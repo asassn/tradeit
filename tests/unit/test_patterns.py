@@ -53,6 +53,7 @@ from tradeit.patterns.swings import (
     touches_of_level,
 )
 from tradeit.patterns.synthetic import BullFlagSpec, PatternGenerator, SeriesSpec
+from tradeit.patterns.tracking import PatternTracker, merge_overlapping
 
 GENERATOR = PatternGenerator()
 DETECTOR = BullFlagDetector()
@@ -836,3 +837,142 @@ class TestSyntheticGenerator:
             BullFlagSpec(pole_sessions=1)
         with pytest.raises(ConfigError):
             BullFlagSpec(retracement=2.0)
+
+
+# ---------------------------------------------------------------------------
+# Identity tracking across a pattern's life
+# ---------------------------------------------------------------------------
+
+
+class TestTracking:
+    """The memory that re-detection lacks."""
+
+    @staticmethod
+    def _replay(series, tracker: PatternTracker, sessions: int = 20) -> PatternTracker:
+        for i in range(len(series.bars) - sessions, len(series.bars)):
+            bars = series.bars[: i + 1]
+            session = bars[-1].session_date
+            tracker.observe(
+                DETECTOR.detect(bars, session), session, closes={1: float(bars[-1].close)}
+            )
+        return tracker
+
+    def test_one_pattern_is_one_row_across_its_whole_life(self):
+        """The failure this module exists to prevent: a new database object
+        every day merely because another candle appeared."""
+        series = GENERATOR.bull_flag(BullFlagSpec(flag_sessions=10, breakout_sessions=8))
+        tracker = self._replay(series, PatternTracker())
+        tracked = (tracker.open_patterns() + tracker.closed_patterns())[0]
+        assert tracked.sessions_tracked >= 6
+        assert len({t.session_date for t in tracked.history}) == tracked.sessions_tracked
+
+    def test_the_lifecycle_is_recorded_in_order(self):
+        series = GENERATOR.bull_flag(
+            BullFlagSpec(flag_sessions=10, breakout_sessions=8, breakout_strength=0.04)
+        )
+        tracker = self._replay(series, PatternTracker())
+        tracked = (tracker.open_patterns() + tracker.closed_patterns())[0]
+        states = [t.to_state for t in tracked.history]
+        assert states[0] is PatternState.MATURE
+        assert PatternState.BROKEN_OUT_UNCONFIRMED in states
+        assert states.index(PatternState.NEAR_BREAKOUT) < states.index(
+            PatternState.BROKEN_OUT_UNCONFIRMED
+        )
+
+    def test_a_pattern_that_leaves_the_detectors_view_is_resolved_not_lost(self):
+        """The specific bug this API exists to fix.
+
+        A flag that breaks out just outside the re-detection window would
+        otherwise be recorded as "lost" -- the most misleading outcome
+        available, because the pattern did not fail or fade, it did the thing it
+        was being watched for.
+        """
+        series = GENERATOR.bull_flag(
+            BullFlagSpec(flag_sessions=10, breakout_sessions=8, breakout_strength=0.04)
+        )
+        with_price = self._replay(series, PatternTracker())
+        assert any(
+            t.state is PatternState.BROKEN_OUT_UNCONFIRMED for t in with_price.open_patterns()
+        )
+
+        blind = PatternTracker()
+        for i in range(len(series.bars) - 20, len(series.bars)):
+            bars = series.bars[: i + 1]
+            blind.observe(DETECTOR.detect(bars, bars[-1].session_date), bars[-1].session_date)
+        assert not any(
+            t.state is PatternState.BROKEN_OUT_UNCONFIRMED
+            for t in blind.open_patterns() + blind.closed_patterns()
+        )
+
+    def test_carrying_a_pattern_forward_never_rewrites_its_geometry(self):
+        """The retroactive-refinement leak in different clothes.
+
+        A stored pattern whose resistance quietly improves is a pattern that
+        can no longer be reproduced from the data that produced it.
+        """
+        series = GENERATOR.bull_flag(BullFlagSpec(flag_sessions=10, breakout_sessions=8))
+        tracker = PatternTracker()
+        geometries: dict[str, dict] = {}
+        for i in range(len(series.bars) - 20, len(series.bars)):
+            bars = series.bars[: i + 1]
+            session = bars[-1].session_date
+            for tracked in tracker.observe(
+                DETECTOR.detect(bars, session), session, closes={1: float(bars[-1].close)}
+            ):
+                # Only patterns carried forward (not re-detected) are checked:
+                # a re-detected pattern legitimately re-measures itself.
+                if tracked.last_seen != session:
+                    assert geometries[tracked.identity_key] == tracked.current.geometry.as_dict()
+                geometries[tracked.identity_key] = tracked.current.geometry.as_dict()
+
+    def test_history_is_append_only(self):
+        series = GENERATOR.bull_flag(BullFlagSpec(flag_sessions=12))
+        tracker = PatternTracker()
+        lengths: dict[str, int] = {}
+        for i in range(len(series.bars) - 15, len(series.bars)):
+            bars = series.bars[: i + 1]
+            session = bars[-1].session_date
+            for tracked in tracker.observe(DETECTOR.detect(bars, session), session):
+                previous = lengths.get(tracked.identity_key, 0)
+                assert len(tracked.history) >= previous
+                lengths[tracked.identity_key] = len(tracked.history)
+
+    def test_peak_quality_survives_decay(self):
+        """A structure that scored 88 and decayed to 61 is a different story
+        from one that was always mediocre."""
+        series = GENERATOR.bull_flag(BullFlagSpec(flag_sessions=14))
+        tracker = self._replay(series, PatternTracker(), sessions=16)
+        for tracked in tracker.open_patterns():
+            assert tracked.peak_quality >= tracked.current.quality
+
+    def test_out_of_order_observation_is_refused(self):
+        """Feeding a tracker out of order silently corrupts every history."""
+        series = GENERATOR.bull_flag()
+        detections = detect(series)
+        if not detections:
+            pytest.skip("no pattern to track")
+        with pytest.raises(ConfigError, match="out of order"):
+            PatternTracker().observe(detections, series.bars[0].session_date)
+
+    def test_a_broken_structure_closes_rather_than_disappearing(self):
+        """A failed pattern is evidence. A false-positive rate cannot be
+        measured from surviving patterns alone."""
+        series = GENERATOR.bull_flag(BullFlagSpec(retracement=0.5, breakdown=0.35))
+        tracker = self._replay(series, PatternTracker(), sessions=6)
+        assert tracker.summary()["closed"] >= 1
+        assert all(t.state.is_terminal for t in tracker.closed_patterns())
+
+    def test_forming_patterns_are_not_screenable(self):
+        series = GENERATOR.bull_flag(BullFlagSpec(flag_sessions=12))
+        tracker = self._replay(series, PatternTracker())
+        assert all(t.state.may_be_screened for t in tracker.screenable())
+
+    def test_overlap_merging_only_absorbs_the_same_pattern_type(self):
+        """Multiple interpretations may legitimately coexist. Forcing a single
+        label early discards what later scoring is better placed to use.
+        """
+        series = GENERATOR.bull_flag(BullFlagSpec(pole_sessions=18, flag_sessions=12))
+        tracker = self._replay(series, PatternTracker())
+        merged = merge_overlapping(tracker.open_patterns())
+        assert len(merged) <= len(tracker.open_patterns())
+        assert all(m.pattern_type is PatternType.BULL_FLAG for m in merged)
