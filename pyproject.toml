@@ -36,11 +36,12 @@ packages = ["src/tradeit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not performance'"
+addopts = "-m 'not performance and not network'"
 pythonpath = ["src"]
 markers = [
     "integration: requires a live PostgreSQL database",
     "performance: throughput and memory benchmarks; excluded from the default run",
+    "network: makes a real outbound connection; result depends on the machine's egress policy, not this repository",
 ]
 filterwarnings = ["error::DeprecationWarning:tradeit.*"]
 

@@ -1,0 +1,577 @@
+# Phase 3 validation universe
+#
+# 85 instruments chosen to break things, not to make money. The objective is to
+# stress the analytical infrastructure: every entry is here because it exercises
+# a specific code path that a portfolio of large-cap survivors would never
+# touch.
+#
+# `difficulty` names what the instrument tests. `note` says what actually
+# happened. Anything without a real, checkable historical event is not in this
+# file -- a synthetic "hard case" proves nothing.
+#
+# Delisted and acquired names are listed with the date they stopped trading.
+# A provider that silently returns nothing for them, or worse returns the
+# *current* holder of the ticker, fails this universe by construction. That is
+# the intended test.
+
+schema_version = 1
+name = "phase3_validation"
+description = "Heterogeneous stress universe for the Phase 3 acceptance gate"
+
+# --------------------------------------------------------------------------
+# Benchmarks and sector proxies. Not stress cases; the baseline everything
+# else is measured against.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "SPY"
+category = "benchmark"
+difficulty = "none"
+note = "primary benchmark; dividend-paying ETF, quarterly distributions"
+
+[[instruments]]
+ticker = "QQQ"
+category = "benchmark"
+difficulty = "none"
+note = "growth benchmark"
+
+[[instruments]]
+ticker = "IWM"
+category = "benchmark"
+difficulty = "none"
+note = "small-cap benchmark; constituents turn over heavily at each rebalance"
+
+[[instruments]]
+ticker = "XLK"
+category = "sector_proxy"
+difficulty = "sector_reclassification"
+note = "technology; lost V and MA to financials in the 2023 GICS change"
+
+[[instruments]]
+ticker = "XLF"
+category = "sector_proxy"
+difficulty = "sector_reclassification"
+note = "financials; gained the payment networks in 2023, lost real estate in 2016"
+
+[[instruments]]
+ticker = "XLC"
+category = "sector_proxy"
+difficulty = "index_inception"
+note = "communication services; did not exist before September 2018. A backtest before that date must have no XLC series at all, not a backfilled one"
+
+[[instruments]]
+ticker = "XLRE"
+category = "sector_proxy"
+difficulty = "index_inception"
+note = "real estate; created October 2015 out of financials"
+
+[[instruments]]
+ticker = "XLE"
+category = "sector_proxy"
+difficulty = "extreme_drawdown"
+note = "energy; -60% in 2020 then +50% in 2021"
+
+[[instruments]]
+ticker = "XLV"
+category = "sector_proxy"
+difficulty = "none"
+
+[[instruments]]
+ticker = "XLY"
+category = "sector_proxy"
+difficulty = "none"
+
+[[instruments]]
+ticker = "XLP"
+category = "sector_proxy"
+difficulty = "none"
+
+[[instruments]]
+ticker = "XLI"
+category = "sector_proxy"
+difficulty = "none"
+
+[[instruments]]
+ticker = "XLB"
+category = "sector_proxy"
+difficulty = "none"
+
+[[instruments]]
+ticker = "XLU"
+category = "sector_proxy"
+difficulty = "none"
+
+# --------------------------------------------------------------------------
+# Splits. The adjustment path is the single most common source of silent
+# error in a price pipeline.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "AAPL"
+category = "split"
+difficulty = "multiple_splits"
+note = "7-for-1 in June 2014 and 4-for-1 in August 2020. Two splits of very different sizes in one series"
+
+[[instruments]]
+ticker = "TSLA"
+category = "split"
+difficulty = "multiple_splits"
+note = "5-for-1 August 2020 and 3-for-1 August 2022, both during high-volatility periods where a mis-adjusted bar looks like a real move"
+
+[[instruments]]
+ticker = "NVDA"
+category = "split"
+difficulty = "large_split_ratio"
+note = "4-for-1 July 2021 and 10-for-1 June 2024. A 10:1 makes an unadjusted series drop 90% overnight -- the exact shape of a catastrophe"
+
+[[instruments]]
+ticker = "GOOGL"
+category = "split"
+difficulty = "share_class_split"
+note = "2014 class-C distribution was structured as a share-class creation, not a plain split, and 20-for-1 in July 2022"
+
+[[instruments]]
+ticker = "AMZN"
+category = "split"
+difficulty = "large_split_ratio"
+note = "20-for-1 June 2022 after 23 years without one"
+
+[[instruments]]
+ticker = "SHOP"
+category = "split"
+difficulty = "recent_split"
+note = "10-for-1 June 2022"
+
+# --------------------------------------------------------------------------
+# Reverse splits. The opposite sign of the same bug, and rarer in test data.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "GE"
+category = "reverse_split"
+difficulty = "reverse_split_plus_spinoff"
+note = "1-for-8 reverse split August 2021, then split into three companies 2023-2024. Both an adjustment case and a corporate-structure case"
+
+[[instruments]]
+ticker = "AIG"
+category = "reverse_split"
+difficulty = "crisis_reverse_split"
+note = "1-for-20 reverse split July 2009 after a 99% decline. An unadjusted series here spans four orders of magnitude"
+
+[[instruments]]
+ticker = "F"
+category = "dividend"
+difficulty = "special_dividend"
+note = "large special dividends alongside a low share price, where a dividend adjustment is a material fraction of the price"
+
+# --------------------------------------------------------------------------
+# Delisted, bankrupt and acquired. The survivorship test. A feed that returns
+# nothing for these is survivorship-biased and must say so.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "LEH"
+category = "delisted"
+difficulty = "bankruptcy"
+last_trade_date = 2008-09-17
+note = "Lehman Brothers. Bankruptcy September 2008. The canonical survivorship test: a 2007 screen that cannot see LEH is not a 2007 screen"
+
+[[instruments]]
+ticker = "BSC"
+category = "delisted"
+difficulty = "acquisition_at_distress"
+last_trade_date = 2008-05-30
+note = "Bear Stearns, acquired by JPM at $10 after trading above $150"
+
+[[instruments]]
+ticker = "WAMUQ"
+category = "delisted"
+difficulty = "bankruptcy_ticker_suffix"
+last_trade_date = 2009-03-20
+note = "Washington Mutual. The Q suffix appears on bankruptcy, so identity resolution must handle a ticker that changes at the worst moment"
+
+[[instruments]]
+ticker = "ENRNQ"
+category = "delisted"
+difficulty = "fraud_collapse"
+last_trade_date = 2004-01-01
+note = "Enron. Tests whether history reaches back past 2004 at all"
+
+[[instruments]]
+ticker = "TWTR"
+category = "delisted"
+difficulty = "acquisition_going_private"
+last_trade_date = 2022-10-27
+note = "acquired and taken private. Ends mid-series with no delisting distress"
+
+[[instruments]]
+ticker = "ATVI"
+category = "delisted"
+difficulty = "long_pending_acquisition"
+last_trade_date = 2023-10-12
+note = "acquisition announced January 2022, closed October 2023. Volatility collapses for 21 months while the deal is pending -- a volatility-regime model should notice"
+
+[[instruments]]
+ticker = "VMW"
+category = "delisted"
+difficulty = "acquisition"
+last_trade_date = 2023-11-21
+
+[[instruments]]
+ticker = "SIVB"
+category = "delisted"
+difficulty = "sudden_failure"
+last_trade_date = 2023-03-09
+note = "Silicon Valley Bank. Went from investment-grade to closed in two sessions, with a trading halt in between"
+
+[[instruments]]
+ticker = "FRC"
+category = "delisted"
+difficulty = "sudden_failure"
+last_trade_date = 2023-05-01
+note = "First Republic. Same episode, different failure mode"
+
+[[instruments]]
+ticker = "CS"
+category = "delisted"
+difficulty = "forced_merger_adr"
+last_trade_date = 2023-06-12
+note = "Credit Suisse ADR, forced merger into UBS. Foreign issuer plus forced merger"
+
+[[instruments]]
+ticker = "BBBY"
+category = "delisted"
+difficulty = "meme_then_bankruptcy"
+last_trade_date = 2023-05-03
+note = "extreme squeeze volume in 2021 and 2022, then Chapter 11. Relative-volume and volatility features both see values far outside anything a normal name produces"
+
+# --------------------------------------------------------------------------
+# Ticker reuse and symbol changes. The identity trap: the same string means
+# different companies at different times.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "META"
+category = "symbol_change"
+difficulty = "ticker_change"
+note = "was FB until June 2022. A series keyed on the ticker breaks in the middle"
+
+[[instruments]]
+ticker = "GOOG"
+category = "symbol_change"
+difficulty = "ticker_reuse"
+note = "GOOG meant the class-A shares before the 2014 restructuring and the class-C shares after. Same string, different security"
+
+[[instruments]]
+ticker = "X"
+category = "symbol_change"
+difficulty = "ticker_reuse_across_companies"
+note = "US Steel today. The single-letter tickers have been reassigned between companies more than once"
+
+[[instruments]]
+ticker = "WBD"
+category = "symbol_change"
+difficulty = "spinoff_merger"
+note = "Warner Bros Discovery, formed April 2022 from a Discovery/AT&T-Warner combination. The pre-2022 series belongs to a different entity"
+
+# --------------------------------------------------------------------------
+# Halts, gaps and extreme single-session moves. The bars that look like data
+# errors and are not.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "GME"
+category = "extreme_move"
+difficulty = "squeeze_and_halts"
+note = "January 2021. Repeated volatility halts, +134% and -44% sessions, volume 100x its own average. Every extreme-value diagnostic fires here and every one of them is a false positive"
+
+[[instruments]]
+ticker = "AMC"
+category = "extreme_move"
+difficulty = "squeeze_plus_dilution"
+note = "same episode, plus continuous share issuance and a 2023 reverse split"
+
+[[instruments]]
+ticker = "NKLA"
+category = "extreme_move"
+difficulty = "fraud_allegation_gap"
+note = "-40% on a research report, later a reverse split. A genuine single-session collapse that is not a split"
+
+[[instruments]]
+ticker = "MRNA"
+category = "extreme_move"
+difficulty = "event_driven_repricing"
+note = "+400% in 2020 on trial results, -80% after. Momentum features see values a normal-market calibration never produces"
+
+[[instruments]]
+ticker = "USO"
+category = "extreme_move"
+difficulty = "negative_underlying"
+note = "oil ETF during the April 2020 negative-price episode; also multiple reverse splits. Tests whether anything in the pipeline assumes prices are positive"
+
+[[instruments]]
+ticker = "UVXY"
+category = "extreme_move"
+difficulty = "serial_reverse_splits"
+note = "leveraged volatility ETF, reverse-split repeatedly. Excluded from the tradable universe by configuration -- included here to check that the exclusion actually works"
+
+# --------------------------------------------------------------------------
+# IPOs. The warm-up path: instruments that do not have 252 sessions.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "ABNB"
+category = "ipo"
+difficulty = "recent_ipo"
+first_trade_date = 2020-12-10
+note = "no 252-session history until December 2021. Must be DATA_ELIGIBLE and not FEATURE_READY in between"
+
+[[instruments]]
+ticker = "RIVN"
+category = "ipo"
+difficulty = "ipo_at_peak_valuation"
+first_trade_date = 2021-11-10
+
+[[instruments]]
+ticker = "COIN"
+category = "ipo"
+difficulty = "direct_listing"
+first_trade_date = 2021-04-14
+note = "direct listing, so there is no IPO price and the first session's open is the first real print"
+
+[[instruments]]
+ticker = "ARM"
+category = "ipo"
+difficulty = "re_ipo"
+first_trade_date = 2023-09-14
+note = "previously listed, taken private, listed again. A naive first_trade_date lookup finds the wrong one"
+
+[[instruments]]
+ticker = "CART"
+category = "ipo"
+difficulty = "recent_ipo"
+first_trade_date = 2023-09-19
+
+# --------------------------------------------------------------------------
+# Low-liquidity and low-price. The filters exist for these.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "SIRI"
+category = "liquidity"
+difficulty = "low_price_high_volume"
+note = "traded under $5 for years with enormous share volume. Passes a dollar-volume floor and fails a price floor"
+
+[[instruments]]
+ticker = "SNDL"
+category = "liquidity"
+difficulty = "sub_dollar_plus_reverse_split"
+note = "sub-$1 for extended periods, then a 1-for-10 reverse split in 2022"
+
+[[instruments]]
+ticker = "BRK-A"
+category = "liquidity"
+difficulty = "extreme_price_thin_volume"
+note = "several hundred thousand dollars per share, often under 100 shares traded. Tests the top of the price band, decimal precision, and a dollar-volume floor that a five-figure price passes trivially"
+
+[[instruments]]
+ticker = "SEB"
+category = "liquidity"
+difficulty = "very_thin"
+note = "Seaboard. Four-figure price, frequently under 1,000 shares a day. Sessions with zero volume occur"
+
+# --------------------------------------------------------------------------
+# Foreign issuers and ADRs. Holiday calendars that are not the NYSE's.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "BABA"
+category = "adr"
+difficulty = "foreign_holiday_calendar"
+note = "trades on NYSE hours but its underlying follows the Hong Kong and mainland calendars, so news arrives when the ADR cannot trade"
+
+[[instruments]]
+ticker = "TSM"
+category = "adr"
+difficulty = "foreign_holiday_calendar"
+note = "Taiwan; Lunar New Year closes the home market for a week while the ADR keeps trading"
+
+[[instruments]]
+ticker = "NVO"
+category = "adr"
+difficulty = "adr_ratio_change"
+note = "Novo Nordisk; the ADR-to-ordinary ratio has changed, which looks exactly like a split and is not one"
+
+[[instruments]]
+ticker = "SHEL"
+category = "adr"
+difficulty = "unification_and_ticker_change"
+note = "was RDS.A/RDS.B, unified into one class and renamed in 2022"
+
+# --------------------------------------------------------------------------
+# Structure: REITs, dual-class, trusts. Asset-class handling.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "O"
+category = "reit"
+difficulty = "monthly_dividend"
+note = "Realty Income pays monthly, so the dividend adjustment path runs twelve times a year instead of four"
+
+[[instruments]]
+ticker = "PLD"
+category = "reit"
+difficulty = "sector_change"
+note = "moved from financials to the new real-estate sector in 2016"
+
+[[instruments]]
+ticker = "BRK-B"
+category = "dual_class"
+difficulty = "share_class_pair"
+note = "must not be treated as the same instrument as BRK-A"
+
+[[instruments]]
+ticker = "UHAL"
+category = "dual_class"
+difficulty = "class_restructuring"
+note = "AMERCO renamed and restructured its share classes in 2022"
+
+# --------------------------------------------------------------------------
+# Long, boring, high-quality history. The control group: if a diagnostic
+# fires on these, the diagnostic is wrong.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "JNJ"
+category = "control"
+difficulty = "none"
+note = "decades of clean history, regular dividends, one 2023 spin-off (Kenvue)"
+
+[[instruments]]
+ticker = "KO"
+category = "control"
+difficulty = "none"
+
+[[instruments]]
+ticker = "PG"
+category = "control"
+difficulty = "none"
+
+[[instruments]]
+ticker = "XOM"
+category = "control"
+difficulty = "cyclical"
+note = "full commodity cycles including 2014-2016 and 2020"
+
+[[instruments]]
+ticker = "MSFT"
+category = "control"
+difficulty = "regime_change"
+note = "a decade of flat price followed by a decade of trend. A regime model that reports the same thing for both is not working"
+
+[[instruments]]
+ticker = "WMT"
+category = "control"
+difficulty = "none"
+
+[[instruments]]
+ticker = "CVX"
+category = "control"
+difficulty = "cyclical"
+
+[[instruments]]
+ticker = "MCD"
+category = "control"
+difficulty = "none"
+
+[[instruments]]
+ticker = "HD"
+category = "control"
+difficulty = "none"
+
+[[instruments]]
+ticker = "UNH"
+category = "control"
+difficulty = "none"
+
+[[instruments]]
+ticker = "JPM"
+category = "control"
+difficulty = "crisis_survivor"
+note = "survived 2008 while its peers in this file did not. The pair with LEH and BSC is the survivorship test"
+
+[[instruments]]
+ticker = "C"
+category = "control"
+difficulty = "crisis_reverse_split"
+note = "1-for-10 reverse split May 2011 after a 95% decline"
+
+[[instruments]]
+ticker = "INTC"
+category = "control"
+difficulty = "secular_decline"
+note = "a long uptrend followed by a multi-year decline and a dividend cut"
+
+[[instruments]]
+ticker = "IBM"
+category = "control"
+difficulty = "spinoff"
+note = "Kyndryl spin-off November 2021"
+
+[[instruments]]
+ticker = "T"
+category = "control"
+difficulty = "spinoff_dividend_cut"
+note = "Warner spin-off and a dividend cut in April 2022, both in the same week"
+
+[[instruments]]
+ticker = "PFE"
+category = "control"
+difficulty = "event_driven"
+note = "2020-2021 vaccine repricing then a full retrace"
+
+[[instruments]]
+ticker = "BA"
+category = "control"
+difficulty = "prolonged_crisis"
+note = "737 MAX grounding then the 2020 collapse, with a suspended dividend"
+
+[[instruments]]
+ticker = "DIS"
+category = "control"
+difficulty = "dividend_suspension"
+note = "suspended its dividend in 2020 and resumed in 2023"
+
+[[instruments]]
+ticker = "CSCO"
+category = "control"
+difficulty = "bubble_peak"
+note = "still below its March 2000 high for two decades. A 52-week-high feature and an all-time-high feature disagree permanently"
+
+[[instruments]]
+ticker = "ORCL"
+category = "control"
+difficulty = "none"
+
+[[instruments]]
+ticker = "ADBE"
+category = "control"
+difficulty = "no_dividend"
+note = "never paid a dividend; the dividend-adjustment path must be a no-op, not a divide-by-zero"
+
+[[instruments]]
+ticker = "COST"
+category = "control"
+difficulty = "special_dividend"
+note = "irregular large special dividends, including $15 in 2023"
+
+[[instruments]]
+ticker = "LLY"
+category = "control"
+difficulty = "none"
+
+[[instruments]]
+ticker = "AVGO"
+category = "control"
+difficulty = "domicile_change_and_split"
+note = "redomiciled from Singapore to the US in 2018 and split 10-for-1 in 2024"
