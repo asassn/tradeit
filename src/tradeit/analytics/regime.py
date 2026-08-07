@@ -40,6 +40,7 @@ from tradeit.analytics.registry import (
 )
 from tradeit.analytics.volatility import VolatilityRegime
 from tradeit.core.enums import Bartimeframe, MarketRegime
+from tradeit.errors import DataError
 from tradeit.strategy.config import RegimeConfig
 
 REGIME_INPUTS = ("ohlcv_bars", "indicator_values", "universe_memberships")
@@ -113,11 +114,28 @@ class RegimeSignal:
     score: float
     weight: float
     evidence: str
+    #: Whether this signal reads *bullish*. Note carefully: this is the sign of
+    #: the signal, not "supports the classification". In a bear market every
+    #: signal is bearish and every one of them supports the BEAR conclusion.
+    #: Conflating the two put all seven signals under "Contradicting Evidence"
+    #: on a maximum-conviction risk-off reading -- the evidence lists were
+    #: exactly inverted for every negative regime. Use :meth:`agrees_with`.
     supports: bool
 
     @property
     def contribution(self) -> float:
         return self.score * self.weight
+
+    def agrees_with(self, direction: int) -> bool:
+        """Whether this signal points the same way as the composite.
+
+        ``direction`` is the sign of the composite score. A zero-score signal
+        agrees with nothing: it is the absence of evidence, and filing it as
+        support would overstate the case.
+        """
+        if self.score == 0 or direction == 0:
+            return False
+        return (self.score > 0) == (direction > 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +354,18 @@ class MarketRegimeEngine:
     ) -> RegimeSignal | None:
         if pct_above_200 is None or not np.isfinite(pct_above_200):
             return None
+        if not 0.0 <= pct_above_200 <= 1.0:
+            # A *fraction*, matching what BreadthEngine emits. The parameter name
+            # says "pct" and invites a caller to pass 3.0 for 3%, which without
+            # this guard scores +1.0 -- maximally bullish -- for the single most
+            # bearish breadth reading possible. Found by the Phase 3 validation
+            # gate doing exactly that. Raising is the only safe response: there
+            # is no way to tell 0.03 from a genuine 3% at the boundary, so
+            # guessing would trade a loud failure for a silent one.
+            raise DataError(
+                f"pct_above_200dma must be a fraction in [0, 1]; got {pct_above_200}. "
+                "Breadth is supplied as a fraction (0.03 for 3%), not a percentage."
+            )
         # 50% above the 200DMA is neutral; 80% is firmly bullish.
         score = _clip((pct_above_200 - 0.5) / 0.3)
         size = f" of {universe_size} eligible" if universe_size else ""
@@ -372,8 +402,18 @@ class MarketRegimeEngine:
     def _sector_participation(
         self, sectors_above_fast: int | None, sectors_total: int | None
     ) -> RegimeSignal | None:
-        if not sectors_above_fast or not sectors_total:
+        # `is None`, not falsiness. Zero sectors above their moving average is
+        # the most bearish participation reading available, and treating it as
+        # a missing input discarded the signal precisely when it mattered most
+        # -- in the March 2020 scenario it silently removed the sector evidence
+        # from a maximum-risk-off classification. Found by the Phase 3
+        # validation gate.
+        if sectors_above_fast is None or not sectors_total:
             return None
+        if sectors_above_fast < 0 or sectors_above_fast > sectors_total:
+            raise DataError(
+                f"sectors_above_fast_ma ({sectors_above_fast}) is outside [0, {sectors_total}]"
+            )
         fraction = sectors_above_fast / sectors_total
         score = _clip((fraction - 0.5) / 0.35)
         return RegimeSignal(
@@ -387,8 +427,8 @@ class MarketRegimeEngine:
             supports=score > 0,
         )
 
-    def _divergences(self, benchmarks: Mapping[str, BenchmarkTrendInput]) -> list[str]:
-        """Per-benchmark disagreements worth recording but not separately scored.
+    def _observations(self, benchmarks: Mapping[str, BenchmarkTrendInput]) -> list[tuple[str, int]]:
+        """Per-benchmark trend facts, each tagged with the direction it implies.
 
         The aggregate agreement signal deliberately scores the *balance* across
         benchmarks, which means a single lagging index can be outvoted and
@@ -396,18 +436,39 @@ class MarketRegimeEngine:
         needs to see: a bull market where small caps are below their 50DMA is
         narrower than one where they are not.
 
-        These strings join the evidence lists without contributing to the
-        composite, so ``reconciles`` still holds.
+        Both directions are emitted. A benchmark *holding above* its 200DMA
+        while the composite is bearish is the mirror-image observation and just
+        as informative -- it is what an early turn looks like -- and only
+        recording the bearish half made it invisible.
+
+        The direction tag is what lets the caller decide whether an observation
+        corroborates the classification or cuts against it. Getting that
+        backwards is not cosmetic: before this was tagged, every bearish
+        observation was filed as *contradicting* regardless of the composite,
+        so the March 2020 scenario -- with all seven signals in agreement and
+        nine benchmark observations all confirming -- scored 64/100 confidence
+        and would have scored lower still the more the benchmarks agreed.
+
+        These strings never contribute to the composite, so ``reconciles``
+        still holds.
         """
-        out: list[str] = []
+        out: list[tuple[str, int]] = []
+        fast, slow = self.config.trend_ma_fast, self.config.trend_ma_slow
         for symbol in sorted(benchmarks):
             benchmark = benchmarks[symbol]
             if benchmark.above_fast is False:
-                out.append(f"{symbol} below {self.config.trend_ma_fast}DMA")
+                out.append((f"{symbol} below {fast}DMA", -1))
+            elif benchmark.above_fast is True:
+                out.append((f"{symbol} above {fast}DMA", 1))
             if benchmark.above_slow is False:
-                out.append(f"{symbol} below {self.config.trend_ma_slow}DMA")
-            if benchmark.ma_fast_slope is not None and benchmark.ma_fast_slope < 0:
-                out.append(f"{symbol} {self.config.trend_ma_fast}DMA falling")
+                out.append((f"{symbol} below {slow}DMA", -1))
+            elif benchmark.above_slow is True:
+                out.append((f"{symbol} above {slow}DMA", 1))
+            if benchmark.ma_fast_slope is not None:
+                if benchmark.ma_fast_slope < 0:
+                    out.append((f"{symbol} {fast}DMA falling", -1))
+                elif benchmark.ma_fast_slope > 0:
+                    out.append((f"{symbol} {fast}DMA rising", 1))
         return out
 
     def _volatility(self, volatility_regime: VolatilityRegime | None) -> RegimeSignal | None:
@@ -503,15 +564,29 @@ class MarketRegimeEngine:
                 "score overrides the trend-based band"
             )
 
-        supporting = tuple(s.evidence for s in signals if s.supports)
-        # Divergences are unscored observations; they enrich the explanation
-        # without touching the composite. Deduplicated against signal evidence
-        # so a benchmark that already failed a scored signal is not listed twice.
-        divergences = [d for d in self._divergences(benchmarks) if d not in supporting]
-        contradicting = tuple(
-            dict.fromkeys([s.evidence for s in signals if not s.supports] + divergences)
+        # Per-benchmark observations are unscored; they enrich the explanation
+        # without touching the composite. Each is filed by whether it points the
+        # same way as the composite, so a confirming observation strengthens the
+        # picture instead of being logged as a contradiction.
+        direction = 1 if composite > 0 else -1 if composite < 0 else 0
+        corroborating = [t for t, d in self._observations(benchmarks) if d == direction]
+        opposing = [t for t, d in self._observations(benchmarks) if d != direction]
+
+        # Evidence is filed relative to the *classification*, not relative to
+        # bullishness. In a BEAR reading, "0 of 11 sectors above their 50DMA" is
+        # supporting evidence.
+        supporting = tuple(
+            dict.fromkeys([s.evidence for s in signals if s.agrees_with(direction)] + corroborating)
         )
-        confidence = self._confidence(composite, regime, signals, len(divergences))
+        contradicting = tuple(
+            dict.fromkeys(
+                [s.evidence for s in signals if not s.agrees_with(direction)]
+                + [t for t in opposing if t not in supporting]
+            )
+        )
+        # Only *opposing* observations reduce confidence. Unanimity is not
+        # ambiguity.
+        confidence = self._confidence(composite, regime, signals, len(opposing))
 
         if len(signals) < 4:
             notes.append(
