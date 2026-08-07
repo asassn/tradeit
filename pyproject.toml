@@ -57,6 +57,7 @@ ignore = ["ANN401"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ANN", "DTZ001", "B017"]  # naive datetimes and blind raises are the assertions
 "migrations/*" = ["ANN", "E501"]
+"scripts/*" = ["ANN", "E402"]  # report generators: local paths set up before imports
 
 [tool.mypy]
 python_version = "3.11"
