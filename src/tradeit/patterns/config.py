@@ -745,6 +745,197 @@ class InverseHeadShouldersConfig(PatternSection):
     )
 
 
+class BaseOnBaseConfig(PatternSection):
+    """Two consecutive bases at a similar level, the second no lower.
+
+    The parameter that carries the family is ``max_ceiling_advance``. What
+    distinguishes base-on-base from an ordinary sequence of bases is the
+    *absence* of progress between them: price built a base, failed to advance
+    meaningfully, and built another at the same level without giving ground. A
+    pair separated by a 30% advance is a stair-step, which is a different and
+    more common thing.
+    """
+
+    version: int = Field(default=1, ge=1)
+    min_base_sessions: int = Field(default=12, ge=6)
+    max_base_sessions: int = Field(default=80, ge=15)
+    #: Each base must be shallow enough to be a base rather than a correction.
+    max_base_depth: float = Field(default=0.22, gt=0, lt=0.6)
+    ideal_base_depth: float = Field(default=0.11, gt=0)
+    #: Advance of the second base's ceiling over the first's. Small is the
+    #: point; large means these are two bases in a rising sequence.
+    max_ceiling_advance: float = Field(default=0.15, gt=0, lt=0.6)
+    ideal_ceiling_advance: float = Field(default=0.05, ge=0)
+    #: The second base may not undercut the first's low by more than this. A
+    #: lower base is a descending sequence, which is the opposite claim.
+    max_low_undercut: float = Field(default=0.03, ge=0, lt=0.2)
+    #: Sessions permitted between the end of the first base and the start of
+    #: the second. They are consecutive; a long gap means an intervening move.
+    max_gap_sessions: int = Field(default=12, ge=0)
+    min_prior_gain: float = Field(default=0.15, gt=0)
+    prior_trend_sessions: int = Field(default=60, ge=20)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "prior_trend": 0.12,
+            "first_base": 0.16,
+            "second_base": 0.18,
+            "ceiling_progression": 0.20,
+            "low_progression": 0.16,
+            "tightening": 0.10,
+            "volume_character": 0.08,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        if self.max_base_sessions <= self.min_base_sessions:
+            raise ConfigError("max_base_sessions must exceed min_base_sessions")
+        if self.ideal_ceiling_advance >= self.max_ceiling_advance:
+            raise ConfigError("ideal ceiling advance must sit below the maximum")
+        return self
+
+
+class TightConsolidationConfig(PatternSection):
+    """A short window that is tight **for this instrument**.
+
+    **The dumping-ground problem.** Tight consolidation is the pattern most
+    easily degraded into "this stock is not moving", and every sideways stock in
+    the market qualifies under an absolute threshold. A utility that trades in a
+    2% weekly range is not consolidating tightly; that is its ordinary state,
+    and reporting it as a pattern says nothing about supply and demand.
+
+    So every measurement here is **relative to the instrument's own recent
+    past**: range against its own prior range, ATR against its own prior ATR,
+    volume against its own baseline. A quiet stock that has always been quiet
+    contracts against nothing and scores nothing. Combined with a required prior
+    advance, the family describes what it is supposed to describe -- a pause
+    that tightened -- rather than an absence of movement.
+    """
+
+    version: int = Field(default=1, ge=1)
+    min_sessions: int = Field(default=5, ge=3)
+    max_sessions: int = Field(default=25, ge=6)
+    ideal_sessions_low: int = Field(default=6, ge=3)
+    ideal_sessions_high: int = Field(default=15, ge=5)
+    #: Window range as a fraction of the *prior* window's range. This is the
+    #: measurement that makes the family mean anything.
+    max_range_ratio: float = Field(default=0.70, gt=0, lt=1.5)
+    ideal_range_ratio: float = Field(default=0.40, gt=0)
+    #: Absolute depth ceiling, as a backstop. A window can contract by half and
+    #: still be 30% wide if what preceded it was chaos.
+    max_depth: float = Field(default=0.12, gt=0, lt=0.5)
+    ideal_depth: float = Field(default=0.05, gt=0)
+    #: ATR across the window over ATR before it.
+    max_atr_ratio: float = Field(default=0.85, gt=0, lt=1.5)
+    #: The lookback the window is compared against. Longer is a more stable
+    #: reference and slower to notice a genuine regime change.
+    reference_sessions: int = Field(default=30, ge=10)
+    min_prior_gain: float = Field(default=0.10, gt=0)
+    #: Must comfortably exceed ``reference_sessions``: the reference window sits
+    #: between the advance and the tight window by construction, so a lookback
+    #: barely longer than it measures the reference and reports no prior trend.
+    prior_trend_sessions: int = Field(default=80, ge=20)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "range_contraction": 0.26,
+            "absolute_tightness": 0.14,
+            "volatility_contraction": 0.18,
+            "close_clustering": 0.12,
+            "volume_dryup": 0.12,
+            "prior_trend": 0.12,
+            "duration": 0.06,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        if self.ideal_range_ratio >= self.max_range_ratio:
+            raise ConfigError("ideal range ratio must sit below the maximum")
+        if self.ideal_depth >= self.max_depth:
+            raise ConfigError("ideal depth must sit below the maximum")
+        if not (
+            self.min_sessions
+            <= self.ideal_sessions_low
+            <= self.ideal_sessions_high
+            <= self.max_sessions
+        ):
+            raise ConfigError("ideal duration band must sit inside [min_sessions, max_sessions]")
+        if self.prior_trend_sessions <= self.reference_sessions + self.max_sessions:
+            raise ConfigError(
+                "prior_trend_sessions must exceed reference_sessions + max_sessions, or the "
+                "prior-trend lookback measures the reference window rather than the advance"
+            )
+        return self
+
+
+class BreakoutRetestConfig(PatternSection):
+    """A level that was crossed, returned to, and so far held.
+
+    **Phase 4 boundary.** This family is defined by a breakout having already
+    happened, which makes it the one place where the temptation to say something
+    about breakout *validity* is strongest. It does not. Every measurement here
+    is geometric: a level existed, price closed above it, price came back to it,
+    price is currently above or below it. Whether any of that constitutes a
+    confirmed breakout is Phase 5's question, and this module has no vocabulary
+    for answering it.
+    """
+
+    version: int = Field(default=1, ge=1)
+    #: How far above the level a close must sit to count as having crossed it.
+    #: A geometric observation, not a confirmation rule.
+    break_buffer: float = Field(default=0.005, gt=0, lt=0.1)
+    #: How close the pullback must come to the level to count as a retest. Wider
+    #: and every shallow dip after a breakout is a retest.
+    retest_tolerance: float = Field(default=0.04, gt=0, lt=0.2)
+    ideal_retest_tolerance: float = Field(default=0.015, gt=0)
+    #: Below the level by more than this and the retest failed.
+    fail_tolerance: float = Field(default=0.03, gt=0, lt=0.2)
+    #: Closes above the level between the break and the excursion peak. You
+    #: retest a *breakout*, and a single close above a line is not one -- it is
+    #: a poke. Definitional rather than a tuning knob.
+    min_sessions_above: int = Field(default=3, ge=1)
+    min_sessions_to_retest: int = Field(default=2, ge=1)
+    max_sessions_to_retest: int = Field(default=30, ge=5)
+    #: Sessions after the retest low. Zero means the retest is the last bar and
+    #: nothing is yet known about whether it held.
+    min_hold_sessions: int = Field(default=2, ge=0)
+    #: The level itself must be worth retesting. Two touches inside a fortnight
+    #: is a coincidence; a random walk supplies those by the dozen, and a
+    #: detector built on them finds textbook retests in pure noise.
+    min_level_touches: int = Field(default=3, ge=2)
+    #: Sessions between the level's first and last touch. This is what makes it
+    #: *resistance* rather than two highs that happened to land together.
+    min_level_span: int = Field(default=20, ge=5)
+    #: Fraction of sessions before the break that closed below the level. A
+    #: level price spent half its time above was never resistance.
+    min_below_fraction: float = Field(default=0.85, gt=0, le=1)
+    #: The break must be a real excursion, measured in ATRs so a quiet stock and
+    #: a volatile one are held to the same scale-free standard.
+    min_break_atr: float = Field(default=1.0, ge=0)
+    level_lookback: int = Field(default=90, ge=30)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "level_quality": 0.22,
+            "break_observation": 0.16,
+            "retest_proximity": 0.24,
+            "hold_behaviour": 0.20,
+            "timing": 0.08,
+            "volume_character": 0.10,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        if self.ideal_retest_tolerance >= self.retest_tolerance:
+            raise ConfigError("ideal retest tolerance must sit below the maximum")
+        if self.max_sessions_to_retest <= self.min_sessions_to_retest:
+            raise ConfigError("max_sessions_to_retest must exceed the minimum")
+        return self
+
+
 class PatternEngineConfig(PatternSection):
     """Top-level pattern configuration, shared plus per-detector.
 
@@ -769,6 +960,9 @@ class PatternEngineConfig(PatternSection):
     inverse_head_shoulders: InverseHeadShouldersConfig = Field(
         default_factory=InverseHeadShouldersConfig
     )
+    base_on_base: BaseOnBaseConfig = Field(default_factory=BaseOnBaseConfig)
+    tight_consolidation: TightConsolidationConfig = Field(default_factory=TightConsolidationConfig)
+    breakout_retest: BreakoutRetestConfig = Field(default_factory=BreakoutRetestConfig)
 
     #: Detectors to run. A detector absent from this list is not merely skipped
     #: -- its features never enter the dataset, which keeps the stored pattern
@@ -783,6 +977,9 @@ class PatternEngineConfig(PatternSection):
         "high_tight_flag",
         "double_bottom",
         "inverse_head_shoulders",
+        "base_on_base",
+        "tight_consolidation",
+        "breakout_retest",
     )
     max_candidates_per_pattern: int = Field(default=24, ge=1, le=200)
     #: Instances below this quality are discarded rather than stored. Low, so

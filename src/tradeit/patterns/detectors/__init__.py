@@ -11,6 +11,8 @@ good.
 
 from tradeit.patterns.detectors._base import BaseDetector, DetectionInputs, Structure
 from tradeit.patterns.detectors.ascending_triangle import AscendingTriangleDetector
+from tradeit.patterns.detectors.base_on_base import BaseOnBaseDetector
+from tradeit.patterns.detectors.breakout_retest import BreakoutRetestDetector
 from tradeit.patterns.detectors.bull_flag import BullFlagDetector
 from tradeit.patterns.detectors.cup_handle import CupHandleDetector
 from tradeit.patterns.detectors.double_bottom import DoubleBottomDetector
@@ -18,11 +20,14 @@ from tradeit.patterns.detectors.flat_base import FlatBaseDetector
 from tradeit.patterns.detectors.high_tight_flag import HighTightFlagDetector
 from tradeit.patterns.detectors.inverse_head_shoulders import InverseHeadShouldersDetector
 from tradeit.patterns.detectors.pennant import PennantDetector
+from tradeit.patterns.detectors.tight_consolidation import TightConsolidationDetector
 from tradeit.patterns.detectors.vcp import VcpDetector
 
 __all__ = [
     "AscendingTriangleDetector",
     "BaseDetector",
+    "BaseOnBaseDetector",
+    "BreakoutRetestDetector",
     "BullFlagDetector",
     "CupHandleDetector",
     "DetectionInputs",
@@ -32,5 +37,6 @@ __all__ = [
     "InverseHeadShouldersDetector",
     "PennantDetector",
     "Structure",
+    "TightConsolidationDetector",
     "VcpDetector",
 ]

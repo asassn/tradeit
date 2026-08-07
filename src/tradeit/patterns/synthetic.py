@@ -626,6 +626,279 @@ class PatternGenerator:
         """A flat ceiling with flat lows. Not ascending."""
         return self.ascending_triangle(seed=seed + 400, rising=False)
 
+    def base_on_base(
+        self,
+        *,
+        seed: int = 0,
+        prior_gain: float = 0.30,
+        first_sessions: int = 25,
+        second_sessions: int = 22,
+        first_depth: float = 0.12,
+        second_depth: float = 0.08,
+        ceiling_advance: float = 0.03,
+        low_advance: float = 0.04,
+        gap_sessions: int = 3,
+    ) -> GeneratedSeries:
+        """An advance, a base, almost no progress, a second base.
+
+        ``ceiling_advance`` is the parameter the family turns on. Small is
+        base-on-base; large draws a stair-step, which is a different and more
+        common structure.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 21111)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        prior_sessions = 45
+        rate = (1.0 + prior_gain) ** (1.0 / prior_sessions) - 1.0
+        advance = float(lead[-1]) * np.cumprod(
+            1.0 + rng.normal(rate, base.base_volatility * 0.6, prior_sessions)
+        )
+        first_ceiling = float(advance.max())
+        second_ceiling = first_ceiling * (1.0 + ceiling_advance)
+
+        def band(ceiling: float, depth: float, sessions: int, cycles: float) -> np.ndarray:
+            """Oscillate under a ceiling so the highs actually cluster there."""
+            wave = np.sin(np.linspace(0, cycles * np.pi, sessions))
+            path = ceiling * (1.0 - depth / 2 + wave * depth / 2)
+            return path * (1.0 + rng.normal(0.0, depth * 0.12, sessions))
+
+        first = band(first_ceiling, first_depth, first_sessions, 3.5)
+        # The transition: price clears the first ceiling, then settles into the
+        # second base. Without it the two bases are one long range.
+        bridge = np.linspace(float(first[-1]), second_ceiling, gap_sessions + 1)[1:]
+        second = band(second_ceiling, second_depth, second_sessions, 3.5)
+        # The second base's floor is lifted by ``low_advance`` relative to where
+        # its own depth would put it. An earlier draft clamped the whole band to
+        # the first ceiling, which pinned the floor and silently disconnected
+        # ``second_depth`` -- the tightening knob moved nothing and the detector
+        # correctly reported no change.
+        second = second + second_ceiling * low_advance * (second_ceiling - second) / max(
+            second_ceiling * second_depth, 1e-9
+        )
+
+        segments = [lead, advance, first, bridge, second]
+        volumes = [
+            rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+            rng.lognormal(np.log(base.base_volume * 1.7), 0.2, prior_sessions),
+            rng.lognormal(np.log(base.base_volume * 0.85), 0.2, first_sessions),
+            rng.lognormal(np.log(base.base_volume * 1.1), 0.2, gap_sessions),
+            rng.lognormal(np.log(base.base_volume * 0.6), 0.2, second_sessions),
+        ]
+        closes = np.concatenate(segments)
+        ranges = closes * base.base_volatility * 1.1
+        return GeneratedSeries(
+            self._bars_from(closes, np.concatenate(volumes), ranges, close_position=0.5),
+            {
+                "pattern": "base_on_base",
+                "first_ceiling": first_ceiling,
+                "second_ceiling": second_ceiling,
+                "ceiling_advance": ceiling_advance,
+                "first_base_index": base.lead_in_sessions + prior_sessions,
+            },
+        )
+
+    def stair_step_bases(self, *, seed: int = 0) -> GeneratedSeries:
+        """Two bases separated by a real advance. Not base-on-base."""
+        return self.base_on_base(seed=seed + 1000, ceiling_advance=0.30, gap_sessions=12)
+
+    def descending_bases(self, *, seed: int = 0) -> GeneratedSeries:
+        """A second base built below the first. Ground given, not held."""
+        return self.base_on_base(seed=seed + 1010, ceiling_advance=-0.12, low_advance=-0.12)
+
+    def single_long_base(self, *, seed: int = 0) -> GeneratedSeries:
+        """One continuous range of the same total length.
+
+        The negative that matters: a long base does not become base-on-base
+        because a line can be drawn through its middle.
+        """
+        return self.flat_base(seed=seed + 1020, sessions=50, depth=0.10)
+
+    def tight_consolidation(
+        self,
+        *,
+        seed: int = 0,
+        prior_gain: float = 0.25,
+        reference_depth: float = 0.14,
+        reference_sessions: int = 30,
+        sessions: int = 9,
+        depth: float = 0.035,
+        volume_ratio: float = 0.5,
+    ) -> GeneratedSeries:
+        """An advance, an ordinary-volatility stretch, then a genuinely tight window.
+
+        ``reference_depth`` is what the tight window is tight *against*. Setting
+        it equal to ``depth`` draws a chronically quiet stock, which is the
+        family's defining negative: nothing contracted, so nothing happened.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 22211)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        # Long enough that the detector's prior-trend lookback, which must span
+        # the reference window before it reaches the advance, has an advance to
+        # reach.
+        prior_sessions = 65
+        rate = (1.0 + prior_gain) ** (1.0 / prior_sessions) - 1.0
+        advance = float(lead[-1]) * np.cumprod(
+            1.0 + rng.normal(rate, base.base_volatility * 0.6, prior_sessions)
+        )
+        top = float(advance[-1])
+
+        # The reference ends at a *peak*, so a confirmed swing high sits exactly
+        # where the tight window begins. A tight consolidation starts at a
+        # turning point in reality, and the detector anchors on confirmed pivots
+        # rather than searching window lengths -- a reference that ends
+        # mid-oscillation would leave the nearest pivot several sessions back
+        # and the measured window would span part of the wider range.
+        reference = top * (
+            1.0
+            - reference_depth / 2
+            + np.sin(np.linspace(0, 2.5 * np.pi, reference_sessions)) * reference_depth / 2
+        )
+        reference = reference * (1.0 + rng.normal(0.0, reference_depth * 0.15, reference_sessions))
+
+        anchor = float(reference[-1])
+        window = anchor * (
+            1.0 - depth / 2 - np.sin(np.linspace(0, 2.0 * np.pi, sessions)) * depth / 2
+        )
+        window = window * (1.0 + rng.normal(0.0, depth * 0.10, sessions))
+
+        closes = np.concatenate([lead, advance, reference, window])
+        volumes = np.concatenate(
+            [
+                rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+                rng.lognormal(np.log(base.base_volume * 1.6), 0.2, prior_sessions),
+                rng.lognormal(np.log(base.base_volume), 0.2, reference_sessions),
+                rng.lognormal(np.log(base.base_volume * volume_ratio), 0.15, sessions),
+            ]
+        )
+        # Bar ranges follow the segment they belong to, so ATR contracts with
+        # the window rather than staying flat while the closes narrow.
+        ranges = np.concatenate(
+            [
+                lead * base.base_volatility * 1.3,
+                advance * base.base_volatility * 1.5,
+                reference * reference_depth * 0.30,
+                window * depth * 0.30,
+            ]
+        )
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {
+                "pattern": "tight_consolidation",
+                "depth": depth,
+                "reference_depth": reference_depth,
+                "window_start_index": base.lead_in_sessions + prior_sessions + reference_sessions,
+            },
+        )
+
+    def chronically_quiet(self, *, seed: int = 0) -> GeneratedSeries:
+        """A stock that is always this quiet. Contracts against nothing.
+
+        The tight-consolidation family's defining negative and the reason every
+        measurement in that detector is relative rather than absolute.
+        """
+        return self.tight_consolidation(seed=seed + 1100, reference_depth=0.04, depth=0.035)
+
+    def tight_after_decline(self, *, seed: int = 0) -> GeneratedSeries:
+        """The same tight window with a decline behind it instead of an advance."""
+        return self.tight_consolidation(seed=seed + 1110, prior_gain=-0.20)
+
+    def breakout_retest(
+        self,
+        *,
+        seed: int = 0,
+        base_sessions: int = 55,
+        base_depth: float = 0.10,
+        break_strength: float = 0.07,
+        break_sessions: int = 6,
+        retest_sessions: int = 6,
+        retest_overshoot: float = 0.0,
+        hold_sessions: int = 8,
+        hold: bool = True,
+    ) -> GeneratedSeries:
+        """A level, a break above it, a pullback to it, and a hold or a failure.
+
+        ``retest_overshoot`` pushes the pullback *through* the level;
+        ``hold=False`` keeps price below it afterwards, which is the failure
+        case the detector must report as INVALIDATED rather than hide.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 23311)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        # Above every lead-in high, not merely above the last lead-in close. A
+        # lead-in that wandered higher than the base leaves the series' real
+        # resistance behind the base rather than at its ceiling, and the
+        # detector -- correctly -- finds that one instead.
+        ceiling = float(np.max(lead)) * 1.03
+        # Enough cycles that the ceiling is genuinely tested several times. Two
+        # touches is a coincidence, and the detector requires three across a
+        # span for exactly that reason -- a base drawn with fewer produces no
+        # level at all, which is the correct answer to a level that was never
+        # established.
+        wave = np.sin(np.linspace(0, 8.5 * np.pi, base_sessions))
+        band = ceiling * (1.0 - base_depth / 2 + wave * base_depth / 2)
+        band = band * (1.0 + rng.normal(0.0, base_depth * 0.10, base_sessions))
+
+        peak = ceiling * (1.0 + break_strength)
+        run = self._leg(float(band[-1]), peak, break_sessions, rng)
+        retest_to = ceiling * (1.0 - retest_overshoot)
+        pull = self._leg(peak, retest_to, retest_sessions, rng)
+        if hold:
+            after = self._leg(retest_to, peak, hold_sessions, rng)
+        else:
+            # A genuine turn at the level -- so a confirmed swing low forms and
+            # the retest is real -- followed by the breakdown. Without the
+            # bounce there is no turning point, and "price fell through and kept
+            # falling" is a failed breakout rather than a failed retest.
+            bounce = max(3, hold_sessions // 3)
+            after = np.concatenate(
+                [
+                    self._leg(retest_to, retest_to * 1.03, bounce, rng),
+                    self._leg(retest_to * 1.03, ceiling * 0.90, hold_sessions - bounce, rng),
+                ]
+            )
+
+        closes = np.concatenate([lead, band, run, pull, after])
+        volumes = np.concatenate(
+            [
+                rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+                rng.lognormal(np.log(base.base_volume * 0.8), 0.2, base_sessions),
+                rng.lognormal(np.log(base.base_volume * 2.4), 0.2, break_sessions),
+                rng.lognormal(np.log(base.base_volume * 0.7), 0.2, retest_sessions),
+                rng.lognormal(np.log(base.base_volume * 1.2), 0.2, hold_sessions),
+            ]
+        )
+        ranges = closes * base.base_volatility * 1.2
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.55),
+            {
+                "pattern": "breakout_retest",
+                "level": ceiling,
+                "break_strength": break_strength,
+                "held": hold,
+            },
+        )
+
+    def breakout_no_retest(self, *, seed: int = 0) -> GeneratedSeries:
+        """A break that ran away and never came back. Real, and not this pattern."""
+        return self.breakout_retest(seed=seed + 1200, retest_overshoot=-0.12)
+
+    def failed_retest(self, *, seed: int = 0) -> GeneratedSeries:
+        """A genuine retest that then breaks down.
+
+        The pullback reaches the level -- so the structure is real and must be
+        *found* -- and price then loses it, which is what the state machine is
+        for. A series that fell straight through to ten percent below would be a
+        failed breakout, which is a different structure and not this test.
+        """
+        return self.breakout_retest(seed=seed + 1210, retest_overshoot=0.01, hold=False)
+
     def pennant(
         self,
         *,
