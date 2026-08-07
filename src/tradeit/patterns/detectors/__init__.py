@@ -3,10 +3,26 @@
 One detector per pattern type, deliberately. They have genuinely different
 parameters, they are validated separately, and a single class that finds twelve
 patterns is a class nobody will ever refactor. Renaming one detector's output to
-serve another pattern is the specific anti-pattern the architecture forbids.
+serve another pattern is the specific anti-pattern the architecture forbids --
+which is why `BaseDetector.discover` and `BaseDetector.score` are abstract: a
+subclass cannot accidentally inherit a flag's opinion of what makes a structure
+good.
 """
 
+from tradeit.patterns.detectors._base import BaseDetector, DetectionInputs, Structure
+from tradeit.patterns.detectors.ascending_triangle import AscendingTriangleDetector
 from tradeit.patterns.detectors.bull_flag import BullFlagDetector
+from tradeit.patterns.detectors.flat_base import FlatBaseDetector
+from tradeit.patterns.detectors.pennant import PennantDetector
 from tradeit.patterns.detectors.vcp import VcpDetector
 
-__all__ = ["BullFlagDetector", "VcpDetector"]
+__all__ = [
+    "AscendingTriangleDetector",
+    "BaseDetector",
+    "BullFlagDetector",
+    "DetectionInputs",
+    "FlatBaseDetector",
+    "PennantDetector",
+    "Structure",
+    "VcpDetector",
+]

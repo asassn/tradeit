@@ -424,6 +424,143 @@ class VcpConfig(PatternSection):
         return self
 
 
+class FlatBaseConfig(PatternSection):
+    """Flat base: a shallow, horizontal pause in an advance.
+
+    ``max_depth`` is the parameter that separates this from every other base. A
+    flat base is *flat* -- 15% is the classic ceiling, and a 25% "flat base" is
+    a correction someone did not want to call one.
+    """
+
+    version: int = Field(default=1, ge=1)
+    min_sessions: int = Field(default=20, ge=8)
+    max_sessions: int = Field(default=120, ge=20)
+    ideal_sessions_low: int = Field(default=25, ge=8)
+    ideal_sessions_high: int = Field(default=60, ge=15)
+    max_depth: float = Field(default=0.15, gt=0, lt=0.5)
+    ideal_depth_low: float = Field(default=0.04, gt=0)
+    ideal_depth_high: float = Field(default=0.11, gt=0)
+    #: Slope of the base, fraction of price per session. A flat base is flat in
+    #: both directions -- a rising one is a channel, a falling one is a decline.
+    max_abs_slope: float = Field(default=0.0025, gt=0)
+    min_resistance_touches: int = Field(default=2, ge=2)
+    prior_trend_sessions: int = Field(default=60, ge=20)
+    ideal_prior_gain: float = Field(default=0.25, gt=0)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "prior_trend": 0.18,
+            "horizontal_structure": 0.20,
+            "depth": 0.16,
+            "duration": 0.10,
+            "resistance_consistency": 0.14,
+            "compression": 0.12,
+            "volume_character": 0.06,
+            "relative_strength": 0.04,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        if self.max_sessions <= self.min_sessions:
+            raise ConfigError("max_sessions must exceed min_sessions")
+        if self.ideal_depth_high >= self.max_depth:
+            raise ConfigError("ideal depth must sit below max_depth")
+        return self
+
+
+class AscendingTriangleConfig(PatternSection):
+    """Horizontal resistance with rising lows converging into it."""
+
+    version: int = Field(default=1, ge=1)
+    min_sessions: int = Field(default=18, ge=10)
+    max_sessions: int = Field(default=120, ge=20)
+    ideal_sessions_low: int = Field(default=25, ge=10)
+    ideal_sessions_high: int = Field(default=70, ge=15)
+    #: Resistance is "flat" within this scatter. Real triangles are not drawn
+    #: with a ruler; demanding a perfect line finds none of them.
+    max_resistance_scatter: float = Field(default=0.025, gt=0, lt=0.15)
+    min_resistance_touches: int = Field(default=2, ge=2)
+    min_rising_lows: int = Field(default=2, ge=2)
+    #: Maximum sessions between consecutive resistance touches. Touches farther
+    #: apart than this belong to different structures that happen to share a
+    #: price, not to one triangle.
+    max_touch_gap: int = Field(default=25, ge=5, le=120)
+    #: Lower boundary slope, fraction of price per session. Must be positive --
+    #: flat lows make it a rectangle, falling lows a descending triangle.
+    min_lower_slope: float = Field(default=0.0008, gt=0)
+    #: How much of the initial height the apex must have closed.
+    ideal_convergence: float = Field(default=0.55, gt=0, lt=1)
+    #: Fraction of pivots allowed to sit outside the boundaries. Real triangles
+    #: have overshoots; zero tolerance rejects every genuine one.
+    outlier_tolerance: float = Field(default=0.25, ge=0, lt=0.6)
+    prior_trend_sessions: int = Field(default=60, ge=20)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "resistance_flatness": 0.24,
+            "rising_lows": 0.24,
+            "convergence": 0.16,
+            "touch_quality": 0.12,
+            "duration": 0.08,
+            "compression": 0.10,
+            "prior_context": 0.06,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        if self.max_sessions <= self.min_sessions:
+            raise ConfigError("max_sessions must exceed min_sessions")
+        return self
+
+
+class PennantConfig(PatternSection):
+    """A sharp impulse followed by a symmetrically converging pause.
+
+    The distinction from a bull flag is not cosmetic. A flag's boundaries are
+    roughly *parallel* -- it is a channel. A pennant's boundaries *converge* from
+    both sides. `min_convergence` is what enforces that, and without it every
+    pennant is also a flag and the family is redundant.
+    """
+
+    version: int = Field(default=1, ge=1)
+    min_impulse_gain: float = Field(default=0.10, gt=0)
+    min_impulse_sessions: int = Field(default=3, ge=2)
+    max_impulse_sessions: int = Field(default=25, ge=3)
+    min_sessions: int = Field(default=5, ge=3)
+    max_sessions: int = Field(default=25, ge=5)
+    #: Pennant duration as a multiple of the impulse. A pennant is brief; one
+    #: lasting longer than its own pole has become a triangle.
+    max_duration_ratio: float = Field(default=1.2, gt=0)
+    #: Late height over early height. Must be well below 1 -- that is the
+    #: pattern. A ratio near 1 is a flag, not a pennant.
+    min_convergence: float = Field(default=0.35, gt=0, lt=1)
+    ideal_convergence: float = Field(default=0.45, gt=0, lt=1)
+    #: How symmetric the two boundaries must be. Upper falling and lower rising
+    #: at wildly different rates is a wedge or a triangle.
+    max_slope_asymmetry: float = Field(default=3.0, gt=1)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "impulse": 0.24,
+            "convergence": 0.26,
+            "symmetry": 0.14,
+            "duration": 0.12,
+            "compression": 0.14,
+            "volume_contraction": 0.10,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        if self.max_sessions <= self.min_sessions:
+            raise ConfigError("max_sessions must exceed min_sessions")
+        if self.ideal_convergence <= self.min_convergence:
+            raise ConfigError("ideal_convergence must exceed min_convergence")
+        return self
+
+
 class PatternEngineConfig(PatternSection):
     """Top-level pattern configuration, shared plus per-detector.
 
@@ -439,11 +576,20 @@ class PatternEngineConfig(PatternSection):
     states: PatternStateConfig = Field(default_factory=PatternStateConfig)
     bull_flag: BullFlagConfig = Field(default_factory=BullFlagConfig)
     vcp: VcpConfig = Field(default_factory=VcpConfig)
+    flat_base: FlatBaseConfig = Field(default_factory=FlatBaseConfig)
+    ascending_triangle: AscendingTriangleConfig = Field(default_factory=AscendingTriangleConfig)
+    pennant: PennantConfig = Field(default_factory=PennantConfig)
 
     #: Detectors to run. A detector absent from this list is not merely skipped
     #: -- its features never enter the dataset, which keeps the stored pattern
     #: set reproducible from the config digest alone.
-    enabled_detectors: tuple[str, ...] = ("bull_flag", "vcp")
+    enabled_detectors: tuple[str, ...] = (
+        "bull_flag",
+        "vcp",
+        "flat_base",
+        "ascending_triangle",
+        "pennant",
+    )
     max_candidates_per_pattern: int = Field(default=24, ge=1, le=200)
     #: Instances below this quality are discarded rather than stored. Low, so
     #: that near-misses remain visible for false-positive analysis; the screen

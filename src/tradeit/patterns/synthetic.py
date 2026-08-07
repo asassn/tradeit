@@ -493,6 +493,208 @@ class PatternGenerator:
             {"pattern": "descending_wedge"},
         )
 
+    def flat_base(
+        self,
+        *,
+        seed: int = 0,
+        prior_gain: float = 0.30,
+        depth: float = 0.08,
+        sessions: int = 35,
+        slope: float = 0.0,
+        breakout_sessions: int = 0,
+    ) -> GeneratedSeries:
+        """An advance, then a shallow horizontal range."""
+        rng = np.random.default_rng(self.spec.seed + seed + 14411)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        prior_sessions = 55
+        rate = (1.0 + prior_gain) ** (1.0 / prior_sessions) - 1.0
+        advance = float(lead[-1]) * np.cumprod(
+            1.0 + rng.normal(rate, base.base_volatility * 0.6, prior_sessions)
+        )
+        ceiling = float(advance.max())
+
+        # Oscillate inside a band whose width is the stated depth, with the
+        # highs clustered at the ceiling so a resistance level actually forms.
+        oscillation = np.sin(np.linspace(0, 3.5 * np.pi, sessions)) * (depth / 2)
+        path = ceiling * (1.0 - depth / 2 + oscillation)
+        path = path * (1.0 + slope * np.arange(sessions))
+        band = path * (1.0 + rng.normal(0.0, depth * 0.12, sessions))
+
+        segments = [lead, advance, band]
+        volumes = [
+            rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+            rng.lognormal(np.log(base.base_volume * 1.7), 0.2, prior_sessions),
+            rng.lognormal(np.log(base.base_volume * 0.7), 0.2, sessions),
+        ]
+        ranges = [
+            lead * base.base_volatility * 1.3,
+            advance * base.base_volatility * 1.6,
+            band * max(0.004, depth * 0.2),
+        ]
+
+        if breakout_sessions > 0:
+            run = float(band[-1]) * np.cumprod(
+                1.0 + rng.normal(0.025, base.base_volatility, breakout_sessions)
+            )
+            run = np.maximum(run, ceiling * 1.01)
+            segments.append(run)
+            volumes.append(rng.lognormal(np.log(base.base_volume * 2.2), 0.2, breakout_sessions))
+            ranges.append(run * base.base_volatility * 2.0)
+
+        closes = np.concatenate(segments)
+        return GeneratedSeries(
+            self._bars_from(
+                closes, np.concatenate(volumes), np.concatenate(ranges), close_position=0.5
+            ),
+            {
+                "pattern": "flat_base",
+                "expected_ceiling": ceiling,
+                "depth": depth,
+                "base_start_index": base.lead_in_sessions + prior_sessions,
+            },
+        )
+
+    def base_without_prior_trend(self, *, seed: int = 0) -> GeneratedSeries:
+        """The same shallow horizontal range with no advance before it.
+
+        The critical flat-base negative: identical geometry, missing context.
+        """
+        return self.flat_base(seed=seed + 300, prior_gain=0.0)
+
+    def ascending_triangle(
+        self,
+        *,
+        seed: int = 0,
+        sessions: int = 40,
+        depth: float = 0.12,
+        touches: int = 4,
+        rising: bool = True,
+    ) -> GeneratedSeries:
+        """A flat ceiling with lows that climb toward it.
+
+        ``rising=False`` draws the rectangle: same ceiling, flat lows. The
+        negative that separates an ascending triangle from a range.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 15511)
+        base = self.spec
+        # An advance *into* the ceiling, not a drift along it. Without the
+        # advance the lead-in trades at the ceiling level throughout, so the
+        # detector's resistance cluster reaches back through the whole series
+        # and the "rising lows" it measures are lead-in noise.
+        quiet = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions - 30))
+        )
+        advance = float(quiet[-1]) * np.cumprod(
+            1.0 + rng.normal(0.008, base.base_volatility * 0.6, 30)
+        )
+        lead = np.concatenate([quiet, advance])
+        ceiling = float(lead[-1])
+
+        # Each cycle runs down to a low and back to the ceiling. The lows climb
+        # when `rising`, so the boundaries converge.
+        per_cycle = max(4, sessions // touches)
+        path: list[float] = []
+        for cycle in range(touches):
+            fraction = cycle / max(1, touches - 1)
+            low = ceiling * (1.0 - depth * (1.0 - 0.75 * fraction if rising else 1.0))
+            half = per_cycle // 2
+            path.extend(np.linspace(ceiling, low, half))
+            path.extend(np.linspace(low, ceiling * 0.998, per_cycle - half))
+        band = np.array(path) * (1.0 + rng.normal(0.0, base.base_volatility * 0.4, len(path)))
+
+        closes = np.concatenate([lead, band])
+        volumes = np.concatenate(
+            [
+                rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+                rng.lognormal(np.log(base.base_volume * 0.8), 0.2, len(band)),
+            ]
+        )
+        ranges = closes * base.base_volatility * 1.1
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {
+                "pattern": "ascending_triangle" if rising else "rectangle",
+                "expected_ceiling": ceiling,
+                "touches": touches,
+            },
+        )
+
+    def rectangle(self, *, seed: int = 0) -> GeneratedSeries:
+        """A flat ceiling with flat lows. Not ascending."""
+        return self.ascending_triangle(seed=seed + 400, rising=False)
+
+    def pennant(
+        self,
+        *,
+        seed: int = 0,
+        impulse_gain: float = 0.22,
+        impulse_sessions: int = 9,
+        sessions: int = 9,
+        convergence: float = 0.35,
+        symmetric: bool = True,
+    ) -> GeneratedSeries:
+        """A sharp impulse then a converging wedge.
+
+        ``symmetric=False`` holds the lower boundary flat while the upper falls,
+        which is a descending wedge -- the negative that separates a pennant
+        from every other converging structure.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 16611)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        rate = (1.0 + impulse_gain) ** (1.0 / impulse_sessions) - 1.0
+        impulse = float(lead[-1]) * np.cumprod(
+            1.0 + rng.normal(rate, base.base_volatility * 0.5, impulse_sessions)
+        )
+        peak = float(impulse.max())
+
+        # Both boundaries close on the midpoint; alternate between them so the
+        # bars actually touch each side.
+        opening = peak * 0.09
+        widths = np.linspace(opening, opening * convergence, sessions)
+        midpoint = peak * 0.97
+        offsets = np.array([(1 if i % 2 == 0 else -1) for i in range(sessions)])
+        if not symmetric:
+            # Lower boundary held flat: only the highs come down.
+            offsets = np.where(offsets > 0, offsets, 0.0)
+            wedge = midpoint - opening / 2 + widths * (offsets + 0.5)
+        else:
+            wedge = midpoint + offsets * widths / 2
+        wedge = wedge * (1.0 + rng.normal(0.0, base.base_volatility * 0.3, sessions))
+
+        closes = np.concatenate([lead, impulse, wedge])
+        volumes = np.concatenate(
+            [
+                rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+                rng.lognormal(np.log(base.base_volume * 2.2), 0.2, impulse_sessions),
+                rng.lognormal(np.log(base.base_volume * 0.6), 0.2, sessions),
+            ]
+        )
+        ranges = np.concatenate(
+            [
+                lead * base.base_volatility * 1.3,
+                impulse * base.base_volatility * 1.8,
+                wedge * widths / peak * 0.6,
+            ]
+        )
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.55),
+            {
+                "pattern": "pennant" if symmetric else "descending_wedge_pennant",
+                "impulse_gain": impulse_gain,
+                "expected_peak": peak,
+            },
+        )
+
+    def parallel_flag_channel(self, *, seed: int = 0) -> GeneratedSeries:
+        """An impulse then a *parallel* channel. A flag, explicitly not a pennant."""
+        return self.pennant(seed=seed + 500, convergence=0.95)
+
     def bear_flag(self, *, seed: int = 0) -> GeneratedSeries:
         """A downward pole with an upward drift. Must never score as bullish.
 
