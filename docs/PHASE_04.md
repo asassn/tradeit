@@ -28,7 +28,7 @@ All twelve implemented, registered, contract-declared and characterised.
 | 11 | `tight_consolidation` | structural | v1 | 152 | 70% | 1w, 1d, 4h, 1h, 15m |
 | 12 | `breakout_retest` | structural | **v2** | 109 | 60% | 1w, 1d, 4h, 1h, 15m |
 
-Five families moved to v2 during the gate, all for the same defect (§20).
+Five families moved to v2 during the gate, all for the same defect (§14).
 
 Contracts, required and optional components: `docs/PATTERN_VALIDATION.md` §
 *Detector registry*. Conceptual overlap: `docs/PATTERN_METHODOLOGY.md` §2.
@@ -55,8 +55,8 @@ Contracts, required and optional components: `docs/PATTERN_VALIDATION.md` §
 
 ## 3. Validation results
 
-Full tables: **`docs/PATTERN_VALIDATION.md`** (generated, n=1000 per cohort,
-~170,000 detections).
+Full tables: **`docs/PATTERN_VALIDATION.md`** — generated at n=1000 per cohort,
+174 cohorts, 174,000 detections.
 
 ### Positive recognition
 

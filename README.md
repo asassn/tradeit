@@ -14,8 +14,7 @@ architecture, the causal analytics foundation and twelve chart-pattern detectors
 are built and tested. Phase 4 adds pattern identity that survives across
 sessions, an append-only observation history, a six-edge relationship taxonomy,
 human-labelling infrastructure, multi-timeframe detection and an integrated
-scanner — characterised against a seeded synthetic corpus of ~170,000
-detections. See [`docs/PHASE_04.md`](docs/PHASE_04.md).
+scanner — characterised against a seeded synthetic corpus of 174,000 detections. See [`docs/PHASE_04.md`](docs/PHASE_04.md).
 
 **Two gates remain open, and both matter.** Phase 3's acceptance gate is a
 conditional pass: the mathematics was validated against two independent
