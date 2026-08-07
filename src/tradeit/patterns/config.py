@@ -692,8 +692,13 @@ class DoubleBottomConfig(PatternSection):
     #: stops before the reversal. Beyond this it is a continued decline.
     max_undercut: float = Field(default=0.04, ge=0, lt=0.2)
     #: The decline the pattern is reversing. Without it there is nothing to
-    #: double-bottom out of.
+    #: double-bottom out of. Measured peak-to-low.
     min_prior_decline: float = Field(default=0.12, gt=0)
+    #: **Net** change across the lookback, which peak-to-low does not capture.
+    #: A choppy range contains a high and a low 20% apart and has declined by
+    #: nothing; without this a range yields a double bottom on every pair of
+    #: lows it happens to put at the same level.
+    min_net_decline: float = Field(default=0.06, ge=0)
     prior_trend_sessions: int = Field(default=60, ge=20)
     atr_period: int = Field(default=14, ge=2)
     weights: dict[str, float] = Field(
@@ -723,6 +728,9 @@ class InverseHeadShouldersConfig(PatternSection):
     min_sessions: int = Field(default=20, ge=10)
     max_sessions: int = Field(default=160, ge=25)
     min_prior_decline: float = Field(default=0.10, gt=0)
+    #: As for the double bottom: peak-to-low says a range fell 20%, and net
+    #: change is what says it did not.
+    min_net_decline: float = Field(default=0.05, ge=0)
     prior_trend_sessions: int = Field(default=60, ge=20)
     atr_period: int = Field(default=14, ge=2)
     weights: dict[str, float] = Field(
@@ -773,6 +781,8 @@ class PatternEngineConfig(PatternSection):
         "pennant",
         "cup_handle",
         "high_tight_flag",
+        "double_bottom",
+        "inverse_head_shoulders",
     )
     max_candidates_per_pattern: int = Field(default=24, ge=1, le=200)
     #: Instances below this quality are discarded rather than stored. Low, so

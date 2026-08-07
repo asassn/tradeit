@@ -13,8 +13,10 @@ from tradeit.patterns.detectors._base import BaseDetector, DetectionInputs, Stru
 from tradeit.patterns.detectors.ascending_triangle import AscendingTriangleDetector
 from tradeit.patterns.detectors.bull_flag import BullFlagDetector
 from tradeit.patterns.detectors.cup_handle import CupHandleDetector
+from tradeit.patterns.detectors.double_bottom import DoubleBottomDetector
 from tradeit.patterns.detectors.flat_base import FlatBaseDetector
 from tradeit.patterns.detectors.high_tight_flag import HighTightFlagDetector
+from tradeit.patterns.detectors.inverse_head_shoulders import InverseHeadShouldersDetector
 from tradeit.patterns.detectors.pennant import PennantDetector
 from tradeit.patterns.detectors.vcp import VcpDetector
 
@@ -24,8 +26,10 @@ __all__ = [
     "BullFlagDetector",
     "CupHandleDetector",
     "DetectionInputs",
+    "DoubleBottomDetector",
     "FlatBaseDetector",
     "HighTightFlagDetector",
+    "InverseHeadShouldersDetector",
     "PennantDetector",
     "Structure",
     "VcpDetector",

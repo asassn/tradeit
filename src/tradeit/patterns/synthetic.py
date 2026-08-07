@@ -890,6 +890,208 @@ class PatternGenerator:
         """A genuine thrust followed by a 40% correction. No longer tight."""
         return self.high_tight_flag(seed=seed + 720, pause_depth=0.40, pause_sessions=18)
 
+    # -- reversal structures -------------------------------------------------
+
+    def _leg(
+        self,
+        start: float,
+        end: float,
+        sessions: int,
+        rng: np.random.Generator,
+        wobble: float = 0.35,
+    ) -> np.ndarray:
+        """A price path from ``start`` to ``end`` with noise that lands on ``end``.
+
+        Reversal structures are built from legs rather than from a closed-form
+        shape, because what defines them is a *sequence* of turning points and
+        the generator has to place those points exactly where the test says
+        they are.
+        """
+        path = np.linspace(start, end, sessions + 1)[1:]
+        noise = rng.normal(0.0, self.spec.base_volatility * wobble, sessions)
+        noise[-1] = 0.0  # land on the stated turning point
+        return path * (1.0 + noise)
+
+    def double_bottom(
+        self,
+        *,
+        seed: int = 0,
+        prior_decline: float = 0.28,
+        decline_sessions: int = 35,
+        separation: int = 30,
+        rally: float = 0.16,
+        undercut: float = 0.02,
+        recovery_sessions: int = 12,
+        second_low_volume: float = 0.6,
+    ) -> GeneratedSeries:
+        """A decline, a low, a rally, a second low at the same level, a recovery.
+
+        ``undercut`` places the second low *below* the first, which is the
+        constructive case. Negative values place it above.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 19911)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        peak = float(lead[-1])
+        low1 = peak * (1.0 - prior_decline)
+        middle = low1 * (1.0 + rally)
+        low2 = low1 * (1.0 - undercut)
+
+        up = separation // 2
+        down = separation - up
+        decline = self._leg(peak, low1, decline_sessions, rng)
+        first_rally = self._leg(low1, middle, up, rng)
+        second_fall = self._leg(middle, low2, down, rng)
+        recovery = self._leg(low2, middle * 0.99, recovery_sessions, rng)
+
+        closes = np.concatenate([lead, decline, first_rally, second_fall, recovery])
+        volumes = np.concatenate(
+            [
+                rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+                # Heaviest into the first low: that is the capitulation.
+                rng.lognormal(np.log(base.base_volume * 1.8), 0.25, decline_sessions),
+                rng.lognormal(np.log(base.base_volume * 0.9), 0.2, up),
+                rng.lognormal(np.log(base.base_volume * second_low_volume), 0.2, down),
+                rng.lognormal(np.log(base.base_volume * 1.1), 0.2, recovery_sessions),
+            ]
+        )
+        ranges = closes * base.base_volatility * 1.4
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {
+                "pattern": "double_bottom",
+                "prior_decline": prior_decline,
+                "first_low": low1,
+                "second_low": low2,
+                "neckline": middle,
+                "first_low_index": base.lead_in_sessions + decline_sessions - 1,
+            },
+        )
+
+    def descending_double_low(self, *, seed: int = 0) -> GeneratedSeries:
+        """A second low well below the first. A continued decline, not a bottom."""
+        return self.double_bottom(seed=seed + 800, undercut=0.18)
+
+    def range_double_low(self, *, seed: int = 0) -> GeneratedSeries:
+        """Two lows at the same level with nothing to reverse.
+
+        The double bottom's defining negative: identical geometry, no prior
+        decline. A range is not a bottom.
+        """
+        return self.double_bottom(seed=seed + 810, prior_decline=0.02)
+
+    def single_low_with_noise(self, *, seed: int = 0) -> GeneratedSeries:
+        """One low with a 2% wobble in the middle. Not two lows."""
+        return self.double_bottom(seed=seed + 820, rally=0.02)
+
+    def inverse_head_shoulders(
+        self,
+        *,
+        seed: int = 0,
+        prior_decline: float = 0.24,
+        decline_sessions: int = 30,
+        prominence: float = 0.12,
+        shoulder_asymmetry: float = 0.0,
+        neckline_slope: float = 0.0,
+        half_sessions: int = 22,
+        timing_skew: float = 1.0,
+        recovery_sessions: int = 10,
+    ) -> GeneratedSeries:
+        """Left shoulder, head, right shoulder, with a neckline through the rallies.
+
+        ``prominence`` is how far the head sits below the shallower shoulder.
+        ``shoulder_asymmetry`` makes the right shoulder that fraction shallower
+        **below the neckline**, which is how the detector measures shoulder
+        depth and is the only definition under which the parameter stays
+        meaningful once ``neckline_slope`` tilts the line: expressed as a
+        fraction of price instead, a 25% asymmetry lifts the right shoulder
+        above its own neckline and the structure stops containing a third low
+        at all.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 20011)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        peak = float(lead[-1])
+        left_shoulder = peak * (1.0 - prior_decline)
+        neck_left = left_shoulder * 1.10
+        neck_right = neck_left * (1.0 + neckline_slope)
+        left_depth = neck_left - left_shoulder
+        right_shoulder = neck_right - left_depth * (1.0 - shoulder_asymmetry)
+        head = min(left_shoulder, right_shoulder) * (1.0 - prominence)
+
+        first = max(4, int(half_sessions * timing_skew))
+        second = half_sessions
+        legs = [
+            self._leg(peak, left_shoulder, decline_sessions, rng),
+            self._leg(left_shoulder, neck_left, first // 2, rng),
+            self._leg(neck_left, head, first - first // 2, rng),
+            self._leg(head, neck_right, second // 2, rng),
+            self._leg(neck_right, right_shoulder, second - second // 2, rng),
+            self._leg(right_shoulder, neck_right * 0.98, recovery_sessions, rng),
+        ]
+        volume_scales = (1.6, 1.0, 2.0, 1.0, 0.55, 0.9)
+        closes = np.concatenate([lead, *legs])
+        volumes = np.concatenate(
+            [
+                rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+                *(
+                    rng.lognormal(np.log(base.base_volume * scale), 0.2, len(leg))
+                    for scale, leg in zip(volume_scales, legs, strict=True)
+                ),
+            ]
+        )
+        ranges = closes * base.base_volatility * 1.4
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {
+                "pattern": "inverse_head_shoulders",
+                "left_shoulder": left_shoulder,
+                "head": head,
+                "right_shoulder": right_shoulder,
+                "prominence": prominence,
+                "left_shoulder_index": base.lead_in_sessions + decline_sessions - 1,
+            },
+        )
+
+    def triple_bottom(self, *, seed: int = 0) -> GeneratedSeries:
+        """Three lows at the same level. No head, so not this pattern."""
+        return self.inverse_head_shoulders(seed=seed + 900, prominence=0.01)
+
+    def head_and_shoulders_top(self, *, seed: int = 0) -> GeneratedSeries:
+        """The bearish mirror: three highs with the middle one highest.
+
+        The adversarial case for a bottom detector. Whatever it reports here it
+        must not report as a strong bullish reversal.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 20111)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0005, base.base_volatility, base.lead_in_sessions))
+        )
+        trough = float(lead[-1])
+        shoulder = trough * 1.22
+        head_price = trough * 1.38
+        neck = trough * 1.02
+        legs = [
+            self._leg(trough, shoulder, 18, rng),
+            self._leg(shoulder, neck, 12, rng),
+            self._leg(neck, head_price, 18, rng),
+            self._leg(head_price, neck, 14, rng),
+            self._leg(neck, shoulder, 14, rng),
+            self._leg(shoulder, neck * 0.95, 12, rng),
+        ]
+        closes = np.concatenate([lead, *legs])
+        volumes = rng.lognormal(np.log(base.base_volume), 0.25, len(closes))
+        ranges = closes * base.base_volatility * 1.4
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {"pattern": "head_and_shoulders_top"},
+        )
+
     def bear_flag(self, *, seed: int = 0) -> GeneratedSeries:
         """A downward pole with an upward drift. Must never score as bullish.
 
