@@ -569,7 +569,7 @@ class CupHandleConfig(PatternSection):
     point -- and the difference is what separates accumulation from a bounce.
     """
 
-    version: int = Field(default=1, ge=1)
+    version: int = Field(default=2, ge=1)
     min_cup_sessions: int = Field(default=25, ge=12)
     max_cup_sessions: int = Field(default=200, ge=30)
     ideal_cup_sessions_low: int = Field(default=35, ge=12)
@@ -679,7 +679,7 @@ class HighTightFlagConfig(PatternSection):
 class DoubleBottomConfig(PatternSection):
     """Two lows at a similar level separated by a rally."""
 
-    version: int = Field(default=1, ge=1)
+    version: int = Field(default=2, ge=1)
     #: How close the two lows must be, as a fraction of the first.
     max_low_divergence: float = Field(default=0.06, gt=0, lt=0.3)
     #: The rally between them, as a fraction of the first low. Too shallow and
@@ -717,7 +717,7 @@ class DoubleBottomConfig(PatternSection):
 class InverseHeadShouldersConfig(PatternSection):
     """Three lows, the middle one deepest, with a neckline above."""
 
-    version: int = Field(default=1, ge=1)
+    version: int = Field(default=2, ge=1)
     #: How much deeper the head must be than the shoulders.
     min_head_prominence: float = Field(default=0.04, gt=0)
     #: Shoulder-to-shoulder depth difference. Real patterns are asymmetric;
@@ -756,7 +756,7 @@ class BaseOnBaseConfig(PatternSection):
     more common thing.
     """
 
-    version: int = Field(default=1, ge=1)
+    version: int = Field(default=2, ge=1)
     min_base_sessions: int = Field(default=12, ge=6)
     max_base_sessions: int = Field(default=80, ge=15)
     #: Each base must be shallow enough to be a base rather than a correction.
@@ -882,7 +882,7 @@ class BreakoutRetestConfig(PatternSection):
     for answering it.
     """
 
-    version: int = Field(default=1, ge=1)
+    version: int = Field(default=2, ge=1)
     #: How far above the level a close must sit to count as having crossed it.
     #: A geometric observation, not a confirmation rule.
     break_buffer: float = Field(default=0.005, gt=0, lt=0.1)

@@ -262,7 +262,11 @@ class BreakoutRetestDetector(BaseDetector):
             proximity = (retest_low - level.level) / level.level if level.level > 0 else 1.0
             out.append(
                 Structure(
-                    start_index=lookback_start,
+                    # The level's first touch, not the lookback window's start.
+                    # The window start is an artefact of how far back the search
+                    # reached; identity keys on the structural start, and a start
+                    # that moves with the search depth is not a structural fact.
+                    start_index=first_touch,
                     end_index=inputs.last_index,
                     parts={
                         "level": level,

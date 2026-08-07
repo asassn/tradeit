@@ -233,8 +233,9 @@ class BaseDetector(ABC):
             _right_bars=swing_cfg.right_bars,
         )
 
+        discovered = _one_per_structural_start(self.discover(inputs))
         instances: list[PatternInstance] = []
-        for structure in self.discover(inputs)[: self.engine_config.max_candidates_per_pattern]:
+        for structure in discovered[: self.engine_config.max_candidates_per_pattern]:
             instance = self._build(inputs, structure)
             if instance is None or not instance.is_structurally_complete:
                 continue
@@ -343,6 +344,41 @@ class BaseDetector(ABC):
         if last_close >= level * (1.0 - states.near_breakout_pct):
             return PatternState.NEAR_BREAKOUT
         return PatternState.MATURE
+
+
+def _one_per_structural_start(structures: Sequence[Structure]) -> list[Structure]:
+    """Keep one structure per structural start index.
+
+    **The defect this closes.** Pattern identity is a content hash of the
+    instrument, the family, the timeframe and the structural start -- everything
+    that does *not* change as a pattern evolves. Several detectors deduplicated
+    discovery on a composite key instead: the cup on (left rim, right rim), the
+    double bottom on (first low, second low), the inverse head and shoulders on
+    all three lows. Those keys permit two structures to share a start, and two
+    structures sharing a start share an identity.
+
+    The consequences were not cosmetic. The tracker matches on identity, so it
+    would have folded two genuinely different structures into one history; the
+    patterns table has a unique constraint on (identity_key, detector_version),
+    so the second would have collided on insert. Measured before the fix, more
+    than half of the cup detector's instances and three quarters of the inverse
+    head and shoulders' collided.
+
+    **Which one is kept, and why that is not a score decision.** Every detector
+    walks its anchors from the most recent backwards, so the first structure
+    seen at a given start is the one with the most recent completion -- the most
+    recent right rim, second low, or right shoulder. That is the structure as it
+    stands today, and recency is decided by the market rather than by this
+    detector's opinion of the result, which is what ADR-0014 requires.
+    """
+    seen: set[int] = set()
+    kept: list[Structure] = []
+    for structure in structures:
+        if structure.start_index in seen:
+            continue
+        seen.add(structure.start_index)
+        kept.append(structure)
+    return kept
 
 
 def _coverage(components: Sequence[ComponentScore]) -> float:

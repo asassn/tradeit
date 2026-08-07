@@ -319,13 +319,38 @@ class Baseline:
 
 #: Detector versions frozen for the Phase 4 validation gate.
 #:
-#: Every family sits at v1: none has been revised since it was written, and the
-#: defects corrected during construction were corrected before any of these
-#: numbers were published, so there is no earlier published behaviour for a v2
-#: to distinguish itself from. A correction made *during* the validation gate
-#: increments the entry here, and :meth:`Baseline.check` then reports the drift
-#: until the baseline is deliberately re-cut.
-PHASE4_VERSIONS: Mapping[str, int] = {name: 1 for name in DETECTOR_ORDER}
+#: Five families sit at v2. All five were corrected during the gate for the same
+#: defect: pattern identity is a content hash of the structural start, but their
+#: discovery deduplicated on a composite key -- the cup on (left rim, right rim),
+#: the double bottom on (first low, second low), and so on -- which permitted two
+#: structures to share a start and therefore an identity. More than half of the
+#: cup detector's instances and three quarters of the inverse head and
+#: shoulders' were colliding when it was measured.
+#:
+#: The correction is definitional rather than performance tuning: no threshold
+#: moved, no weight changed, and no score was made better. What changed is that
+#: a detector no longer emits two structures the persistence layer cannot tell
+#: apart. The breakout retest also had its structural start moved from the
+#: lookback window's edge -- an artefact of how far the search reached -- to the
+#: level's first touch, which is a structural fact.
+#:
+#: A correction made *after* this baseline is cut increments the entry here, and
+#: :meth:`Baseline.check` reports the drift until the baseline is re-cut
+#: deliberately.
+PHASE4_VERSIONS: Mapping[str, int] = {
+    "bull_flag": 1,
+    "vcp": 1,
+    "flat_base": 1,
+    "ascending_triangle": 1,
+    "pennant": 1,
+    "cup_handle": 2,
+    "high_tight_flag": 1,
+    "double_bottom": 2,
+    "inverse_head_shoulders": 2,
+    "base_on_base": 2,
+    "tight_consolidation": 1,
+    "breakout_retest": 2,
+}
 
 
 def phase4_baseline(config: PatternEngineConfig | None = None) -> Baseline:
