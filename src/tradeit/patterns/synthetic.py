@@ -492,6 +492,182 @@ class PatternGenerator:
             {"pattern": "parabolic"},
         )
 
+    def mean_reverting(self, *, seed: int = 0, strength: float = 0.08) -> GeneratedSeries:
+        """An Ornstein-Uhlenbeck process: pulled back toward its own mean.
+
+        A distinct negative from a random walk. Mean reversion manufactures
+        repeated tests of the same levels, which is exactly what makes a
+        detector see resistance and support where there is only a restoring
+        force. Any pattern engine that keys on "price touched this level three
+        times" finds structure here.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 3301)
+        n = self.spec.lead_in_sessions + 80
+        level = np.log(self.spec.start_price)
+        path = np.empty(n)
+        value = level
+        for i in range(n):
+            value += strength * (level - value) + rng.normal(0.0, self.spec.base_volatility)
+            path[i] = value
+        closes = np.exp(path)
+        volumes = rng.lognormal(np.log(self.spec.base_volume), 0.3, n)
+        ranges = closes * self.spec.base_volatility * 1.3
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {"pattern": "mean_reverting"},
+        )
+
+    def autocorrelated_noise(self, *, seed: int = 0, phi: float = 0.45) -> GeneratedSeries:
+        """Returns with positive serial correlation and no structure.
+
+        The most instructive negative in the corpus. Autocorrelated returns
+        produce runs -- streaks of up days and down days -- which look exactly
+        like impulse legs and pullbacks without any of the market behaviour a
+        flag is supposed to represent. A detector fooled here is keying on
+        momentum persistence alone.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 4409)
+        n = self.spec.lead_in_sessions + 80
+        shocks = rng.normal(0.0, self.spec.base_volatility, n)
+        returns = np.empty(n)
+        previous = 0.0
+        for i in range(n):
+            previous = phi * previous + shocks[i]
+            returns[i] = previous
+        closes = self.spec.start_price * np.exp(np.cumsum(returns))
+        volumes = rng.lognormal(np.log(self.spec.base_volume), 0.3, n)
+        ranges = closes * self.spec.base_volatility * 1.4
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {"pattern": "autocorrelated_noise"},
+        )
+
+    def regime_switching(self, *, seed: int = 0) -> GeneratedSeries:
+        """Alternating quiet and violent regimes with no directional structure.
+
+        Tests whether volatility *contraction* is being measured or merely
+        volatility *level*. A detector that rewards the quiet half without
+        reference to what preceded it scores this well.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 5501)
+        segments = []
+        volatilities = [0.006, 0.030, 0.008, 0.026, 0.010]
+        for i, vol in enumerate(volatilities):
+            segments.append(rng.normal(0.0002 * (-1) ** i, vol, 28))
+        returns = np.concatenate(segments)
+        closes = self.spec.start_price * np.exp(np.cumsum(returns))
+        volumes = rng.lognormal(np.log(self.spec.base_volume), 0.4, len(closes))
+        ranges = closes * np.repeat(volatilities, 28) * 1.5
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {"pattern": "regime_switching"},
+        )
+
+    def quiet_drift(self, *, seed: int = 0) -> GeneratedSeries:
+        """A low-volatility sideways stretch with no prior advance.
+
+        The negative that separates a *base* from a *flat patch*. The geometry
+        is genuinely tight and genuinely clean; what is missing is the context
+        that makes tightness meaningful, which is why prior trend is a primitive
+        rather than an afterthought.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 6607)
+        n = self.spec.lead_in_sessions + 60
+        closes = self.spec.start_price * np.exp(np.cumsum(rng.normal(0.0, 0.004, n)))
+        volumes = rng.lognormal(np.log(self.spec.base_volume * 0.6), 0.2, n)
+        ranges = closes * 0.006
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {"pattern": "quiet_drift"},
+        )
+
+    def choppy_range(self, *, seed: int = 0) -> GeneratedSeries:
+        """Rapid alternation inside a band. Noise with a ceiling and a floor."""
+        rng = np.random.default_rng(self.spec.seed + seed + 7717)
+        n = self.spec.lead_in_sessions + 70
+        oscillation = np.sin(np.linspace(0, 14 * np.pi, n)) * 0.06
+        closes = self.spec.start_price * (1.0 + oscillation + rng.normal(0.0, 0.02, n))
+        volumes = rng.lognormal(np.log(self.spec.base_volume), 0.5, n)
+        ranges = closes * 0.03
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {"pattern": "choppy_range"},
+        )
+
+    def broadening_formation(self, *, seed: int = 0) -> GeneratedSeries:
+        """Expanding range: the exact inverse of every contraction pattern.
+
+        A detector that measures net range change rather than the *direction*
+        of that change could score this as compression, since the window ends
+        near where it began.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 8821)
+        n = self.spec.lead_in_sessions + 60
+        amplitude = np.linspace(0.01, 0.16, n)
+        oscillation = np.sin(np.linspace(0, 8 * np.pi, n)) * amplitude
+        closes = self.spec.start_price * (1.0 + oscillation + rng.normal(0.0, 0.01, n))
+        volumes = rng.lognormal(np.log(self.spec.base_volume), 0.45, n)
+        ranges = closes * amplitude * 0.8
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {"pattern": "broadening_formation"},
+        )
+
+    def deep_pullback(self, *, seed: int = 0) -> GeneratedSeries:
+        """A real advance given almost entirely back.
+
+        The borderline case that matters most, because everything about it is
+        right except the one thing that is not: an 85% retracement is not a
+        pause, it is the advance being reversed.
+        """
+        return self.bull_flag(BullFlagSpec(retracement=0.85, flag_sessions=12), seed=seed + 90)
+
+    def failed_base(self, *, seed: int = 0) -> GeneratedSeries:
+        """A sound-looking consolidation that breaks down out of it."""
+        return self.bull_flag(
+            BullFlagSpec(retracement=0.4, flag_sessions=14, breakdown=0.28), seed=seed + 91
+        )
+
+    def earnings_gap(self, *, seed: int = 0) -> GeneratedSeries:
+        """A single overnight repricing followed by a tight range.
+
+        Distinct from `gap_and_fade`: price *holds* the gap here rather than
+        bleeding back. The structure is genuinely tight and the advance
+        genuinely happened -- in one session, with no accumulation, which is the
+        whole question.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 9931)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        gap_level = float(lead[-1]) * 1.22
+        after = gap_level * (1.0 + rng.normal(0.0, 0.008, 16))
+        closes = np.concatenate([lead, [gap_level], after])
+        gaps = np.zeros(len(closes))
+        gaps[base.lead_in_sessions] = 0.22
+        volumes = np.concatenate(
+            [
+                rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+                [base.base_volume * 10],
+                rng.lognormal(np.log(base.base_volume * 1.3), 0.25, 16),
+            ]
+        )
+        ranges = closes * base.base_volatility
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.55, gaps=gaps),
+            {"pattern": "earnings_gap"},
+        )
+
+    def trending_walk(self, *, seed: int = 0, drift: float = 0.0018) -> GeneratedSeries:
+        """A random walk with drift. Structure-free but directional.
+
+        Separated from the plain walk because drift alone manufactures impulse
+        legs, and a detector's false-positive rate on trending noise is a
+        different number from its rate on flat noise.
+        """
+        return self.random_walk(140, drift=drift, seed=seed + 200)
+
     def low_volume_noise(self, *, seed: int = 0) -> GeneratedSeries:
         """A thin, drifting security with sporadic volume."""
         rng = np.random.default_rng(self.spec.seed + seed + 2003)
