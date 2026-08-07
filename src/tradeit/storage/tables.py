@@ -1558,3 +1558,220 @@ class SystemLog(Base):
         Index("ix_syslog_category", "category", "logged_at"),
         {"postgresql_partition_by": "RANGE (logged_at)"},
     )
+
+
+# ===========================================================================
+# Phase 3 schema: analytics outputs.
+#
+# All derived, all recomputable, all carrying the feature-set digest that
+# produced them. The recurring column across these tables is
+# ``universe_digest`` / ``universe_size``: every cross-sectional or market-level
+# measure records the roster it was computed over, because "68% above their
+# 200DMA" is meaningless without "of what?" -- and a breadth series whose
+# universe silently changed size is not a series.
+# ===========================================================================
+
+
+class RelativeStrengthValue(Base):
+    """Benchmark-relative and cross-sectional strength, per instrument and date.
+
+    Dimensioned by (instrument, session, benchmark, lookback) because the whole
+    point of the multi-benchmark design is that a name beating SPY while lagging
+    QQQ is a distinguishable state. Collapsing to one benchmark would discard
+    exactly what the configuration was written to capture.
+
+    Partitioned monthly like ``indicator_values``: the row count is
+    universe x benchmarks x lookbacks x sessions, which is roughly 12x the
+    indicator table for the default 3 benchmarks and 4 lookbacks.
+    """
+
+    __tablename__ = "relative_strength_values"
+
+    instrument_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    session_date: Mapped[dt.date] = mapped_column(Date, primary_key=True)
+    benchmark_symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    lookback: Mapped[int] = mapped_column(Integer, primary_key=True)
+    feature_set_digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    security_return: Mapped[float | None] = mapped_column(Float)
+    benchmark_return: Mapped[float | None] = mapped_column(Float)
+    relative_performance: Mapped[float | None] = mapped_column(Float)
+    excess_return: Mapped[float | None] = mapped_column(Float)
+    relative_trend: Mapped[float | None] = mapped_column(Float)
+    relative_momentum: Mapped[float | None] = mapped_column(Float)
+    universe_percentile: Mapped[float | None] = mapped_column(Float)
+    sector_percentile: Mapped[float | None] = mapped_column(Float)
+    industry_percentile: Mapped[float | None] = mapped_column(Float)
+    rs_score: Mapped[float | None] = mapped_column(Float)
+    #: How many instruments the percentile was computed against. Recorded so a
+    #: historical rank can be audited: "8th of what, exactly?"
+    ranking_universe_size: Mapped[int | None] = mapped_column(Integer)
+    ranking_universe_digest: Mapped[str | None] = mapped_column(String(64))
+    computed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_rs_lookup", "instrument_id", "benchmark_symbol", "session_date"),
+        Index("ix_rs_ranking", "session_date", "benchmark_symbol", "rs_score"),
+        CheckConstraint(
+            "universe_percentile IS NULL OR (universe_percentile >= 0 "
+            "AND universe_percentile <= 1)",
+            name="ck_rs_percentile_range",
+        ),
+        CheckConstraint(
+            "rs_score IS NULL OR (rs_score >= 0 AND rs_score <= 100)",
+            name="ck_rs_score_range",
+        ),
+        CheckConstraint("lookback > 0", name="ck_rs_lookback"),
+        {"postgresql_partition_by": "RANGE (session_date)"},
+    )
+
+
+class MarketBreadthSnapshot(Base):
+    """Daily breadth over an explicitly recorded eligible universe.
+
+    ``universe_digest`` is part of the measurement, not metadata. Comparing a
+    2008 reading computed over 500 survivors with a 2024 reading computed over
+    4,000 names is comparing two different statistics, and the digest is what
+    makes that detectable rather than invisible.
+    """
+
+    __tablename__ = "market_breadth_snapshots"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    session_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    universe_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    universe_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    universe_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evaluated: Mapped[int] = mapped_column(Integer, nullable=False)
+    feature_set_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    advances: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    declines: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unchanged: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    advance_volume: Mapped[Decimal | None] = mapped_column(VALUE)
+    decline_volume: Mapped[Decimal | None] = mapped_column(VALUE)
+    pct_above_ma: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    new_highs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_lows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ad_line: Mapped[int | None] = mapped_column(BigInteger)
+    thrust_ratio: Mapped[float | None] = mapped_column(Float)
+    #: Set when the roster was too small for the percentages to mean much.
+    #: Downstream must be able to distinguish "40% above their 200DMA out of
+    #: 4,000" from the same figure out of 12.
+    low_confidence: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    computed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_date", "universe_name", "feature_set_digest", name="uq_breadth_snapshot"
+        ),
+        Index("ix_breadth_session", "session_date"),
+        CheckConstraint("evaluated <= universe_size", name="ck_breadth_evaluated"),
+        CheckConstraint("universe_size >= 0", name="ck_breadth_universe_size"),
+    )
+
+
+class VolatilityRegimeState(Base):
+    """Daily volatility regime with its evidence.
+
+    Separate from ``market_regime_states`` because the two genuinely differ: a
+    market can trend strongly with elevated volatility, and one row carrying
+    both would force a single confidence number for two independent judgements.
+    """
+
+    __tablename__ = "volatility_regime_states"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    session_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, default="market")
+    instrument_id: Mapped[int | None] = mapped_column(BigInteger)
+    regime: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    realized_volatility: Mapped[float | None] = mapped_column(Float)
+    volatility_percentile: Mapped[float | None] = mapped_column(Float)
+    atr_percent: Mapped[float | None] = mapped_column(Float)
+    gap_frequency: Mapped[float | None] = mapped_column(Float)
+    cross_sectional_volatility: Mapped[float | None] = mapped_column(Float)
+    expansion: Mapped[float | None] = mapped_column(Float)
+    supporting_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    contradicting_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    strategy_config_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    computed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_date",
+            "scope",
+            "instrument_id",
+            "strategy_config_digest",
+            name="uq_volatility_regime",
+        ),
+        Index("ix_volatility_regime_session", "session_date", "scope"),
+        CheckConstraint("confidence >= 0 AND confidence <= 100", name="ck_volatility_confidence"),
+    )
+
+
+class FeatureDefinition(Base):
+    """Persisted feature registry.
+
+    The in-process registry is the source of truth during a run; this table is
+    its durable record, so a feature-set digest referenced by a two-year-old
+    backtest can still be explained after the code that defined it has changed.
+
+    Keyed by (digest) rather than name: two definitions of ``rs_score`` with
+    different lookbacks are different features, and giving them one row would
+    lose exactly the distinction the registry exists to preserve.
+    """
+
+    __tablename__ = "feature_definitions"
+
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(96), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    calculation_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    description: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False)
+    output_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    null_behaviour: Mapped[str] = mapped_column(String(24), nullable=False)
+    input_datasets: Mapped[dict[str, object]] = mapped_column(JSONB_OR_JSON, nullable=False)
+    warmup_periods: Mapped[int] = mapped_column(Integer, nullable=False)
+    lookback_sessions: Mapped[int | None] = mapped_column(Integer)
+    parameters: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    availability: Mapped[str | None] = mapped_column(Text)
+    depends_on: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    deprecated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_feature_name", "name", "version", "calculation_version"),
+        Index("ix_feature_kind", "kind", "deprecated"),
+        CheckConstraint("warmup_periods >= 0", name="ck_feature_warmup"),
+    )
+
+
+class FeatureSetMember(Base):
+    """Which feature definitions belong to which feature-set digest.
+
+    The join that makes a two-year-old ``feature_set_digest`` explainable: given
+    the digest, list exactly the definitions that were active.
+    """
+
+    __tablename__ = "feature_set_members"
+
+    feature_set_digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    feature_digest: Mapped[str] = mapped_column(
+        ForeignKey("feature_definitions.digest", ondelete="RESTRICT"), primary_key=True
+    )
+    feature_name: Mapped[str] = mapped_column(String(96), nullable=False)
+
+    __table_args__ = (Index("ix_feature_set_lookup", "feature_set_digest", "feature_name"),)

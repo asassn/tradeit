@@ -14,6 +14,7 @@ PostgreSQL's ``DISTINCT ON`` so the same code runs against SQLite in unit tests.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 from decimal import Decimal
 
 from sqlalchemy import and_, func, or_, select
@@ -470,3 +471,244 @@ def apply_adjustments(
 
     adjusted.reverse()
     return adjusted
+
+
+class SectorRepository:
+    """Point-in-time sector and industry classification.
+
+    Resolves the classification an instrument carried **on the clock's date**,
+    not today's. A company reclassified in 2018 was in its old sector in 2017,
+    and a sector-rotation backtest built on current mappings measures a
+    different strategy from the one it claims to.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def classification(
+        self, clock: AsOfClock, instrument_id: int, scheme: str = "GICS"
+    ) -> tuple[str, str | None] | None:
+        """``(sector, industry)`` on the clock's date, or ``None`` if unclassified.
+
+        ``None`` rather than a default bucket: an unclassified instrument
+        lumped into "Other" distorts that group's aggregates and hides the gap
+        in the data.
+        """
+        on = clock.date
+        row = self.session.execute(
+            select(tables.Sector.sector, tables.Sector.industry).where(
+                tables.Sector.instrument_id == instrument_id,
+                tables.Sector.scheme == scheme,
+                tables.Sector.valid_from <= on,
+                or_(tables.Sector.valid_to.is_(None), tables.Sector.valid_to > on),
+            )
+        ).first()
+        return (str(row[0]), row[1]) if row else None
+
+    def classifications(
+        self, clock: AsOfClock, instrument_ids: Sequence[int], scheme: str = "GICS"
+    ) -> dict[int, tuple[str, str | None]]:
+        """Bulk form. One query for a whole universe rather than N.
+
+        Instruments with no classification on the date are simply absent from
+        the result, which callers must handle rather than defaulting.
+        """
+        if not instrument_ids:
+            return {}
+        on = clock.date
+        rows = self.session.execute(
+            select(tables.Sector.instrument_id, tables.Sector.sector, tables.Sector.industry).where(
+                tables.Sector.instrument_id.in_(list(instrument_ids)),
+                tables.Sector.scheme == scheme,
+                tables.Sector.valid_from <= on,
+                or_(tables.Sector.valid_to.is_(None), tables.Sector.valid_to > on),
+            )
+        ).all()
+        return {int(r[0]): (str(r[1]), r[2]) for r in rows}
+
+    def members(
+        self, clock: AsOfClock, sector: str, universe: str, scheme: str = "GICS"
+    ) -> list[int]:
+        """Instruments classified into ``sector`` and in ``universe`` on the date.
+
+        Both intervals are applied, so a company that was in the universe but
+        classified elsewhere at the time is correctly excluded, and one that has
+        since delisted is correctly included.
+        """
+        on = clock.date
+        rows = self.session.execute(
+            select(tables.Sector.instrument_id)
+            .join(
+                tables.UniverseMembership,
+                tables.UniverseMembership.instrument_id == tables.Sector.instrument_id,
+            )
+            .where(
+                tables.Sector.scheme == scheme,
+                tables.Sector.sector == sector,
+                tables.Sector.valid_from <= on,
+                or_(tables.Sector.valid_to.is_(None), tables.Sector.valid_to > on),
+                tables.UniverseMembership.universe == universe,
+                tables.UniverseMembership.valid_from <= on,
+                or_(
+                    tables.UniverseMembership.valid_to.is_(None),
+                    tables.UniverseMembership.valid_to > on,
+                ),
+            )
+            .order_by(tables.Sector.instrument_id)
+        ).all()
+        return [int(r[0]) for r in rows]
+
+
+class IndicatorRepository:
+    """Reads and writes materialised indicator values.
+
+    Reads are gated by the clock's *session date* rather than by a
+    ``knowledge_time``: an indicator value is derived from bars that were
+    themselves clock-gated when computed, so its visibility is determined by
+    the session it describes plus the feature-set digest that produced it.
+
+    That is a weaker guarantee than the fact tables carry, and it is why
+    ``feature_set_digest`` is mandatory on every read: values computed under a
+    different definition are a different feature and must not be silently mixed
+    into one series.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def series(
+        self,
+        clock: AsOfClock,
+        instrument_id: int,
+        indicator: str,
+        feature_set_digest: str,
+        *,
+        start: dt.date | None = None,
+        timeframe: str = "1d",
+    ) -> list[tuple[dt.date, float | None]]:
+        t = tables.IndicatorValue
+        conditions = [
+            t.instrument_id == instrument_id,
+            t.indicator == indicator,
+            t.timeframe == timeframe,
+            t.feature_set_digest == feature_set_digest,
+            t.session_date <= clock.date,
+        ]
+        if start is not None:
+            conditions.append(t.session_date >= start)
+        rows = self.session.execute(
+            select(t.session_date, t.value).where(and_(*conditions)).order_by(t.session_date)
+        ).all()
+        return [(r[0], r[1]) for r in rows]
+
+    def cross_section(
+        self,
+        clock: AsOfClock,
+        indicator: str,
+        feature_set_digest: str,
+        eligible_universe: Sequence[int],
+        *,
+        timeframe: str = "1d",
+    ) -> dict[int, float | None]:
+        """One date's values across an explicit point-in-time roster.
+
+        The roster is an argument, not a query, so a caller cannot accidentally
+        rank against today's universe. Instruments with no value on the date are
+        absent rather than defaulted.
+        """
+        if not eligible_universe:
+            return {}
+        t = tables.IndicatorValue
+        rows = self.session.execute(
+            select(t.instrument_id, t.value).where(
+                t.indicator == indicator,
+                t.timeframe == timeframe,
+                t.feature_set_digest == feature_set_digest,
+                t.session_date == clock.date,
+                t.instrument_id.in_(list(eligible_universe)),
+            )
+        ).all()
+        return {int(r[0]): r[1] for r in rows}
+
+    def latest_value(
+        self,
+        clock: AsOfClock,
+        instrument_id: int,
+        indicator: str,
+        feature_set_digest: str,
+        *,
+        timeframe: str = "1d",
+    ) -> float | None:
+        t = tables.IndicatorValue
+        row = self.session.execute(
+            select(t.value)
+            .where(
+                t.instrument_id == instrument_id,
+                t.indicator == indicator,
+                t.timeframe == timeframe,
+                t.feature_set_digest == feature_set_digest,
+                t.session_date <= clock.date,
+            )
+            .order_by(t.session_date.desc())
+            .limit(1)
+        ).first()
+        return row[0] if row else None
+
+
+class RegimeRepository:
+    """Market and volatility regime states, as known on a date."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def market_regime(
+        self, clock: AsOfClock, classifier: str, strategy_config_digest: str
+    ) -> tables.MarketRegimeState | None:
+        """The most recent regime at or before the clock's date.
+
+        Returns the last *computed* state rather than requiring one for the
+        exact date, because a scan run before that evening's regime job would
+        otherwise see nothing. What it will not do is return a state computed
+        for a later session.
+        """
+        t = tables.MarketRegimeState
+        return self.session.execute(
+            select(t)
+            .where(
+                t.classifier == classifier,
+                t.strategy_config_digest == strategy_config_digest,
+                t.session_date <= clock.date,
+            )
+            .order_by(t.session_date.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+    def volatility_regime(
+        self, clock: AsOfClock, strategy_config_digest: str, *, scope: str = "market"
+    ) -> tables.VolatilityRegimeState | None:
+        t = tables.VolatilityRegimeState
+        return self.session.execute(
+            select(t)
+            .where(
+                t.scope == scope,
+                t.strategy_config_digest == strategy_config_digest,
+                t.session_date <= clock.date,
+            )
+            .order_by(t.session_date.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+    def breadth(
+        self, clock: AsOfClock, universe_name: str, feature_set_digest: str
+    ) -> tables.MarketBreadthSnapshot | None:
+        t = tables.MarketBreadthSnapshot
+        return self.session.execute(
+            select(t)
+            .where(
+                t.universe_name == universe_name,
+                t.feature_set_digest == feature_set_digest,
+                t.session_date <= clock.date,
+            )
+            .order_by(t.session_date.desc())
+            .limit(1)
+        ).scalar_one_or_none()

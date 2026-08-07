@@ -55,18 +55,29 @@ def session(engine):
         session.close()
 
 
-#: Objects PostgreSQL creates from a partitioned parent: the child tables and
-#: the per-child copies of the parent's indexes.
-_PARTITION_CHILD = re.compile(r"^(indicator_values|system_logs)_(p\d{6}|default)(_.*)?$")
+#: Tables PostgreSQL creates from a partitioned parent: the monthly children
+#: and the DEFAULT backstop.
+_PARTITION_PARENTS = ("indicator_values", "system_logs", "relative_strength_values")
+_PARTITION_CHILD = re.compile(rf"^({'|'.join(_PARTITION_PARENTS)})_(p\d{{6}}|default)$")
 
 
-def _diff_object_name(entry: object) -> str:
-    """Best-effort name of whatever a diff entry is about."""
+def _diff_target_table(entry: object) -> str:
+    """The table a diff entry concerns.
+
+    Indexes are matched by their owning table rather than by their own name:
+    PostgreSQL truncates identifiers at 63 characters, so a child index called
+    ``relative_strength_values_p202603_instrument_id_benchmark_symbol_idx``
+    arrives as ``relative_strength_values_p202_instrument_id_benchmark_symb_idx``
+    -- with the month digits mangled and unmatchable. The owning table name is
+    short enough to survive intact.
+    """
     if not isinstance(entry, tuple) or len(entry) < 2:
         return ""
     target = entry[1]
-    name = getattr(target, "name", None)
-    return str(name) if name else ""
+    table = getattr(target, "table", None)
+    if table is not None and getattr(table, "name", None):
+        return str(table.name)
+    return str(getattr(target, "name", "") or "")
 
 
 def _is_partition_child(entry: object) -> bool:
@@ -78,13 +89,15 @@ def _is_partition_child(entry: object) -> bool:
     what lets this check catch genuine divergence between the migration and the
     ORM instead of drowning in expected noise.
     """
-    return bool(_PARTITION_CHILD.match(_diff_object_name(entry)))
+    return bool(_PARTITION_CHILD.match(_diff_target_table(entry)))
 
 
 class TestMigration:
-    def test_both_migrations_applied(self, session):
+    def test_the_schema_is_at_the_latest_migration(self, session):
+        """Pinned to head deliberately: a stale head means later tests are
+        validating a schema the application no longer uses."""
         version = session.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert version == "0002_phase2_schema"
+        assert version == "0003_phase3_analytics"
 
     def test_every_orm_table_exists_in_the_database(self, session):
         present = {

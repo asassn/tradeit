@@ -6,7 +6,12 @@ exists is the schema, the interfaces, the configuration system, and the
 contracts each later phase builds against.
 
 **Companion documents:** [Data Model](DATA_MODEL.md) · [API](API.md) ·
+[Analytics methodology](ANALYTICS.md) · [Vendor evaluation](VENDOR_EVALUATION.md) ·
 [Roadmap](ROADMAP.md) · [ADRs](adr/)
+
+> **Phase numbering.** This document was written in Phase 2, before the
+> canonical twelve-phase roadmap was fixed. Where the phase numbers below
+> conflict with [ROADMAP.md](ROADMAP.md), the roadmap wins.
 
 ---
 
@@ -169,16 +174,21 @@ graph TB
 | **Fundamental ingestion** | As-filed financials with real filing timestamps | 1 | ✅ Built |
 | **Corporate-event data** | Splits, dividends, earnings dates, symbol changes | 1 | ✅ Built |
 | **News / macro ingestion** | Headlines and economic series | — | Interfaces only |
-| **Indicator calculation** | Causal transforms with warm-up contracts | 3 | Interface |
-| **Pattern recognition** | Base/consolidation geometry; pivot and stop levels | 5 | Interface |
+| **Indicator calculation** | 58 causal transforms with declared warm-up | 3 | ✅ Built |
+| **Relative strength** | Multi-benchmark + point-in-time cross-sectional | 3 | ✅ Built |
+| **Sector strength** | Point-in-time aggregation, ETF-proxy fallback | 3 | ✅ Built |
+| **Market breadth** | Roster-recorded participation measures | 3 | ✅ Built |
+| **Market / volatility regime** | Transparent rule-based, explainable | 3 | ✅ Built |
+| **Feature registry** | Versioned definitions with null semantics | 3 | ✅ Built |
+| **Pattern recognition** | Base/consolidation geometry; pivot and stop levels | 4 | Interface |
 | **Breakout monitoring** | Approach → trigger → confirm → fail lifecycle | 5 | Interface |
-| **Scoring** | Weighted factor combination with stored breakdown | 5 | Interface |
-| **Portfolio construction** | Sizing, correlation, capital allocation | 6 | Interface |
-| **Risk management** | Limit evaluation; the veto before an order exists | 6 | Interface |
-| **Backtesting** | Clock-driven replay reusing live components | 8 | Interface |
-| **Paper trading** | Same code path as live, different broker adapter | 9 | Interface |
-| **Trade journal** | Every decision with its full context | 9 | Schema |
-| **Dashboard / API** | Read-mostly surface over produced results | 9 | Spec |
+| **Scoring** | Standalone, portfolio-fit and final scores | 7 | Interface |
+| **Portfolio construction** | Sizing, correlation, capital allocation | 8 | Interface |
+| **Risk management** | Limit evaluation; the veto before an order exists | 8 | Interface |
+| **Backtesting** | Clock-driven replay reusing live components | 9 | Interface |
+| **Dashboard / API** | Read-mostly surface over produced results | 10 | Spec |
+| **Paper trading** | Same code path as live, different broker adapter | 11 | Interface |
+| **Trade journal** | Every decision with its full context | 11 | Schema |
 | **Task scheduling** | 22 declared jobs, dependency-ordered, trading gate | 2 | ✅ Declared |
 | **Caching** | Redis, keyed by content-addressed manifest | 9 | Design |
 | **Logging** | structlog → stdout; audit subset → `system_logs` | 1 | ✅ Built |
@@ -251,12 +261,17 @@ tradeit/
 │   ├── reproducibility/                  ✅ VERSIONING
 │   │   └── versioning.py                     content hashing, run manifests
 │   │
-│   ├── analytics/                        ✅ interface  ○ implementation
+│   ├── analytics/                        ✅ BUILT — the causal feature layer
 │   │   ├── base.py                       ✅   Indicator, CrossSectionalFeature
-│   │   ├── indicators/                   ○    trend, momentum, volatility, volume
-│   │   ├── relative_strength.py          ○
-│   │   ├── regime.py                     ○
-│   │   └── sectors.py                    ○
+│   │   ├── kernels.py                    ✅   pure NumPy, causality-tested
+│   │   ├── indicators.py                 ✅   58 features bound to config
+│   │   ├── timeframes.py                 ✅   causal weekly/intraday aggregation
+│   │   ├── relative_strength.py          ✅   multi-benchmark + PIT ranking
+│   │   ├── sectors.py                    ✅   PIT aggregation, ETF proxies
+│   │   ├── breadth.py                    ✅   roster-recorded breadth
+│   │   ├── regime.py                     ✅   explainable market regime
+│   │   ├── volatility.py                 ✅   percentile-based volatility regime
+│   │   └── registry.py                   ✅   versioned feature definitions
 │   │
 │   ├── strategy/                         ✅ interface  ○ implementation
 │   │   ├── base.py                       ✅   ScreenFilter, PatternDetector,

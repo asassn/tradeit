@@ -28,6 +28,9 @@ test:  ## unit + sqlite integration tests
 test-pg:  ## also run the PostgreSQL-specific tests
 	TRADEIT_TEST_PG_DSN=$(PG_TEST_DSN) $(PY) -m pytest -q
 
+bench:  ## throughput, scaling and memory benchmarks
+	$(PY) -m pytest tests/performance -m performance -s
+
 cov:  ## test with coverage
 	$(PY) -m pytest --cov=tradeit --cov-report=term-missing
 

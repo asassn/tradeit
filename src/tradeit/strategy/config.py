@@ -47,14 +47,95 @@ class Section(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class BenchmarkConfig(Section):
+    """Benchmark instruments and sector proxies.
+
+    Relative strength is measured against *several* benchmarks, not one. A
+    growth name that beats SPY but lags QQQ is a different proposition from one
+    that beats both, and collapsing that into a single number early discards the
+    distinction. ``comparison_symbols`` is the set every security is measured
+    against; ``primary_symbol`` is only the default when one must be chosen.
+
+    ``sector_proxies`` maps a GICS-style sector to a tradable ETF. Proxies are a
+    fallback for sector strength when historical constituent classifications are
+    unavailable -- the ETF's own price history is a legitimate point-in-time
+    series, whereas today's constituent list applied to 2015 is not.
+    """
+
+    primary_symbol: str = "SPY"
+    growth_symbol: str = "QQQ"
+    small_cap_symbol: str = "IWM"
+    comparison_symbols: tuple[str, ...] = ("SPY", "QQQ", "IWM")
+    volatility_symbol: str | None = "VIX"
+    sector_proxies: dict[str, str] = Field(
+        default_factory=lambda: {
+            "Communication Services": "XLC",
+            "Consumer Discretionary": "XLY",
+            "Consumer Staples": "XLP",
+            "Energy": "XLE",
+            "Financials": "XLF",
+            "Health Care": "XLV",
+            "Industrials": "XLI",
+            "Information Technology": "XLK",
+            "Materials": "XLB",
+            "Real Estate": "XLRE",
+            "Utilities": "XLU",
+        }
+    )
+    classification_scheme: str = "GICS"
+
+    @model_validator(mode="after")
+    def _validate_benchmarks(self) -> Self:
+        if not self.comparison_symbols:
+            raise ConfigError("at least one comparison benchmark is required")
+        if self.primary_symbol not in self.comparison_symbols:
+            raise ConfigError(
+                f"primary_symbol {self.primary_symbol!r} must appear in comparison_symbols"
+            )
+        return self
+
+
 class UniverseConfig(Section):
-    """Which instruments are eligible before any filtering."""
+    """Which instruments are eligible before any filtering.
+
+    ETFs are deliberately absent from ``asset_classes``. They are needed as
+    benchmarks, sector proxies, breadth constituents and research subjects, and
+    they are loaded and analysed as such -- but an ETF is not an individual
+    stock opportunity, and including them in the scanner would put SPY in
+    competition with the companies it contains.
+    """
 
     name: str = "us_equity"
     exchanges: tuple[str, ...] = ("XNYS", "XNAS", "XASE")
     asset_classes: tuple[str, ...] = ("common_stock", "adr", "reit")
-    exclude_asset_classes: tuple[str, ...] = ("warrant", "unit", "preferred")
-    benchmark_symbol: str = "SPY"
+    exclude_asset_classes: tuple[str, ...] = (
+        "warrant",
+        "unit",
+        "preferred",
+        "closed_end_fund",
+        "etf",
+    )
+    include_adrs: bool = True
+    include_reits: bool = True
+    #: ETFs available for benchmarks, sectors, breadth and research, but never
+    #: in the individual-stock opportunity scanner.
+    etf_universe_name: str = "us_etf"
+    exclude_otc: bool = True
+    exclude_leveraged_etfs: bool = True
+    exclude_inverse_etfs: bool = True
+    exclude_pre_merger_spacs: bool = True
+    country: str = "US"
+
+    @model_validator(mode="after")
+    def _validate_universe(self) -> Self:
+        overlap = set(self.asset_classes) & set(self.exclude_asset_classes)
+        if overlap:
+            raise ConfigError(f"asset classes both included and excluded: {sorted(overlap)}")
+        if self.include_adrs and "adr" not in self.asset_classes:
+            raise ConfigError("include_adrs is set but 'adr' is not in asset_classes")
+        if self.include_reits and "reit" not in self.asset_classes:
+            raise ConfigError("include_reits is set but 'reit' is not in asset_classes")
+        return self
 
 
 class LiquidityConfig(Section):
@@ -62,8 +143,9 @@ class LiquidityConfig(Section):
 
     min_price: float = Field(default=5.0, gt=0)
     max_price: float = Field(default=10_000.0, gt=0)
-    min_avg_dollar_volume: float = Field(default=5_000_000, ge=0)
-    dollar_volume_lookback: int = Field(default=50, ge=1)
+    min_market_cap: float = Field(default=500_000_000, ge=0)
+    min_avg_dollar_volume: float = Field(default=10_000_000, ge=0)
+    dollar_volume_lookback: int = Field(default=20, ge=1)
     min_trading_history_sessions: int = Field(default=250, ge=0)
     #: Cap on our share of a session's volume. The single most important
     #: liquidity parameter, because it bounds how badly a backtest can lie about
@@ -75,6 +157,20 @@ class LiquidityConfig(Section):
         if self.max_price <= self.min_price:
             raise ConfigError("max_price must exceed min_price")
         return self
+
+
+class ScannerProfile(Section):
+    """A named liquidity/size preset.
+
+    Profiles exist so that "institutional growth" and "broad opportunity" are
+    two configurations of one strategy rather than two forks of it. Each profile
+    overrides only the floors; everything else comes from the base config.
+    """
+
+    min_market_cap: float = Field(ge=0)
+    min_avg_dollar_volume: float = Field(ge=0)
+    min_price: float | None = Field(default=None, gt=0)
+    description: str = ""
 
 
 class FundamentalConfig(Section):
@@ -104,6 +200,254 @@ class TechnicalConfig(Section):
     min_relative_strength_rank: float = Field(default=0.70, ge=0, le=1)
     atr_period: int = Field(default=14, ge=2)
     volume_baseline_period: int = Field(default=50, ge=5)
+
+
+class IndicatorConfig(Section):
+    """Periods for the technical indicator engine.
+
+    Every period is here rather than defaulted in an indicator's signature. An
+    ``SMA(period=50)`` default inside a function is a strategy constant hiding
+    in a type annotation (ADR-0008).
+    """
+
+    sma_periods: tuple[int, ...] = (10, 20, 50, 150, 200)
+    ema_periods: tuple[int, ...] = (8, 21, 50)
+    rsi_period: int = Field(default=14, ge=2)
+    macd_fast: int = Field(default=12, ge=2)
+    macd_slow: int = Field(default=26, ge=3)
+    macd_signal: int = Field(default=9, ge=2)
+    adx_period: int = Field(default=14, ge=2)
+    atr_period: int = Field(default=14, ge=2)
+    bollinger_period: int = Field(default=20, ge=2)
+    bollinger_stdev: float = Field(default=2.0, gt=0)
+    vwap_period: int = Field(default=20, ge=2)
+    relative_volume_period: int = Field(default=20, ge=2)
+    volatility_periods: tuple[int, ...] = (20, 60)
+    momentum_periods: tuple[int, ...] = (20, 60, 120, 250)
+    roc_periods: tuple[int, ...] = (5, 20, 60)
+    ma_slope_period: int = Field(default=20, ge=2)
+    ma_slope_lookback: int = Field(default=10, ge=1)
+    rolling_extreme_periods: tuple[int, ...] = (20, 52, 252)
+    dollar_volume_period: int = Field(default=20, ge=2)
+    #: Contraction compares a recent window against a longer baseline. A ratio
+    #: below 1 means the recent window is quieter -- the signature of a base.
+    contraction_short_window: int = Field(default=10, ge=2)
+    contraction_long_window: int = Field(default=50, ge=5)
+    #: Trading days per year, for annualising volatility.
+    annualisation_factor: int = Field(default=252, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_periods(self) -> Self:
+        if self.macd_slow <= self.macd_fast:
+            raise ConfigError("macd_slow must exceed macd_fast")
+        if self.contraction_long_window <= self.contraction_short_window:
+            raise ConfigError("contraction_long_window must exceed contraction_short_window")
+        return self
+
+
+class TimeframeConfig(Section):
+    """Which timeframes are constructed, and from what.
+
+    Higher timeframes are aggregated from a base timeframe rather than fetched
+    separately, so a weekly bar is by construction consistent with the daily
+    bars it contains -- and, more importantly, so its completeness is something
+    the calendar can determine rather than something a vendor asserts.
+    """
+
+    base_timeframe: str = "1d"
+    enabled: tuple[str, ...] = ("1d", "1w")
+    intraday_enabled: tuple[str, ...] = ("15m", "1h", "4h")
+    intraday_base: str = "1m"
+    #: An incomplete higher-timeframe bar is never emitted as a feature. This is
+    #: the single most important multi-timeframe rule: at Wednesday noon, the
+    #: current week's bar does not exist yet.
+    emit_incomplete_bars: bool = False
+    week_anchor: str = "friday"
+
+
+class RelativeStrengthConfig(Section):
+    """Benchmark-relative and cross-sectional strength.
+
+    Note: this is *relative strength* in the market-structure sense -- a
+    security's performance against a benchmark and against its peers. It is
+    unrelated to RSI, which is a momentum oscillator on a single series and is
+    configured under indicators.
+    """
+
+    lookbacks: tuple[int, ...] = (20, 60, 120, 250)
+    #: Weights for combining lookbacks into the 0-100 score. Longer horizons
+    #: dominate because a name that has led for a year is a stronger statement
+    #: than one that led for a month.
+    lookback_weights: dict[str, float] = Field(
+        default_factory=lambda: {"20": 0.15, "60": 0.25, "120": 0.30, "250": 0.30}
+    )
+    benchmarks: tuple[str, ...] = ("SPY", "QQQ", "IWM")
+    score_benchmark: str = "SPY"
+    rank_against_sector: bool = True
+    rank_against_industry: bool = True
+    #: Minimum eligible peers before a percentile rank is emitted at all. A
+    #: percentile computed over four names is a number, not a rank.
+    min_universe_for_rank: int = Field(default=20, ge=2)
+    min_sector_peers_for_rank: int = Field(default=5, ge=2)
+
+    @model_validator(mode="after")
+    def _validate_weights(self) -> Self:
+        missing = {str(lb) for lb in self.lookbacks} - set(self.lookback_weights)
+        if missing:
+            raise ConfigError(f"lookback_weights missing entries for {sorted(missing)}")
+        if self.score_benchmark not in self.benchmarks:
+            raise ConfigError("score_benchmark must be one of benchmarks")
+        if sum(self.lookback_weights.values()) <= 0:
+            raise ConfigError("lookback_weights must sum to a positive number")
+        return self
+
+    def normalised_lookback_weights(self) -> dict[str, float]:
+        active = {str(lb): self.lookback_weights[str(lb)] for lb in self.lookbacks}
+        total = sum(active.values())
+        return {k: v / total for k, v in sorted(active.items())}
+
+
+class SectorStrengthConfig(Section):
+    """Sector aggregation. Weights are configurable and later backtestable."""
+
+    scheme: str = "GICS"
+    breadth_ma_periods: tuple[int, ...] = (20, 50, 200)
+    momentum_lookbacks: tuple[int, ...] = (20, 60)
+    #: Minimum classified members before a sector is scored. Below this the
+    #: aggregate is noise, and emitting it anyway invites a rotation signal
+    #: driven by two stocks.
+    min_members: int = Field(default=5, ge=1)
+    use_etf_proxy_when_unavailable: bool = True
+    factor_weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "relative_return": 0.25,
+            "absolute_return": 0.15,
+            "relative_momentum": 0.20,
+            "breadth_above_50dma": 0.20,
+            "breadth_above_200dma": 0.10,
+            "participation": 0.10,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate_weights(self) -> Self:
+        if not self.factor_weights or sum(self.factor_weights.values()) <= 0:
+            raise ConfigError("sector factor_weights must be non-empty and sum positive")
+        if any(w < 0 for w in self.factor_weights.values()):
+            raise ConfigError("sector factor_weights must be non-negative")
+        return self
+
+    def normalised_factor_weights(self) -> dict[str, float]:
+        total = sum(self.factor_weights.values())
+        return {k: v / total for k, v in sorted(self.factor_weights.items())}
+
+
+class BreadthConfig(Section):
+    """Market breadth. Every measure declares the universe it was computed on."""
+
+    ma_periods: tuple[int, ...] = (20, 50, 200)
+    new_high_low_lookback: int = Field(default=252, ge=20)
+    #: Below this, breadth percentages are too noisy to act on and are emitted
+    #: with a low-confidence flag rather than silently trusted.
+    min_universe_size: int = Field(default=50, ge=2)
+    thrust_lookback: int = Field(default=10, ge=2)
+    advance_threshold_pct: float = Field(default=0.0, ge=-1.0, le=1.0)
+
+
+class RegimeConfig(Section):
+    """Market-regime classifier thresholds.
+
+    Deliberately rule-based and transparent. Thresholds are a starting point and
+    were NOT fitted to historical returns -- doing that in Phase 3 would produce
+    a regime model that looks excellent on the data it was tuned on and says
+    nothing about the future.
+    """
+
+    trend_ma_fast: int = Field(default=50, ge=2)
+    trend_ma_slow: int = Field(default=200, ge=5)
+    slope_lookback: int = Field(default=20, ge=2)
+    benchmarks: tuple[str, ...] = ("SPY", "QQQ", "IWM")
+    #: Signal weights. Each signal contributes a score in [-1, 1].
+    signal_weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "primary_trend": 0.30,
+            "benchmark_agreement": 0.15,
+            "ma_slope": 0.15,
+            "breadth_above_200dma": 0.15,
+            "new_high_low": 0.10,
+            "sector_participation": 0.10,
+            "volatility": 0.05,
+        }
+    )
+    #: Composite score boundaries, descending. A score at or above a boundary
+    #: takes that regime.
+    thresholds: dict[str, float] = Field(
+        default_factory=lambda: {
+            "STRONG_BULL": 0.60,
+            "BULL": 0.25,
+            "NEUTRAL": -0.10,
+            "WEAK": -0.35,
+            "BEAR": -0.65,
+        }
+    )
+    severe_risk_off_volatility_states: tuple[str, ...] = ("EXTREME",)
+
+    @model_validator(mode="after")
+    def _validate_thresholds(self) -> Self:
+        if not self.signal_weights or sum(self.signal_weights.values()) <= 0:
+            raise ConfigError("regime signal_weights must be non-empty and sum positive")
+        required = {"STRONG_BULL", "BULL", "NEUTRAL", "WEAK", "BEAR"}
+        if set(self.thresholds) != required:
+            raise ConfigError(f"regime thresholds must define exactly {sorted(required)}")
+        ordered = [
+            self.thresholds[name] for name in ("STRONG_BULL", "BULL", "NEUTRAL", "WEAK", "BEAR")
+        ]
+        if ordered != sorted(ordered, reverse=True):
+            raise ConfigError(
+                "regime thresholds must decrease from STRONG_BULL to BEAR; "
+                "overlapping bands make the classification ambiguous"
+            )
+        return self
+
+    def normalised_signal_weights(self) -> dict[str, float]:
+        total = sum(self.signal_weights.values())
+        return {k: v / total for k, v in sorted(self.signal_weights.items())}
+
+
+class VolatilityRegimeConfig(Section):
+    """Volatility-regime thresholds, expressed as percentiles of history.
+
+    Percentile-based rather than absolute: 20% annualised volatility means
+    something different in 2017 than in 2020, and a fixed threshold silently
+    reclassifies the whole market when the volatility level shifts.
+    """
+
+    realized_vol_period: int = Field(default=20, ge=5)
+    percentile_lookback: int = Field(default=252, ge=60)
+    atr_period: int = Field(default=14, ge=2)
+    gap_lookback: int = Field(default=20, ge=5)
+    gap_threshold_pct: float = Field(default=0.02, gt=0)
+    #: Percentile boundaries, ascending.
+    thresholds: dict[str, float] = Field(
+        default_factory=lambda: {
+            "LOW": 0.20,
+            "NORMAL": 0.60,
+            "ELEVATED": 0.80,
+            "HIGH": 0.95,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate_thresholds(self) -> Self:
+        required = {"LOW", "NORMAL", "ELEVATED", "HIGH"}
+        if set(self.thresholds) != required:
+            raise ConfigError(f"volatility thresholds must define exactly {sorted(required)}")
+        ordered = [self.thresholds[n] for n in ("LOW", "NORMAL", "ELEVATED", "HIGH")]
+        if ordered != sorted(ordered) or len(set(ordered)) != len(ordered):
+            raise ConfigError("volatility thresholds must strictly increase")
+        if not all(0 < v < 1 for v in ordered):
+            raise ConfigError("volatility thresholds are percentiles in (0, 1)")
+        return self
 
 
 class PatternConfig(Section):
@@ -263,7 +607,29 @@ class StrategyConfig(BaseModel):
     schema_version: int = Field(default=1, ge=1)
 
     universe: UniverseConfig = Field(default_factory=UniverseConfig)
+    benchmarks: BenchmarkConfig = Field(default_factory=BenchmarkConfig)
     liquidity: LiquidityConfig = Field(default_factory=LiquidityConfig)
+    scanner_profiles: dict[str, ScannerProfile] = Field(
+        default_factory=lambda: {
+            "institutional_growth": ScannerProfile(
+                min_market_cap=2_000_000_000,
+                min_avg_dollar_volume=25_000_000,
+                description="Large, heavily traded names only.",
+            ),
+            "broad_opportunity": ScannerProfile(
+                min_market_cap=500_000_000,
+                min_avg_dollar_volume=10_000_000,
+                description="The default breadth of coverage.",
+            ),
+        }
+    )
+    indicators: IndicatorConfig = Field(default_factory=IndicatorConfig)
+    timeframes: TimeframeConfig = Field(default_factory=TimeframeConfig)
+    relative_strength: RelativeStrengthConfig = Field(default_factory=RelativeStrengthConfig)
+    sector_strength: SectorStrengthConfig = Field(default_factory=SectorStrengthConfig)
+    breadth: BreadthConfig = Field(default_factory=BreadthConfig)
+    regime: RegimeConfig = Field(default_factory=RegimeConfig)
+    volatility_regime: VolatilityRegimeConfig = Field(default_factory=VolatilityRegimeConfig)
     fundamental: FundamentalConfig = Field(default_factory=FundamentalConfig)
     technical: TechnicalConfig = Field(default_factory=TechnicalConfig)
     patterns: PatternConfig = Field(default_factory=PatternConfig)
@@ -304,7 +670,68 @@ class StrategyConfig(BaseModel):
                 f"min_trading_history_sessions ({self.liquidity.min_trading_history_sessions}); "
                 "every instrument passing the liquidity filter would fail on warm-up"
             )
+        longest_rs = max(self.relative_strength.lookbacks)
+        if longest_rs > self.liquidity.min_trading_history_sessions:
+            raise ConfigError(
+                f"the longest relative-strength lookback ({longest_rs}) exceeds "
+                f"min_trading_history_sessions ({self.liquidity.min_trading_history_sessions}); "
+                "no eligible instrument could ever produce that feature"
+            )
+        if self.relative_strength.score_benchmark != self.benchmarks.primary_symbol and (
+            self.relative_strength.score_benchmark not in self.benchmarks.comparison_symbols
+        ):
+            raise ConfigError("relative_strength.score_benchmark must be a configured benchmark")
+        for symbol in self.relative_strength.benchmarks:
+            if symbol not in self.benchmarks.comparison_symbols:
+                raise ConfigError(
+                    f"relative_strength benchmark {symbol!r} is not in "
+                    "benchmarks.comparison_symbols"
+                )
         return self
+
+    def coherence_warnings(self) -> list[str]:
+        """Configuration smells that are worth surfacing but are not errors.
+
+        The distinction matters. A relative-strength lookback longer than the
+        required trading history is fatal -- combined with the liquidity floor
+        it guarantees an empty screen. But an *indicator* lookback slightly
+        longer than the minimum history is ordinary warm-up: an instrument that
+        just became eligible with 250 sessions genuinely has no 252-session
+        high, and will have one two sessions later. Raising on that would be
+        confusing a transient state for a broken configuration.
+
+        Surfaced by ``tradeit config`` and by the API's validation endpoint.
+        """
+        out: list[str] = []
+        history = self.liquidity.min_trading_history_sessions
+        longest = max(
+            (
+                *self.indicators.sma_periods,
+                *self.indicators.rolling_extreme_periods,
+                *self.indicators.momentum_periods,
+                self.indicators.contraction_long_window,
+            )
+        )
+        if longest > history:
+            out.append(
+                f"the longest indicator lookback ({longest}) exceeds "
+                f"min_trading_history_sessions ({history}); newly eligible instruments "
+                f"will lack that feature for their first {longest - history} sessions"
+            )
+        if self.indicators.bollinger_period > self.liquidity.dollar_volume_lookback * 4:
+            out.append(
+                "bollinger_period is much longer than dollar_volume_lookback; the "
+                "liquidity screen and the volatility bands are measuring very "
+                "different horizons"
+            )
+        proxy_sectors = set(self.benchmarks.sector_proxies)
+        if len(proxy_sectors) < 11:
+            out.append(
+                f"only {len(proxy_sectors)} sector proxies configured; sectors without "
+                "a proxy cannot fall back to an ETF when constituent classification "
+                "is unavailable"
+            )
+        return out
 
     # -- identity ------------------------------------------------------------
 
@@ -316,7 +743,16 @@ class StrategyConfig(BaseModel):
         the backtest that validated it.
         """
         payload = self.model_dump(mode="json", exclude={"description"})
+        # Weights are hashed in normalised form, so proportionally identical
+        # weight sets are correctly recognised as the same strategy.
         payload["scoring"]["weights"] = self.scoring.normalised_weights()
+        payload["relative_strength"]["lookback_weights"] = (
+            self.relative_strength.normalised_lookback_weights()
+        )
+        payload["sector_strength"]["factor_weights"] = (
+            self.sector_strength.normalised_factor_weights()
+        )
+        payload["regime"]["signal_weights"] = self.regime.normalised_signal_weights()
         return payload
 
     @property

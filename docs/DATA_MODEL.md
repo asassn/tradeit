@@ -1,9 +1,15 @@
 # Data Model
 
-41 tables in five domains. Every table is defined in `src/tradeit/storage/tables.py`
+46 tables in six domains. Every table is defined in `src/tradeit/storage/tables.py`
 and created by `migrations/versions/`. The schema has been applied to
 PostgreSQL 16 and is verified by `tests/integration/test_phase2_schema.py`,
 which includes a drift check asserting the ORM and the migrations still agree.
+
+> The five analytics tables added in Phase 3 — `relative_strength_values`,
+> `market_breadth_snapshots`, `volatility_regime_states`, `feature_definitions`
+> and `feature_set_members` — are described in
+> [PHASE_03.md §10](PHASE_03.md#10-database-changes). `relative_strength_values`
+> is range-partitioned monthly like `indicator_values`.
 
 ## The three kinds of table
 
@@ -446,6 +452,7 @@ is applied where row counts justify it and nowhere else.
 | Table | Key | Interval | Rationale |
 |---|---|---|---|
 | `indicator_values` | `session_date` | monthly | ~40M rows/year (4,000 instruments × 40 indicators × 252 sessions). Every query is date-bounded, so pruning eliminates almost all of it. |
+| `relative_strength_values` | `session_date` | monthly | ~12M rows/year (4,000 × 3 benchmarks × 4 lookbacks × 252). Same query shape. |
 | `system_logs` | `logged_at` | monthly | High write volume, short useful life, retention by partition drop. |
 
 Both use a **natural composite primary key** rather than a surrogate id.

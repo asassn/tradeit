@@ -9,11 +9,13 @@ The distinction it is organised around:
 > **"A great stock"** and **"a great trade for this portfolio right now"** are
 > not the same thing.
 
-**Status: Phase 2 complete.** The point-in-time data layer is built and tested;
-the full system architecture, database schema, interfaces and configuration
-system are designed and validated. No trading logic is implemented yet —
-indicators, screening, patterns, sizing, risk and backtesting are Phases 3–8.
-See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+**Status: Phase 3 complete.** The point-in-time data layer, the system
+architecture, and the causal analytics foundation are built and tested — 58
+indicators, multi-benchmark relative strength, sector strength, market breadth,
+and transparent market- and volatility-regime models. Pattern recognition,
+breakout confirmation, scoring, portfolio construction and backtesting are
+Phases 4–9. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the canonical
+twelve-phase plan.
 
 Live trading is disabled and stays disabled until separately authorised
 ([ADR-0004](docs/adr/0004-live-trading-safety-interlock.md)).
@@ -45,6 +47,14 @@ Live trading is disabled and stays disabled until separately authorised
 - **Vendor-neutral interfaces** for market data, fundamentals, earnings, news,
   macro and brokers — plus the domain contracts every later phase builds
   against.
+- **A causal analytics layer.** 58 indicators written rather than imported, so
+  their seeding, smoothing and warm-up behaviour can be tested; multi-benchmark
+  relative strength ranked against the point-in-time universe; sector strength,
+  breadth, and explainable regime models that record contradicting evidence as
+  well as supporting.
+- **274 causality tests.** Every indicator is proved to depend only on past
+  bars, by asserting that computing over a prefix reproduces the prefix of
+  computing over everything.
 
 ## Quick start
 
@@ -99,7 +109,7 @@ src/tradeit/
   ingest/           append-only ingestion with quarantine and run audit
   storage/          schema, sessions, point-in-time repositories
   reproducibility/  content hashing and run manifests
-  analytics/        indicator contracts            (interfaces only)
+  analytics/        58 causal indicators, RS, sectors, breadth, regimes
   strategy/         screening, patterns, scoring   (interfaces + config)
   portfolio/        state, sizing, allocation      (interfaces only)
   risk/             limits and the veto gate       (interfaces only)
@@ -114,10 +124,12 @@ docs/               architecture, data model, API, roadmap, ADRs, phase reports
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — the complete technical architecture
-- [Data model](docs/DATA_MODEL.md) — 41 tables, ERDs, partitioning, indexes
-- [API specification](docs/API.md) — the endpoints Phase 9 will implement
-- [Roadmap](docs/ROADMAP.md) — ten phases and what each requires
-- Phase reports — [Phase 1](docs/PHASE_01.md) · [Phase 2](docs/PHASE_02.md)
+- [Analytics methodology](docs/ANALYTICS.md) — indicator formulas, regime rules
+- [Data model](docs/DATA_MODEL.md) — 46 tables, ERDs, partitioning, indexes
+- [API specification](docs/API.md) — the endpoints Phase 10 will implement
+- [Vendor evaluation](docs/VENDOR_EVALUATION.md) — options and an acceptance test
+- [Roadmap](docs/ROADMAP.md) — the canonical twelve phases
+- Phase reports — [1](docs/PHASE_01.md) · [2](docs/PHASE_02.md) · [3](docs/PHASE_03.md)
 - [ADRs](docs/adr/) — the decisions that constrain later phases
 
 ## Testing
@@ -130,5 +142,12 @@ make test-pg   # additionally runs the PostgreSQL-specific tests
 The tests in `tests/unit/test_point_in_time.py` are the ones that matter most:
 if they regress, every backtest this platform produces is fiction.
 
-185 tests today — 160 unit, 25 integration, of which 18 run against a real
-PostgreSQL 16 instance to validate partitioning, constraints and schema drift.
+626 tests today. The 274 in `tests/unit/test_causality.py` are the analytics
+layer's equivalent: they assert that computing an indicator over a prefix of the
+data reproduces the prefix of computing it over everything, which is the formal
+statement of "no look-ahead". Verified to catch centred windows, full-sample
+z-scores and off-by-one reads.
+
+```bash
+make bench     # throughput, scaling and memory benchmarks
+```

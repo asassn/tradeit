@@ -1,6 +1,6 @@
 [project]
 name = "tradeit"
-version = "0.2.0"
+version = "0.3.0"
 description = "Quantitative stock screening, breakout confirmation, and portfolio compounding platform"
 requires-python = ">=3.11"
 dependencies = [
@@ -36,9 +36,11 @@ packages = ["src/tradeit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not performance'"
 pythonpath = ["src"]
 markers = [
     "integration: requires a live PostgreSQL database",
+    "performance: throughput and memory benchmarks; excluded from the default run",
 ]
 filterwarnings = ["error::DeprecationWarning:tradeit.*"]
 
