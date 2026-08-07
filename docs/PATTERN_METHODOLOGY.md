@@ -12,18 +12,19 @@ claim is what a component set encodes.
 
 ## 1. The three kinds
 
-| Kind | Families | Context required | What it asserts |
+| Kind | Families | Rising context comes from | What it asserts |
 | --- | --- | --- | --- |
-| **Continuation** | bull flag, VCP, flat base, ascending triangle, pennant, cup and handle, high tight flag | a prior **advance** | this pause is a digestion of the advance, not its end |
-| **Reversal** | double bottom, inverse head and shoulders | a prior **decline** | selling is exhausting |
+| **Continuation** | bull flag, VCP, flat base, ascending triangle, pennant, cup and handle, high tight flag | an impulse inside the pattern, or a required prior advance | this pause is a digestion of the advance, not its end |
+| **Reversal** | double bottom, inverse head and shoulders | a required prior **decline** | selling is exhausting |
 | **Structural** | base on base, tight consolidation, breakout retest | varies | a statement about *relationship* or *state* rather than about a single shape |
 
-The context requirement is the single most important dividing line, and it is why
-a reversal detector cannot be built by flipping a continuation detector's sign.
-The flag's `prior_trend` asks *how strong was the advance we are pausing inside*;
-the double bottom's `prior_decline` asks *how much damage is there to repair*,
-measured peak-to-low rather than across a lookback, and scored as a band because
-more damage is not more evidence — a first bounce is rarely the end of a 60% fall.
+The direction of the required context is the most important dividing line, and it
+is why a reversal detector cannot be built by flipping a continuation detector's
+sign. The VCP's `prior_trend` asks *how strong was the advance we are pausing
+inside*, and is a ramp — more advance is more evidence. The double bottom's
+`prior_decline` asks *how much damage is there to repair*, is measured peak-to-low
+rather than across a lookback, and is a **band** rather than a ramp, because more
+damage is not more evidence: a first bounce is rarely the end of a 60% fall.
 
 ---
 
@@ -31,20 +32,33 @@ more damage is not more evidence — a first bounce is rarely the end of a 60% f
 
 | Pattern | Kind | Prior trend | Impulse | Horizontal resistance | Converging boundaries | Progressive contraction | Reversal lows | Neckline | Handle | Parent structure | Prior breakout |
 | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Bull Flag | cont. | ● up | ● | ○ | — | ○ | — | — | — | — | — |
+| Bull Flag | cont. | — | ● | ○ | — | ○ | — | — | — | — | — |
 | VCP | cont. | ● up | — | ○ | — | ● | — | — | — | — | — |
 | Flat Base | cont. | ● up | — | ● | — | — | — | — | — | — | — |
-| Ascending Triangle | cont. | ○ up | — | ● | ● | — | — | — | — | — | — |
-| Pennant | cont. | ○ up | ● | — | ● | ○ | — | — | — | — | — |
+| Ascending Triangle | cont. | — | — | ● | ● | ○ | — | — | — | — | — |
+| Pennant | cont. | — | ● | — | ● | ○ | — | — | — | — | — |
 | Cup and Handle | cont. | ○ up | — | ● rims | — | — | — | — | ● | — | — |
-| High Tight Flag | cont. | ● extreme | ● | — | — | — | — | — | — | — | — |
-| Double Bottom | rev. | ● down | — | ○ | — | — | ● two | ● | — | — | — |
+| High Tight Flag | cont. | — | ● extreme | — | — | — | — | — | — | — | — |
+| Double Bottom | rev. | ● down | — | — | — | — | ● two | ● | — | — | — |
 | Inverse H&S | rev. | ● down | — | — | — | — | ● three | ● sloped | — | — | — |
 | Base on Base | struct. | ● up | — | ● both | — | ○ | — | — | — | ● two bases | — |
 | Tight Consolidation | struct. | ● up | — | — | — | ● vs own past | — | — | — | — | — |
 | Breakout Retest | struct. | — | ○ | ● | — | — | — | — | — | ● the level | ● |
 
-● required — ○ scored but not required — — not part of the definition
+● required component — ○ scored but optional — — not part of the definition
+
+Derived from each detector's declared `DetectorContract`, so the table and the
+code cannot drift apart without a test noticing.
+
+**Note on "prior trend".** Four families require a prior *advance* and two require
+a prior *decline*, but the bull flag, pennant and high tight flag require none —
+because their **impulse** *is* the trend, measured inside the pattern rather than
+before it. Reading the blank as "context-free" would be wrong: a flag without an
+impulse is not a flag, and the requirement is in the impulse column instead.
+
+The ascending triangle genuinely requires no prior context, which is the reason
+it is the one continuation family that legitimately fires inside a parabolic run
+— a ceiling with rising lows can form anywhere.
 
 ### Reading the matrix
 

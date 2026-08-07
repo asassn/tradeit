@@ -57,6 +57,17 @@ class Perturbation:
     perturbed_quality: float
     #: Whether the structure's start date moved. A legitimate reason for a jump.
     start_moved: bool
+    #: Whether any *other* key point moved -- a head, a right shoulder, a rim.
+    #:
+    #: Added after the first stability run reported three "unexplained" jumps of
+    #: ~28 points in the inverse head and shoulders under 0.1% price noise.
+    #: Diagnosing one showed the right shoulder had been re-identified nineteen
+    #: sessions earlier, with `shoulder_symmetry` moving 39.5 -> 100 accordingly.
+    #: That is a genuine structural re-identification and the score was right to
+    #: follow it; the *classifier* was blind, because it only compared the start.
+    #: A measurement instrument that mislabels real structure as noise is worse
+    #: than useless -- it points investigation at the wrong thing.
+    geometry_moved: bool
     #: Whether the lifecycle state changed. Also legitimate.
     state_changed: bool
     #: Whether the pattern vanished or appeared. The largest legitimate jump.
@@ -69,7 +80,9 @@ class Perturbation:
     @property
     def structurally_explained(self) -> bool:
         """Whether a jump has a structural cause rather than being noise."""
-        return self.start_moved or self.state_changed or self.presence_changed
+        return (
+            self.start_moved or self.geometry_moved or self.state_changed or self.presence_changed
+        )
 
 
 @dataclass(slots=True)
@@ -138,6 +151,8 @@ def _cause(sample: Perturbation | None) -> str:
         return "appeared/vanished"
     if sample.start_moved:
         return "structural start moved"
+    if sample.geometry_moved:
+        return "key point re-identified"
     if sample.state_changed:
         return "lifecycle state changed"
     return "continuous"
@@ -208,6 +223,24 @@ def _best(instances: Sequence[PatternInstance]) -> PatternInstance | None:
     return max(instances, key=lambda p: p.quality, default=None)
 
 
+def _key_points_moved(before: PatternInstance | None, after: PatternInstance | None) -> bool:
+    """Whether any named structural point landed on a different session.
+
+    Compared by *date* rather than by price: a rim that moved by a cent under
+    price jitter is the same rim, and a rim that moved to a different session is
+    a different rim. Only the second is a structural re-identification, and only
+    the second can justify a large score change.
+    """
+    if before is None or after is None:
+        return False
+    shared = set(before.geometry.key_points) & set(after.geometry.key_points)
+    return any(
+        before.geometry.key_points[name].session_date
+        != after.geometry.key_points[name].session_date
+        for name in shared
+    )
+
+
 def perturb(
     detector: Detector,
     baseline: Builder,
@@ -237,6 +270,7 @@ def perturb(
                     and after is not None
                     and before.geometry.start_date != after.geometry.start_date
                 ),
+                geometry_moved=_key_points_moved(before, after),
                 state_changed=(
                     before is not None and after is not None and before.state is not after.state
                 ),

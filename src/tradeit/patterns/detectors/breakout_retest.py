@@ -36,19 +36,30 @@ the first close above it after the cluster's last touch; the retest is the first
 confirmed swing low after the excursion peak that reaches the line. Every index
 is determined by the data.
 
-**A measured limitation, reported rather than tuned away.** This family fires on
-roughly 70% of 250-session random walks, against 12% for base-on-base and 20%
-for tight consolidation. That is a property of the pattern, not a defect in the
-code: every ingredient — a level, a close above it, a return to it — is a single
-event that noise supplies readily, where a cup or a high tight flag requires a
-sustained shape that noise does not. Several structural requirements are in
-place because they are definitionally right (three touches spanning at least
-twenty sessions, price below the level for 85% of them, a break of at least one
-ATR sustained over three closes), and each cut the rate; none of them was chosen
-to hit a number, and the brief forbids moving thresholds until the rate looks
-better. The consequence for later phases is concrete: a retest reading is weak
-evidence on its own and should be weighted accordingly, and real labelled data
-is what will say by how much.
+**A measured limitation, reported rather than tuned away.** Across the full
+validation corpus (n=1000 per cohort) this family produces a candidate on 30.7%
+of noise series and rates 19.8% of them at 70 or above. That is a property of
+the pattern, not a defect in the code: every ingredient — a level, a close above
+it, a return to it — is a single event that noise supplies readily, where a cup
+or a high tight flag requires a sustained shape that noise does not.
+
+Two details of the shape are worth knowing. It fires **most on quiet noise**
+(73% candidate on low-volatility walks, 27.8% on high-volatility ones), because
+a level needs price to sit below it for 85% of its span and a violent series
+does not oblige. And it produces **nothing at all** on choppy or broad volatile
+ranges, where no level survives the below-fraction test.
+
+Several structural requirements are in place because they are definitionally
+right — three touches spanning at least twenty sessions, price below the level
+for 85% of them, a break of at least one ATR sustained over three closes — and
+each cut the rate. None was chosen to hit a number, and no threshold has moved
+since the rate was measured.
+
+**It is not the noisiest family.** An earlier estimate, taken from a narrow probe
+before the full corpus existed, said it was. At n=1000 the flat base is
+materially noisier (46.6% of noise series at 70 or above, against 19.8% here).
+The consequence for later phases stands regardless: a retest reading is weak
+evidence on its own and real labelled data is what will say by how much.
 """
 
 from __future__ import annotations

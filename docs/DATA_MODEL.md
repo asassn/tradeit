@@ -1,6 +1,6 @@
 # Data Model
 
-46 tables in six domains. Every table is defined in `src/tradeit/storage/tables.py`
+49 tables in six domains. Every table is defined in `src/tradeit/storage/tables.py`
 and created by `migrations/versions/`. The schema has been applied to
 PostgreSQL 16 and is verified by `tests/integration/test_phase2_schema.py`,
 which includes a drift check asserting the ORM and the migrations still agree.

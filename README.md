@@ -9,18 +9,24 @@ The distinction it is organised around:
 > **"A great stock"** and **"a great trade for this portfolio right now"** are
 > not the same thing.
 
-**Status: Phase 3 complete; its acceptance gate is a conditional pass.** The
-point-in-time data layer, the system architecture, and the causal analytics
-foundation are built and tested — 58 indicators, multi-benchmark relative
-strength, sector strength, market breadth, and transparent market- and
-volatility-regime models. The gate validated the mathematics against two
-independent libraries and found four real defects in the regime model; it could
-not validate against real market data, because this environment's network
-policy refuses every market-data vendor. See
-[`docs/PHASE_03_GATE.md`](docs/PHASE_03_GATE.md). Pattern recognition,
-breakout confirmation, scoring, portfolio construction and backtesting are
-Phases 4–9. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the canonical
-twelve-phase plan.
+**Status: Phase 4 complete.** The point-in-time data layer, the system
+architecture, the causal analytics foundation and twelve chart-pattern detectors
+are built and tested. Phase 4 adds pattern identity that survives across
+sessions, an append-only observation history, a six-edge relationship taxonomy,
+human-labelling infrastructure, multi-timeframe detection and an integrated
+scanner — characterised against a seeded synthetic corpus of ~170,000
+detections. See [`docs/PHASE_04.md`](docs/PHASE_04.md).
+
+**Two gates remain open, and both matter.** Phase 3's acceptance gate is a
+conditional pass: the mathematics was validated against two independent
+libraries and four real defects were found in the regime model, but it could not
+be validated against real market data because this environment's network policy
+refuses every market-data vendor ([`docs/PHASE_03_GATE.md`](docs/PHASE_03_GATE.md)).
+Phase 4 inherits that limit — synthetic corpora establish code properties, never
+market accuracy ([ADR-0018](docs/adr/0018-synthetic-data-limits.md)) — so no
+claim about real-world pattern precision or recall has been made. Breakout
+confirmation, scoring, portfolio construction and backtesting are Phases 5–9.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the canonical twelve-phase plan.
 
 Live trading is disabled and stays disabled until separately authorised
 ([ADR-0004](docs/adr/0004-live-trading-safety-interlock.md)).
@@ -135,12 +141,16 @@ docs/               architecture, data model, API, roadmap, ADRs, phase reports
 
 - [Architecture](docs/ARCHITECTURE.md) — the complete technical architecture
 - [Analytics methodology](docs/ANALYTICS.md) — indicator formulas, regime rules
-- [Data model](docs/DATA_MODEL.md) — 46 tables, ERDs, partitioning, indexes
+- [Data model](docs/DATA_MODEL.md) — 49 tables, ERDs, partitioning, indexes
 - [API specification](docs/API.md) — the endpoints Phase 10 will implement
 - [Vendor evaluation](docs/VENDOR_EVALUATION.md) — options and an acceptance test
 - [Roadmap](docs/ROADMAP.md) — the canonical twelve phases
-- Phase reports — [1](docs/PHASE_01.md) · [2](docs/PHASE_02.md) · [3](docs/PHASE_03.md)
+- Phase reports — [1](docs/PHASE_01.md) · [2](docs/PHASE_02.md) · [3](docs/PHASE_03.md) · [4](docs/PHASE_04.md)
 - [Phase 3 acceptance gate](docs/PHASE_03_GATE.md) — what was validated, what could not be, and why
+- Pattern recognition — [architecture](docs/PATTERN_ARCHITECTURE.md) · [methodology](docs/PATTERN_METHODOLOGY.md) · [lifecycle](docs/PATTERN_LIFECYCLE.md) · [relationships](docs/PATTERN_RELATIONSHIPS.md)
+- [Pattern validation report](docs/PATTERN_VALIDATION.md) — generated distributions, competing-pattern matrix, known weaknesses
+- [Pattern labelling protocol](docs/PATTERN_LABELING.md) — the real-market corpus design, and the sampling rules that keep future returns out of it
+- [Pattern performance](docs/PATTERN_PERFORMANCE.md) — benchmarks, budget, storage growth
 - [ADRs](docs/adr/) — the decisions that constrain later phases
 
 ## Testing

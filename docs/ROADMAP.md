@@ -52,16 +52,26 @@ classifier, a volatility-regime model, and a formal feature registry.
 
 See [`PHASE_03.md`](PHASE_03.md) and [`ANALYTICS.md`](ANALYTICS.md).
 
-## Phase 4 — Pattern recognition
+## Phase 4 — Pattern recognition ✅
 
-Base and consolidation geometry: flat bases, cup-with-handle, VCP, ascending
-triangles, bull flags, pennants. Produces pivot and stop levels — the two
-numbers that determine entry and position size.
+Twelve causal chart-pattern families with declared contracts, a lifecycle, an
+append-only history, a relationship taxonomy, human-labelling infrastructure, an
+integrated scanner and multi-timeframe support. Produces structural pivot and
+invalidation levels — emphatically not stops, which belong to a position.
+
+Answers one question: *does this structure resemble a valid bullish chart
+pattern, and how good is it?* It does not judge breakouts, generate trades or
+rank candidates.
+
+See [`PHASE_04.md`](PHASE_04.md), [`PATTERN_ARCHITECTURE.md`](PATTERN_ARCHITECTURE.md)
+and [`PATTERN_VALIDATION.md`](PATTERN_VALIDATION.md).
 
 *Consumes from Phase 3:* rolling highs/lows, ATR and range contraction, volume
 contraction, distance-from-high, moving-average structure.
-*Blocked by:* nothing in Phase 3. A vendor decision improves the universe but
-does not gate pattern geometry.
+*Still open:* real-market validation. The corpus is synthetic, and synthetic
+data establishes code properties rather than market accuracy
+([ADR-0018](adr/0018-synthetic-data-limits.md)). Cross-family score calibration
+does not exist and needs labelled real data.
 
 ## Phase 5 — Breakout detection & confirmation
 

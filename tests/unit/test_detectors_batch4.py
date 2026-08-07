@@ -14,14 +14,22 @@ The last three families, and the three the brief warns about most specifically.
   Its tests check that the detector reports geometry and stops.
 
 **A measured limitation, stated rather than tuned away.** The retest family
-fires on roughly 70% of 250-session random walks with a mean quality near 74.
-That is a property of the pattern rather than a defect in the code: every
-ingredient — a level, a close above it, a return to it — is a single event that
-noise supplies readily, where a cup or a high tight flag requires a sustained
-shape that noise does not. The rate is asserted below as a recorded fact so a
-regression in either direction is visible, and the brief's instruction not to
-tune thresholds to obtain a desired false-positive rate is why it has not been
-reduced by moving numbers.
+produces a *candidate* on roughly 70% of 250-session random walks. That is a
+property of the pattern rather than a defect in the code: every ingredient — a
+level, a close above it, a return to it — is a single event that noise supplies
+readily, where a cup or a high tight flag requires a sustained shape that noise
+does not. The rate is asserted below as a recorded fact so a regression in
+either direction is visible, and the brief's instruction not to tune thresholds
+to obtain a desired false-positive rate is why it has not been reduced by moving
+numbers.
+
+Two clarifications the full validation corpus added, and which the assertions in
+this file are scoped to respect. **Candidate rate is not quality rate**: across
+the corpus the retest rates 19.8% of noise series at 70 or above, well below the
+candidate figure. And it is **not the noisiest family** — at n=1000 the flat base
+reaches 70 or above on 46.6% of noise series, more than twice as often. The
+`random_walk` helper here is a fast local probe, not the corpus; the corpus lives
+in `docs/PATTERN_VALIDATION.md`.
 """
 
 from __future__ import annotations
@@ -296,8 +304,16 @@ class TestBreakoutRetest:
             "than tuning away"
         )
 
-    def test_it_is_the_noisiest_family_by_a_wide_margin(self):
-        """The comparison that makes the limitation legible."""
+    def test_it_is_noisier_than_the_other_structural_families(self):
+        """A comparison scoped to what it actually shows.
+
+        An earlier version of this test was called "the noisiest family by a wide
+        margin", which the full validation corpus does not support: at n=1000 the
+        flat base produces high-quality readings on noise more than twice as
+        often as this detector does. What is true, and what this asserts, is that
+        the retest is noisier than the other two *structural* families — which is
+        the comparison the three of them being in one file makes natural.
+        """
         assert noise_rate(RETEST) > noise_rate(BOB) + 0.3
         assert noise_rate(RETEST) > noise_rate(TIGHT) + 0.3
 
