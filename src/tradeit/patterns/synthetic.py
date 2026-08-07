@@ -108,6 +108,34 @@ class BullFlagSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class VcpSpec:
+    """A base built from explicit contraction legs.
+
+    ``depths`` is the sequence the pattern *is*. Passing (0.18, 0.10, 0.05)
+    draws the textbook three-leg VCP; passing (0.18, 0.05, 0.12) draws a base
+    that ends tight without being a staircase, which is the case that separates
+    a detector measuring progression from one measuring net change.
+    """
+
+    prior_gain: float = 0.35
+    prior_sessions: int = 55
+    depths: tuple[float, ...] = (0.18, 0.10, 0.05)
+    leg_sessions: tuple[int, ...] = (14, 9, 6)
+    #: Volume through each leg, relative to the pre-base baseline.
+    volume_ratios: tuple[float, ...] = (0.9, 0.7, 0.45)
+    noise: float = 0.6
+    breakout_sessions: int = 0
+
+    def __post_init__(self) -> None:
+        if len(self.depths) < 2:
+            raise ConfigError("a VCP needs at least two contractions")
+        if len(self.leg_sessions) != len(self.depths):
+            raise ConfigError("leg_sessions must match depths")
+        if len(self.volume_ratios) != len(self.depths):
+            raise ConfigError("volume_ratios must match depths")
+
+
+@dataclass(frozen=True, slots=True)
 class GeneratedSeries:
     """Bars plus the ground truth used to draw them.
 
@@ -360,6 +388,110 @@ class PatternGenerator:
         )
 
     # -- negative controls ---------------------------------------------------
+
+    def vcp(self, spec: VcpSpec | None = None, *, seed: int = 0) -> GeneratedSeries:
+        """A base of explicit contraction legs after an advance.
+
+        Each leg runs from the base high down by its stated depth and back to
+        near the high, so the *pivot* stays roughly constant while the pullbacks
+        shrink -- which is what a VCP looks like and what distinguishes it from
+        a descending wedge.
+        """
+        vcp = spec or VcpSpec()
+        rng = np.random.default_rng(self.spec.seed + seed + 12211)
+        base = self.spec
+
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        advance_rate = (1.0 + vcp.prior_gain) ** (1.0 / vcp.prior_sessions) - 1.0
+        advance = float(lead[-1]) * np.cumprod(
+            1.0 + rng.normal(advance_rate, base.base_volatility * 0.6, vcp.prior_sessions)
+        )
+        pivot = float(advance.max())
+
+        segments: list[np.ndarray] = [lead, advance]
+        volumes: list[np.ndarray] = [
+            rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+            rng.lognormal(np.log(base.base_volume * 1.8), 0.2, vcp.prior_sessions),
+        ]
+        ranges: list[np.ndarray] = [
+            lead * base.base_volatility * 1.3,
+            advance * base.base_volatility * 1.7,
+        ]
+
+        for depth, sessions, volume_ratio in zip(
+            vcp.depths, vcp.leg_sessions, vcp.volume_ratios, strict=True
+        ):
+            half = max(2, sessions // 2)
+            down = np.linspace(pivot, pivot * (1.0 - depth), half)
+            up = np.linspace(pivot * (1.0 - depth), pivot * 0.995, sessions - half)
+            leg = np.concatenate([down, up])
+            leg = leg * (1.0 + rng.normal(0.0, base.base_volatility * vcp.noise, len(leg)))
+            segments.append(leg)
+            volumes.append(rng.lognormal(np.log(base.base_volume * volume_ratio), 0.2, len(leg)))
+            # Bar ranges shrink with the leg depth, so volatility contracts with
+            # the structure rather than independently of it.
+            ranges.append(leg * max(0.004, depth * 0.28))
+
+        if vcp.breakout_sessions > 0:
+            launch = float(segments[-1][-1])
+            run = launch * np.cumprod(
+                1.0 + rng.normal(0.03, base.base_volatility, vcp.breakout_sessions)
+            )
+            run = np.maximum(run, pivot * 1.01)
+            segments.append(run)
+            volumes.append(
+                rng.lognormal(np.log(base.base_volume * 2.5), 0.2, vcp.breakout_sessions)
+            )
+            ranges.append(run * base.base_volatility * 2.0)
+
+        closes = np.concatenate(segments)
+        return GeneratedSeries(
+            self._bars_from(
+                closes, np.concatenate(volumes), np.concatenate(ranges), close_position=0.55
+            ),
+            {
+                "pattern": "vcp",
+                "contractions": len(vcp.depths),
+                "depths": vcp.depths,
+                "expected_pivot": pivot,
+                "base_start_index": base.lead_in_sessions + vcp.prior_sessions,
+            },
+        )
+
+    def descending_wedge(self, *, seed: int = 0) -> GeneratedSeries:
+        """Tightening legs whose *highs* fall too. Not a VCP.
+
+        The negative that matters most for this detector: the pullbacks shrink,
+        so a detector scoring only depth progression sees a textbook VCP. What
+        is missing is that the pivot is falling -- the security is not coiling
+        beneath a level, it is grinding down.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 13313)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0005, base.base_volatility, base.lead_in_sessions))
+        )
+        level = float(lead[-1])
+        segments = [lead]
+        for depth, sessions in ((0.16, 12), (0.09, 9), (0.05, 6)):
+            level *= 0.94  # each leg starts lower than the last
+            half = max(2, sessions // 2)
+            leg = np.concatenate(
+                [
+                    np.linspace(level, level * (1 - depth), half),
+                    np.linspace(level * (1 - depth), level * 0.98, sessions - half),
+                ]
+            )
+            segments.append(leg * (1.0 + rng.normal(0.0, base.base_volatility * 0.6, len(leg))))
+        closes = np.concatenate(segments)
+        volumes = rng.lognormal(np.log(base.base_volume), 0.3, len(closes))
+        ranges = closes * base.base_volatility
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.45),
+            {"pattern": "descending_wedge"},
+        )
 
     def bear_flag(self, *, seed: int = 0) -> GeneratedSeries:
         """A downward pole with an upward drift. Must never score as bullish.

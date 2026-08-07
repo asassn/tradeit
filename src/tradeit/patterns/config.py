@@ -329,6 +329,101 @@ class BullFlagConfig(PatternSection):
     volume_baseline_sessions: int = Field(default=20, ge=5)
 
 
+class VcpWeights(PatternSection):
+    """Component weights for the VCP quality score.
+
+    Progression carries the most weight because it *is* the pattern. A base with
+    perfect volume dry-up and no tightening is not a mediocre VCP; it is a quiet
+    consolidation, and the weighting says so.
+    """
+
+    contraction_progression: float = Field(default=0.30, ge=0)
+    base_structure: float = Field(default=0.16, ge=0)
+    prior_trend: float = Field(default=0.14, ge=0)
+    volume_dryup: float = Field(default=0.14, ge=0)
+    volatility_profile: float = Field(default=0.12, ge=0)
+    pivot_quality: float = Field(default=0.08, ge=0)
+    relative_strength: float = Field(default=0.06, ge=0)
+
+    def as_mapping(self) -> dict[str, float]:
+        return {
+            "contraction_progression": self.contraction_progression,
+            "base_structure": self.base_structure,
+            "prior_trend": self.prior_trend,
+            "volume_dryup": self.volume_dryup,
+            "volatility_profile": self.volatility_profile,
+            "pivot_quality": self.pivot_quality,
+            "relative_strength": self.relative_strength,
+        }
+
+
+class VcpConfig(PatternSection):
+    """Volatility Contraction Pattern parameters.
+
+    ``min_contractions`` is 2, not 3. Three is the textbook count and requiring
+    it finds a subset of VCPs selected for tidiness rather than for structure --
+    a two-leg base that has tightened from 14% to 5% is a VCP in progress, and a
+    detector blind to it is blind until the pattern is nearly over.
+    """
+
+    version: int = Field(default=1, ge=1)
+
+    min_contractions: int = Field(default=2, ge=2, le=8)
+    max_contractions: int = Field(default=6, ge=2, le=12)
+    ideal_contractions_low: int = Field(default=3, ge=2)
+    ideal_contractions_high: int = Field(default=4, ge=2)
+
+    #: Final depth over first depth. Below 1 means the base tightened.
+    ideal_tightening_ratio: float = Field(default=0.35, gt=0)
+    poor_tightening_ratio: float = Field(default=0.95, gt=0)
+    #: Depth of the last contraction. The tightness that makes a pivot.
+    ideal_final_depth: float = Field(default=0.05, gt=0)
+    poor_final_depth: float = Field(default=0.15, gt=0)
+
+    min_base_sessions: int = Field(default=15, ge=6)
+    max_base_sessions: int = Field(default=140, ge=20)
+    ideal_base_sessions_low: int = Field(default=25, ge=6)
+    ideal_base_sessions_high: int = Field(default=80, ge=10)
+
+    ideal_base_depth_low: float = Field(default=0.08, gt=0)
+    ideal_base_depth_high: float = Field(default=0.28, gt=0)
+    #: Beyond this the structure is a correction with tightening legs, not a
+    #: base. A 50% decline that narrows as it goes is a security finding a
+    #: floor, which is a different bet.
+    max_base_depth: float = Field(default=0.40, gt=0, lt=1)
+
+    prior_trend_sessions: int = Field(default=60, ge=20)
+    ideal_prior_gain: float = Field(default=0.25, gt=0)
+    ideal_volume_ratio: float = Field(default=0.65, gt=0)
+    atr_period: int = Field(default=14, ge=2)
+    #: A later high within this fraction of the base peak starts a tighter
+    #: sub-base of the same structure, reported as a second interpretation.
+    sub_base_tolerance: float = Field(default=0.02, gt=0, lt=0.2)
+
+    weights: VcpWeights = Field(default_factory=VcpWeights)
+
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        if self.max_contractions <= self.min_contractions:
+            raise ConfigError("max_contractions must exceed min_contractions")
+        if not (
+            self.min_contractions
+            <= self.ideal_contractions_low
+            <= self.ideal_contractions_high
+            <= self.max_contractions
+        ):
+            raise ConfigError("VCP ideal contraction count must sit inside the limits")
+        if self.poor_tightening_ratio <= self.ideal_tightening_ratio:
+            raise ConfigError("poor_tightening_ratio must exceed ideal_tightening_ratio")
+        if self.poor_final_depth <= self.ideal_final_depth:
+            raise ConfigError("poor_final_depth must exceed ideal_final_depth")
+        if self.max_base_sessions <= self.min_base_sessions:
+            raise ConfigError("max_base_sessions must exceed min_base_sessions")
+        if self.ideal_base_depth_high >= self.max_base_depth:
+            raise ConfigError("ideal base depth must sit below max_base_depth")
+        return self
+
+
 class PatternEngineConfig(PatternSection):
     """Top-level pattern configuration, shared plus per-detector.
 
@@ -343,11 +438,12 @@ class PatternEngineConfig(PatternSection):
     swings: SwingConfig = Field(default_factory=SwingConfig)
     states: PatternStateConfig = Field(default_factory=PatternStateConfig)
     bull_flag: BullFlagConfig = Field(default_factory=BullFlagConfig)
+    vcp: VcpConfig = Field(default_factory=VcpConfig)
 
     #: Detectors to run. A detector absent from this list is not merely skipped
     #: -- its features never enter the dataset, which keeps the stored pattern
     #: set reproducible from the config digest alone.
-    enabled_detectors: tuple[str, ...] = ("bull_flag",)
+    enabled_detectors: tuple[str, ...] = ("bull_flag", "vcp")
     max_candidates_per_pattern: int = Field(default=24, ge=1, le=200)
     #: Instances below this quality are discarded rather than stored. Low, so
     #: that near-misses remain visible for false-positive analysis; the screen

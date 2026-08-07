@@ -7,5 +7,6 @@ serve another pattern is the specific anti-pattern the architecture forbids.
 """
 
 from tradeit.patterns.detectors.bull_flag import BullFlagDetector
+from tradeit.patterns.detectors.vcp import VcpDetector
 
-__all__ = ["BullFlagDetector"]
+__all__ = ["BullFlagDetector", "VcpDetector"]
