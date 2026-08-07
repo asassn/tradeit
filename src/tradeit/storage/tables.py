@@ -671,52 +671,237 @@ class SectorStrength(Base):
 
 
 class Pattern(Base):
-    """A detected chart formation and its lifecycle.
+    """One pattern identity, from first detection to terminal state.
 
-    Mutable in exactly one respect -- ``status`` advances as the pattern
-    resolves -- which makes it the only non-append-only table that feeds a
-    decision. That is a deliberate exception: a pattern is a long-lived entity
-    with a lifecycle, and modelling every status change as a new row would make
-    "the current state of this base" a windowed query on the hot path.
+    **One row per pattern, not one per session.** The Phase 2 draft of this
+    table keyed uniqueness on ``(instrument, type, start_date, detected_on)``,
+    which minted a new row every day the same structure was re-detected -- the
+    exact failure the Phase 4 brief forbids. Identity now keys on
+    ``identity_key``, a content hash of the things that do not change as a
+    pattern evolves.
 
-    The audit trail is preserved instead by ``breakout_events``, which is
-    append-only and records every transition with its evidence. ``detected_on``
-    and ``last_evaluated_on`` bound when the pattern was visible.
+    This row holds *current* state. Everything historical lives in
+    ``pattern_observations``, which is append-only, so advancing a pattern never
+    destroys what the system believed yesterday.
+
+    ``detector_version`` and ``config_digest`` are not decoration. A scoring
+    rule that changes in v1.1 produces different numbers from v1.0, and a
+    backtest that silently recomputes history under the newest detector and
+    presents the results as unchanged is the specific dishonesty they prevent.
     """
 
     __tablename__ = "patterns"
 
     id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    #: Stable across the pattern's life. Content hash of instrument, type,
+    #: timeframe and structural start.
+    identity_key: Mapped[str] = mapped_column(String(32), nullable=False)
     instrument_id: Mapped[int] = mapped_column(
         ForeignKey("instruments.instrument_id", ondelete="CASCADE"), nullable=False
     )
-    pattern_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False)
-    start_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
-    end_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
-    detected_on: Mapped[dt.date] = mapped_column(Date, nullable=False)
-    last_evaluated_on: Mapped[dt.date] = mapped_column(Date, nullable=False)
-    pivot_price: Mapped[Decimal | None] = mapped_column(PRICE)
-    stop_price: Mapped[Decimal | None] = mapped_column(PRICE)
-    depth_pct: Mapped[float | None] = mapped_column(Float)
-    length_sessions: Mapped[int] = mapped_column(Integer, nullable=False)
+    pattern_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False, default="1d")
+
+    #: Provenance. Without these a stored pattern cannot be reproduced.
+    detector_name: Mapped[str] = mapped_column(String(40), nullable=False)
+    detector_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    config_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    data_snapshot_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+    #: Lifecycle. ``previous_state`` is kept alongside the current one so the
+    #: most recent transition is answerable without touching the history table.
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(32))
+    state_changed_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    terminal_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+
+    first_detected_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    last_observed_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    #: When the *structure* began, which precedes when anyone noticed it.
+    structural_start_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    structural_end_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    first_detected_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    last_observed_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
+
     quality: Mapped[float] = mapped_column(Float, nullable=False)
-    attributes: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
-    run_manifest_id: Mapped[int] = mapped_column(
-        ForeignKey("run_manifests.id", ondelete="RESTRICT"), nullable=False
+    peak_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence_coverage: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    resistance_price: Mapped[Decimal | None] = mapped_column(PRICE)
+    support_price: Mapped[Decimal | None] = mapped_column(PRICE)
+    #: Structural invalidation, emphatically not a stop-loss. A stop belongs to
+    #: a position and depends on portfolio risk and sizing, none of which exist
+    #: at this stage.
+    invalidation_price: Mapped[Decimal | None] = mapped_column(PRICE)
+
+    #: Full geometry, sufficient to redraw the pattern without recomputing it.
+    #: Recomputation against a longer series would draw a different pattern and
+    #: call it the same one.
+    geometry: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    session_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    run_manifest_id: Mapped[int | None] = mapped_column(
+        ForeignKey("run_manifests.id", ondelete="RESTRICT")
     )
 
     __table_args__ = (
-        UniqueConstraint(
-            "instrument_id", "pattern_type", "start_date", "detected_on", name="uq_pattern"
-        ),
-        Index("ix_pattern_active", "status", "last_evaluated_on"),
-        Index("ix_pattern_instrument", "instrument_id", "detected_on"),
-        CheckConstraint("end_date >= start_date", name="ck_pattern_dates"),
-        CheckConstraint("quality >= 0 AND quality <= 1", name="ck_pattern_quality"),
+        UniqueConstraint("identity_key", "detector_version", name="uq_pattern_identity"),
+        Index("ix_pattern_active", "state", "last_observed_session"),
+        Index("ix_pattern_instrument", "instrument_id", "pattern_type", "state"),
+        CheckConstraint("structural_end_date >= structural_start_date", name="ck_pattern_dates"),
+        CheckConstraint("quality >= 0 AND quality <= 100", name="ck_pattern_quality"),
         CheckConstraint(
-            "stop_price IS NULL OR pivot_price IS NULL OR stop_price < pivot_price",
-            name="ck_pattern_stop_below_pivot",
+            "evidence_coverage >= 0 AND evidence_coverage <= 100",
+            name="ck_pattern_coverage",
+        ),
+        CheckConstraint(
+            "support_price IS NULL OR resistance_price IS NULL OR support_price < resistance_price",
+            name="ck_pattern_support_below_resistance",
+        ),
+    )
+
+
+class PatternObservation(Base):
+    """Append-only record of what a pattern looked like on one session.
+
+    The reason the pattern table can hold mutable current state without lying:
+    every previous belief is here, unchanged. A pattern that was MATURE at
+    quality 88 on 40% coverage on Wednesday was exactly that on Wednesday,
+    whatever Thursday brought.
+
+    Component scores are stored per observation rather than only currently,
+    because "why did this decay?" is answerable from the component history and
+    unanswerable from the composite alone.
+    """
+
+    __tablename__ = "pattern_observations"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    pattern_id: Mapped[int] = mapped_column(
+        ForeignKey("patterns.id", ondelete="CASCADE"), nullable=False
+    )
+    session_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    observed_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    #: The clock boundary the detection was computed under.
+    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+
+    from_state: Mapped[str | None] = mapped_column(String(32))
+    to_state: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    quality: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence_coverage: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    #: {name: {score, weight, unavailable, unavailable_reason, measurements}}
+    component_scores: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    supporting_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    contradicting_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("pattern_id", "session_date", name="uq_pattern_observation"),
+        Index("ix_pattern_observation_session", "session_date"),
+        CheckConstraint("quality >= 0 AND quality <= 100", name="ck_observation_quality"),
+    )
+
+
+class PatternRelationship(Base):
+    """How two patterns relate: nested, superseding, or merely coincident.
+
+    Kept as edges rather than as columns on ``patterns`` because the
+    relationships are many-to-many and directional, and because a weekly VCP
+    containing three daily flags is a perfectly ordinary situation that a
+    parent_id column would model badly.
+
+    The ontology is deliberately small. ``NESTED_IN`` for a genuine containment
+    (a daily flag inside a weekly base), ``SUPERSEDED_BY`` when one structure
+    replaced another under a new identity, ``RELATED_TO`` for alternative
+    readings of the same geometry -- a structure can be a TIGHT_CONSOLIDATION
+    and a BULL_FLAG at once, and forcing exclusivity would discard what a later
+    scoring stage is better placed to decide.
+    """
+
+    __tablename__ = "pattern_relationships"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    from_pattern_id: Mapped[int] = mapped_column(
+        ForeignKey("patterns.id", ondelete="CASCADE"), nullable=False
+    )
+    to_pattern_id: Mapped[int] = mapped_column(
+        ForeignKey("patterns.id", ondelete="CASCADE"), nullable=False
+    )
+    #: "nested_in" | "superseded_by" | "related_to"
+    relationship: Mapped[str] = mapped_column(String(24), nullable=False)
+    established_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "from_pattern_id", "to_pattern_id", "relationship", name="uq_pattern_relationship"
+        ),
+        Index("ix_pattern_relationship_to", "to_pattern_id", "relationship"),
+        CheckConstraint("from_pattern_id <> to_pattern_id", name="ck_pattern_no_self_relation"),
+    )
+
+
+class PatternLabel(Base):
+    """A human's opinion of a pattern, for eventual detector evaluation.
+
+    Infrastructure only -- no model is trained on this in Phase 4, and none
+    should be until humans have actually labelled real examples.
+
+    Multiple reviewers per example is the point rather than an edge case. A
+    single reviewer's rating is one opinion about a subjective judgement, and
+    inter-reviewer agreement is what turns a set of opinions into a measurement.
+    The detector's own prediction is stored alongside so agreement is computable
+    without re-running a possibly-changed detector.
+    """
+
+    __tablename__ = "pattern_labels"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    instrument_id: Mapped[int] = mapped_column(
+        ForeignKey("instruments.instrument_id", ondelete="CASCADE"), nullable=False
+    )
+    as_of_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False, default="1d")
+    pattern_type: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    reviewer: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: 0-100, on the same scale as the detector so the two are comparable.
+    human_quality: Mapped[float | None] = mapped_column(Float)
+    #: How sure the reviewer is, 0-100. A confident 40 and an unsure 40 are
+    #: different labels and should not be averaged as if they were the same.
+    reviewer_confidence: Mapped[float | None] = mapped_column(Float)
+    #: True when the reviewer says this is not the pattern at all.
+    is_pattern: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    annotated_pivots: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    annotated_boundaries: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    comments: Mapped[str | None] = mapped_column(Text)
+
+    #: What the detector said, pinned at labelling time.
+    detector_name: Mapped[str | None] = mapped_column(String(40))
+    detector_version: Mapped[int | None] = mapped_column(Integer)
+    detector_quality: Mapped[float | None] = mapped_column(Float)
+    detector_state: Mapped[str | None] = mapped_column(String(32))
+    pattern_id: Mapped[int | None] = mapped_column(ForeignKey("patterns.id", ondelete="SET NULL"))
+
+    labelled_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "instrument_id",
+            "as_of_session",
+            "timeframe",
+            "pattern_type",
+            "reviewer",
+            name="uq_pattern_label",
+        ),
+        Index("ix_pattern_label_lookup", "pattern_type", "as_of_session"),
+        CheckConstraint(
+            "human_quality IS NULL OR (human_quality >= 0 AND human_quality <= 100)",
+            name="ck_label_quality",
         ),
     )
 
