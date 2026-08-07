@@ -199,6 +199,32 @@ class FeatureRegistry:
     def active(self) -> list[FeatureSpec]:
         return [s for s in self.all() if not s.deprecated]
 
+    def subset(self, names: Iterable[str], *, with_dependencies: bool = True) -> FeatureRegistry:
+        """A smaller registry containing only the named features.
+
+        This is the mechanism behind ADR-0013. Registry membership says a
+        feature *exists*; a subset says a consumer *chose* it. A model trained
+        on ``registry.active()`` is a model whose input surface changes whenever
+        anyone adds an indicator — the subset is what makes a consumer's inputs
+        a stated, hashable decision rather than a side effect of the catalogue.
+
+        Dependencies are pulled in transitively by default: asking for
+        ``rs_percentile`` without the ``rs_score`` it is computed from would
+        produce a subset that cannot actually be computed, and a warm-up figure
+        that understates what the feature really needs.
+        """
+        wanted: dict[str, FeatureSpec] = {}
+        pending = list(names)
+        while pending:
+            name = pending.pop()
+            if name in wanted:
+                continue
+            spec = self.get(name)
+            wanted[name] = spec
+            if with_dependencies:
+                pending.extend(spec.depends_on)
+        return FeatureRegistry(wanted[name] for name in sorted(wanted))
+
     @property
     def max_warmup(self) -> int:
         """History needed before every active feature is defined.

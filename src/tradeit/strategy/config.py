@@ -146,7 +146,16 @@ class LiquidityConfig(Section):
     min_market_cap: float = Field(default=500_000_000, ge=0)
     min_avg_dollar_volume: float = Field(default=10_000_000, ge=0)
     dollar_volume_lookback: int = Field(default=20, ge=1)
-    min_trading_history_sessions: int = Field(default=250, ge=0)
+    #: One full trading year. 252 rather than 250 because the longest annual
+    #: features (52-week range, 252-session percentile) need a full year of
+    #: sessions to mean what their names say; at 250 they are two sessions short
+    #: and quietly report a 250-session high as a 52-week high.
+    #:
+    #: This is a *default*, not a law. A strategy whose longest feature is a
+    #: 20-day Bollinger band has no business waiting a year, and may lower this
+    #: in its own TOML. :class:`~tradeit.analytics.eligibility.EligibilityPolicy`
+    #: derives the real requirement per strategy from its declared feature set.
+    min_trading_history_sessions: int = Field(default=252, ge=0)
     #: Cap on our share of a session's volume. The single most important
     #: liquidity parameter, because it bounds how badly a backtest can lie about
     #: fills in thin names.
@@ -696,9 +705,13 @@ class StrategyConfig(BaseModel):
         required trading history is fatal -- combined with the liquidity floor
         it guarantees an empty screen. But an *indicator* lookback slightly
         longer than the minimum history is ordinary warm-up: an instrument that
-        just became eligible with 250 sessions genuinely has no 252-session
-        high, and will have one two sessions later. Raising on that would be
+        just became eligible with 252 sessions genuinely has no 272-session ADX
+        yet, and will have one twenty sessions later. Raising on that would be
         confusing a transient state for a broken configuration.
+
+        That transient state is exactly the ``DATA_ELIGIBLE`` /
+        ``FEATURE_READY`` split in :mod:`tradeit.analytics.eligibility`: this
+        warning describes the gap, the eligibility policy enforces it.
 
         Surfaced by ``tradeit config`` and by the API's validation endpoint.
         """

@@ -63,7 +63,7 @@ max_price = 10000.0
 min_market_cap = 500000000.0
 min_avg_dollar_volume = 10000000.0
 dollar_volume_lookback = 20
-min_trading_history_sessions = 250
+min_trading_history_sessions = 252
 max_participation_rate = 0.02
 
 [scanner_profiles]
