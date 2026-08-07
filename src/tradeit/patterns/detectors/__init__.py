@@ -12,7 +12,9 @@ good.
 from tradeit.patterns.detectors._base import BaseDetector, DetectionInputs, Structure
 from tradeit.patterns.detectors.ascending_triangle import AscendingTriangleDetector
 from tradeit.patterns.detectors.bull_flag import BullFlagDetector
+from tradeit.patterns.detectors.cup_handle import CupHandleDetector
 from tradeit.patterns.detectors.flat_base import FlatBaseDetector
+from tradeit.patterns.detectors.high_tight_flag import HighTightFlagDetector
 from tradeit.patterns.detectors.pennant import PennantDetector
 from tradeit.patterns.detectors.vcp import VcpDetector
 
@@ -20,8 +22,10 @@ __all__ = [
     "AscendingTriangleDetector",
     "BaseDetector",
     "BullFlagDetector",
+    "CupHandleDetector",
     "DetectionInputs",
     "FlatBaseDetector",
+    "HighTightFlagDetector",
     "PennantDetector",
     "Structure",
     "VcpDetector",

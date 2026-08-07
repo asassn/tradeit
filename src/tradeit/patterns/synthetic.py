@@ -695,6 +695,201 @@ class PatternGenerator:
         """An impulse then a *parallel* channel. A flag, explicitly not a pennant."""
         return self.pennant(seed=seed + 500, convergence=0.95)
 
+    def cup_handle(
+        self,
+        *,
+        seed: int = 0,
+        prior_gain: float = 0.35,
+        cup_sessions: int = 60,
+        depth: float = 0.22,
+        roundness: float = 0.5,
+        handle_sessions: int = 10,
+        handle_depth_ratio: float = 0.20,
+        right_rim_shortfall: float = 0.0,
+    ) -> GeneratedSeries:
+        """An advance, a rounded decline and recovery, then a shallow handle.
+
+        ``roundness`` is the exponent on the bottom shape and is the whole
+        argument of the cup-versus-V distinction. Below 1 the trough is broad
+        and price spends sessions near the low; above 1 it narrows toward a
+        point. The detector measures time-near-low rather than fitting a curve,
+        so this knob moves exactly the quantity under test.
+
+        ``right_rim_shortfall`` leaves the recovery short of the left rim --
+        an incomplete recovery, which is the rim-symmetry negative.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 17711)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        prior_sessions = 50
+        rate = (1.0 + prior_gain) ** (1.0 / prior_sessions) - 1.0
+        advance = float(lead[-1]) * np.cumprod(
+            1.0 + rng.normal(rate, base.base_volatility * 0.6, prior_sessions)
+        )
+        rim = float(advance.max())
+
+        # sin(pi*u) is 0 at both rims and 1 at the midpoint; the exponent
+        # controls how much time is spent at the bottom.
+        u = np.linspace(0.0, 1.0, cup_sessions)
+        shape = np.sin(np.pi * u) ** roundness
+        recovery_ceiling = 1.0 - right_rim_shortfall * u  # tilts the right rim down
+        cup = rim * (1.0 - depth * shape) * recovery_ceiling
+        cup = cup * (1.0 + rng.normal(0.0, base.base_volatility * 0.35, cup_sessions))
+
+        right_rim = float(cup[-1])
+        handle_depth = depth * handle_depth_ratio
+        drift = np.linspace(0.0, 1.0, handle_sessions)
+        handle = right_rim * (1.0 - handle_depth * np.sin(np.pi * drift) ** 0.8)
+        handle = handle * (1.0 + rng.normal(0.0, base.base_volatility * 0.3, handle_sessions))
+
+        closes = np.concatenate([lead, advance, cup, handle])
+        volumes = np.concatenate(
+            [
+                rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+                rng.lognormal(np.log(base.base_volume * 1.6), 0.2, prior_sessions),
+                # Volume dries up into the cup low and returns on the right side.
+                rng.lognormal(np.log(base.base_volume), 0.22, cup_sessions)
+                * (0.55 + 0.45 * np.abs(u - 0.5) * 2),
+                rng.lognormal(np.log(base.base_volume * 0.55), 0.2, handle_sessions),
+            ]
+        )
+        ranges = np.concatenate(
+            [
+                lead * base.base_volatility * 1.3,
+                advance * base.base_volatility * 1.5,
+                cup * base.base_volatility * 1.2,
+                handle * base.base_volatility * 0.8,
+            ]
+        )
+        return GeneratedSeries(
+            self._bars_from(closes, volumes, ranges, close_position=0.5),
+            {
+                "pattern": "cup_handle",
+                "expected_rim": rim,
+                "depth": depth,
+                "roundness": roundness,
+                "cup_start_index": base.lead_in_sessions + prior_sessions,
+            },
+        )
+
+    def v_bottom(self, *, seed: int = 0) -> GeneratedSeries:
+        """The same decline and recovery, reversed at a point rather than rounded.
+
+        The cup's defining negative: identical depth, duration and rims, and no
+        time spent at the low.
+        """
+        return self.cup_handle(seed=seed + 600, roundness=4.0)
+
+    def cup_without_handle(self, *, seed: int = 0) -> GeneratedSeries:
+        """A rounded base that runs straight back to the rim. Not a cup *and handle*."""
+        return self.cup_handle(seed=seed + 610, handle_sessions=2, handle_depth_ratio=0.01)
+
+    def incomplete_recovery(self, *, seed: int = 0) -> GeneratedSeries:
+        """A cup whose right rim finishes well below the left."""
+        return self.cup_handle(seed=seed + 620, right_rim_shortfall=0.18)
+
+    def high_tight_flag(
+        self,
+        *,
+        seed: int = 0,
+        advance: float = 1.10,
+        advance_sessions: int = 30,
+        pause_sessions: int = 10,
+        pause_depth: float = 0.12,
+        gap_share: float = 0.0,
+    ) -> GeneratedSeries:
+        """A near-vertical advance and a shallow pause.
+
+        ``advance`` defaults above the detector's 70% floor and ``pause_depth``
+        below its 25% ceiling. Lowering ``advance`` to ordinary-flag territory is
+        how the tests check the detector has not diluted its own definition.
+
+        ``gap_share`` delivers a fraction of the advance in a single overnight
+        gap, which is a repricing rather than accumulation and should show up in
+        ``advance_consistency`` rather than in the headline magnitude.
+        """
+        rng = np.random.default_rng(self.spec.seed + seed + 18811)
+        base = self.spec
+        lead = base.start_price * np.exp(
+            np.cumsum(rng.normal(0.0, base.base_volatility, base.lead_in_sessions))
+        )
+        start = float(lead[-1])
+        target = start * (1.0 + advance)
+
+        continuous = (1.0 + advance) ** (1.0 - gap_share)
+        rate = continuous ** (1.0 / advance_sessions) - 1.0
+        steps = 1.0 + rng.normal(rate, base.base_volatility * 0.5, advance_sessions)
+        gaps = np.zeros(advance_sessions)
+        if gap_share > 0:
+            jump = (1.0 + advance) ** gap_share
+            at = advance_sessions // 2
+            steps[at] *= jump
+            gaps[at] = jump - 1.0
+        run = start * np.cumprod(steps)
+        # Land on the stated advance regardless of the noise draw, so the test's
+        # magnitude assertion is about the spec rather than about the seed.
+        run = run * (target / float(run[-1]))
+        peak = float(run.max())
+
+        # A shallow drift down and sideways, never breaching the stated depth.
+        u = np.linspace(0.0, 1.0, pause_sessions)
+        pause = peak * (1.0 - pause_depth * np.sin(np.pi * u) ** 0.7)
+        pause = pause * (1.0 + rng.normal(0.0, base.base_volatility * 0.4, pause_sessions))
+        pause = np.minimum(pause, peak * 0.999)
+        pause = np.maximum(pause, peak * (1.0 - pause_depth * 0.98))
+
+        closes = np.concatenate([lead, run, pause])
+        volumes = np.concatenate(
+            [
+                rng.lognormal(np.log(base.base_volume), 0.25, base.lead_in_sessions),
+                rng.lognormal(np.log(base.base_volume * 4.0), 0.25, advance_sessions),
+                rng.lognormal(np.log(base.base_volume * 0.9), 0.2, pause_sessions),
+            ]
+        )
+        ranges = np.concatenate(
+            [
+                lead * base.base_volatility * 1.3,
+                run * base.base_volatility * 2.4,
+                pause * base.base_volatility * 1.0,
+            ]
+        )
+        all_gaps = np.concatenate([np.zeros(base.lead_in_sessions), gaps, np.zeros(pause_sessions)])
+        return GeneratedSeries(
+            self._bars_from(
+                closes,
+                volumes,
+                ranges,
+                close_position=0.7,
+                gaps=all_gaps,
+            ),
+            {
+                "pattern": "high_tight_flag",
+                "advance": advance,
+                "expected_peak": peak,
+                "pause_depth": pause_depth,
+                "advance_start_index": base.lead_in_sessions,
+            },
+        )
+
+    def ordinary_bull_flag_for_htf(self, *, seed: int = 0) -> GeneratedSeries:
+        """A perfectly ordinary bull flag: 25% advance, 10% pause.
+
+        The high tight flag's primary negative. A detector that fires here has
+        absorbed the bull flag universe and become a rename rather than a
+        distinct family.
+        """
+        return self.high_tight_flag(seed=seed + 700, advance=0.25, advance_sessions=22)
+
+    def slow_double(self, *, seed: int = 0) -> GeneratedSeries:
+        """A 100% advance taken slowly. Magnitude without thrust: a trend, not a flag."""
+        return self.high_tight_flag(seed=seed + 710, advance=1.00, advance_sessions=120)
+
+    def deep_pause_after_thrust(self, *, seed: int = 0) -> GeneratedSeries:
+        """A genuine thrust followed by a 40% correction. No longer tight."""
+        return self.high_tight_flag(seed=seed + 720, pause_depth=0.40, pause_sessions=18)
+
     def bear_flag(self, *, seed: int = 0) -> GeneratedSeries:
         """A downward pole with an upward drift. Must never score as bullish.
 

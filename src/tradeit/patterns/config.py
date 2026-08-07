@@ -561,6 +561,182 @@ class PennantConfig(PatternSection):
         return self
 
 
+class CupHandleConfig(PatternSection):
+    """Cup and Handle: a rounded decline and recovery, then a shallow drift.
+
+    ``max_bottom_sharpness`` is what stops a V-shaped decline qualifying. A cup
+    is *rounded* -- price spends time near the low rather than reversing at a
+    point -- and the difference is what separates accumulation from a bounce.
+    """
+
+    version: int = Field(default=1, ge=1)
+    min_cup_sessions: int = Field(default=25, ge=12)
+    max_cup_sessions: int = Field(default=200, ge=30)
+    ideal_cup_sessions_low: int = Field(default=35, ge=12)
+    ideal_cup_sessions_high: int = Field(default=120, ge=25)
+    min_cup_depth: float = Field(default=0.10, gt=0)
+    max_cup_depth: float = Field(default=0.45, gt=0, lt=1)
+    ideal_cup_depth_low: float = Field(default=0.14, gt=0)
+    ideal_cup_depth_high: float = Field(default=0.32, gt=0)
+    #: How level the two rims must be. A right rim far below the left is an
+    #: incomplete recovery, not a cup.
+    max_rim_asymmetry: float = Field(default=0.10, gt=0, lt=0.5)
+    #: Discovery admits rims within ``max_rim_asymmetry * rim_search_multiple``
+    #: and *scores* symmetry within that band. Searching at exactly the scoring
+    #: tolerance would mean every discovered cup scored well on symmetry by
+    #: construction, and an incomplete recovery would be silently discarded
+    #: rather than found and marked down.
+    rim_search_multiple: float = Field(default=2.0, ge=1.0, le=5.0)
+    #: How close to the window's highest high a swing must sit to count as the
+    #: *same* rim. Tight, because this decides where the cup starts: loosening
+    #: it lets the left rim slide back into the advance that preceded the cup.
+    rim_level_tolerance: float = Field(default=0.03, gt=0, lt=0.2)
+    #: The "near the low" band, expressed as a fraction of the **cup's own
+    #: depth** rather than of price. A fixed 10%-of-price band is a narrow
+    #: sliver inside a 45% cup and the entire range of a 12% one, so a
+    #: price-relative band measures cup depth twice and roundness not at all.
+    bottom_band: float = Field(default=0.33, gt=0, le=1.0)
+    min_bottom_fraction: float = Field(default=0.20, gt=0, lt=1)
+    min_handle_sessions: int = Field(default=4, ge=2)
+    max_handle_sessions: int = Field(default=35, ge=5)
+    #: Handle depth as a fraction of cup depth. A handle deeper than a third of
+    #: the cup is a second decline, not a shakeout.
+    max_handle_depth_ratio: float = Field(default=0.40, gt=0, lt=1)
+    ideal_handle_depth_ratio: float = Field(default=0.18, gt=0, lt=1)
+    prior_trend_sessions: int = Field(default=60, ge=20)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "prior_trend": 0.10,
+            "cup_depth": 0.14,
+            "cup_duration": 0.10,
+            "bottom_roundness": 0.18,
+            "rim_symmetry": 0.14,
+            "handle_structure": 0.20,
+            "volume_profile": 0.08,
+            "relative_strength": 0.06,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        if self.max_cup_sessions <= self.min_cup_sessions:
+            raise ConfigError("max_cup_sessions must exceed min_cup_sessions")
+        if self.ideal_cup_depth_high >= self.max_cup_depth:
+            raise ConfigError("ideal cup depth must sit below max_cup_depth")
+        if self.ideal_handle_depth_ratio >= self.max_handle_depth_ratio:
+            raise ConfigError("ideal handle depth must sit below the maximum")
+        return self
+
+
+class HighTightFlagConfig(PatternSection):
+    """High Tight Flag: a rare extreme-momentum structure.
+
+    **Precision over recall, deliberately.** The classic definition is a 90-100%
+    advance in eight weeks followed by a correction of no more than 25%. These
+    defaults are close to that, and the brief is explicit that they must not be
+    relaxed to generate more examples -- a high tight flag that fires on
+    ordinary bull flags is not a rarer pattern, it is a duplicate detector.
+    """
+
+    version: int = Field(default=1, ge=1)
+    #: The advance. Deliberately extreme.
+    min_advance: float = Field(default=0.70, gt=0)
+    ideal_advance: float = Field(default=1.00, gt=0)
+    min_advance_sessions: int = Field(default=8, ge=3)
+    max_advance_sessions: int = Field(default=50, ge=10)
+    #: The consolidation must be *tight*. Beyond this it is an ordinary flag.
+    max_consolidation_depth: float = Field(default=0.25, gt=0, lt=0.6)
+    ideal_consolidation_depth: float = Field(default=0.12, gt=0)
+    min_consolidation_sessions: int = Field(default=4, ge=2)
+    max_consolidation_sessions: int = Field(default=25, ge=5)
+    #: Liquidity floor in dollar volume. These structures appear
+    #: disproportionately in thin securities where the advance is a quote
+    #: artefact rather than accumulation.
+    min_dollar_volume: float = Field(default=5_000_000, ge=0)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "advance_magnitude": 0.26,
+            "advance_speed": 0.16,
+            "advance_consistency": 0.14,
+            "consolidation_tightness": 0.22,
+            "consolidation_duration": 0.08,
+            "liquidity": 0.08,
+            "extreme_move_risk": 0.06,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        if self.ideal_advance <= self.min_advance:
+            raise ConfigError("ideal_advance must exceed min_advance")
+        if self.ideal_consolidation_depth >= self.max_consolidation_depth:
+            raise ConfigError("ideal consolidation depth must sit below the maximum")
+        return self
+
+
+class DoubleBottomConfig(PatternSection):
+    """Two lows at a similar level separated by a rally."""
+
+    version: int = Field(default=1, ge=1)
+    #: How close the two lows must be, as a fraction of the first.
+    max_low_divergence: float = Field(default=0.06, gt=0, lt=0.3)
+    #: The rally between them, as a fraction of the first low. Too shallow and
+    #: it is one low with noise, not two.
+    min_intervening_rally: float = Field(default=0.06, gt=0)
+    ideal_intervening_rally: float = Field(default=0.14, gt=0)
+    min_separation_sessions: int = Field(default=8, ge=3)
+    max_separation_sessions: int = Field(default=90, ge=15)
+    #: A second low slightly *below* the first is constructive -- it shakes out
+    #: stops before the reversal. Beyond this it is a continued decline.
+    max_undercut: float = Field(default=0.04, ge=0, lt=0.2)
+    #: The decline the pattern is reversing. Without it there is nothing to
+    #: double-bottom out of.
+    min_prior_decline: float = Field(default=0.12, gt=0)
+    prior_trend_sessions: int = Field(default=60, ge=20)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "low_symmetry": 0.24,
+            "intervening_rally": 0.20,
+            "prior_decline": 0.16,
+            "timing": 0.12,
+            "undercut_behaviour": 0.12,
+            "volume_profile": 0.10,
+            "relative_strength": 0.06,
+        }
+    )
+
+
+class InverseHeadShouldersConfig(PatternSection):
+    """Three lows, the middle one deepest, with a neckline above."""
+
+    version: int = Field(default=1, ge=1)
+    #: How much deeper the head must be than the shoulders.
+    min_head_prominence: float = Field(default=0.04, gt=0)
+    #: Shoulder-to-shoulder depth difference. Real patterns are asymmetric;
+    #: demanding visual perfection rejects almost all of them.
+    max_shoulder_asymmetry: float = Field(default=0.40, gt=0, lt=1)
+    #: Timing asymmetry between the two halves, as a ratio.
+    max_timing_asymmetry: float = Field(default=2.5, gt=1)
+    min_sessions: int = Field(default=20, ge=10)
+    max_sessions: int = Field(default=160, ge=25)
+    min_prior_decline: float = Field(default=0.10, gt=0)
+    prior_trend_sessions: int = Field(default=60, ge=20)
+    atr_period: int = Field(default=14, ge=2)
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "head_prominence": 0.22,
+            "shoulder_symmetry": 0.20,
+            "neckline_quality": 0.18,
+            "timing_symmetry": 0.14,
+            "prior_decline": 0.14,
+            "volume_profile": 0.12,
+        }
+    )
+
+
 class PatternEngineConfig(PatternSection):
     """Top-level pattern configuration, shared plus per-detector.
 
@@ -579,6 +755,12 @@ class PatternEngineConfig(PatternSection):
     flat_base: FlatBaseConfig = Field(default_factory=FlatBaseConfig)
     ascending_triangle: AscendingTriangleConfig = Field(default_factory=AscendingTriangleConfig)
     pennant: PennantConfig = Field(default_factory=PennantConfig)
+    cup_handle: CupHandleConfig = Field(default_factory=CupHandleConfig)
+    high_tight_flag: HighTightFlagConfig = Field(default_factory=HighTightFlagConfig)
+    double_bottom: DoubleBottomConfig = Field(default_factory=DoubleBottomConfig)
+    inverse_head_shoulders: InverseHeadShouldersConfig = Field(
+        default_factory=InverseHeadShouldersConfig
+    )
 
     #: Detectors to run. A detector absent from this list is not merely skipped
     #: -- its features never enter the dataset, which keeps the stored pattern
@@ -589,6 +771,8 @@ class PatternEngineConfig(PatternSection):
         "flat_base",
         "ascending_triangle",
         "pennant",
+        "cup_handle",
+        "high_tight_flag",
     )
     max_candidates_per_pattern: int = Field(default=24, ge=1, le=200)
     #: Instances below this quality are discarded rather than stored. Low, so
