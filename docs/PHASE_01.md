@@ -277,7 +277,12 @@ idempotency. The modules that carry the guarantees are covered at 96–100%:
 
 ---
 
-## What Phase 2 requires
+## What the next phase requires
+
+> **Numbering note (added after Phase 2).** Phase 2 was subsequently defined as
+> system architecture and data design, so the analytics work described below is
+> now **Phase 3**. See [`ROADMAP.md`](ROADMAP.md), which is authoritative.
+
 
 **Available from Phase 1**, nothing further needed:
 
@@ -316,4 +321,4 @@ confirming the values match the full-series prefix.
 
 ---
 
-**Phase 2 is not started and will not be started until explicitly instructed.**
+**No further phase is started until explicitly instructed.**

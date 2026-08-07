@@ -1,6 +1,6 @@
 [project]
 name = "tradeit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Quantitative stock screening, breakout confirmation, and portfolio compounding platform"
 requires-python = ">=3.11"
 dependencies = [

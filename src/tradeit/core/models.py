@@ -327,3 +327,54 @@ class EarningsEvent(BitemporalFact):
     @property
     def has_reported(self) -> bool:
         return self.eps_actual is not None
+
+
+class NewsItem(BitemporalFact):
+    """A headline, stamped with when it was actually published.
+
+    ``event_time`` and ``knowledge_time`` are usually identical for news -- the
+    event *is* the publication. They stay separate fields because syndicated and
+    re-published items legitimately differ, and because a vendor backfilling an
+    archive will set ``knowledge_time`` to its own ingestion instant, which we
+    need to be able to see rather than have silently merged into one column.
+
+    ``sentiment`` is nullable and carries ``sentiment_model_version``: a
+    sentiment score is a model output, not an observation, and scores recomputed
+    with a newer model are a different fact. Without the version, backtests
+    silently use tomorrow's model on yesterday's news.
+    """
+
+    instrument_id: int | None
+    headline: str = Field(min_length=1, max_length=512)
+    url: str | None = Field(default=None, max_length=1024)
+    publisher: str | None = Field(default=None, max_length=128)
+    sentiment: float | None = Field(default=None, ge=-1.0, le=1.0)
+    sentiment_model_version: str | None = Field(default=None, max_length=64)
+    external_id: str | None = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def _validate_sentiment_provenance(self) -> Self:
+        if self.sentiment is not None and self.sentiment_model_version is None:
+            raise DataError(
+                "a sentiment score without a model version cannot be reproduced; "
+                "record which model produced it"
+            )
+        return self
+
+
+class MacroObservation(BitemporalFact):
+    """One value of an economic series, as originally released.
+
+    Macro data is revised more aggressively than anything else the platform
+    consumes: employment figures are revised twice, GDP three times, and vendor
+    APIs typically serve only the current vintage. ``event_time`` is the end of
+    the reference period; ``knowledge_time`` is the release instant.
+    ``vintage`` distinguishes the first print from subsequent revisions of the
+    same period, so a regime model can be backtested on what was actually known.
+    """
+
+    series_id: str = Field(min_length=1, max_length=64)
+    period_end: dt.date
+    value: Decimal | None
+    unit: str = Field(default="index", max_length=24)
+    vintage: int = Field(default=1, ge=1)

@@ -11,7 +11,12 @@ import datetime as dt
 import pytest
 
 from tradeit.core.enums import Bartimeframe
-from tradeit.data.provider import FundamentalProvider, PriceProvider, ReferenceDataProvider
+from tradeit.data.provider import (
+    EarningsProvider,
+    FundamentalDataProvider,
+    MarketDataProvider,
+    ReferenceDataProvider,
+)
 from tradeit.data.providers.synthetic import SyntheticProvider
 
 START = dt.date(2022, 1, 3)
@@ -23,10 +28,11 @@ def provider() -> SyntheticProvider:
     return SyntheticProvider(seed=42)
 
 
-def test_satisfies_all_three_protocols(provider):
+def test_satisfies_every_protocol_it_claims(provider):
     assert isinstance(provider, ReferenceDataProvider)
-    assert isinstance(provider, PriceProvider)
-    assert isinstance(provider, FundamentalProvider)
+    assert isinstance(provider, MarketDataProvider)
+    assert isinstance(provider, FundamentalDataProvider)
+    assert isinstance(provider, EarningsProvider)
 
 
 def test_bars_are_deterministic_for_a_seed():

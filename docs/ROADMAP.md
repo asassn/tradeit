@@ -1,113 +1,143 @@
 # Roadmap
 
-Phases are gated: each one ends with a written report, and the next does not
-start until it is explicitly authorised. The sequencing rule is that **nothing
-gets built on top of an unverified foundation** — which is why backtesting comes
-after portfolio construction rather than alongside screening, and why machine
-learning comes last or not at all.
+Phases are gated: each ends with a written report, and the next does not start
+until explicitly authorised. The sequencing rule is that **nothing is built on
+an unverified foundation** — which is why execution modelling precedes
+backtesting, and why machine learning comes last or never.
+
+> **Numbering note.** The Phase 1 report listed an eight-phase plan in which
+> Phase 2 was market analytics. Phase 2 was subsequently defined as system
+> architecture and data design, so everything below it shifted by one and a live
+> trading phase was made explicit. The table here is authoritative; earlier
+> references to "Phase 2 — market analytics" mean what is now Phase 3.
 
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Foundation, domain model, point-in-time data layer | ✅ Complete |
-| 2 | Market analytics: indicators, relative strength, regime, sectors | Not started |
-| 3 | Screening: liquidity, quality, fundamental and technical filters | Not started |
-| 4 | Patterns, breakout detection and confirmation, opportunity scoring | Not started |
-| 5 | Portfolio construction: sizing, heat, correlation, allocation | Not started |
-| 6 | Position management: stops, trailing, pyramiding, capital recycling | Not started |
-| 7 | Backtesting, walk-forward, Monte Carlo, attribution | Not started |
-| 8 | Paper trading, journalling, explainability, API and dashboard | Not started |
+| 2 | System architecture, database design, interfaces, configuration | ✅ Complete |
+| 3 | Market analytics: indicators, relative strength, regime, sectors | Not started |
+| 4 | Screening: liquidity, quality, fundamental and technical filters | Not started |
+| 5 | Patterns, breakout detection and confirmation, opportunity scoring | Not started |
+| 6 | Portfolio construction, risk engine, position management | Not started |
+| 7 | Execution: cost and fill models, paper broker, reconciliation | Not started |
+| 8 | Backtesting, walk-forward, Monte Carlo, attribution | Not started |
+| 9 | Paper trading, journal, API, dashboard, monitoring | Not started |
+| 10 | Live trading | Requires separate written authorisation |
 
 ---
 
 ## Phase 1 — Foundation ✅
 
-Domain model, bitemporal storage, as-of clock, calendar, provider protocols,
-ingestion with quarantine, synthetic provider, migrations, CI. See
-`docs/PHASE_01.md`.
+Bitemporal storage, the as-of clock, exchange calendar, provider protocols,
+ingestion with quarantine, synthetic provider, migrations, CI.
+See [`PHASE_01.md`](PHASE_01.md).
 
-## Phase 2 — Market analytics
+## Phase 2 — Architecture and data design ✅
+
+Complete technical architecture, 41-table schema validated against
+PostgreSQL 16 with partitioning, six provider interfaces, the domain interface
+set for every later phase, content-addressed reproducibility, the versioned
+configuration system, and the 22-job schedule.
+See [`PHASE_02.md`](PHASE_02.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+## Phase 3 — Market analytics
 
 Indicators (moving averages, ATR, RSI, MACD, ADX, volume statistics), relative
-strength vs. benchmark and sector, multi-timeframe alignment, sector aggregates
-and rotation, and a market-regime classifier.
+strength against benchmark and sector, multi-timeframe alignment, sector
+aggregates, and a market-regime classifier.
 
-The whole phase computes on clock-gated bar series, so **every indicator must be
-causal**: value at bar *t* uses bars ≤ *t* only. A centred moving average or a
-z-score computed over the full sample is a leak wearing a respectable name.
+**Constraint that defines the phase:** every indicator must be causal — the
+value at bar *t* uses bars ≤ *t* only. Centred moving averages, full-sample
+z-scores and universe-wide percentile ranks computed once over all history are
+leaks with respectable names. The causality property test must exist before the
+indicators it guards.
 
-Needs from Phase 1: `BarRepository.history`, the calendar, adjustment policy.
-Adds: an indicator library with a warm-up contract (indicators return `None`
-until they have enough history, rather than a wrong number).
+*Needs:* benchmark instrument, sector classification scheme.
+*Provides:* `IndicatorValue` rows, `market_regime_states`, `sector_strength`.
 
-## Phase 3 — Screening
+## Phase 4 — Screening
 
-Liquidity and tradability filters (dollar volume, price floor, spread proxy),
-quality filters, fundamental filters using as-filed data, technical filters. A
-declarative, versioned filter-chain description so a historical screen can be
-reproduced exactly — including which version of the rules ran.
+Liquidity and tradability filters, quality filters, fundamental filters on
+as-filed data, technical filters. The filter chain is declarative and versioned,
+so a historical screen reproduces exactly — including which version of the rules
+ran.
 
-Needs from Phase 2: indicators and relative strength.
-Open question: which fundamental metrics, which requires the vendor decision.
+*Needs:* Phase 3, and the data vendor decision for fundamental filters.
+*Provides:* candidate sets, `screen_rejections`.
 
-## Phase 4 — Patterns, breakouts, and scoring
+## Phase 5 — Patterns, breakouts, scoring
 
-Base/consolidation detection, volatility contraction, pivot identification,
-breakout triggers, and — most importantly — **confirmation**: volume expansion,
-follow-through, and failure detection.
+Base and consolidation detection, volatility contraction, pivot identification,
+breakout triggers, and — most importantly — confirmation: volume expansion,
+follow-through, failure detection.
 
-Scoring combines the evidence into a single opportunity score with a per-factor
-contribution breakdown, so every recommendation can be explained. Scoring is
-rule-based here. A learned model is Phase 9 at the earliest, and only against a
-rule-based baseline that already works.
+Scoring combines evidence into a single ranked score with a stored per-factor
+breakdown. Rule-based. A learned model is not scheduled.
 
-Needs from Phase 3: a screened candidate set.
+*Provides:* `patterns`, `breakout_events`, `opportunity_scores`, `watchlists`.
 
-## Phase 5 — Portfolio construction
+## Phase 6 — Portfolio construction and risk
 
-Where "a great stock" becomes "a great trade for this portfolio right now":
-position sizing from stop distance and risk budget, total portfolio heat limits,
-correlation and cluster exposure, sector concentration caps, and ranking
-competing uses of capital.
+Position sizing from stop distance and risk budget, portfolio heat limits,
+correlation and cluster exposure, sector caps, allocation ranking, and position
+management: stops, trailing, partial exits, pyramiding, time stops,
+earnings-related exits, capital recycling.
 
-Needs: a portfolio state model (positions, cash, open risk) — this is where the
-`Position`/`Portfolio`/`Order` domain models get defined, deliberately not in
-Phase 1.
+Compounding is a property of this loop, not a separate feature: gains are
+redeployed under the same risk budget.
 
-## Phase 6 — Position management
+*Needs:* starting capital and risk budget parameters.
+*Provides:* `positions`, `risk_snapshots`, `portfolio_snapshots`.
 
-Initial and trailing stops, partial exits, pyramiding rules, time stops,
-earnings-related exits, and capital recycling as positions close. Compounding is
-a property of this loop, not a separate feature: gains are redeployed under the
-same risk budget.
+## Phase 7 — Execution
 
-## Phase 7 — Evaluation
+Cost model (commission, spread, participation-dependent impact), fill model
+(no fills outside the bar, gaps respected, volume caps participation), paper
+broker, execution service with broker reconciliation.
 
-Event-driven backtester reusing the *same* screening and portfolio code paths as
-live — no parallel implementation. Realistic costs: commission, slippage as a
-function of participation rate, gap risk, and no fills at prices that did not
-trade. Walk-forward validation, Monte Carlo on trade sequence and on parameter
-perturbation, and attribution by factor, sector, and regime.
+**Built before backtesting on purpose.** The backtester must use the same cost
+and fill models the paper broker uses; building execution first prevents it from
+growing its own optimistic assumptions.
+
+*Provides:* `orders`, `executions`, `trades`.
+
+## Phase 8 — Evaluation
+
+Event-driven backtester that advances a clock and calls the *same* components as
+live — no parallel implementation. Walk-forward validation, Monte Carlo on trade
+sequence and parameter perturbation, attribution by factor, sector and regime.
 
 This phase needs its own bias controls: parameter-selection bias, multiple-
-comparison correction, and out-of-sample discipline. Phase 1's controls address
-data leakage, not overfitting.
+comparison correction, out-of-sample discipline. Phases 1–2 addressed data
+leakage, not overfitting.
 
-## Phase 8 — Paper trading and interface
+*Provides:* `backtest_runs`, `backtest_trades`, `monte_carlo_runs`.
 
-Paper broker with realistic fills, the daily job pipeline, a trade journal
-capturing the full decision context (score breakdown, portfolio state,
-alternatives rejected), post-trade analysis, strategy-decay monitoring, a
-FastAPI service, and a dashboard.
+## Phase 9 — Paper trading and surface
 
-Live trading remains disabled throughout, per ADR-0004.
+Paper trading on the live code path, the daily job pipeline running end to end,
+trade journal capturing full decision context including rejected alternatives,
+post-trade analysis, strategy-decay monitoring, FastAPI service, dashboard.
+
+Live trading remains disabled throughout.
+
+## Phase 10 — Live trading
+
+Requires separate written authorisation, a live broker adapter, and its own
+reliability, reconciliation and incident-response design. The interlock in
+ADR-0004 stays in force regardless of how much of the above is complete.
+
+---
 
 ## Deliberately unscheduled
 
 **Machine learning.** The brief lists XGBoost and PyTorch as available, not
-required. A learned model is worth adding when there is a rule-based baseline
-with a validated edge and enough independent trades to train without overfitting
-— several hundred at minimum. Introduced earlier, it mostly launders look-ahead
-bias into a plausible-looking score.
+required. A learned model becomes worth adding when a rule-based baseline shows
+a validated edge across several hundred out-of-sample trades. Introduced
+earlier, it mostly launders look-ahead bias into a plausible-looking score. The
+schema (`model_metadata`, with training-window CHECK constraints) is ready for
+that day; nothing else is.
 
-**Live execution.** Requires separate authorisation, a broker adapter, and its
-own reliability and reconciliation design.
+**News and sentiment.** Interfaces and storage exist. No phase consumes them,
+because news is the most leak-prone dataset in the system and it should not be
+added until something specific needs it.

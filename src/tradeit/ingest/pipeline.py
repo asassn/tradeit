@@ -60,7 +60,7 @@ class IngestResult:
 class Ingestor:
     """Writes validated facts, quarantining what it cannot validate."""
 
-    def __init__(self, session: Session, provider_name: str, code_version: str = "0.1.0") -> None:
+    def __init__(self, session: Session, provider_name: str, code_version: str = "0.2.0") -> None:
         self.session = session
         self.provider_name = provider_name
         self.code_version = code_version

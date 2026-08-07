@@ -1,0 +1,118 @@
+# Baseline strategy configuration.
+#
+# Every number that affects a trading decision lives in a file like this one.
+# The strategy's identity is the hash of this content, so changing any value
+# here produces a different strategy -- which is exactly what makes a backtest
+# and a live session comparable, or provably not.
+#
+# These values are a documented starting point, not a validated edge. Nothing
+# has been backtested yet; Phase 7 does that. Treat every threshold below as a
+# hypothesis.
+
+name = "baseline"
+description = "Trend-following breakout on fundamentally sound names. Unvalidated starting point."
+schema_version = 1
+
+[universe]
+name = "us_equity"
+exchanges = ["XNYS", "XNAS", "XASE"]
+asset_classes = ["common_stock", "adr", "reit"]
+exclude_asset_classes = ["warrant", "unit", "preferred"]
+benchmark_symbol = "SPY"
+
+[liquidity]
+min_price = 5.0
+max_price = 10000.0
+min_avg_dollar_volume = 5000000
+dollar_volume_lookback = 50
+min_trading_history_sessions = 250
+max_participation_rate = 0.02
+
+[fundamental]
+require_positive_revenue_growth = true
+min_revenue_growth_yoy = 0.10
+min_earnings_growth_yoy = 0.15
+require_positive_earnings = false
+max_debt_to_equity = 2.0
+min_return_on_equity = 0.10
+min_quarters_of_history = 4
+
+[technical]
+trend_ma_periods = [50, 150, 200]
+require_price_above_ma = [50, 200]
+require_ma_stack = true
+min_pct_off_52w_low = 0.30
+max_pct_below_52w_high = 0.25
+relative_strength_lookback = 126
+min_relative_strength_rank = 0.70
+atr_period = 14
+volume_baseline_period = 50
+
+[patterns]
+enabled_patterns = ["flat_base", "cup_with_handle", "volatility_contraction", "ascending_triangle"]
+min_base_sessions = 25
+max_base_sessions = 150
+max_base_depth_pct = 0.35
+min_base_depth_pct = 0.08
+max_volatility_contraction_ratio = 0.60
+pivot_buffer_pct = 0.001
+
+[breakout]
+approach_threshold_pct = 0.03
+trigger_buffer_pct = 0.002
+min_volume_ratio = 1.5
+confirmation_sessions = 2
+max_extension_from_pivot_pct = 0.05
+failure_undercut_pct = 0.02
+max_sessions_to_confirm = 5
+
+[scoring]
+min_score_to_consider = 0.60
+max_candidates_per_session = 20
+
+[scoring.weights]
+relative_strength = 0.25
+pattern_quality = 0.20
+breakout_confirmation = 0.20
+fundamental_quality = 0.15
+sector_strength = 0.10
+volume_accumulation = 0.10
+
+[sizing]
+risk_per_trade_pct = 0.005
+max_position_pct_of_equity = 0.20
+min_position_notional = 500.0
+allow_fractional_shares = false
+allow_pyramiding = true
+max_pyramid_entries = 2
+pyramid_min_gain_pct = 0.03
+
+[risk]
+max_portfolio_heat_pct = 0.06
+max_positions = 12
+max_sector_exposure_pct = 0.30
+max_correlation_for_new_position = 0.75
+correlation_lookback_sessions = 126
+max_gross_exposure_pct = 1.00
+max_daily_loss_pct = 0.03
+drawdown_halt_pct = 0.15
+reduce_risk_below_regime = ["bear_trending", "high_volatility"]
+regime_risk_multiplier = 0.5
+
+[exits]
+initial_stop_atr_multiple = 2.0
+max_initial_stop_pct = 0.08
+trailing_stop_atr_multiple = 3.0
+activate_trailing_at_r = 1.5
+move_stop_to_breakeven_at_r = 1.0
+time_stop_sessions = 40
+take_partial_profit_at_r = 2.0
+partial_profit_fraction = 0.33
+earnings_blackout_sessions = 2
+
+[costs]
+commission_per_share = 0.005
+commission_minimum = 1.0
+slippage_bps = 5.0
+spread_bps = 3.0
+market_impact_coefficient = 0.1
