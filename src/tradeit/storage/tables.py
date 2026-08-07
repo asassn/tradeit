@@ -831,9 +831,15 @@ class PatternRelationship(Base):
     to_pattern_id: Mapped[int] = mapped_column(
         ForeignKey("patterns.id", ondelete="CASCADE"), nullable=False
     )
-    #: "nested_in" | "superseded_by" | "related_to"
+    #: One of the six edges in :mod:`tradeit.patterns.relationships`:
+    #: "contains" | "nested_in" | "overlaps" | "related_to" |
+    #: "superseded_by" | "derived_from".
     relationship: Mapped[str] = mapped_column(String(24), nullable=False)
     established_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    #: The knowledge boundary the edge was derived under. An edge is a claim
+    #: about what was visible at a moment; without this a stored edge cannot be
+    #: distinguished from one somebody backdated.
+    as_of_session: Mapped[dt.date | None] = mapped_column(Date)
     note: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
@@ -869,13 +875,19 @@ class PatternLabel(Base):
     pattern_type: Mapped[str] = mapped_column(String(40), nullable=False)
 
     reviewer: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: Append-only revisions. A reviewer changing their mind is itself a fact
+    #: about how hard the example is, and the earlier opinion is what makes it
+    #: visible, so a re-review is a new row rather than an update.
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    #: "positive" | "negative" | "ambiguous" | "abstain" | "insufficient_evidence".
+    #: See :class:`tradeit.patterns.labeling.HumanLabel` for why the last two
+    #: are not merged.
+    label: Mapped[str] = mapped_column(String(24), nullable=False, default="positive")
     #: 0-100, on the same scale as the detector so the two are comparable.
     human_quality: Mapped[float | None] = mapped_column(Float)
     #: How sure the reviewer is, 0-100. A confident 40 and an unsure 40 are
     #: different labels and should not be averaged as if they were the same.
     reviewer_confidence: Mapped[float | None] = mapped_column(Float)
-    #: True when the reviewer says this is not the pattern at all.
-    is_pattern: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     annotated_pivots: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
     annotated_boundaries: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
     comments: Mapped[str | None] = mapped_column(Text)
@@ -885,6 +897,13 @@ class PatternLabel(Base):
     detector_version: Mapped[int | None] = mapped_column(Integer)
     detector_quality: Mapped[float | None] = mapped_column(Float)
     detector_state: Mapped[str | None] = mapped_column(String(32))
+    #: Coverage at labelling time. Agreement between a human and a detector that
+    #: was scoring on 40% of its intended evidence is a different measurement
+    #: from agreement with one that had everything.
+    detector_coverage: Mapped[float | None] = mapped_column(Float)
+    #: The configuration the detector ran under, so the prediction is
+    #: reproducible rather than merely recorded.
+    config_digest: Mapped[str | None] = mapped_column(String(64))
     pattern_id: Mapped[int | None] = mapped_column(ForeignKey("patterns.id", ondelete="SET NULL"))
 
     labelled_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
@@ -896,6 +915,7 @@ class PatternLabel(Base):
             "timeframe",
             "pattern_type",
             "reviewer",
+            "revision",
             name="uq_pattern_label",
         ),
         Index("ix_pattern_label_lookup", "pattern_type", "as_of_session"),

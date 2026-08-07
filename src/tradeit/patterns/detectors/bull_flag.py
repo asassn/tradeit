@@ -137,6 +137,10 @@ class BullFlagDetector:
         )
 
     @property
+    def atr_period(self) -> int:
+        return self.config.atr_period
+
+    @property
     def parameters(self) -> Mapping[str, object]:
         return self.config.model_dump(mode="json")
 

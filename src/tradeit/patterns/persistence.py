@@ -31,6 +31,7 @@ from tradeit.core.clock import utcnow
 from tradeit.errors import DataError
 from tradeit.patterns.base import PatternInstance
 from tradeit.patterns.lifecycle import StateTransition
+from tradeit.patterns.relationships import STORED_RELATIONSHIPS
 from tradeit.patterns.tracking import TrackedPattern
 from tradeit.storage import tables
 
@@ -202,17 +203,22 @@ class PatternRepository:
         to_pattern: tables.Pattern,
         relationship: str,
         *,
+        as_of_session: dt.date | None = None,
         note: str = "",
     ) -> tables.PatternRelationship:
         """Record how two patterns relate.
 
-        ``relationship`` is one of ``nested_in``, ``superseded_by``,
-        ``related_to``. Deliberately a small vocabulary: a bigger ontology would
-        invite arguments about which edge applies rather than recording the fact
+        The vocabulary lives in :mod:`tradeit.patterns.relationships` so there
+        is one definition of it rather than a string literal here and an enum
+        there. Deliberately small -- six edges -- because a bigger ontology
+        invites arguments about which one applies instead of recording the fact
         that two structures coexist.
         """
-        if relationship not in {"nested_in", "superseded_by", "related_to"}:
-            raise DataError(f"unknown pattern relationship {relationship!r}")
+        if relationship not in STORED_RELATIONSHIPS:
+            raise DataError(
+                f"unknown pattern relationship {relationship!r}; "
+                f"expected one of {sorted(STORED_RELATIONSHIPS)}"
+            )
         if from_pattern.id == to_pattern.id:
             raise DataError("a pattern cannot relate to itself")
 
@@ -221,6 +227,7 @@ class PatternRepository:
             to_pattern_id=to_pattern.id,
             relationship=relationship,
             established_at=utcnow(),
+            as_of_session=as_of_session,
             note=note or None,
         )
         self.session.add(edge)

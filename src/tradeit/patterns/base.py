@@ -704,6 +704,13 @@ class Detector(Protocol):
     @property
     def minimum_bars(self) -> int: ...
 
+    #: The ATR period the detector computes with. Part of the interface rather
+    #: than a private detail because callers that bound a rescan window need it:
+    #: Wilder smoothing has unbounded memory, so how much history a detector
+    #: needs re-examined depends on this number.
+    @property
+    def atr_period(self) -> int: ...
+
     @property
     def parameters(self) -> Mapping[str, object]: ...
 

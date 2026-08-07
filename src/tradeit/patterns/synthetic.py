@@ -39,6 +39,15 @@ from tradeit.errors import ConfigError
 
 UTC = dt.UTC
 
+#: Minutes per intraday bar, for :meth:`PatternGenerator.to_intraday_bars`.
+_TIMEFRAME_MINUTES: dict[Bartimeframe, int] = {
+    Bartimeframe.M1: 1,
+    Bartimeframe.M5: 5,
+    Bartimeframe.M15: 15,
+    Bartimeframe.M30: 30,
+    Bartimeframe.H1: 60,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class SeriesSpec:
@@ -1162,6 +1171,81 @@ class PatternGenerator:
     def deep_pause_after_thrust(self, *, seed: int = 0) -> GeneratedSeries:
         """A genuine thrust followed by a 40% correction. No longer tight."""
         return self.high_tight_flag(seed=seed + 720, pause_depth=0.40, pause_sessions=18)
+
+    # -- intraday ------------------------------------------------------------
+
+    def to_intraday_bars(
+        self,
+        series: GeneratedSeries,
+        timeframe: Bartimeframe = Bartimeframe.M15,
+        *,
+        seed: int = 0,
+    ) -> list[OhlcvBar]:
+        """Expand a daily series into intraday bars that fold back to it.
+
+        The multi-timeframe work needs genuine intraday input, and relabelling a
+        daily series as 15-minute would test nothing: the point of the
+        requirement is that aggregation is causal, and a series with one bar per
+        session has no aggregation to be causal about.
+
+        The bar count per session is derived from the session's real length and
+        the requested timeframe, so the bars are *actually* the width their
+        label claims. An earlier draft emitted 26 bars per session and called
+        them minute bars, which made every aggregation test downstream a test of
+        nothing: rolling 15-minute bars labelled M1 into 15-minute buckets is
+        the identity function.
+
+        Each session's closes walk from the previous session's close to this
+        one's, and the session's high and low are placed inside it, so the
+        intraday path *reconstructs* the daily bar rather than merely sitting
+        near it.
+        """
+        minutes = _TIMEFRAME_MINUTES.get(timeframe)
+        if minutes is None:
+            raise ConfigError(f"{timeframe} is not an intraday timeframe")
+
+        rng = np.random.default_rng(self.spec.seed + seed + 31311)
+        out: list[OhlcvBar] = []
+        previous_close = float(series.bars[0].open)
+
+        for bar in series.bars:
+            session = self.calendar.session(bar.session_date)
+            bars_per_session = max(4, int(session.duration.total_seconds() // (minutes * 60)))
+            span = dt.timedelta(minutes=minutes)
+            close = float(bar.close)
+            path = np.linspace(previous_close, close, bars_per_session + 1)[1:]
+            wobble = rng.normal(0.0, self.spec.base_volatility * 0.25, bars_per_session)
+            wobble[-1] = 0.0  # the last bucket must land on the daily close
+            path = path * (1.0 + wobble)
+
+            # The session's high and low have to appear somewhere inside it, or
+            # the aggregate would be a strictly narrower bar than the daily one
+            # it came from.
+            path[bars_per_session // 3] = float(bar.high)
+            path[2 * bars_per_session // 3] = float(bar.low)
+
+            volume_share = float(bar.volume) / bars_per_session
+            for index, value in enumerate(path):
+                event_time = session.open_utc + span * (index + 1)
+                low = min(value, float(path[max(index - 1, 0)]))
+                high = max(value, float(path[max(index - 1, 0)]))
+                out.append(
+                    OhlcvBar(
+                        instrument_id=self.spec.instrument_id,
+                        timeframe=timeframe,
+                        session_date=bar.session_date,
+                        event_time=event_time,
+                        knowledge_time=event_time + dt.timedelta(seconds=1),
+                        knowledge_source=KnowledgeTimeSource.SYNTHETIC,
+                        open=_price(float(path[max(index - 1, 0)])),
+                        high=_price(high),
+                        low=_price(low),
+                        close=_price(float(value)),
+                        volume=Decimal(str(int(max(1.0, volume_share)))),
+                    )
+                )
+            previous_close = close
+        return out
 
     # -- reversal structures -------------------------------------------------
 
