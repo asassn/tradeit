@@ -176,6 +176,13 @@ class PatternType(StrEnum):
     VOLATILITY_CONTRACTION = "volatility_contraction"
     HIGH_TIGHT_FLAG = "high_tight_flag"
     CONSOLIDATION = "consolidation"
+    # Added in Phase 4. Kept in one enum rather than split per phase so a stored
+    # pattern row is interpretable without knowing when its family was added.
+    PENNANT = "pennant"
+    INVERSE_HEAD_AND_SHOULDERS = "inverse_head_and_shoulders"
+    BASE_ON_BASE = "base_on_base"
+    TIGHT_CONSOLIDATION = "tight_consolidation"
+    BREAKOUT_RETEST = "breakout_retest"
 
 
 class PatternStatus(StrEnum):

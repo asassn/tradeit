@@ -33,48 +33,16 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from enum import StrEnum
 
 from tradeit.core.enums import PatternType
 from tradeit.errors import ConfigError
 from tradeit.patterns.base import PatternInstance, PatternState
-
-
-class TransitionReason(StrEnum):
-    """Why a pattern moved between states. Recorded so a history reads."""
-
-    DETECTED = "detected"
-    #: Re-detected on a later session with the same identity.
-    ADVANCED = "advanced"
-    #: Not re-detected, but carried forward because it had already resolved.
-    CARRIED_FORWARD = "carried_forward"
-    #: Price closed below the invalidation level.
-    SUPPORT_BROKEN = "support_broken"
-    #: Ran out of time without resolving.
-    TIMED_OUT = "timed_out"
-    #: Disappeared from detection without resolving or breaking.
-    LOST = "lost"
-    #: Absorbed by a larger structure on the same instrument.
-    SUPERSEDED = "superseded"
-
-
-@dataclass(frozen=True, slots=True)
-class StateTransition:
-    """One entry in a pattern's history. Append-only."""
-
-    session_date: dt.date
-    from_state: PatternState | None
-    to_state: PatternState
-    reason: TransitionReason
-    quality: float
-    note: str = ""
-
-    def __str__(self) -> str:
-        origin = str(self.from_state) if self.from_state else "-"
-        return (
-            f"{self.session_date.isoformat()}  {origin} -> {self.to_state} "
-            f"({self.reason}, quality {self.quality:.0f})"
-        )
+from tradeit.patterns.lifecycle import (
+    StateTransition,
+    TransitionReason,
+    check_transition,
+    is_legal,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,12 +97,19 @@ class TrackedPattern:
         note: str = "",
     ) -> TrackedPattern:
         """Advance to a new observation, appending to the history."""
+        check_transition(
+            self.current.state,
+            instance.state,
+            pattern_type=self.pattern_type,
+            identity_key=self.identity_key,
+        )
         transition = StateTransition(
             session_date=instance.as_of_session,
             from_state=self.current.state,
             to_state=instance.state,
             reason=reason,
             quality=instance.quality,
+            evidence_coverage=instance.evidence_coverage,
             note=note,
         )
         return replace(
@@ -220,15 +195,74 @@ class PatternTracker:
                             to_state=instance.state,
                             reason=TransitionReason.DETECTED,
                             quality=instance.quality,
+                            evidence_coverage=instance.evidence_coverage,
                         ),
                     ),
                 )
             else:
+                if not is_legal(
+                    existing.current.state, instance.state, pattern_type=existing.pattern_type
+                ):
+                    # A fresh detection that would move this identity along an
+                    # edge that does not exist is a *different* structure that
+                    # happens to start on the same date. Minting a new identity
+                    # preserves the fact that the first one failed, which is the
+                    # fact a false-positive rate is computed from.
+                    self._fork(existing, instance, session)
+                    continue
                 self._open[key] = existing.with_transition(instance, TransitionReason.ADVANCED)
 
         self._age_unseen(seen_keys, session, closes or {})
         self._retire_terminal()
         return self.open_patterns()
+
+    def _fork(self, existing: TrackedPattern, instance: PatternInstance, session: dt.date) -> None:
+        """Retire an identity and start a new one for genuinely new structure.
+
+        Reached when a detection would require an illegal edge -- almost always
+        a terminal pattern whose instrument has produced a fresh structure with
+        the same start date. Retiring rather than resurrecting is what keeps the
+        failure on the record.
+        """
+        # Retire the old identity into a terminal state first. Closing a
+        # non-terminal pattern would break the invariant that everything in the
+        # closed set has an outcome, and "it stopped being tracked" is not an
+        # outcome anyone can compute a failure rate from.
+        retired = (
+            existing
+            if existing.current.state.is_terminal
+            else existing.with_transition(
+                _restated(existing.current, PatternState.EXPIRED, session),
+                TransitionReason.SUPERSEDED,
+                note=f"identity ended; structure re-detected as {instance.state}",
+            )
+        )
+        self._closed.append(retired)
+        del self._open[existing.identity_key]
+
+        forked = f"{instance.identity_key}:{session.isoformat()}"
+        self._open[forked] = TrackedPattern(
+            identity_key=forked,
+            instrument_id=instance.instrument_id,
+            pattern_type=instance.pattern_type,
+            current=instance,
+            first_seen=session,
+            last_seen=session,
+            history=(
+                StateTransition(
+                    session_date=session,
+                    from_state=None,
+                    to_state=instance.state,
+                    reason=TransitionReason.DETECTED,
+                    quality=instance.quality,
+                    evidence_coverage=instance.evidence_coverage,
+                    note=(
+                        f"new identity: {existing.identity_key} was "
+                        f"{existing.current.state} and cannot become {instance.state}"
+                    ),
+                ),
+            ),
+        )
 
     def _age_unseen(
         self, seen_keys: set[str], session: dt.date, closes: Mapping[int, float]

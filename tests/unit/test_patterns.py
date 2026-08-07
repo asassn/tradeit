@@ -23,12 +23,16 @@ from itertools import pairwise
 import numpy as np
 import pytest
 
+from tradeit.analytics import kernels
 from tradeit.core.enums import PatternType
 from tradeit.errors import ConfigError
 from tradeit.patterns.base import (
+    ComponentRequirement,
     ComponentScore,
     Detector,
+    DetectorContract,
     Evidence,
+    PatternContext,
     PatternGeometry,
     PatternInstance,
     PatternState,
@@ -36,6 +40,24 @@ from tradeit.patterns.base import (
 )
 from tradeit.patterns.config import PatternEngineConfig
 from tradeit.patterns.detectors import BullFlagDetector
+from tradeit.patterns.lifecycle import (
+    IllegalTransitionError,
+    StateTransition,
+    TransitionReason,
+    check_transition,
+    is_legal,
+)
+from tradeit.patterns.primitives import (
+    Contraction,
+    ContractionSequence,
+    build_contractions,
+    measure_impulse,
+    measure_prior_trend,
+    measure_pullback,
+    measure_relative_strength,
+    measure_volatility,
+    measure_volume,
+)
 from tradeit.patterns.scoring import (
     band_score,
     combine,
@@ -789,9 +811,20 @@ class TestComponentScores:
             ComponentScore(name="x", score=120.0, weight=1.0)
 
     def test_an_unavailable_component_may_hold_any_score(self):
-        component = ComponentScore(name="x", score=0.0, weight=1.0, unavailable=True)
+        component = ComponentScore(
+            name="x", score=0.0, weight=1.0, unavailable=True, unavailable_reason="no benchmark"
+        )
         assert component.effective_weight == 0.0
         assert component.contribution == 0.0
+
+    def test_an_unavailable_component_must_say_why(self):
+        """An unexplained gap in the evidence cannot be acted on or fixed.
+
+        An operator looking at 58% coverage needs to know whether the remedy is
+        a benchmark series or more history.
+        """
+        with pytest.raises(ConfigError, match="without a reason"):
+            ComponentScore(name="x", score=0.0, weight=1.0, unavailable=True)
 
     def test_evidence_renders_as_its_detail(self):
         assert str(Evidence("volume dried up")) == "volume dried up"
@@ -976,3 +1009,289 @@ class TestTracking:
         merged = merge_overlapping(tracker.open_patterns())
         assert len(merged) <= len(tracker.open_patterns())
         assert all(m.pattern_type is PatternType.BULL_FLAG for m in merged)
+
+
+# ---------------------------------------------------------------------------
+# Evidence coverage, required components, detector contract
+# ---------------------------------------------------------------------------
+
+
+class TestEvidenceCoverage:
+    """Quality and coverage answer different questions and must stay separate."""
+
+    def test_coverage_is_reported_separately_from_quality(self):
+        """Quality 92 / coverage 100 and quality 92 / coverage 58 are
+        materially different results, and one number cannot hold both."""
+        series = GENERATOR.bull_flag()
+        without = detect(series)[0]
+        assert without.evidence_coverage < 100.0
+        assert "relative_strength" in without.unavailable_components
+
+        benchmark = [100.0 * (1.005**i) for i in range(len(series.bars))]
+        with_context = DETECTOR.detect(
+            series.bars, series.last_session, context=PatternContext(benchmark_closes=benchmark)
+        )[0]
+        assert with_context.evidence_coverage == 100.0
+
+    def test_coverage_is_not_multiplied_into_quality(self):
+        """Collapsing them destroys the distinction irrecoverably.
+
+        A later scoring phase may choose to combine them; Phase 4 preserves
+        both independently so that choice remains available.
+        """
+        series = GENERATOR.bull_flag()
+        instance = detect(series)[0]
+        assert instance.reconciles, "quality still reconciles with its components"
+        assert instance.quality != instance.quality * instance.evidence_coverage / 100.0
+
+    def test_every_gap_names_its_reason(self):
+        """An operator looking at 58% coverage needs to know whether the remedy
+        is a benchmark series or more history."""
+        for instance in detect(GENERATOR.bull_flag()):
+            for name, reason in instance.coverage_gaps().items():
+                assert reason, f"{name} is unavailable without a reason"
+
+    def test_available_and_unavailable_partition_the_components(self):
+        instance = detect(GENERATOR.bull_flag())[0]
+        assert set(instance.available_components) | set(instance.unavailable_components) == {
+            c.name for c in instance.components
+        }
+        assert not set(instance.available_components) & set(instance.unavailable_components)
+
+    def test_an_unavailable_optional_component_does_not_suppress_the_pattern(self):
+        """Missing relative strength reduces coverage. It must not prevent
+        bull-flag recognition -- that would confuse corroboration with
+        definition."""
+        assert detect(GENERATOR.bull_flag())
+
+    def test_the_explanation_shows_coverage_and_the_detector_version(self):
+        text = detect(GENERATOR.bull_flag())[0].explain()
+        assert "Evidence Coverage" in text
+        assert "Detector:" in text
+        assert "Unavailable:" in text
+
+
+class TestDetectorContract:
+    def test_the_contract_declares_what_the_detector_needs(self):
+        contract = DETECTOR.contract
+        assert "ohlcv_bars" in contract.required_inputs
+        assert set(contract.required_components) == {
+            "flagpole",
+            "consolidation",
+            "retracement",
+            "duration",
+        }
+        assert "relative_strength" in contract.optional_components
+        assert contract.warmup_bars == DETECTOR.minimum_bars
+
+    def test_a_component_cannot_be_both_required_and_optional(self):
+        with pytest.raises(ConfigError, match="both required and optional"):
+            DetectorContract(required_components=("a",), optional_components=("a",))
+
+    def test_required_components_are_marked_in_the_output(self):
+        instance = detect(GENERATOR.bull_flag())[0]
+        required = {
+            c.name for c in instance.components if c.requirement is ComponentRequirement.REQUIRED
+        }
+        assert required == set(DETECTOR.contract.required_components)
+
+    def test_structural_completeness_is_asserted_on_every_emitted_instance(self):
+        """A structure missing a required component is not a low-coverage
+        pattern; it is not that pattern."""
+        for series in (
+            GENERATOR.bull_flag(),
+            GENERATOR.bull_flag(BullFlagSpec(noise=2.5)),
+            GENERATOR.broad_volatile_range(),
+        ):
+            for instance in detect(series):
+                assert instance.is_structurally_complete
+
+    def test_thin_evidence_caps_maturity_rather_than_being_hidden(self):
+        """Below the coverage floor the composite stops describing the pattern.
+
+        Reported as FORMING with the coverage on its face, rather than
+        suppressed -- the structure may be perfectly sound and the consumer
+        should be able to see both it and the gap.
+        """
+        thin = PatternEngineConfig.model_validate(
+            {
+                "bull_flag": {
+                    "weights": {
+                        "flagpole": 0.05,
+                        "consolidation": 0.05,
+                        "retracement": 0.05,
+                        "duration": 0.05,
+                        "volume_structure": 0.05,
+                        "volatility_contraction": 0.05,
+                        "relative_strength": 0.65,
+                        "resistance_quality": 0.05,
+                    }
+                }
+            }
+        )
+        detector = BullFlagDetector(thin)
+        found = detector.detect(GENERATOR.bull_flag().bars, GENERATOR.bull_flag().last_session)
+        for instance in found:
+            assert instance.evidence_coverage < 60.0
+            assert instance.state is PatternState.FORMING
+
+
+class TestStateMachine:
+    def test_terminal_states_are_absorbing(self):
+        """Allowing INVALIDATED -> MATURE would not merely lose information; it
+        would let every failure-rate measurement be computed from a population
+        that erased its own failures."""
+        assert not is_legal(PatternState.INVALIDATED, PatternState.MATURE)
+        assert not is_legal(PatternState.EXPIRED, PatternState.FORMING)
+        with pytest.raises(IllegalTransitionError, match="absorbing"):
+            check_transition(PatternState.INVALIDATED, PatternState.MATURE)
+
+    def test_the_error_names_the_remedy(self):
+        """The answer to an illegal transition is a new identity, not a new edge."""
+        with pytest.raises(IllegalTransitionError, match="mint a new pattern identity"):
+            check_transition(PatternState.EXPIRED, PatternState.NEAR_BREAKOUT)
+
+    def test_hesitation_is_legal(self):
+        """Approaching resistance and drifting back is ordinary behaviour.
+        Forbidding it would invalidate a pattern every time it paused."""
+        assert is_legal(PatternState.NEAR_BREAKOUT, PatternState.MATURE)
+
+    def test_a_resolved_structure_may_still_fail(self):
+        """Clearing resistance then breaking support is a real sequence. Phase 4
+        does not judge the breakout, but it does record the later failure."""
+        assert is_legal(PatternState.BROKEN_OUT_UNCONFIRMED, PatternState.INVALIDATED)
+        assert not is_legal(PatternState.BROKEN_OUT_UNCONFIRMED, PatternState.MATURE)
+
+    def test_a_family_may_narrow_the_machine_but_not_widen_it(self):
+        """A retest structure is observed only after price moved through
+        resistance, so it never occupies the pre-breakout states."""
+        assert not is_legal(
+            PatternState.FORMING,
+            PatternState.NEAR_BREAKOUT,
+            pattern_type=PatternType.BREAKOUT_RETEST,
+        )
+        assert is_legal(PatternState.FORMING, PatternState.NEAR_BREAKOUT)
+
+    def test_a_transition_record_refuses_an_illegal_edge(self):
+        with pytest.raises(IllegalTransitionError):
+            StateTransition(
+                session_date=dt.date(2024, 1, 3),
+                from_state=PatternState.INVALIDATED,
+                to_state=PatternState.MATURE,
+                reason=TransitionReason.ADVANCED,
+                quality=80.0,
+            )
+
+    def test_transitions_carry_coverage_as_well_as_quality(self):
+        """A pattern that matured at quality 88 on 40% coverage matured on very
+        little evidence, and a history recording only the score cannot say so."""
+        transition = StateTransition(
+            session_date=dt.date(2024, 1, 3),
+            from_state=PatternState.FORMING,
+            to_state=PatternState.MATURE,
+            reason=TransitionReason.ADVANCED,
+            quality=88.0,
+            evidence_coverage=40.0,
+        )
+        assert "coverage 40" in str(transition)
+
+
+class TestPrimitives:
+    def test_an_impulse_reports_magnitude_two_ways(self):
+        """Neither alone compares across securities."""
+        series = GENERATOR.bull_flag()
+        closes = np.array([float(b.close) for b in series.bars])
+        highs = np.array([float(b.high) for b in series.bars])
+        lows = np.array([float(b.low) for b in series.bars])
+        atr = kernels.atr(highs, lows, closes, 14)
+        leg = measure_impulse(series.bars, start_index=59, end_index=71, atr=atr)
+        assert leg is not None
+        assert leg.gain_pct > 0
+        assert leg.gain_atr > 0
+
+    def test_a_single_session_leg_is_identifiable(self):
+        """A leg carried entirely by one bar has no duration to sustain."""
+        series = GENERATOR.single_day_spike()
+        leg = measure_impulse(series.bars, start_index=58, end_index=61)
+        assert leg is not None
+        assert leg.largest_session_share > 0.5
+
+    def test_a_pullback_reports_retracement_of_its_own_impulse(self):
+        series = GENERATOR.bull_flag()
+        impulse = measure_impulse(series.bars, start_index=59, end_index=71)
+        assert impulse is not None
+        pullback = measure_pullback(series.bars, impulse, start_index=72, end_index=80)
+        assert pullback is not None
+        assert 0.0 < pullback.retracement_of_impulse < 1.0
+        assert not pullback.undercut_impulse_low
+
+    def test_contractions_pair_highs_with_the_lows_that_follow(self):
+        """Pairing low-to-high instead would report a rising base as tightening."""
+        series = GENERATOR.bull_flag(BullFlagSpec(flag_sessions=25, noise=1.5))
+        highs = confirmed_swings(series.bars, series.last_session, kind=SwingKind.HIGH)
+        lows = confirmed_swings(series.bars, series.last_session, kind=SwingKind.LOW)
+        sequence = build_contractions(highs, lows, start_index=0, end_index=len(series.bars) - 1)
+        for leg in sequence.legs:
+            assert leg.low_index > leg.high_index
+
+    def test_a_contraction_sequence_measures_progression_not_count(self):
+        """A valid VCP does not require exactly three contractions."""
+        legs = tuple(
+            Contraction(
+                index=i,
+                high_index=i * 10,
+                low_index=i * 10 + 5,
+                high_date=dt.date(2024, 1, 3),
+                low_date=dt.date(2024, 1, 10),
+                high=100.0,
+                low=100.0 * (1 - depth),
+                sessions=5,
+            )
+            for i, depth in enumerate((0.18, 0.10, 0.05))
+        )
+        sequence = ContractionSequence(legs)
+        assert sequence.count == 3
+        assert sequence.depth_progression < 0
+        assert sequence.monotonic_fraction == 1.0
+        assert sequence.tightening_ratio < 0.4
+        assert [round(d, 2) for d in sequence.depths] == [0.18, 0.10, 0.05]
+
+    def test_a_non_monotonic_sequence_reports_partial_tightening(self):
+        """One deep leg among shallow ones is a different structure from a
+        clean staircase, and the fraction is what says so."""
+        legs = tuple(
+            Contraction(
+                index=i,
+                high_index=i * 10,
+                low_index=i * 10 + 5,
+                high_date=dt.date(2024, 1, 3),
+                low_date=dt.date(2024, 1, 10),
+                high=100.0,
+                low=100.0 * (1 - depth),
+                sessions=5,
+            )
+            for i, depth in enumerate((0.18, 0.05, 0.12))
+        )
+        sequence = ContractionSequence(legs)
+        assert 0.0 < sequence.monotonic_fraction < 1.0
+
+    def test_prior_trend_distinguishes_a_pause_from_a_bear_rest(self):
+        """The primitive that stops arbitrary sideways movement being a base."""
+        up = measure_prior_trend(GENERATOR.bull_flag().bars, end_index=70, lookback=60)
+        down = measure_prior_trend(GENERATOR.falling_knife().bars, end_index=80, lookback=60)
+        assert up is not None and down is not None
+        assert up.is_uptrend
+        assert not down.is_uptrend
+
+    def test_volume_and_volatility_profiles_measure_without_judging(self):
+        series = GENERATOR.bull_flag()
+        volume = measure_volume(series.bars, start_index=72, end_index=80)
+        volatility = measure_volatility(series.bars, start_index=72, end_index=80)
+        assert volume is not None and volatility is not None
+        assert volume.ratio > 0
+        assert volatility.atr_ratio > 0
+        assert 0.0 <= volatility.narrowing_fraction <= 1.0
+
+    def test_relative_strength_refuses_a_misaligned_benchmark(self):
+        with pytest.raises(ConfigError, match="differ in length"):
+            measure_relative_strength([1.0, 2.0, 3.0], [1.0, 2.0], start_index=0, end_index=2)

@@ -46,7 +46,9 @@ from tradeit.core.enums import Bartimeframe, PatternType
 from tradeit.core.models import OhlcvBar
 from tradeit.patterns.base import (
     Boundary,
+    ComponentRequirement,
     ComponentScore,
+    DetectorContract,
     Evidence,
     EvidenceKind,
     PatternCandidate,
@@ -85,6 +87,27 @@ class BullFlagDetector:
     name = "bull_flag"
     pattern_type = PatternType.BULL_FLAG
 
+    #: What the detector needs, declared rather than left implicit in the order
+    #: of its early returns. `flagpole`, `consolidation`, `retracement` and
+    #: `duration` are the pattern's *definition* -- without any of them there is
+    #: no flag to classify. The rest is corroboration.
+    CONTRACT = DetectorContract(
+        required_inputs=("ohlcv_bars",),
+        required_components=("flagpole", "consolidation", "retracement", "duration"),
+        optional_components=(
+            "volume_structure",
+            "volatility_contraction",
+            "relative_strength",
+            "resistance_quality",
+        ),
+        warmup_bars=0,  # replaced below by minimum_bars, which reads config
+        # Below 60% coverage the composite is computed from fewer than three of
+        # its eight dimensions and stops describing the pattern. Not a trading
+        # threshold -- Phase 4 sets none -- but the point at which the detector
+        # should stop calling a structure MATURE.
+        minimum_evidence_coverage=60.0,
+    )
+
     def __init__(
         self,
         config: PatternEngineConfig | None = None,
@@ -95,6 +118,12 @@ class BullFlagDetector:
         self.config: BullFlagConfig = self.engine_config.bull_flag
         self.timeframe = timeframe
         self.version = self.config.version
+
+    @property
+    def contract(self) -> DetectorContract:
+        from dataclasses import replace as _replace
+
+        return _replace(self.CONTRACT, warmup_bars=self.minimum_bars)
 
     @property
     def minimum_bars(self) -> int:
@@ -177,6 +206,12 @@ class BullFlagDetector:
                 bars, candidate, atr, swing_highs, swing_lows, as_of_session, context
             )
             if instance is None:
+                continue
+            if not instance.is_structurally_complete:
+                # A required component could not be measured. That is not a
+                # low-coverage flag; there is no flag. Emitting one anyway would
+                # be constructing a pattern from insufficient structural
+                # evidence, which the contract exists to forbid.
                 continue
             if instance.quality < self.engine_config.min_quality_to_report:
                 continue
@@ -390,6 +425,30 @@ class BullFlagDetector:
             bars, shape, resistance, invalidation, composite.value, pole_sessions
         )
 
+        coverage = (
+            sum(c.weight for c in components if not c.unavailable)
+            / sum(c.weight for c in components)
+            * 100.0
+            if sum(c.weight for c in components) > 0
+            else 0.0
+        )
+        if coverage < self.contract.minimum_evidence_coverage and state.is_established:
+            # The structure may be perfectly sound; the *evidence* is too thin
+            # for the composite to describe it. Reported as FORMING rather than
+            # suppressed, with the coverage on its face, so a consumer can see
+            # both the structure and the gap.
+            state = PatternState.FORMING
+            contradicting.append(
+                Evidence(
+                    f"evidence coverage {coverage:.0f}% is below the detector's "
+                    f"{self.contract.minimum_evidence_coverage:.0f}% floor; the quality "
+                    "score is computed from too little of its intended evidence to "
+                    "call this mature",
+                    EvidenceKind.CONTEXTUAL,
+                    measured=coverage,
+                )
+            )
+
         if state is PatternState.INVALIDATED:
             contradicting.append(
                 Evidence(
@@ -583,6 +642,7 @@ class BullFlagDetector:
 
         return ComponentScore(
             name="flagpole",
+            requirement=ComponentRequirement.REQUIRED,
             score=score,
             weight=self.config.weights.flagpole,
             measurements={
@@ -675,6 +735,7 @@ class BullFlagDetector:
 
         return ComponentScore(
             name="consolidation",
+            requirement=ComponentRequirement.REQUIRED,
             score=score,
             weight=self.config.weights.consolidation,
             measurements={
@@ -734,6 +795,7 @@ class BullFlagDetector:
 
         return ComponentScore(
             name="retracement",
+            requirement=ComponentRequirement.REQUIRED,
             score=score,
             weight=self.config.weights.retracement,
             measurements={"retracement_of_flagpole": retracement},
@@ -792,6 +854,7 @@ class BullFlagDetector:
 
         return ComponentScore(
             name="duration",
+            requirement=ComponentRequirement.REQUIRED,
             score=score,
             weight=self.config.weights.duration,
             measurements={
@@ -900,6 +963,7 @@ class BullFlagDetector:
 
         return ComponentScore(
             name="volume_structure",
+            requirement=ComponentRequirement.OPTIONAL,
             score=score,
             weight=self.config.weights.volume_structure,
             measurements={
@@ -929,6 +993,10 @@ class BullFlagDetector:
                 weight=self.config.weights.volatility_contraction,
                 measurements={"sessions": float(sessions)},
                 unavailable=True,
+                unavailable_reason=(
+                    f"consolidation is {sessions} sessions; contraction needs "
+                    f"{cfg.min_sessions} for the two halves to be comparable"
+                ),
             )
 
         half = sessions // 2
@@ -967,6 +1035,7 @@ class BullFlagDetector:
 
         return ComponentScore(
             name="volatility_contraction",
+            requirement=ComponentRequirement.OPTIONAL,
             score=score,
             weight=self.config.weights.volatility_contraction,
             measurements={
@@ -999,7 +1068,7 @@ class BullFlagDetector:
                 score=0.0,
                 weight=weight,
                 unavailable=True,
-                evidence=(),
+                unavailable_reason="no benchmark series supplied in the pattern context",
             )
 
         benchmark = np.asarray(context.benchmark_closes, dtype=np.float64)
@@ -1007,7 +1076,13 @@ class BullFlagDetector:
         start, end = flag_start, flag_end
         if benchmark[start] <= 0 or closes[start] <= 0:
             return ComponentScore(
-                name="relative_strength", score=0.0, weight=weight, unavailable=True
+                name="relative_strength",
+                score=0.0,
+                weight=weight,
+                unavailable=True,
+                unavailable_reason=(
+                    "benchmark or security price is non-positive at the window start"
+                ),
             )
 
         security_return = closes[end] / closes[start] - 1.0
@@ -1058,6 +1133,7 @@ class BullFlagDetector:
 
         return ComponentScore(
             name="relative_strength",
+            requirement=ComponentRequirement.OPTIONAL,
             score=float(np.clip(rs_score, 0.0, 100.0)),
             weight=weight,
             measurements=measurements,
@@ -1075,7 +1151,14 @@ class BullFlagDetector:
         weight = self.config.weights.resistance_quality
         if resistance is None:
             return ComponentScore(
-                name="resistance_quality", score=0.0, weight=weight, unavailable=True
+                name="resistance_quality",
+                score=0.0,
+                weight=weight,
+                unavailable=True,
+                unavailable_reason=(
+                    "no resistance level could be established from confirmed pivots "
+                    "or the consolidation high"
+                ),
             )
 
         evidence: list[Evidence] = []
@@ -1098,6 +1181,7 @@ class BullFlagDetector:
 
         return ComponentScore(
             name="resistance_quality",
+            requirement=ComponentRequirement.OPTIONAL,
             score=resistance.confidence,
             weight=weight,
             measurements={

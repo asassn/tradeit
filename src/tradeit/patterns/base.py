@@ -113,6 +113,29 @@ class PatternState(StrEnum):
         return self.is_established
 
 
+class ComponentRequirement(StrEnum):
+    """Whether a component is part of the pattern's definition or its context.
+
+    The distinction is the difference between "we could not measure this" and
+    "there is nothing here to classify".
+
+    A bull flag with no benchmark series cannot be scored for relative
+    strength. That is a gap in *evidence* — the flag still exists, it is still a
+    flag, and refusing to report it would confuse corroboration with definition.
+
+    A bull flag with too little history to establish a flagpole is not a flag
+    with a gap. There is no flagpole, so there is no flag, and emitting one
+    anyway would be constructing a pattern from insufficient structural
+    evidence.
+    """
+
+    #: The pattern cannot be classified without it. Its absence suppresses the
+    #: instance entirely rather than lowering a score.
+    REQUIRED = "required"
+    #: Contributes to quality and coverage. Its absence is reported, not fatal.
+    OPTIONAL = "optional"
+
+
 class EvidenceKind(StrEnum):
     """Why an observation was recorded, so a reader can weigh it."""
 
@@ -165,12 +188,28 @@ class ComponentScore:
     #: insufficient history). Distinct from a score of zero, which is a
     #: measured failure.
     unavailable: bool = False
+    #: Why it could not be computed. Mandatory when ``unavailable`` -- "not
+    #: available" without a reason is an unfalsifiable claim, and an operator
+    #: staring at 58% coverage needs to know whether the fix is a benchmark
+    #: series or more history.
+    unavailable_reason: str = ""
+    #: Whether the pattern's *definition* depends on this component. A required
+    #: component that cannot be computed means the structure cannot be
+    #: classified at all; an optional one only reduces evidence coverage.
+    requirement: ComponentRequirement = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
+        if self.requirement is None:  # dataclass default resolved lazily
+            object.__setattr__(self, "requirement", ComponentRequirement.OPTIONAL)
         if not self.unavailable and not 0.0 <= self.score <= 100.0:
             raise ConfigError(f"component {self.name!r} scored {self.score}, outside [0, 100]")
         if self.weight < 0:
             raise ConfigError(f"component {self.name!r} has negative weight {self.weight}")
+        if self.unavailable and not self.unavailable_reason:
+            raise ConfigError(
+                f"component {self.name!r} is unavailable without a reason; "
+                "an unexplained gap in the evidence cannot be acted on or fixed"
+            )
 
     @property
     def contribution(self) -> float:
@@ -181,6 +220,11 @@ class ComponentScore:
         """Zero when unavailable, so the composite renormalises rather than
         treating a missing component as a zero score."""
         return 0.0 if self.unavailable else self.weight
+
+    @property
+    def blocks_classification(self) -> bool:
+        """Whether this gap prevents the pattern from being classified at all."""
+        return self.unavailable and self.requirement is ComponentRequirement.REQUIRED
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,18 +465,77 @@ class PatternInstance:
         expected = sum(c.contribution for c in self.components) / total
         return abs(expected - self.quality) < 1e-6
 
+    # -- evidence coverage ---------------------------------------------------
+
+    @property
+    def evidence_coverage(self) -> float:
+        """How much of the intended evidence was actually available, 0-100.
+
+        Deliberately a *separate* number from quality, and deliberately not
+        multiplied into it. They answer different questions:
+
+        * **Quality**: how good does the available evidence look?
+        * **Coverage**: how much of the intended evidence was available?
+
+        Quality 92 / coverage 100 and quality 92 / coverage 58 are materially
+        different results, and collapsing them into one number destroys the
+        distinction irrecoverably. The second is a pattern that looks excellent
+        on the four dimensions that could be measured while four others are
+        simply unknown — which a consumer may reasonably treat as a strong
+        candidate or as unusable, but cannot decide if the system has already
+        decided for it.
+
+        Whether coverage should gate trade eligibility is a later phase's
+        decision. Phase 4's job is to preserve both values honestly.
+        """
+        total = sum(c.weight for c in self.components)
+        if total <= 0:
+            return 0.0
+        available = sum(c.weight for c in self.components if not c.unavailable)
+        return round(available / total * 100.0, 6)
+
+    @property
+    def available_components(self) -> tuple[str, ...]:
+        return tuple(c.name for c in self.components if not c.unavailable)
+
+    @property
+    def unavailable_components(self) -> tuple[str, ...]:
+        return tuple(c.name for c in self.components if c.unavailable)
+
+    def coverage_gaps(self) -> dict[str, str]:
+        """Unavailable components mapped to why, so a gap can be acted on."""
+        return {c.name: c.unavailable_reason for c in self.components if c.unavailable}
+
+    @property
+    def is_structurally_complete(self) -> bool:
+        """Whether every component the *definition* requires was measurable.
+
+        False means the instance should not have been emitted at all: a
+        structure missing a required component is not a low-coverage pattern,
+        it is not that pattern.
+        """
+        return not any(c.blocks_classification for c in self.components)
+
     def explain(self) -> str:
         """The human-readable output the brief specifies."""
         lines = [
             f"Pattern:          {self.pattern_type}",
             f"State:            {self.state}",
             f"Pattern Quality:  {self.quality:.0f}",
+            f"Evidence Coverage:{self.evidence_coverage:>4.0f}",
             f"Confidence:       {self.confidence:.0f}",
+            f"Detector:         {self.detector_name} v{self.detector_version}",
             "",
         ]
         for item in self.components:
             label = "n/a" if item.unavailable else f"{item.score:.0f}"
-            lines.append(f"  {item.name:<28} {label:>4}  (weight {item.weight:.2f})")
+            marker = "*" if item.requirement is ComponentRequirement.REQUIRED else " "
+            lines.append(f" {marker}{item.name:<28} {label:>4}  (weight {item.weight:.2f})")
+        gaps = self.coverage_gaps()
+        if gaps:
+            lines.append("")
+            lines.append("Unavailable:")
+            lines.extend(f"  {name}: {reason}" for name, reason in sorted(gaps.items()))
         lines.append("")
         if self.geometry.resistance:
             lines.append(f"Resistance:       {self.geometry.resistance.level:.2f}")
@@ -515,6 +618,63 @@ class PatternCandidate:
         return self.end_index - self.start_index + 1
 
 
+@dataclass(frozen=True, slots=True)
+class DetectorContract:
+    """What a detector needs, declared rather than discovered.
+
+    Written down because the alternative is that each detector's requirements
+    live implicitly in the order of its early-return statements, where nobody
+    can review them and a later refactor can quietly relax one.
+
+    ``minimum_evidence_coverage`` deserves a note. It is **not** a trading
+    threshold and Phase 4 sets no trading thresholds. It is the point below
+    which the detector's own quality score stops meaning what it says: a
+    composite computed from a fifth of its intended evidence is describing
+    something other than the pattern. A detector may still emit such an
+    instance -- with the low coverage on its face -- but it should not claim it
+    is MATURE.
+    """
+
+    #: Datasets that must be present. ``ohlcv_bars`` is universal; a detector
+    #: needing corporate actions or fundamentals says so here.
+    required_inputs: tuple[str, ...] = ("ohlcv_bars",)
+    #: Components without which the pattern cannot be classified at all.
+    required_components: tuple[str, ...] = ()
+    #: Components that contribute to quality and coverage but never gate.
+    optional_components: tuple[str, ...] = ()
+    #: Bars needed before the detector can produce anything.
+    warmup_bars: int = 0
+    #: Below this, the instance stays FORMING regardless of its score.
+    minimum_evidence_coverage: float = 0.0
+
+    def __post_init__(self) -> None:
+        overlap = set(self.required_components) & set(self.optional_components)
+        if overlap:
+            raise ConfigError(f"components declared both required and optional: {sorted(overlap)}")
+        if not 0.0 <= self.minimum_evidence_coverage <= 100.0:
+            raise ConfigError("minimum_evidence_coverage must be a percentage")
+
+    @property
+    def all_components(self) -> tuple[str, ...]:
+        return (*self.required_components, *self.optional_components)
+
+    def requirement_of(self, name: str) -> ComponentRequirement:
+        return (
+            ComponentRequirement.REQUIRED
+            if name in self.required_components
+            else ComponentRequirement.OPTIONAL
+        )
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "required_inputs": list(self.required_inputs),
+            "required_components": list(self.required_components),
+            "optional_components": list(self.optional_components),
+            "warmup_bars": self.warmup_bars,
+            "minimum_evidence_coverage": self.minimum_evidence_coverage,
+        }
+
+
 @runtime_checkable
 class Detector(Protocol):
     """Finds one family of structures in a clock-gated bar series.
@@ -532,7 +692,14 @@ class Detector(Protocol):
 
     name: str
     pattern_type: PatternType
+    #: Bumped whenever a scoring rule or structural definition changes, so a
+    #: stored pattern says which definition produced it. A backtest pins this;
+    #: silently recomputing history under a newer detector and presenting the
+    #: results as unchanged is the specific dishonesty it prevents.
     version: int
+
+    @property
+    def contract(self) -> DetectorContract: ...
 
     @property
     def minimum_bars(self) -> int: ...
