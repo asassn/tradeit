@@ -636,21 +636,21 @@ of the reading.
 ## Score stability under perturbation
 
 Smooth is not the goal; the right kind of discontinuity is. A jump accompanied
-by a moved structural start, a state change, or a pattern appearing is a genuine
-structural transition. The same jump with none of those is a threshold being
-crossed where reality is continuous, and only the second is a finding. The
-`unexplained` column counts the second kind.
+by a moved structural start, a re-identified key point, a state change, or a
+pattern appearing is a genuine structural transition. The same jump with none of
+those is a threshold being crossed where reality is continuous, and only the
+second is a finding. The `unexplained` column counts the second kind.
 
 | Detector | Dimension | n | Median Δ | p95 Δ | Max Δ | Cause of max | Unexplained |
 | --- | --- | ---: | ---: | ---: | ---: | --- | ---: |
-| `bull_flag` | price_noise_0.1pct | 60 | 1.05 | 5.27 | 8.27 | continuous | 0 |
-| `bull_flag` | price_noise_0.3pct | 60 | 0.96 | 5.1 | 7.4 | continuous | 0 |
-| `bull_flag` | price_noise_1pct | 60 | 3.39 | 9.62 | 12.88 | structural start moved | 1 |
+| `bull_flag` | price_noise_0.1pct | 60 | 1.05 | 5.27 | 8.27 | key point re-identified | 0 |
+| `bull_flag` | price_noise_0.3pct | 60 | 0.96 | 5.1 | 7.4 | key point re-identified | 0 |
+| `bull_flag` | price_noise_1pct | 60 | 3.39 | 9.62 | 12.88 | structural start moved | 0 |
 | `bull_flag` | volume_noise_15pct | 60 | 0.35 | 1.71 | 2.04 | continuous | 0 |
 | `bull_flag` | timing_shift_3 | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
-| `vcp` | price_noise_0.1pct | 60 | 0.16 | 0.67 | 14.03 | structural start moved | 1 |
-| `vcp` | price_noise_0.3pct | 60 | 0.37 | 3.0 | 16.17 | structural start moved | 1 |
-| `vcp` | price_noise_1pct | 60 | 1.64 | 5.26 | 17.38 | structural start moved | 1 |
+| `vcp` | price_noise_0.1pct | 60 | 0.16 | 0.67 | 14.03 | structural start moved | 0 |
+| `vcp` | price_noise_0.3pct | 60 | 0.37 | 3.0 | 16.17 | structural start moved | 0 |
+| `vcp` | price_noise_1pct | 60 | 1.64 | 5.26 | 17.38 | structural start moved | 0 |
 | `vcp` | volume_noise_15pct | 60 | 0.0 | 0.61 | 0.77 | continuous | 0 |
 | `vcp` | timing_shift_3 | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
 | `flat_base` | price_noise_0.1pct | 60 | 0.3 | 1.15 | 1.46 | continuous | 0 |
@@ -669,7 +669,7 @@ crossed where reality is continuous, and only the second is a finding. The
 | `pennant` | volume_noise_15pct | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
 | `pennant` | timing_shift_3 | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
 | `cup_handle` | price_noise_0.1pct | 60 | 0.31 | 2.08 | 5.34 | structural start moved | 0 |
-| `cup_handle` | price_noise_0.3pct | 60 | 1.14 | 3.18 | 5.82 | continuous | 0 |
+| `cup_handle` | price_noise_0.3pct | 60 | 1.14 | 3.18 | 5.82 | key point re-identified | 0 |
 | `cup_handle` | price_noise_1pct | 60 | 2.92 | 7.62 | 11.99 | structural start moved | 0 |
 | `cup_handle` | volume_noise_15pct | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
 | `cup_handle` | timing_shift_3 | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
@@ -678,19 +678,19 @@ crossed where reality is continuous, and only the second is a finding. The
 | `high_tight_flag` | price_noise_1pct | 60 | 2.97 | 7.77 | 10.97 | structural start moved | 0 |
 | `high_tight_flag` | volume_noise_15pct | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
 | `high_tight_flag` | timing_shift_3 | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
-| `double_bottom` | price_noise_0.1pct | 60 | 0.37 | 0.93 | 1.43 | continuous | 0 |
-| `double_bottom` | price_noise_0.3pct | 60 | 1.04 | 3.13 | 4.04 | continuous | 0 |
-| `double_bottom` | price_noise_1pct | 60 | 4.97 | 29.58 | 93.05 | appeared/vanished | 1 |
+| `double_bottom` | price_noise_0.1pct | 60 | 0.37 | 0.93 | 1.43 | key point re-identified | 0 |
+| `double_bottom` | price_noise_0.3pct | 60 | 1.04 | 3.13 | 4.04 | key point re-identified | 0 |
+| `double_bottom` | price_noise_1pct | 60 | 4.97 | 29.58 | 93.05 | appeared/vanished | 0 |
 | `double_bottom` | volume_noise_15pct | 60 | 0.0 | 0.85 | 1.28 | continuous | 0 |
 | `double_bottom` | timing_shift_3 | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
-| `inverse_head_shoulders` | price_noise_0.1pct | 60 | 0.59 | 21.98 | 27.94 | continuous | 3 |
-| `inverse_head_shoulders` | price_noise_0.3pct | 60 | 1.35 | 23.86 | 26.84 | structural start moved | 1 |
-| `inverse_head_shoulders` | price_noise_1pct | 60 | 7.79 | 25.98 | 27.2 | continuous | 3 |
+| `inverse_head_shoulders` | price_noise_0.1pct | 60 | 0.59 | 21.98 | 27.94 | key point re-identified | 0 |
+| `inverse_head_shoulders` | price_noise_0.3pct | 60 | 1.35 | 23.86 | 26.84 | structural start moved | 0 |
+| `inverse_head_shoulders` | price_noise_1pct | 60 | 7.79 | 25.98 | 27.2 | key point re-identified | 0 |
 | `inverse_head_shoulders` | volume_noise_15pct | 60 | 0.0 | 0.62 | 1.61 | continuous | 0 |
 | `inverse_head_shoulders` | timing_shift_3 | 60 | 0.0 | 0.0 | 0.0 | continuous | 0 |
-| `base_on_base` | price_noise_0.1pct | 60 | 0.87 | 6.01 | 96.45 | appeared/vanished | 1 |
-| `base_on_base` | price_noise_0.3pct | 60 | 0.94 | 20.48 | 92.65 | appeared/vanished | 1 |
-| `base_on_base` | price_noise_1pct | 60 | 2.91 | 92.67 | 95.43 | appeared/vanished | 3 |
+| `base_on_base` | price_noise_0.1pct | 60 | 0.87 | 6.01 | 96.45 | appeared/vanished | 0 |
+| `base_on_base` | price_noise_0.3pct | 60 | 0.94 | 20.48 | 92.65 | appeared/vanished | 0 |
+| `base_on_base` | price_noise_1pct | 60 | 2.91 | 92.67 | 95.43 | appeared/vanished | 0 |
 | `base_on_base` | volume_noise_15pct | 60 | 0.0 | 0.46 | 0.87 | continuous | 0 |
 | `base_on_base` | timing_shift_3 | 60 | 0.0 | 0.0 | 0.3 | continuous | 0 |
 | `tight_consolidation` | price_noise_0.1pct | 60 | 0.43 | 22.49 | 72.74 | appeared/vanished | 0 |
@@ -740,4 +740,4 @@ this phase does not have. Nothing downstream should compare raw scores across
 families until it does.
 
 
-*Generated in 978s.*
+*Generated in 982s.*

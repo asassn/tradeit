@@ -204,18 +204,25 @@ visibly.
 `tests/unit/test_perturbation.py` — 63 assertions. Full table in
 `PATTERN_VALIDATION.md`.
 
-Under 0.1% price noise every family moves a median of well under 8 points. Large
-jumps are classified by cause: a moved structural start, a re-identified key
-point, a state change, or a pattern appearing.
+Under 0.1% price noise every family moves a **median of under 1.3 points**, the
+largest being the ascending triangle at 1.27. Volume-only noise moves scores less
+than price noise for every family, as it should when geometry is definition and
+volume is evidence. Dropping three leading bars moves nothing at all.
 
-**A defect in the measurement instrument was found and fixed here.** The first
-run reported three "unexplained" ~28-point jumps in the inverse head and
+**Across all sixty stability rows, zero large jumps are unexplained.** Every one
+traces to a moved structural start, a re-identified key point, a state change, or
+a pattern appearing — which is the result the framework was built to be able to
+distinguish, rather than a result it was built to produce.
+
+**A defect in the measurement instrument was found and fixed to get there.** The
+first run reported three "unexplained" ~28-point jumps in the inverse head and
 shoulders. Diagnosis showed the right shoulder had been re-identified nineteen
 sessions earlier, with `shoulder_symmetry` moving 39.5 → 100 accordingly — a
 genuine structural change the score was right to follow. The classifier compared
 only the structural *start*, so it labelled real structure as noise. It now
-compares every named key point. An instrument that mislabels structure as noise
-is worse than useless: it points investigation at the wrong thing.
+compares every named key point, and the unexplained count fell to zero. An
+instrument that mislabels structure as noise is worse than useless: it points
+investigation at the wrong thing.
 
 Monotonicity is imposed on eleven dimensions whose definitions imply a direction.
 Three tests record where non-linearity is **deliberate**: prior decline and head
