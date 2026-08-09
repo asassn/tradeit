@@ -255,9 +255,7 @@ class TestRawCacheAndResume:
     def test_a_truncated_cache_entry_is_treated_as_absent(self, tmp_path: Path) -> None:
         # An interrupted write must not be mistaken for a complete download.
         cache = RawCache(tmp_path / "ws")
-        request = FetchRequest(
-            dataset=AcquisitionDataset.DAILY_PRICES, symbol="SPY", start=START, end=END
-        )
+        request = FetchRequest.one(AcquisitionDataset.DAILY_PRICES, "SPY", START, END)
         entry = cache.put("tiingo", request, b'[{"a": 1}]', url="https://example/x")
         assert cache.get("tiingo", request) is not None
         entry.path.write_bytes(b'[{"a": ')  # digest no longer matches
@@ -292,7 +290,9 @@ class TestFailureHandling:
         self, error: Exception, expected: FetchStatus
     ) -> None:
         provider = make_provider(FakeTransport(fail_symbols={"SPY": error}))
-        outcome = provider.fetch(FetchRequest(AcquisitionDataset.DAILY_PRICES, "SPY", START, END))
+        outcome = provider.fetch(
+            FetchRequest.one(AcquisitionDataset.DAILY_PRICES, "SPY", START, END)
+        )
         assert outcome.status is expected
         assert outcome.error
 
@@ -582,8 +582,8 @@ class TestPackageOutput:
 
 
 class TestProviderSeam:
-    def test_both_providers_are_registered(self) -> None:
-        assert available_providers() == ["eodhd", "tiingo"]
+    def test_every_provider_is_registered(self) -> None:
+        assert available_providers() == ["eodhd", "tiingo", "twelve_data"]
 
     def test_an_unknown_provider_names_the_ones_that_exist(self) -> None:
         with pytest.raises(ConfigError, match="tiingo"):
@@ -591,7 +591,7 @@ class TestProviderSeam:
 
     def test_the_eodhd_stub_refuses_clearly_rather_than_failing_obscurely(self) -> None:
         provider = EodhdAcquisition()
-        outcome = provider.fetch(FetchRequest(AcquisitionDataset.DAILY_PRICES, "SPY"))
+        outcome = provider.fetch(FetchRequest.one(AcquisitionDataset.DAILY_PRICES, "SPY"))
         assert outcome.status is FetchStatus.REJECTED
         assert "stub" in outcome.error
         assert "--provider tiingo" in outcome.error

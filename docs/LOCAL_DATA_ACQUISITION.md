@@ -14,20 +14,39 @@ while you do something else.
 
 ---
 
+## Which provider?
+
+Two work today. **Use Twelve Data for the first empirical package** — it is the
+one that has been verified against the live API.
+
+| | **Twelve Data** | **Tiingo** |
+|---|---|---|
+| Environment variable | `TWELVE_DATA_API_KEY` | `TIINGO_API_KEY` |
+| Daily prices | **split-adjusted** | raw exchange prints |
+| Splits / dividends | separate endpoints, may need a paid plan | included with the prices |
+| Limits | credit-based, per-minute and per-day | requests per hour |
+| Multi-day download | yes, resumes after the daily quota resets | not usually needed |
+
+The **split-adjusted** row is the one that matters and is explained in
+[The split-adjusted caveat](#7-the-split-adjusted-caveat-twelve-data-only). It
+does not make Twelve Data worse; it makes it different, and the tool records the
+difference rather than papering over it.
+
 ## Contents
 
 1. [What you need first](#1-what-you-need-first)
-2. [Get a Tiingo API key](#2-get-a-tiingo-api-key)
+2. [Get an API key](#2-get-an-api-key)
 3. [Set the key so the tool can find it](#3-set-the-key-so-the-tool-can-find-it)
 4. [Run the smoke test — two symbols](#4-run-the-smoke-test--two-symbols)
 5. [Run the full download](#5-run-the-full-download)
 6. [What success looks like](#6-what-success-looks-like)
-7. [What was created, and where](#7-what-was-created-and-where)
-8. [Move the package to the project](#8-move-the-package-to-the-project)
-9. [Import and validate](#9-import-and-validate)
-10. [Common errors](#common-errors)
-11. [Resuming and retrying](#resuming-and-retrying)
-12. [A note about licensing and git](#a-note-about-licensing-and-git)
+7. [The split-adjusted caveat](#7-the-split-adjusted-caveat-twelve-data-only)
+8. [What was created, and where](#8-what-was-created-and-where)
+9. [Move the package to the project](#9-move-the-package-to-the-project)
+10. [Import and validate](#10-import-and-validate)
+11. [Common errors](#common-errors)
+12. [Resuming and retrying](#resuming-and-retrying)
+13. [A note about licensing and git](#a-note-about-licensing-and-git)
 
 ---
 
@@ -74,45 +93,62 @@ needed later, for the import step, and that happens wherever the project runs.
 
 ---
 
-## 2. Get a Tiingo API key
+## 2. Get an API key
+
+### Twelve Data (recommended)
+
+1. Go to [twelvedata.com](https://twelvedata.com/) and create an account.
+2. Open your dashboard and find the **API key**.
+3. Copy it.
+
+The free plan gives a limited number of **credits** per minute and per day. One
+symbol's price history costs one credit, so the ~91-symbol validation universe
+costs roughly 270 credits in total (prices, splits and dividends for each). On a
+free plan that will very likely take **more than one day**, and that is fine —
+the tool stops cleanly when the daily allowance runs out and picks up where it
+left off when you run the same command again.
+
+### Tiingo (also supported)
 
 1. Go to [tiingo.com](https://www.tiingo.com/) and create an account.
-2. Once signed in, open your account page and find the **API Token** section.
-3. Copy the token. It is a long string of letters and numbers.
+2. Open your account page and find the **API Token** section.
+3. Copy the token.
 
-The free tier is enough to start and is limited in how many symbols per hour it
-will serve. The tool respects that limit automatically and will simply take
-longer. If you have a paid plan, see `--rate-limit` in
-[Run the full download](#5-run-the-full-download).
-
-> **Keep the token private.** It is a password. Anyone who has it can use your
-> account. This tool never writes it to a file, never puts it in a URL, and
-> never prints it — there is an automated test that checks all three.
+> **Keep the key private.** It is a password. Anyone who has it can use your
+> account.
+>
+> Twelve Data's API takes the key as part of the web address, which means every
+> request URL contains a secret. The tool scrubs it out of every file it writes
+> — the download log, the cached responses, the error messages — and there is an
+> automated test that searches every written file for the key and fails if it
+> finds it.
 
 ---
 
 ## 3. Set the key so the tool can find it
 
-The tool reads the key from an **environment variable** called
-`TIINGO_API_KEY`. An environment variable is just a named value your terminal
-hands to the programs it runs.
+The tool reads the key from an **environment variable** — just a named value
+your terminal hands to the programs it runs. The name depends on the provider:
+`TWELVE_DATA_API_KEY` or `TIINGO_API_KEY`.
 
 **macOS / Linux** — in the terminal you are going to run the download from:
 
 ```bash
-export TIINGO_API_KEY="paste-your-token-here"
+export TWELVE_DATA_API_KEY="paste-your-key-here"
 ```
+
+(For Tiingo instead, use `export TIINGO_API_KEY="..."`. You can set both.)
 
 **Windows PowerShell:**
 
 ```powershell
-$env:TIINGO_API_KEY = "paste-your-token-here"
+$env:TWELVE_DATA_API_KEY = "paste-your-key-here"
 ```
 
 **Windows Command Prompt:**
 
 ```cmd
-set TIINGO_API_KEY=paste-your-token-here
+set TWELVE_DATA_API_KEY=paste-your-key-here
 ```
 
 This lasts until you close the terminal window. That is deliberate — a key that
@@ -127,12 +163,13 @@ python -m tradeit.cli_data data providers
 You should see:
 
 ```
-eodhd      stub (see the module docstring)    EODHD_API_KEY=NOT SET
-tiingo     ready                              TIINGO_API_KEY=set
+eodhd        stub (see the module docstring)    EODHD_API_KEY=NOT SET
+tiingo       ready                              TIINGO_API_KEY=NOT SET
+twelve_data  ready                              TWELVE_DATA_API_KEY=set
 ```
 
-If `TIINGO_API_KEY` says `NOT SET`, the `export` did not take effect — check for
-a typo, and make sure you are in the same terminal window.
+If your provider says `NOT SET`, the `export` did not take effect — check for a
+typo, and make sure you are in the same terminal window.
 
 **Do not** put the key in a file inside the project. Do not commit it anywhere.
 
@@ -146,11 +183,13 @@ downloading.
 
 ```bash
 python -m tradeit.cli_data data acquire \
-    --provider tiingo \
+    --provider twelve_data \
     --symbols SPY,AAPL \
     --start 2025-01-01 \
     --output ./empirical-smoke
 ```
+
+For Tiingo, swap `--provider twelve_data` for `--provider tiingo`.
 
 On Windows PowerShell, use a backtick `` ` `` instead of `\` at the end of each
 line, or just put the whole command on one line.
@@ -179,7 +218,7 @@ silently omit — from 2010 to the last completed trading session.
 
 ```bash
 python -m tradeit.cli_data data acquire \
-    --provider tiingo \
+    --provider twelve_data \
     --start 2010-01-01 \
     --output ./empirical-data \
     --estimate-only
@@ -189,16 +228,32 @@ python -m tradeit.cli_data data acquire \
 
 ```bash
 python -m tradeit.cli_data data acquire \
-    --provider tiingo \
+    --provider twelve_data \
     --start 2010-01-01 \
     --output ./empirical-data
 ```
 
-Leave it running. On the free tier this takes roughly an hour, most of which is
-the tool deliberately waiting between requests so as not to exceed the rate
-limit. **You can interrupt it at any time with Ctrl-C** and re-run the same
-command later; it picks up where it stopped. See
-[Resuming and retrying](#resuming-and-retrying).
+Leave it running. Much of the elapsed time is the tool deliberately waiting so
+as not to exceed the plan's limits. **You can interrupt it at any time with
+Ctrl-C** and re-run the same command later; it picks up where it stopped.
+
+### On a free plan this will probably take more than one day
+
+That is expected and is not a failure. When the daily credit allowance runs out
+the tool stops cleanly, writes everything it has, and reports:
+
+```
+Package status       : ACQUISITION_INCOMPLETE_QUOTA
+```
+
+Wait for the allowance to reset, then **run exactly the same command again**.
+Symbols already downloaded are read from disk and cost no credits; only the
+missing ones are requested. Repeat until the status is `PACKAGE_VALID` or
+`PACKAGE_VALID_WITH_WARNINGS`.
+
+Do not import a package while it is still `ACQUISITION_INCOMPLETE_QUOTA` unless
+you specifically want a partial universe — the rows in it are real, but it
+covers fewer instruments than you asked for.
 
 ### Options you might want
 
@@ -207,7 +262,8 @@ command later; it picks up where it stopped. See
 | `--symbols AAPL,MSFT,NVDA` | Download only these instead of the whole universe. |
 | `--start 2004-01-01` | Go further back. More history is better if your plan allows it. |
 | `--end 2024-12-31` | Stop earlier. Defaults to yesterday. |
-| `--rate-limit 500` | If you have a paid plan that allows more requests per minute. Leave it alone on the free tier. |
+| `--rate-limit 500` | Requests or credits per minute, depending on how the provider charges. Raise it only if your plan actually allows more. |
+| `--batch-size 4` | Symbols per request (Twelve Data). Fewer means a cheaper retry when something goes wrong; it does **not** reduce credits, which are charged per symbol either way. |
 | `--name my-package` | Name recorded in the manifest. Defaults to `tiingo-daily`. |
 | `--force-refresh` | Re-download everything, ignoring what is already on disk. |
 | `--retry-failed` | Attempt only the instruments that failed last time. |
@@ -270,7 +326,58 @@ import.
 
 ---
 
-## 7. What was created, and where
+## 7. The split-adjusted caveat (Twelve Data only)
+
+Worth two minutes, because it is the one thing about this provider that changes
+what the data *means*.
+
+**Twelve Data's daily prices are adjusted for stock splits.** When a company
+splits 2-for-1, every price before that day is halved so the series looks
+continuous. Tiingo's daily prices are the raw exchange prints instead.
+
+Neither is wrong. They are different, and the danger is only in mislabelling
+them — a split-adjusted series described as raw looks completely plausible, and
+every pattern drawn on it is drawn on a price history nobody could ever have
+seen.
+
+So the tool:
+
+- writes `adjustment_policy = "split_adjusted"` into the manifest;
+- puts the caveat first in the package's list of known limitations, in capitals;
+- and makes the validation harness report a **WARN**, not a pass, when it later
+  reads that package.
+
+You do not have to do anything about this. It is recorded, and the rest of the
+system knows.
+
+### What "reconstructed raw" is, and why it is kept separate
+
+The raw prices *can* be recovered: multiply each adjusted price by every split
+that happened after it. The tool does this and writes the result to
+
+```
+empirical-data/_acquisition/reconstructed_raw_prices.csv.gz
+```
+
+Every row carries the vendor's original value, the factor applied, which splits
+produced it, and the version of the algorithm — so anyone who disagrees with the
+method can redo it without downloading anything again.
+
+**These reconstructed values never become the package's prices, and are never
+described as vendor data.** They are labelled
+`RECONSTRUCTED_RAW_FROM_SPLIT_ADJUSTED` on every row. The reason for the
+caution: the arithmetic is exact, but it depends on the split history being
+complete, and a missing split would make every earlier price wrong by that
+factor with nothing in the data to reveal it.
+
+If the splits endpoint is not on your plan, the tool does **not** reconstruct
+anything and says so. It does not quietly assume "no splits found" means "no
+splits happened" — those are different facts, and the summary distinguishes
+them.
+
+---
+
+## 8. What was created, and where
 
 Inside `./empirical-data` (or whatever you passed to `--output`):
 
@@ -285,28 +392,31 @@ empirical-data/
   _acquisition/              <- provenance; keep it, do not edit it
     journal.jsonl            <- one line per request made
     acquisition_report.json  <- the full summary as data
-    vendor_adjusted_prices.csv.gz
-    raw/tiingo/...           <- every vendor response, exactly as received
+    vendor_adjusted_prices.csv.gz     (Tiingo)
+    reconstructed_raw_prices.csv.gz   (Twelve Data — DERIVED, see section 7)
+    raw/<provider>/...       <- every vendor response, exactly as received
 ```
 
 **Keep `_acquisition/`.** It is the evidence behind every number: the raw vendor
 responses, and a record of every request. It is also what makes re-running the
 command resume instead of restarting.
 
-The package stores **unadjusted** prices — the prices as the exchange printed
-them. The vendor's adjusted prices are kept separately in
-`vendor_adjusted_prices.csv.gz` so the project's own adjustment maths can be
-checked against the vendor's, rather than agreeing with it by construction.
+What the package's price columns contain depends on the provider, and the
+manifest says which: **raw exchange prints** from Tiingo, **split-adjusted**
+prices from Twelve Data. Either way the other version is kept alongside it —
+`vendor_adjusted_prices.csv.gz` or `reconstructed_raw_prices.csv.gz` — so the
+project's own adjustment maths can be checked against the vendor's rather than
+agreeing with it by construction.
 
 ---
 
-## 8. Move the package to the project
+## 9. Move the package to the project
 
 The whole `empirical-data` folder is the deliverable. Move it however you
 normally move files.
 
 **If the project runs on this same computer**, it is already in the right place
-and you can skip to step 9.
+and you can skip to step 10.
 
 **To move it elsewhere**, zip it first:
 
@@ -327,7 +437,7 @@ a `.zip` directly, so there is no need to unpack it.
 
 ---
 
-## 9. Import and validate
+## 10. Import and validate
 
 On the machine where the project runs, with its database configured
 (`TRADEIT_DATABASE__DSN`) and migrations applied (`alembic upgrade head`):
@@ -374,25 +484,25 @@ market data.
 
 ## Common errors
 
-### `TIINGO_API_KEY=NOT SET`
+### `TWELVE_DATA_API_KEY=NOT SET` (or `TIINGO_API_KEY=NOT SET`)
 
 The environment variable is not visible to the command. Re-run the `export`
 line from [step 3](#3-set-the-key-so-the-tool-can-find-it) **in the same
 terminal window**, then try again.
 
-### `no API key: set TIINGO_API_KEY in your environment`
+### `no API key: set TWELVE_DATA_API_KEY in your environment`
 
 Same cause. The tool refuses to send a request it knows will be rejected, rather
-than letting a 403 look like a network problem.
+than letting a 401 look like a network problem.
 
-### `the vendor rejected the request` / HTTP 403
+### `the vendor rejected the request` / HTTP 401 or 403
 
 Two possibilities:
 
 - The key is wrong — check for a stray space or a missing character when you
   pasted it.
-- Your plan does not include what was asked for. The free tier covers US daily
-  equities; some symbols may be outside it.
+- Your plan does not include what was asked for. Free tiers generally cover US
+  daily equities; some symbols and some endpoints may be outside them.
 
 The tool does **not** retry these. Repeatedly re-asking a question the vendor has
 answered "no" to is how an account gets blocked.
@@ -402,21 +512,56 @@ answered "no" to is how an account gets blocked.
 You hit the plan's request ceiling. Everything already downloaded is kept. Wait
 an hour and re-run the same command — it resumes.
 
-### `could not reach api.tiingo.com`
+### `could not reach api.twelvedata.com` (or `api.tiingo.com`)
 
 No HTTP response at all: no internet, DNS failure, or a firewall/VPN blocking
-the connection. Nothing to do with your key. Check you can open
-`https://api.tiingo.com` in a browser.
+the connection. Nothing to do with your key. Check you can open the provider's
+site in a browser.
 
-### Some instruments failed with `404`
+### Some instruments failed with `404` / `not_found`
 
 Normal, especially for delisted tickers. They are listed by name in the summary
 and recorded in the manifest. If the rest succeeded, the package is usable.
+
+The summary distinguishes *why* each one failed — `not_found`,
+`plan_restricted`, `ambiguous`, `unavailable_historically` — because they need
+different responses. An `ambiguous` symbol trades on more than one venue and
+needs an exchange qualifier; a `plan_restricted` one needs a subscription, not a
+retry.
 
 ### `PACKAGE_INVALID`
 
 Nothing usable was produced — usually no key, or every request failed. The
 `Problems` section says which. Nothing was written that needs cleaning up.
+
+### `You have run out of API credits for the current day` (Twelve Data)
+
+Not an error. The daily allowance is spent. Everything downloaded so far is
+saved. Wait for the reset and run the same command again — see
+[Resuming and retrying](#resuming-and-retrying).
+
+### `You have run out of API credits for the current minute` (Twelve Data)
+
+The tool handles this itself by pausing and continuing. If you see it in the
+summary rather than as a pause, the plan's per-minute allowance is lower than
+the tool assumed — pass a smaller `--rate-limit`.
+
+### `/splits is available with the Grow plan and above` (Twelve Data)
+
+Your subscription does not include the corporate-actions endpoints. The package
+is still usable: prices are unaffected.
+
+Two consequences, both recorded in the manifest rather than hidden:
+
+- there are no splits or dividends rows, and **that absence means "we could not
+  ask", not "these securities had no splits"**;
+- raw-price reconstruction is skipped, because inverting a split adjustment
+  without the split history is guesswork.
+
+### `Package status: ACQUISITION_INCOMPLETE_QUOTA`
+
+Expected on a free plan. See
+[Resuming and retrying](#resuming-and-retrying).
 
 ### The command is very slow
 
@@ -433,6 +578,12 @@ saved under `_acquisition/raw/` and reused. So:
 
 - **Interrupted with Ctrl-C?** Run the exact same command again. Already-fetched
   symbols are read from disk; only the missing ones are requested.
+- **Daily credits exhausted (Twelve Data)?** The status will be
+  `ACQUISITION_INCOMPLETE_QUOTA`. Nothing is broken. Wait for the reset — a
+  Twelve Data day, not necessarily midnight where you are — and run the same
+  command again. Repeat until the status reaches `PACKAGE_VALID` or
+  `PACKAGE_VALID_WITH_WARNINGS`. Cached symbols cost no credits, so each pass
+  makes real progress.
 - **Some symbols failed with a network error?** Same thing — re-run the command.
   Or, to attempt *only* the ones that failed:
 
@@ -457,10 +608,10 @@ asking for help.
 
 ## A note about licensing and git
 
-Market-data licences commonly **prohibit redistribution**. Tiingo's terms are
-between you and Tiingo — read them — but as a rule:
+Market-data licences commonly **prohibit redistribution**. As a rule:
 
-- **Do not push downloaded market data to a public repository.** The project's
+- **Do not push downloaded market data to a public repository.** Twelve Data's
+  and Tiingo's terms are between you and them — read them. The project's
   `.gitignore` already excludes `**/_acquisition/`, `/empirical-data/` and
   `/empirical-smoke/`, so this will not happen by accident from the default
   locations. If you use a different output directory, check `git status` before

@@ -87,6 +87,37 @@ class NormalizedRows:
         return sum(len(rows) for rows in self.rows.values())
 
 
+def canonical_bar_row(
+    *,
+    instrument_id: int,
+    session: dt.date,
+    open_: Decimal | None,
+    high: Decimal | None,
+    low: Decimal | None,
+    close: Decimal | None,
+    volume: Decimal | None,
+) -> dict[str, str] | None:
+    """One daily bar in the package's canonical columns, or ``None``.
+
+    Shared by every adapter, so a vendor's field names cannot reach the package
+    and two providers cannot disagree about what a bar row looks like. Returns
+    ``None`` when any of the four prices is missing — a bar without all four is
+    not a bar, and the caller reports it rather than writing a partial row.
+    """
+    prices = {"open": open_, "high": high, "low": low, "close": close}
+    if any(value is None for value in prices.values()):
+        return None
+    row = {
+        "instrument_id": str(instrument_id),
+        "session_date": session.isoformat(),
+        "volume": _plain(volume) if volume is not None else "0",
+    }
+    for name, value in prices.items():
+        assert value is not None  # narrowed above
+        row[name] = _plain(value)
+    return row
+
+
 def assign_instrument_ids(symbols: Sequence[str], *, start_id: int = 1) -> dict[str, int]:
     """Stable surrogate keys, assigned from the sorted symbol list.
 
@@ -309,6 +340,7 @@ __all__ = [
     "SPLIT_EPSILON",
     "NormalizedRows",
     "assign_instrument_ids",
+    "canonical_bar_row",
     "normalize_metadata",
     "normalize_prices",
 ]

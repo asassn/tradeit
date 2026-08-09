@@ -23,16 +23,26 @@ operator's machine, and `docs/LOCAL_DATA_ACQUISITION.md` walks through it.
 from tradeit.acquisition.base import (
     AcquisitionDataset,
     AcquisitionProvider,
+    CapabilitySupport,
+    CreditUsage,
     FetchOutcome,
     FetchRequest,
     FetchStatus,
+    SymbolStatus,
     available_providers,
     get_provider_class,
 )
 from tradeit.acquisition.cache import RawCache
+from tradeit.acquisition.credits import CreditLedger
 from tradeit.acquisition.eodhd import EodhdAcquisition
 from tradeit.acquisition.journal import AcquisitionJournal
 from tradeit.acquisition.normalize import assign_instrument_ids
+from tradeit.acquisition.reconstruct import (
+    RECONSTRUCTION_LABEL,
+    ReconstructionQuality,
+    reconstruct_symbol,
+)
+from tradeit.acquisition.redaction import credential_hint, redact_url
 from tradeit.acquisition.runner import (
     ACQUISITION_TOOL_VERSION,
     AcquisitionOptions,
@@ -42,24 +52,35 @@ from tradeit.acquisition.runner import (
     estimate_size,
 )
 from tradeit.acquisition.tiingo import TiingoAcquisition
+from tradeit.acquisition.twelvedata import TwelveDataAcquisition
 
 __all__ = [
     "ACQUISITION_TOOL_VERSION",
+    "RECONSTRUCTION_LABEL",
     "AcquisitionDataset",
     "AcquisitionJournal",
     "AcquisitionOptions",
     "AcquisitionProvider",
     "AcquisitionReport",
     "AcquisitionRunner",
+    "CapabilitySupport",
+    "CreditLedger",
+    "CreditUsage",
     "EodhdAcquisition",
     "FetchOutcome",
     "FetchRequest",
     "FetchStatus",
     "PackageStatus",
     "RawCache",
+    "ReconstructionQuality",
+    "SymbolStatus",
     "TiingoAcquisition",
+    "TwelveDataAcquisition",
     "assign_instrument_ids",
     "available_providers",
+    "credential_hint",
     "estimate_size",
     "get_provider_class",
+    "reconstruct_symbol",
+    "redact_url",
 ]

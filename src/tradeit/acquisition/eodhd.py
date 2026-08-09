@@ -36,16 +36,20 @@ needs to change for any of that.
 
 from __future__ import annotations
 
+import datetime as dt
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from tradeit.acquisition.base import (
     AcquisitionDataset,
+    CapabilitySupport,
     FetchOutcome,
     FetchRequest,
     FetchStatus,
     register,
 )
-from tradeit.data.packages.spec import DatasetKind
+from tradeit.acquisition.normalize import NormalizedRows
+from tradeit.data.packages.spec import AdjustmentPolicyDeclaration, DatasetKind
 
 #: Endpoint paths, to be filled in against the vendor's documentation. Empty
 #: rather than guessed: a plausible-looking wrong path produces a 404 that
@@ -100,6 +104,31 @@ class EodhdAcquisition:
         return FetchOutcome(
             request=request, status=FetchStatus.REJECTED, error=NOT_IMPLEMENTED_MESSAGE
         )
+
+    def plan(self, symbols: Sequence[str], start: dt.date, end: dt.date) -> list[FetchRequest]:
+        """One request, so the refusal is reported once rather than per symbol."""
+        first = next((s for s in symbols if s.strip()), "")
+        if not first:
+            return []
+        return [FetchRequest.one(AcquisitionDataset.DAILY_PRICES, first.upper(), start, end)]
+
+    def normalize(self, outcome: FetchOutcome, ids: Mapping[str, int]) -> NormalizedRows:
+        return NormalizedRows()
+
+    def adjustment_policy(self) -> AdjustmentPolicyDeclaration:
+        """UNKNOWN, because nothing has been observed.
+
+        Not RAW_UNADJUSTED as a hopeful default: the whole point of this field
+        is that a wrong answer is invisible afterwards.
+        """
+        return AdjustmentPolicyDeclaration.UNKNOWN
+
+    def capabilities(self) -> Mapping[str, CapabilitySupport]:
+        return {
+            "daily_ohlcv": CapabilitySupport.UNKNOWN,
+            "splits": CapabilitySupport.UNKNOWN,
+            "dividends": CapabilitySupport.UNKNOWN,
+        }
 
     def limitations(self) -> list[str]:
         return [NOT_IMPLEMENTED_MESSAGE]

@@ -35,25 +35,35 @@ with no change to the package format.
 ``TRADEIT_TIINGO_TOKEN`` for continuity with the Phase 1 provider. It travels in
 an ``Authorization`` header, never in the query string, so it cannot reach a
 cache sidecar, a journal line, a log or an exception message. Every URL this
-module records is passed through :func:`redact_url` first.
+module records is passed through
+:func:`~tradeit.acquisition.redaction.redact_url` anyway — the cost is nothing
+and the failure it prevents is one careless edit away.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
-import re
 import time
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from tradeit.acquisition.base import (
     AcquisitionDataset,
+    CapabilitySupport,
     FetchOutcome,
     FetchRequest,
     FetchStatus,
     register,
 )
-from tradeit.data.packages.spec import DatasetKind
+from tradeit.acquisition.normalize import (
+    NormalizedRows,
+    normalize_metadata,
+    normalize_prices,
+)
+from tradeit.acquisition.redaction import credential_hint, redact_url
+from tradeit.data.packages.spec import AdjustmentPolicyDeclaration, DatasetKind
 from tradeit.data.providers.http import (
     HttpTransport,
     ProviderAuthError,
@@ -63,25 +73,6 @@ from tradeit.data.providers.http import (
 from tradeit.errors import ProviderError
 
 BASE_URL = "https://api.tiingo.com/tiingo/daily"
-
-#: Query parameters whose value must never be printed, whatever the vendor
-#: calls them. Matched case-insensitively.
-CREDENTIAL_PARAMS: tuple[str, ...] = ("token", "api_token", "apikey", "api_key", "key")
-
-_CREDENTIAL_RE = re.compile(
-    rf"(?i)\b({'|'.join(CREDENTIAL_PARAMS)})=[^&\s]*",
-)
-
-
-def redact_url(url: str) -> str:
-    """Replace any credential-shaped query parameter's value with ``REDACTED``.
-
-    Applied to every URL that reaches the journal, the cache sidecar or an
-    error message. This adapter puts its key in a header and so should never
-    produce a URL that needs redacting; the function runs anyway, because the
-    cost is nothing and the failure it prevents is one careless edit away.
-    """
-    return _CREDENTIAL_RE.sub(lambda m: f"{m.group(1)}=REDACTED", url)
 
 
 @register
@@ -98,6 +89,7 @@ class TiingoAcquisition:
         AcquisitionDataset.SYMBOL_META,
         AcquisitionDataset.DAILY_PRICES,
     )
+    implemented = True
     produces: tuple[DatasetKind, ...] = (
         DatasetKind.INSTRUMENTS,
         DatasetKind.SYMBOL_MAPPINGS,
@@ -137,15 +129,66 @@ class TiingoAcquisition:
         return bool(self._token)
 
     def credential_hint(self) -> str:
-        """A non-secret acknowledgement that a key is present.
+        return credential_hint(self._token)
 
-        Length and last two characters only. Enough for a person to tell "the
-        variable is set to something" from "the variable is empty", and useless
-        to anyone who reads it over their shoulder.
+    # -- declared capabilities ------------------------------------------------
+
+    def adjustment_policy(self) -> AdjustmentPolicyDeclaration:
+        """Raw exchange prints. Tiingo serves both, and this adapter reads the
+        unadjusted columns into the package's price columns."""
+        return AdjustmentPolicyDeclaration.RAW_UNADJUSTED
+
+    def capabilities(self) -> Mapping[str, CapabilitySupport]:
+        return {
+            "daily_ohlcv": CapabilitySupport.AVAILABLE,
+            "splits": CapabilitySupport.AVAILABLE,
+            "dividends": CapabilitySupport.AVAILABLE,
+            "reference_data": CapabilitySupport.AVAILABLE,
+            "intraday_ohlcv": CapabilitySupport.NOT_AVAILABLE_ON_PLAN,
+            "delisted_securities": CapabilitySupport.UNKNOWN,
+            "historical_symbol_mapping": CapabilitySupport.UNKNOWN,
+            "historical_universe_membership": CapabilitySupport.NOT_AVAILABLE_ON_PLAN,
+            "corporate_action_knowledge_timestamps": CapabilitySupport.UNKNOWN,
+            "filing_timestamps": CapabilitySupport.NOT_AVAILABLE_ON_PLAN,
+            "fundamentals": CapabilitySupport.UNKNOWN,
+        }
+
+    # -- planning ------------------------------------------------------------
+
+    def plan(self, symbols: Sequence[str], start: dt.date, end: dt.date) -> list[FetchRequest]:
+        """Metadata then prices, one symbol at a time.
+
+        No batching: Tiingo's endpoints take a single ticker in the path.
+        Metadata first, so a symbol the vendor does not know is discovered on a
+        small request rather than after asking for fifteen years of nothing.
         """
-        if not self._token:
-            return "not set"
-        return f"set ({len(self._token)} chars, ends …{self._token[-2:]})"
+        requests: list[FetchRequest] = []
+        for symbol in dict.fromkeys(s.strip().upper() for s in symbols if s.strip()):
+            requests.append(FetchRequest.one(AcquisitionDataset.SYMBOL_META, symbol))
+            requests.append(FetchRequest.one(AcquisitionDataset.DAILY_PRICES, symbol, start, end))
+        return requests
+
+    def credits_for(self, request: FetchRequest) -> int:
+        """Tiingo prices per request rather than per symbol, and its adapter
+        issues one request per symbol, so the two coincide here."""
+        return len(request.symbols)
+
+    def normalize(self, outcome: FetchOutcome, ids: Mapping[str, int]) -> NormalizedRows:
+        symbol = outcome.request.symbol
+        instrument_id = ids.get(symbol)
+        if instrument_id is None:
+            return NormalizedRows()
+        if outcome.request.dataset is AcquisitionDataset.SYMBOL_META:
+            row = outcome.rows[0] if outcome.rows else {}
+            return normalize_metadata(
+                symbol,
+                instrument_id,
+                row,
+                default_start=outcome.request.start or dt.date(1900, 1, 1),
+            )
+        if outcome.request.dataset is AcquisitionDataset.DAILY_PRICES:
+            return normalize_prices(symbol, instrument_id, outcome.rows)
+        return NormalizedRows()
 
     # -- fetching ------------------------------------------------------------
 
@@ -288,4 +331,4 @@ def _read_credential() -> str:
     return ""
 
 
-__all__ = ["BASE_URL", "CREDENTIAL_PARAMS", "TiingoAcquisition", "redact_url"]
+__all__ = ["BASE_URL", "TiingoAcquisition"]

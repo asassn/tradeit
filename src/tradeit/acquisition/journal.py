@@ -224,7 +224,7 @@ class AcquisitionJournal:
             out.append(
                 FetchRequest(
                     dataset=AcquisitionDataset(entry.dataset),
-                    symbol=entry.symbol,
+                    symbols=(entry.symbol,),
                     start=_as_date(entry.requested_start),
                     end=_as_date(entry.requested_end),
                 )

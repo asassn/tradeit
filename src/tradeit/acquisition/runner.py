@@ -36,25 +36,32 @@ import gzip
 import io
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from tradeit.acquisition.base import (
     AcquisitionDataset,
+    CapabilitySupport,
     FetchOutcome,
     FetchRequest,
     FetchStatus,
+    SymbolStatus,
 )
 from tradeit.acquisition.cache import RawCache, sha256_bytes
+from tradeit.acquisition.credits import CreditLedger
 from tradeit.acquisition.journal import AcquisitionJournal
 from tradeit.acquisition.normalize import (
     ADJUSTED_COLUMNS,
     NormalizedRows,
     assign_instrument_ids,
-    normalize_metadata,
-    normalize_prices,
+)
+from tradeit.acquisition.reconstruct import (
+    RECONSTRUCTION_COLUMNS,
+    RECONSTRUCTION_LABEL,
+    ReconstructionResult,
+    reconstruct_symbol,
 )
 from tradeit.data.packages.manifest import (
     WORKSPACE_DIRNAME,
@@ -86,12 +93,26 @@ class PackageStatus(StrEnum):
 
     VALID = "PACKAGE_VALID"
     VALID_WITH_WARNINGS = "PACKAGE_VALID_WITH_WARNINGS"
+    #: The run stopped because the plan's daily credits ran out. Everything
+    #: acquired so far is written and importable; the universe is simply not
+    #: complete yet. **Not a corrupt package** — re-running the same command
+    #: after the allowance resets continues from here.
+    INCOMPLETE_QUOTA = "ACQUISITION_INCOMPLETE_QUOTA"
     INVALID = "PACKAGE_INVALID"
 
     @property
     def snapshot_ready(self) -> bool:
-        """Whether `tradeit data import` should be run against this package."""
+        """Whether `tradeit data import` should be run against this package.
+
+        A quota-truncated package is importable — the rows in it are real — but
+        it covers fewer instruments than asked for, so importing it before the
+        run is finished produces a snapshot nobody should cite as the universe.
+        """
         return self is not PackageStatus.INVALID
+
+    @property
+    def is_complete(self) -> bool:
+        return self in (PackageStatus.VALID, PackageStatus.VALID_WITH_WARNINGS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,9 +125,14 @@ class AcquisitionOptions:
     force_refresh: bool = False
     #: Attempt only the requests a previous journal recorded as retryable.
     retry_failed_only: bool = False
-    #: Written into the manifest. `raw_unadjusted` is the truth for Tiingo's
-    #: `open`/`high`/`low`/`close` columns, which is what the package stores.
-    adjustment_policy: AdjustmentPolicyDeclaration = AdjustmentPolicyDeclaration.RAW_UNADJUSTED
+    #: Overrides the provider's own declaration. Almost never right to set:
+    #: what the price columns contain is a fact about the vendor, not a
+    #: preference, and the provider is the thing that knows it.
+    adjustment_policy: AdjustmentPolicyDeclaration | None = None
+    #: Longest the runner will sleep for a rate or credit limit before giving
+    #: up on pacing and letting the request fail. ``None`` means wait as long
+    #: as the limit requires.
+    max_wait_s: float | None = None
     #: Compress the bar file. On by default: it is the only large file, and
     #: gzip streams where Parquet does not.
     compress_bars: bool = True
@@ -126,6 +152,7 @@ class SymbolOutcome:
     instrument_id: int
     metadata: FetchStatus | None = None
     prices: FetchStatus | None = None
+    symbol_status: SymbolStatus | None = None
     bars: int = 0
     splits: int = 0
     dividends: int = 0
@@ -162,6 +189,16 @@ class AcquisitionReport:
     observed_end: dt.date | None = None
     cached_requests: int = 0
     fetched_requests: int = 0
+    ledger: CreditLedger = field(default_factory=CreditLedger)
+    #: Set when the run stopped because the plan's daily credits ran out.
+    quota_stopped: bool = False
+    #: Distinguishes "there is a problem with this package" from "this run was
+    #: cut short and can be continued".
+    problems_are_recoverable: bool = False
+    notes: list[str] = field(default_factory=list)
+    reconstruction: list[ReconstructionResult] = field(default_factory=list)
+    capabilities: dict[str, str] = field(default_factory=dict)
+    adjustment_policy: str = ""
 
     @property
     def successful(self) -> list[SymbolOutcome]:
@@ -173,11 +210,22 @@ class AcquisitionReport:
 
     @property
     def status(self) -> PackageStatus:
-        if self.problems or not self.successful:
+        if self.problems and not self.problems_are_recoverable:
             return PackageStatus.INVALID
+        if not self.successful:
+            return PackageStatus.INVALID
+        if self.quota_stopped:
+            # Everything acquired is real and importable. What is missing is
+            # the rest of the universe, and the remedy is time rather than
+            # repair — so this is its own state, not a failure.
+            return PackageStatus.INCOMPLETE_QUOTA
         if self.failed or self.findings:
             return PackageStatus.VALID_WITH_WARNINGS
         return PackageStatus.VALID
+
+    @property
+    def symbols_remaining(self) -> list[str]:
+        return sorted(s.symbol for s in self.failed)
 
     def render(self) -> str:
         status = self.status
@@ -214,8 +262,12 @@ class AcquisitionReport:
             f"Instruments written  : {self.rows.get(str(DatasetKind.INSTRUMENTS), 0):,}",
             "",
             f"Coverage             : {self.observed_start} through {self.observed_end}",
+            f"Adjustment           : {self.adjustment_policy or 'unknown'}",
+            "",
             f"Requests fetched     : {self.fetched_requests:,}",
             f"Requests from cache  : {self.cached_requests:,}",
+            *self.ledger.render(),
+            *self._projection_lines(),
             "",
             f"Raw cache            : {_human(self.raw_bytes)} in {self.raw_files:,} files",
             f"Package              : {_human(self.package_bytes)} in {len(self.files)} files",
@@ -229,6 +281,9 @@ class AcquisitionReport:
                 lines.append(f"  {item.symbol:<10} {reason[:90]}")
             lines.append("")
             lines.append("  Retry only these with:  --retry-failed")
+        if self.notes:
+            lines += ["", "Notes", "-" * 72]
+            lines += [f"  - {item}" for item in self.notes]
         if self.problems:
             # Before the findings and the limitations: these are the reasons the
             # package is unusable, and a reader scrolling past them to reach a
@@ -244,8 +299,29 @@ class AcquisitionReport:
             lines += ["", "Declared limitations (copied into the manifest)", "-" * 72]
             lines += [f"  - {item}" for item in self.limitations]
 
+        if self.reconstruction:
+            lines += ["", "Raw-price reconstruction (DERIVED, not vendor raw)", "-" * 72]
+            lines.extend(f"  {entry.summary()}" for entry in self.reconstruction[:10])
+            if len(self.reconstruction) > 10:
+                lines.append(f"  ... and {len(self.reconstruction) - 10} more")
+
+        if self.capabilities:
+            lines += ["", "Provider capabilities as exercised", "-" * 72]
+            for name, state in sorted(self.capabilities.items()):
+                lines.append(f"  {name:<38} {state}")
+
         lines += ["", "Next", "-" * 72]
-        if status.snapshot_ready:
+        if status is PackageStatus.INCOMPLETE_QUOTA:
+            lines += [
+                "  The daily credit allowance ran out. Nothing is wrong with what was",
+                "  acquired — it is simply not the whole universe yet.",
+                "",
+                "  Wait for the allowance to reset, then run the SAME command again.",
+                "  Already-downloaded symbols are read from disk and cost no credits.",
+                "",
+                f"  Symbols still needed: {len(self.failed)}",
+            ]
+        elif status.snapshot_ready:
             lines += [
                 f"  tradeit data inspect {self.output}",
                 f"  tradeit data import  {self.output}",
@@ -255,9 +331,44 @@ class AcquisitionReport:
             lines.append("  Fix the problems above and re-run. Nothing was imported.")
         return "\n".join(lines)
 
+    def _projection_lines(self) -> list[str]:
+        """What finishing the universe would cost, from measured usage.
+
+        Measured rather than documented: the projection is a statement about
+        this account and this plan. No wall-clock estimate is offered, because
+        the only honest input to one would be the vendor's own throttling
+        behaviour, which varies.
+        """
+        done = len(self.successful)
+        remaining = len(self.failed)
+        per_symbol = self.ledger.measured_cost_per_symbol(done)
+        if per_symbol is None or not remaining:
+            return []
+        needed = round(per_symbol * remaining)
+        return [
+            f"Measured cost        : {per_symbol:.1f} credits per completed symbol",
+            f"Estimated to finish  : ~{needed:,} more credits for {remaining} symbol(s)",
+        ]
+
     def to_payload(self) -> dict[str, Any]:
         return {
             "status": str(self.status),
+            "credits": self.ledger.to_payload(),
+            "quota_stopped": self.quota_stopped,
+            "capabilities": dict(self.capabilities),
+            "adjustment_policy": self.adjustment_policy,
+            "symbols_remaining": self.symbols_remaining,
+            "reconstruction": [
+                {
+                    "symbol": item.symbol,
+                    "quality": str(item.quality),
+                    "sessions_changed": item.sessions_changed,
+                    "sessions_total": item.sessions_total,
+                    "splits_used": len(item.splits_used),
+                    "label": RECONSTRUCTION_LABEL,
+                }
+                for item in self.reconstruction
+            ],
             "provider": self.provider,
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
@@ -272,6 +383,7 @@ class AcquisitionReport:
             "observed_end": self.observed_end.isoformat() if self.observed_end else None,
             "findings": list(self.findings),
             "problems": list(self.problems),
+            "notes": list(self.notes),
             "limitations": list(self.limitations),
             "missing_datasets": list(self.missing_datasets),
             "tool_version": ACQUISITION_TOOL_VERSION,
@@ -292,7 +404,13 @@ def estimate_size(symbols: Sequence[str], start: dt.date, end: dt.date) -> str:
 
 
 class AcquisitionRunner:
-    """One acquisition run against one provider."""
+    """One acquisition run against one provider.
+
+    Knows nothing about any vendor's endpoints. It asks the provider for a plan,
+    fetches each request through the raw cache, journals the outcome, hands
+    successful outcomes back to the provider to normalize, accounts for credits,
+    and writes the package. Adding a third vendor touches none of this.
+    """
 
     def __init__(
         self,
@@ -313,6 +431,9 @@ class AcquisitionRunner:
         self.workspace = self.output / WORKSPACE_DIRNAME
         self.cache = RawCache(self.workspace)
         self.journal = AcquisitionJournal(self.workspace / "journal.jsonl")
+        self.ledger = CreditLedger(
+            per_minute_allowance=getattr(provider, "credits_per_minute", None)
+        )
 
     # -- the run -------------------------------------------------------------
 
@@ -322,14 +443,15 @@ class AcquisitionRunner:
             options=self.options,
             output=self.output,
             started_at=dt.datetime.now(dt.UTC),
-            limitations=list(self.provider.limitations()),
             missing_datasets=[str(k) for k in self.provider.missing_datasets()],
+            ledger=self.ledger,
         )
         if not self.provider.has_credential():
             report.problems.append(
                 f"no API key found. Set {self.provider.credential_env} and re-run. "
                 "Nothing was requested."
             )
+            report.limitations = list(self.provider.limitations())
             report.finished_at = dt.datetime.now(dt.UTC)
             return report
 
@@ -344,12 +466,48 @@ class AcquisitionRunner:
             return report
 
         collected = NormalizedRows()
-        for symbol in targets:
-            outcome = self._acquire_symbol(symbol, collected, report)
-            report.symbols.append(outcome)
+        requests = self.provider.plan(targets, self.options.start, self.options.end)
+        symbol_state: dict[str, SymbolOutcome] = {
+            symbol: SymbolOutcome(symbol=symbol, instrument_id=self.ids[symbol])
+            for symbol in targets
+        }
 
+        for request in requests:
+            outcome = self._fetch(request, report)
+
+            if outcome.status.stops_the_run:
+                # The daily allowance is gone. Waiting will not help and every
+                # further request would spend a retry budget on a certainty, so
+                # the run stops here with everything acquired so far intact.
+                self.ledger.daily_exhausted = True
+                report.quota_stopped = True
+                report.problems_are_recoverable = True
+                report.notes.append(
+                    f"stopped after {self.ledger.requests} request(s): "
+                    f"{outcome.error or 'the daily credit allowance is exhausted'}"
+                )
+                break
+
+            self._record_symbol_states(request, outcome, symbol_state)
+            if not outcome.status.is_success:
+                continue
+
+            normalized = self.provider.normalize(outcome, self.ids)
+            collected.extend(normalized)
+            self._tally(request, normalized, symbol_state)
+
+        report.symbols = [symbol_state[s] for s in targets]
+        self._reconstruct(collected, report)
         self._write_package(collected, report)
         report.findings.extend(collected.findings)
+        report.findings.extend(self._coverage_findings())
+        # Read *after* the run, not before: a provider discovers what its plan
+        # actually includes by being used, and limitations captured up front
+        # would contradict the capability table three lines below them.
+        report.limitations = list(self.provider.limitations())
+        report.capabilities = {
+            name: str(state) for name, state in self.provider.capabilities().items()
+        }
         report.finished_at = dt.datetime.now(dt.UTC)
         report.raw_bytes = self.cache.total_bytes()
         report.raw_files = self.cache.file_count()
@@ -359,79 +517,133 @@ class AcquisitionRunner:
         if not self.options.retry_failed_only:
             return self.symbols
         wanted = {r.symbol for r in self.journal.failed_requests()}
-        return [s for s in self.symbols if s in wanted]
+        # Also retry anything the journal has never seen succeed: a run that
+        # stopped at a quota wall never issued those requests at all, so they
+        # are absent rather than failed.
+        succeeded = {
+            e.symbol
+            for e in self.journal.entries
+            if e.succeeded and e.dataset == str(AcquisitionDataset.DAILY_PRICES)
+        }
+        return [s for s in self.symbols if s in wanted or s not in succeeded]
 
-    # -- one symbol ----------------------------------------------------------
+    def _record_symbol_states(
+        self,
+        request: FetchRequest,
+        outcome: FetchOutcome,
+        state: dict[str, SymbolOutcome],
+    ) -> None:
+        """Attribute a batch outcome to its members individually.
 
-    def _acquire_symbol(
-        self, symbol: str, collected: NormalizedRows, report: AcquisitionReport
-    ) -> SymbolOutcome:
-        instrument_id = self.ids[symbol]
-        outcome = SymbolOutcome(symbol=symbol, instrument_id=instrument_id)
+        The point of per-symbol attribution: one unknown ticker in a batch of
+        eight must not discard the other seven, and must not be recorded as a
+        failure of all eight.
+        """
+        if request.dataset is not AcquisitionDataset.DAILY_PRICES:
+            return
+        for symbol in request.symbols:
+            item = state.get(symbol)
+            if item is None:
+                continue
+            item.prices = outcome.status
+            symbol_status = outcome.per_symbol.get(symbol)
+            if symbol_status is not None:
+                item.symbol_status = symbol_status
+                if symbol_status is not SymbolStatus.VALID and not item.error:
+                    item.error = f"vendor reports {symbol_status}"
+            elif not outcome.status.is_success and not item.error:
+                item.error = outcome.error
 
-        meta_request = FetchRequest(dataset=AcquisitionDataset.SYMBOL_META, symbol=symbol)
-        meta = self._fetch(meta_request, report)
-        outcome.metadata = meta.status
-        if meta.status.is_success and meta.rows:
-            collected.extend(
-                normalize_metadata(
-                    symbol, instrument_id, meta.rows[0], default_start=self.options.start
-                )
-            )
-        elif not meta.status.is_success:
-            # Metadata is useful and not essential: a package with prices and a
-            # placeholder instrument row is importable, one with neither is not.
-            collected.extend(
-                normalize_metadata(symbol, instrument_id, {}, default_start=self.options.start)
-            )
-            collected.findings.append(
-                f"{symbol}: metadata unavailable ({meta.status}); the instrument row "
-                "carries the ticker as its name and an UNKNOWN exchange"
-            )
+    def _tally(
+        self,
+        request: FetchRequest,
+        normalized: NormalizedRows,
+        state: dict[str, SymbolOutcome],
+    ) -> None:
+        """Count what this response contributed, per symbol."""
+        by_instrument: dict[str, SymbolOutcome] = {
+            str(item.instrument_id): item for item in state.values()
+        }
+        for dataset, rows in normalized.rows.items():
+            for row in rows:
+                item = by_instrument.get(row.get("instrument_id", ""))
+                if item is None:
+                    continue
+                if dataset is DatasetKind.DAILY_BARS:
+                    item.bars += 1
+                    session = dt.date.fromisoformat(row["session_date"])
+                    item.first_session = min(item.first_session or session, session)
+                    item.last_session = max(item.last_session or session, session)
+                elif dataset is DatasetKind.SPLITS:
+                    item.splits += 1
+                elif dataset is DatasetKind.DIVIDENDS:
+                    item.dividends += 1
+        _ = request
 
-        price_request = FetchRequest(
-            dataset=AcquisitionDataset.DAILY_PRICES,
-            symbol=symbol,
-            start=self.options.start,
-            end=self.options.end,
+    def _coverage_findings(self) -> list[str]:
+        checker = getattr(self.provider, "coverage_findings", None)
+        if checker is None:
+            return []
+        found = checker(self.options.start, self.options.end)
+        return list(found)
+
+    # -- reconstruction ------------------------------------------------------
+
+    def _reconstruct(self, collected: NormalizedRows, report: AcquisitionReport) -> None:
+        """Invert a vendor's split adjustment, where there is one to invert.
+
+        Only runs when the provider declares its prices split-adjusted. For a
+        raw-price vendor there is nothing to reconstruct, and producing a
+        sidecar of identical numbers would imply otherwise.
+        """
+        policy = self.provider.adjustment_policy()
+        if policy is not AdjustmentPolicyDeclaration.SPLIT_ADJUSTED:
+            return
+
+        splits_by_symbol = getattr(self.provider, "splits_by_symbol", {})
+        support = getattr(self.provider, "support", {})
+        split_support = support.get(AcquisitionDataset.SPLITS, CapabilitySupport.UNKNOWN)
+        available = split_support in (
+            CapabilitySupport.AVAILABLE,
+            CapabilitySupport.EMPTY_VALID_RESPONSE,
         )
-        prices = self._fetch(price_request, report)
-        outcome.prices = prices.status
-        if not prices.status.is_success:
-            outcome.error = prices.error
-            return outcome
+        reason = "" if available else f"the splits endpoint reported {split_support}"
 
-        normalized = normalize_prices(symbol, instrument_id, prices.rows)
-        collected.extend(normalized)
-        outcome.bars = normalized.count(DatasetKind.DAILY_BARS)
-        outcome.splits = normalized.count(DatasetKind.SPLITS)
-        outcome.dividends = normalized.count(DatasetKind.DIVIDENDS)
-        sessions = [
-            dt.date.fromisoformat(row["session_date"])
-            for row in normalized.rows.get(DatasetKind.DAILY_BARS, [])
-        ]
-        if sessions:
-            outcome.first_session = min(sessions)
-            outcome.last_session = max(sessions)
-        elif prices.status is FetchStatus.EMPTY:
-            outcome.error = "the vendor returned no rows for this symbol and date range"
-        return outcome
+        bars_by_instrument: dict[str, list[dict[str, str]]] = {}
+        for row in collected.rows.get(DatasetKind.DAILY_BARS, []):
+            bars_by_instrument.setdefault(row["instrument_id"], []).append(row)
+
+        for symbol, instrument_id in self.ids.items():
+            bars = bars_by_instrument.get(str(instrument_id))
+            if not bars:
+                continue
+            result = reconstruct_symbol(
+                symbol,
+                sorted(bars, key=lambda r: r["session_date"]),
+                splits_by_symbol.get(symbol, []),
+                splits_available=available,
+                unavailable_reason=reason,
+            )
+            report.reconstruction.append(result)
+
+    # -- one request ---------------------------------------------------------
 
     def _fetch(self, request: FetchRequest, report: AcquisitionReport) -> FetchOutcome:
-        """Fetch through the cache, journal the result either way."""
+        """Fetch through the cache, pace on credits, journal the result."""
         if self.options.force_refresh:
             self.cache.discard(self.provider.name, request)
 
         entry = self.cache.get(self.provider.name, request)
         if entry is not None:
             raw = entry.read()
-            rows = _decode_rows(self.provider, raw)
+            rows, per_symbol = _replay(self.provider, request, raw)
             outcome = FetchOutcome(
                 request=request,
                 status=FetchStatus.CACHED,
                 url=entry.url,
                 raw=raw,
                 rows=rows,
+                per_symbol=per_symbol,
             )
             report.cached_requests += 1
             self.journal.record(
@@ -442,8 +654,15 @@ class AcquisitionRunner:
             )
             return outcome
 
+        cost = self._cost_of(request)
+        waited = self._pace(cost)
+
         fetched: FetchOutcome = self.provider.fetch(request)
         report.fetched_requests += 1
+        self.ledger.record(fetched.credits, charged_fallback=cost)
+        if waited:
+            fetched = replace(fetched, waited_s=waited)
+
         source_file = ""
         digest = ""
         if fetched.status.is_success and fetched.raw:
@@ -453,10 +672,48 @@ class AcquisitionRunner:
         self.journal.record(self.provider.name, fetched, source_file=source_file, sha256=digest)
         return fetched
 
-    # -- writing -------------------------------------------------------------
+    def _cost_of(self, request: FetchRequest) -> int:
+        pricer = getattr(self.provider, "credits_for", None)
+        return int(pricer(request)) if pricer else len(request.symbols)
+
+    def _pace(self, cost: int) -> float:
+        """Wait if spending ``cost`` now would breach the plan's allowance.
+
+        Sleeping rather than failing: a per-minute wall is a delay, not an
+        error, and turning it into one would abandon a run that only needed to
+        breathe. The wait is recorded so a slow run is explicable.
+        """
+        delay = self.ledger.should_pause(cost)
+        if delay <= 0:
+            return 0.0
+        if self.options.max_wait_s is not None and delay > self.options.max_wait_s:
+            return 0.0
+        time.sleep(delay)
+        self.ledger.note_wait(delay)
+        self.ledger.open_new_window()
+        return delay
+
+    def _policy(self) -> AdjustmentPolicyDeclaration:
+        """What the package's price columns actually contain.
+
+        The provider decides; the option only overrides. This is the field that
+        stops split-adjusted prices being labelled raw, and getting it from the
+        adapter rather than from a default is what makes that automatic for
+        every future vendor.
+        """
+        override = self.options.adjustment_policy
+        if override is not None:
+            return override
+        policy = self.provider.adjustment_policy()
+        return (
+            policy
+            if isinstance(policy, AdjustmentPolicyDeclaration)
+            else (AdjustmentPolicyDeclaration.UNKNOWN)
+        )
 
     def _write_package(self, collected: NormalizedRows, report: AcquisitionReport) -> None:
         self.output.mkdir(parents=True, exist_ok=True)
+        report.adjustment_policy = str(self._policy())
         files: list[DatasetFile] = []
 
         for dataset in (
@@ -485,6 +742,18 @@ class AcquisitionRunner:
                     rows=len(rows),
                 )
             )
+
+        reconstructed = [row for item in report.reconstruction for row in item.rows]
+        if reconstructed:
+            # A DERIVED artefact, deliberately outside the package's declared
+            # files. It carries the vendor's original value, the factor, the
+            # splits responsible and the algorithm version, so somebody who
+            # disagrees with the method can redo it without re-downloading —
+            # and so nothing here can be mistaken for a vendor price.
+            path = self.workspace / "reconstructed_raw_prices.csv.gz"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _write_csv(path, reconstructed, list(RECONSTRUCTION_COLUMNS), compress=True)
+            report.files[path.name] = path.stat().st_size
 
         if collected.adjusted:
             # Not a package dataset: the package's prices are the raw ones. This
@@ -555,7 +824,7 @@ class AcquisitionRunner:
                 instruments=len(report.successful) or None,
             ),
             timezone=self.options.timezone,
-            adjustment_policy=self.options.adjustment_policy,
+            adjustment_policy=self._policy(),
             files=tuple(files),
             known_limitations=tuple(limitations),
             vendor_dataset=f"{self.provider.name}:daily",
@@ -605,29 +874,37 @@ def _write_csv(
         path.write_bytes(payload)
 
 
-def _decode_rows(provider: Any, raw: bytes) -> tuple[dict[str, Any], ...]:
-    """Turn a cached response body back into rows using the provider's own reader.
+def _replay(
+    provider: Any, request: FetchRequest, raw: bytes
+) -> tuple[tuple[dict[str, Any], ...], dict[str, SymbolStatus]]:
+    """Re-decode a cached body through the provider that produced it.
 
     The provider owns the response shape, so replaying a cached file has to go
-    through the same decoding as a live one. A cached body that no longer
-    decodes yields no rows rather than raising: the digest matched, so the file
-    is intact, and the likely cause is an adapter change — which is a finding
-    for the report, not a crash.
+    through the same interpretation as a live one — otherwise a resumed run and
+    a fresh run would disagree about the same bytes.
+
+    A cached body that no longer decodes yields no rows rather than raising: the
+    digest matched, so the file is intact, and the likely cause is an adapter
+    change. That is a finding for the report, not a crash.
     """
     import json
 
     try:
         decoded = json.loads(raw)
     except json.JSONDecodeError:
-        return ()
+        return (), {}
+
+    interpreter = getattr(provider, "_rows_and_statuses", None)
+    if interpreter is not None:
+        rows, statuses = interpreter(request, decoded)
+        return tuple(rows), dict(statuses)
+
     reader = getattr(provider, "_rows", None)
-    if reader is None:
-        return (
-            tuple(row for row in decoded if isinstance(row, dict))
-            if isinstance(decoded, list)
-            else ()
-        )
-    return tuple(reader(decoded))
+    if reader is not None:
+        return tuple(reader(decoded)), {}
+    if isinstance(decoded, list):
+        return tuple(row for row in decoded if isinstance(row, dict)), {}
+    return (), {}
 
 
 def _human(size: int) -> str:

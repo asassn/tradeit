@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import inspect
 import json
 import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from tradeit.acquisition.base import available_providers, get_provider_class
 from tradeit.acquisition.runner import (
@@ -209,10 +211,12 @@ def cmd_acquire(args: argparse.Namespace) -> int:
     start = dt.date.fromisoformat(args.start)
     end = dt.date.fromisoformat(args.end) if args.end else _last_completed_session()
 
-    provider_class = get_provider_class(args.provider)
-    provider = provider_class(rate_limit_per_minute=args.rate_limit)
+    provider = _build_provider(args)
 
     print(f"provider   : {provider.name}")
+    policy = getattr(provider, "adjustment_policy", None)
+    if policy is not None:
+        print(f"prices     : {policy()}")
     hint = getattr(provider, "credential_hint", None)
     print(f"credential : {hint() if hint else 'unknown'}   (from {provider.credential_env})")
     print(f"symbols    : {len(symbols)}")
@@ -246,6 +250,27 @@ def cmd_acquire(args: argparse.Namespace) -> int:
     return 0 if report.status.snapshot_ready else 1
 
 
+def _build_provider(args: argparse.Namespace) -> Any:
+    """Construct the adapter, passing only options it accepts.
+
+    Adapters take different knobs — Tiingo has no batch size, Twelve Data has
+    no per-request rate limit — and a runner that passed all of them to all of
+    them would make adding a provider mean editing the CLI. Filtering on the
+    signature keeps that seam intact.
+    """
+    provider_class = get_provider_class(args.provider)
+    candidates = {
+        "rate_limit_per_minute": args.rate_limit,
+        "credits_per_minute": args.rate_limit,
+        "batch_size": args.batch_size,
+    }
+    accepted = inspect.signature(provider_class).parameters
+    kwargs = {
+        name: value for name, value in candidates.items() if value is not None and name in accepted
+    }
+    return provider_class(**kwargs)
+
+
 def _resolve_symbols(args: argparse.Namespace) -> list[str]:
     if args.symbols:
         raw = ",".join(args.symbols)
@@ -276,7 +301,7 @@ def cmd_providers(_: argparse.Namespace) -> int:
         env = getattr(cls, "credential_env", "?")
         present = "set" if os.environ.get(env) else "NOT SET"
         state = "ready" if implemented else "stub (see the module docstring)"
-        print(f"{name:<10} {state:<34} {env}={present}")
+        print(f"{name:<12} {state:<34} {env}={present}")
     return 0
 
 
@@ -391,7 +416,20 @@ def add_data_commands(sub: argparse._SubParsersAction) -> None:  # type: ignore[
         "--rate-limit",
         type=int,
         default=None,
-        help="requests per minute; defaults to the provider's documented limit",
+        help=(
+            "requests or credits per minute, depending on how the provider is "
+            "priced; defaults to the provider's documented limit"
+        ),
+    )
+    acquire.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help=(
+            "symbols per request, for providers that accept a list. Larger is "
+            "fewer round trips and a costlier retry; it does not reduce credits "
+            "on a per-symbol-priced API"
+        ),
     )
     acquire.add_argument(
         "--estimate-only",
