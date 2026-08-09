@@ -23,3 +23,28 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# ---------------------------------------------------------------------------
+# Acquired market data.
+#
+# Narrowly scoped on purpose. An earlier unanchored `data/` rule in this file
+# also matched `src/tradeit/data/` and silently kept the entire data package out
+# of every commit; a fresh clone did not build. Every pattern below is either
+# anchored to the repository root (leading `/`) or names a directory that no
+# source tree uses (`_acquisition`).
+#
+# LICENSING: market-data licences commonly forbid redistribution. Do not push
+# bulk vendor data to a public repository unless the licence explicitly permits
+# it. Source code, manifests, small deterministic fixtures and validation
+# reports are fine; the raw vendor responses and the bar files are not.
+# ---------------------------------------------------------------------------
+
+# The acquisition workspace: raw vendor responses, journal, adjusted-price
+# sidecar. Lives inside a package directory and is always vendor data.
+**/_acquisition/
+
+# Conventional acquisition output directories at the repository root.
+/empirical-data/
+/empirical-smoke/
+/market-data/
+/packages/

@@ -149,11 +149,15 @@ def _validate_split(record: NormalizedRecord) -> tuple[DataQualityFlag, ...]:
 
 
 def _validate_dividend(record: NormalizedRecord) -> tuple[DataQualityFlag, ...]:
-    amount = record.get("amount")
+    # The contract column is `cash_amount`, not `amount`. An earlier version of
+    # this validator read `amount`, which is absent from every conforming
+    # package, so every dividend row would have been quarantined as "amount is
+    # required" — a failure that looks like bad vendor data and is not.
+    amount = record.get("cash_amount")
     if amount is None:
-        raise ValidationFailure("amount is required for a dividend")
+        raise ValidationFailure("cash_amount is required for a dividend")
     if amount < 0:
-        raise ValidationFailure(f"amount={amount} is negative")
+        raise ValidationFailure(f"cash_amount={amount} is negative")
     ex_date = record.get("ex_date")
     pay_date = record.get("pay_date")
     if ex_date and pay_date and pay_date < ex_date:

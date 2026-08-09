@@ -351,7 +351,7 @@ def _dividend(record: PointInTimeRecord, source: str) -> Any:
         knowledge_time=record.knowledge_time,
         knowledge_source=str(record.knowledge_source),
         ratio=Decimal(1),
-        cash_amount=values["amount"],
+        cash_amount=values["cash_amount"],
         source=source,
     )
 

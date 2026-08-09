@@ -24,17 +24,28 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
 
+from tradeit.acquisition.base import available_providers, get_provider_class
+from tradeit.acquisition.runner import (
+    AcquisitionOptions,
+    AcquisitionRunner,
+    estimate_size,
+)
 from tradeit.data.packages.database import DatabaseSink
 from tradeit.data.packages.importer import (
     ImportOptions,
     PackageImporter,
     inspect_package,
 )
-from tradeit.data.packages.manifest import build_manifest_template, load_manifest
+from tradeit.data.packages.manifest import (
+    WORKSPACE_DIRNAME,
+    build_manifest_template,
+    load_manifest,
+)
 from tradeit.data.packages.pointintime import KnowledgeTimePolicy, describe_policy
 from tradeit.data.packages.readers import resolve_package
 from tradeit.data.packages.sinks import CountingSink, JsonlSink, RecordSink
@@ -183,6 +194,92 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0 if usable else 1
 
 
+def cmd_acquire(args: argparse.Namespace) -> int:
+    """Download real market data from a vendor into a ready-to-import package.
+
+    Runs on the operator's own machine. Nothing in the restricted build
+    environment can reach a provider, which is why this command exists and why
+    its tests use recorded fixtures rather than the network.
+    """
+    symbols = _resolve_symbols(args)
+    if not symbols:
+        print("no symbols to acquire", file=sys.stderr)
+        return 2
+
+    start = dt.date.fromisoformat(args.start)
+    end = dt.date.fromisoformat(args.end) if args.end else _last_completed_session()
+
+    provider_class = get_provider_class(args.provider)
+    provider = provider_class(rate_limit_per_minute=args.rate_limit)
+
+    print(f"provider   : {provider.name}")
+    hint = getattr(provider, "credential_hint", None)
+    print(f"credential : {hint() if hint else 'unknown'}   (from {provider.credential_env})")
+    print(f"symbols    : {len(symbols)}")
+    print(f"range      : {start} .. {end}")
+    print(f"output     : {args.output}")
+    print(f"estimate   : {estimate_size(symbols, start, end)}")
+    print()
+    if args.estimate_only:
+        print("--estimate-only: nothing was requested.")
+        return 0
+
+    options = AcquisitionOptions(
+        start=start,
+        end=end,
+        force_refresh=args.force_refresh,
+        retry_failed_only=args.retry_failed,
+        package_name=args.name or "",
+    )
+    runner = AcquisitionRunner(provider, symbols, Path(args.output), options)
+    report = runner.run()
+    print(report.render())
+
+    payload_path = Path(args.output) / WORKSPACE_DIRNAME / "acquisition_report.json"
+    payload_path.parent.mkdir(parents=True, exist_ok=True)
+    payload_path.write_text(
+        json.dumps(report.to_payload(), indent=2, sort_keys=True), encoding="utf-8"
+    )
+    print(f"\nfull report: {payload_path}")
+    print(f"journal    : {Path(args.output) / WORKSPACE_DIRNAME / 'journal.jsonl'}")
+
+    return 0 if report.status.snapshot_ready else 1
+
+
+def _resolve_symbols(args: argparse.Namespace) -> list[str]:
+    if args.symbols:
+        raw = ",".join(args.symbols)
+        return [s.strip().upper() for s in raw.split(",") if s.strip()]
+    universe = default_universe()
+    return sorted(universe.tickers)
+
+
+def _last_completed_session() -> dt.date:
+    """Yesterday, in US Eastern terms.
+
+    Not today: a session that has not closed produces a partial bar, and a
+    partial bar imported as a complete one is the exact causality error the
+    breakout engine's intraday handling exists to prevent. Erring one day early
+    costs one session and cannot be wrong in the dangerous direction.
+    """
+    from zoneinfo import ZoneInfo
+
+    eastern = dt.datetime.now(ZoneInfo("America/New_York")).date()
+    return eastern - dt.timedelta(days=1)
+
+
+def cmd_providers(_: argparse.Namespace) -> int:
+    """List acquisition providers and whether each is usable right now."""
+    for name in available_providers():
+        cls = get_provider_class(name)
+        implemented = getattr(cls, "implemented", True)
+        env = getattr(cls, "credential_env", "?")
+        present = "set" if os.environ.get(env) else "NOT SET"
+        state = "ready" if implemented else "stub (see the module docstring)"
+        print(f"{name:<10} {state:<34} {env}={present}")
+    return 0
+
+
 def cmd_datasets(_: argparse.Namespace) -> int:
     """List the datasets a package may contain and what each unlocks."""
     for kind, spec in DATASET_SPECS.items():
@@ -258,6 +355,54 @@ def add_data_commands(sub: argparse._SubParsersAction) -> None:  # type: ignore[
     )
     imp.add_argument("--code-version", default=None)
     imp.set_defaults(func=cmd_import)
+
+    acquire = data_sub.add_parser(
+        "acquire", help="download real market data into a ready-to-import package"
+    )
+    acquire.add_argument("--provider", default="tiingo", help="acquisition provider")
+    acquire.add_argument(
+        "--symbols",
+        nargs="*",
+        default=None,
+        help="explicit tickers, comma- or space-separated. Omit for the validation universe",
+    )
+    acquire.add_argument(
+        "--universe",
+        default="validation",
+        help="named universe to acquire when --symbols is not given",
+    )
+    acquire.add_argument("--start", default="2010-01-01", help="ISO date")
+    acquire.add_argument(
+        "--end", default=None, help="ISO date; defaults to the last completed session"
+    )
+    acquire.add_argument("--output", required=True, help="package directory to create")
+    acquire.add_argument("--name", default=None, help="package name recorded in the manifest")
+    acquire.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="re-download even where the raw cache already holds the response",
+    )
+    acquire.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="attempt only the requests a previous run recorded as retryable",
+    )
+    acquire.add_argument(
+        "--rate-limit",
+        type=int,
+        default=None,
+        help="requests per minute; defaults to the provider's documented limit",
+    )
+    acquire.add_argument(
+        "--estimate-only",
+        action="store_true",
+        help="print the size estimate and exit without requesting anything",
+    )
+    acquire.set_defaults(func=cmd_acquire)
+
+    data_sub.add_parser(
+        "providers", help="list acquisition providers and credential status"
+    ).set_defaults(func=cmd_providers)
 
     validate = sub.add_parser("validate", help="run the empirical checks over a snapshot")
     validate.add_argument("--snapshot", required=True, help="snapshot id from a data import")

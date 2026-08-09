@@ -59,6 +59,17 @@ _HASH_CHUNK = 1 << 20
 #: importer reports its absence rather than failing obscurely inside pandas.
 SUPPORTED_SUFFIXES: tuple[str, ...] = (".csv", ".csv.gz", ".tsv", ".tsv.gz", ".parquet")
 
+#: Reserved directory name inside a package. Everything under it is provenance
+#: rather than data — the acquisition tool's raw vendor responses, its journal,
+#: its report — and is deliberately not declared in the manifest.
+#:
+#: It needs a name because :func:`verify_files` otherwise reports every raw
+#: response as an undeclared data file and the importer aborts. The exception is
+#: one directory, named here, rather than a general "ignore what you do not
+#: recognise": an undeclared file at the package root is a file whose provenance
+#: nobody can state, and that check is worth keeping sharp.
+WORKSPACE_DIRNAME = "_acquisition"
+
 
 def file_digest(path: Path) -> str:
     """SHA-256 of a file's bytes, streamed."""
@@ -336,6 +347,8 @@ def verify_files(manifest: PackageManifest, root: Path) -> list[str]:
         if not candidate.is_file() or candidate.name == "manifest.toml":
             continue
         relative = str(candidate.relative_to(root))
+        if candidate.relative_to(root).parts[0] == WORKSPACE_DIRNAME:
+            continue
         if relative not in declared and any(
             relative.endswith(suffix) for suffix in SUPPORTED_SUFFIXES
         ):
@@ -415,6 +428,7 @@ def build_manifest_template(
 
 __all__ = [
     "SUPPORTED_SUFFIXES",
+    "WORKSPACE_DIRNAME",
     "Coverage",
     "DatasetFile",
     "PackageManifest",

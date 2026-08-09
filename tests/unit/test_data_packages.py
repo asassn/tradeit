@@ -507,7 +507,7 @@ class TestValidation:
         record = make_normalized(
             DatasetKind.DIVIDENDS,
             {
-                "amount": Decimal("0.5"),
+                "cash_amount": Decimal("0.5"),
                 "ex_date": dt.date(2020, 5, 1),
                 "pay_date": dt.date(2020, 4, 1),
             },

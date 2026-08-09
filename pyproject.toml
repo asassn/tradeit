@@ -26,6 +26,9 @@ dev = [
 
 [project.scripts]
 tradeit = "tradeit.cli:main"
+# Data and validation commands without loading the platform settings, so the
+# acquisition path works on a laptop with no database configured.
+tradeit-data = "tradeit.cli_data:main"
 
 [build-system]
 requires = ["hatchling"]
