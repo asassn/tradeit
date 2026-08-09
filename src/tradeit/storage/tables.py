@@ -927,41 +927,305 @@ class PatternLabel(Base):
 
 
 class BreakoutEvent(Base):
-    """Append-only log of breakout attempts and their resolution.
+    """One breakout attempt at one boundary, from first approach to resolution.
 
-    Every status transition is a row, so the sequence approaching → triggered →
-    confirmed (or failed) is recoverable in full. This is what makes it possible
-    to measure the false-breakout rate, which is the number that decides whether
-    the confirmation rules are earning their keep.
+    **One row per attempt, not one per session and not one per status.** The
+    Phase 2 draft keyed uniqueness on ``(instrument, pattern, session, status)``,
+    which is a log rather than an identity: an attempt had no row of its own, so
+    "how many attempts has this pattern made at this level?" was unanswerable
+    and the attempt history item 26 requires could not exist. Identity now keys
+    on ``event_key``, a content hash of the instrument, timeframe, pattern and
+    attempt number.
+
+    This row holds *current* state. Everything historical lives in
+    ``breakout_observations``, which is append-only, so an event that failed on
+    Thursday still records that it was CONFIRMED on Tuesday.
+
+    The frozen breakout boundary is stored in full rather than referenced
+    through the pattern, and that is deliberate: the pattern layer legitimately
+    refines its levels as touches accumulate, so an event read back through a
+    live pattern would be judged against a level that partly reflects the
+    breakout it is judging.
     """
 
     __tablename__ = "breakout_events"
 
     id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    #: Stable across the attempt's life. Content hash of instrument, timeframe,
+    #: pattern identity and attempt number.
+    event_key: Mapped[str] = mapped_column(String(32), nullable=False)
     instrument_id: Mapped[int] = mapped_column(
         ForeignKey("instruments.instrument_id", ondelete="CASCADE"), nullable=False
     )
     pattern_id: Mapped[int | None] = mapped_column(ForeignKey("patterns.id", ondelete="SET NULL"))
-    session_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False)
-    pivot_price: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
-    trigger_price: Mapped[Decimal | None] = mapped_column(PRICE)
-    distance_to_pivot_pct: Mapped[float | None] = mapped_column(Float)
-    volume_ratio: Mapped[float | None] = mapped_column(Float)
-    follow_through_pct: Mapped[float | None] = mapped_column(Float)
-    run_manifest_id: Mapped[int] = mapped_column(
-        ForeignKey("run_manifests.id", ondelete="RESTRICT"), nullable=False
+    #: The pattern's own identity key, kept alongside the foreign key so an
+    #: event survives the pattern row being pruned without losing what it was
+    #: attached to.
+    pattern_key: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False, default="1d")
+    #: 1 for the first go at this boundary. Never reused, never overwritten.
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    #: Provenance across both layers. Without all of these a stored event
+    #: cannot be reproduced from the data that produced it.
+    pattern_detector_name: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    pattern_detector_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pattern_config_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    breakout_config_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    scorer_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    data_snapshot_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    #: Which confirmation policy the event was evaluated under. Two events under
+    #: different profiles are not comparable, and a stored state that does not
+    #: say which policy produced it cannot be interpreted.
+    profile: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(32))
+    terminal_reason: Mapped[str | None] = mapped_column(String(40))
+    #: Which of momentum / retest / acceptance produced a confirmation.
+    confirmed_path: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
+
+    opened_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    #: The three timestamps item 1 asks for, kept apart because they answer
+    #: different questions and are frequently different days.
+    first_approach_session: Mapped[dt.date | None] = mapped_column(Date)
+    first_penetration_session: Mapped[dt.date | None] = mapped_column(Date)
+    first_qualifying_close_session: Mapped[dt.date | None] = mapped_column(Date)
+    confirmed_session: Mapped[dt.date | None] = mapped_column(Date)
+    last_observed_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
+
+    #: The frozen boundary. ``tolerance_pct`` and ``atr_at_open`` are stored so
+    #: the zone can be reconstructed exactly rather than recomputed against
+    #: whatever volatility is current when the row is read.
+    boundary_level: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    boundary_anchor_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    boundary_tolerance_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    boundary_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    boundary_method: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    boundary_touches: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    boundary_slope: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    atr_at_open: Mapped[float | None] = mapped_column(Float)
+    pattern_type: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    pattern_quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    #: Frozen at the breakout bar; see ADR-0021.
+    breakout_quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    #: Recomputed each session from post-breakout evidence only.
+    confirmation_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    evidence_coverage: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    breakout_close: Mapped[Decimal | None] = mapped_column(PRICE)
+    breakout_low: Mapped[Decimal | None] = mapped_column(PRICE)
+    breakout_volume: Mapped[float | None] = mapped_column(Float)
+    qualifying_closes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rejection_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    gap_class: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
+    #: "no_earnings_nearby" | "earnings_event_nearby" | "post_earnings_gap" |
+    #: "unknown_event_context". The last is not a synonym for the first: an
+    #: event evaluated without an earnings calendar must not be readable as one
+    #: where the answer was no.
+    earnings_context: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unknown_event_context"
+    )
+
+    #: The retest episode, when one occurred. Kept after it resolves.
+    retest: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    quality_components: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    confirmation_components: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+
+    run_manifest_id: Mapped[int | None] = mapped_column(
+        ForeignKey("run_manifests.id", ondelete="RESTRICT")
     )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     __table_args__ = (
+        UniqueConstraint("event_key", name="uq_breakout_event_identity"),
         UniqueConstraint(
-            "instrument_id", "pattern_id", "session_date", "status", name="uq_breakout_event"
+            "instrument_id",
+            "timeframe",
+            "pattern_key",
+            "attempt_number",
+            name="uq_breakout_attempt",
         ),
-        Index("ix_breakout_session", "session_date", "status"),
-        Index("ix_breakout_pattern", "pattern_id", "session_date"),
+        Index("ix_breakout_active", "state", "last_observed_session"),
+        Index("ix_breakout_instrument", "instrument_id", "timeframe", "state"),
+        Index("ix_breakout_pattern", "pattern_id", "opened_session"),
+        CheckConstraint("attempt_number >= 1", name="ck_breakout_attempt"),
+        CheckConstraint(
+            "breakout_quality >= 0 AND breakout_quality <= 100", name="ck_breakout_quality"
+        ),
+        CheckConstraint(
+            "confirmation_score >= 0 AND confirmation_score <= 100",
+            name="ck_breakout_confirmation",
+        ),
+        CheckConstraint(
+            "evidence_coverage >= 0 AND evidence_coverage <= 100", name="ck_breakout_coverage"
+        ),
+    )
+
+
+class BreakoutObservation(Base):
+    """Append-only record of what a breakout event looked like on one session.
+
+    The reason the event row can hold mutable current state without lying.
+    Item 15 of the Phase 5 brief requires that the progression CLOSED_ABOVE →
+    CONFIRMATION_PENDING → CONFIRMED → FAILED_BREAKOUT survive the failure, and
+    the only reliable way to guarantee that is to make the earlier rows
+    unwritable: the unique constraint on ``(event_id, session_date)`` turns a
+    second write for a session into a conflict rather than an overwrite.
+
+    ``measurements`` carries everything the engine measured that session, which
+    is what makes "why did the confirmation score fall on Thursday?" answerable.
+    """
+
+    __tablename__ = "breakout_observations"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("breakout_events.id", ondelete="CASCADE"), nullable=False
+    )
+    session_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    observed_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    #: The clock boundary the evaluation was computed under.
+    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+
+    from_state: Mapped[str | None] = mapped_column(String(32))
+    to_state: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(String(40), nullable=False)
+    path: Mapped[str | None] = mapped_column(String(16))
+
+    breakout_quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    confirmation_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    evidence_coverage: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    close: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    high: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    low: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    distance_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    distance_atr: Mapped[float | None] = mapped_column(Float)
+
+    measurements: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    supporting_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    contradicting_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "session_date", name="uq_breakout_observation"),
+        Index("ix_breakout_observation_session", "session_date"),
+        CheckConstraint(
+            "breakout_quality >= 0 AND breakout_quality <= 100",
+            name="ck_breakout_observation_quality",
+        ),
+    )
+
+
+class BreakoutRelationship(Base):
+    """How two breakout events relate.
+
+    A deliberately small ontology (item 40 warns against excessive ontology):
+    the same structural region approached on two timeframes, a nested pattern's
+    breakout inside a larger one, or a later event retesting an earlier one's
+    level. Anything finer would be a taxonomy nobody maintains.
+    """
+
+    __tablename__ = "breakout_relationships"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    from_event_id: Mapped[int] = mapped_column(
+        ForeignKey("breakout_events.id", ondelete="CASCADE"), nullable=False
+    )
+    to_event_id: Mapped[int] = mapped_column(
+        ForeignKey("breakout_events.id", ondelete="CASCADE"), nullable=False
+    )
+    #: "same_region" | "cross_timeframe" | "nested_breakout" | "retest_of" |
+    #: "later_attempt".
+    relationship: Mapped[str] = mapped_column(String(24), nullable=False)
+    #: The knowledge boundary the edge was derived under, for the same reason
+    #: pattern relationships carry one: an edge is a claim about what was
+    #: visible at a moment.
+    as_of_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "from_event_id", "to_event_id", "relationship", name="uq_breakout_relationship"
+        ),
+        Index("ix_breakout_relationship_to", "to_event_id", "relationship"),
+        CheckConstraint("from_event_id <> to_event_id", name="ck_breakout_no_self_relation"),
+    )
+
+
+class BreakoutLabel(Base):
+    """A human's structural judgement of a breakout event.
+
+    **Structural and confirmation labels only.** Nobody is asked "did the stock
+    make money afterwards?" for this dataset, and there is no column in which
+    that answer could be recorded. Future outcomes attach separately, later,
+    with their own knowledge horizon — mixing them in here would produce a
+    dataset whose labels silently encode returns and whose every downstream use
+    would be circular.
+
+    ``knowledge_horizon_session`` is the field that makes the labels honest. A
+    FALSE_BREAKOUT label cannot be assigned from the breakout bar alone; it
+    needs the window in which the failure became visible. Recording the last
+    session the reviewer was shown makes the horizon explicit rather than
+    leaving it to be guessed from the label's meaning.
+    """
+
+    __tablename__ = "breakout_labels"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("breakout_events.id", ondelete="SET NULL")
+    )
+    instrument_id: Mapped[int] = mapped_column(
+        ForeignKey("instruments.instrument_id", ondelete="CASCADE"), nullable=False
+    )
+    as_of_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    #: The last session the reviewer could see. Never later than the label's
+    #: definition requires, and stored so a label's horizon is auditable.
+    knowledge_horizon_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False, default="1d")
+
+    reviewer: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: Append-only revisions, for the same reason pattern labels have them.
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    #: "valid_breakout" | "weak_breakout" | "false_breakout" |
+    #: "successful_retest" | "failed_retest" | "ambiguous" |
+    #: "insufficient_evidence".
+    label: Mapped[str] = mapped_column(String(24), nullable=False)
+    reviewer_confidence: Mapped[float | None] = mapped_column(Float)
+    comments: Mapped[str | None] = mapped_column(Text)
+
+    #: What the engine said, pinned at labelling time.
+    engine_state: Mapped[str | None] = mapped_column(String(32))
+    engine_breakout_quality: Mapped[float | None] = mapped_column(Float)
+    engine_confirmation_score: Mapped[float | None] = mapped_column(Float)
+    engine_coverage: Mapped[float | None] = mapped_column(Float)
+    engine_profile: Mapped[str | None] = mapped_column(String(32))
+    breakout_config_digest: Mapped[str | None] = mapped_column(String(64))
+    scorer_version: Mapped[int | None] = mapped_column(Integer)
+
+    labelled_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "instrument_id",
+            "as_of_session",
+            "timeframe",
+            "reviewer",
+            "revision",
+            name="uq_breakout_label",
+        ),
+        Index("ix_breakout_label_lookup", "label", "as_of_session"),
+        CheckConstraint(
+            "knowledge_horizon_session >= as_of_session", name="ck_breakout_label_horizon"
+        ),
     )
 
 

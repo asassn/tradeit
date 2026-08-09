@@ -75,12 +75,33 @@ does not exist and needs labelled real data.
 
 ## Phase 5 — Breakout detection & confirmation
 
-Approach, trigger, confirmation, failure. The distinction between *triggered*
-and *confirmed* is the difference between buying breakouts and buying failed
-breakouts.
+Approach, testing, penetration, close, confirmation, retest, rejection, failure
+and expiry — thirteen states with a constrained machine between them. The
+distinction between *closed above* and *confirmed* is the difference between
+buying breakouts and buying failed breakouts, and the distinction between
+*failed* and *expired* is what stops non-events inflating the failure rate.
+
+Four numbers per event, deliberately not one: breakout quality (frozen at the
+breakout bar), confirmation score (accumulating after it), evidence coverage and
+identification confidence. Three confirmation paths — momentum, retest,
+acceptance — under three evidence profiles that describe how much evidence is
+wanted and say nothing about risk.
+
+Answers one question: *what is price doing relative to an established structural
+boundary, and how convincing is that behaviour?* It does not decide whether to
+buy anything, and holds no field in which that answer could be recorded.
+
+See [`PHASE_05.md`](PHASE_05.md), [`BREAKOUT_ARCHITECTURE.md`](BREAKOUT_ARCHITECTURE.md)
+and [`BREAKOUT_VALIDATION.md`](BREAKOUT_VALIDATION.md).
 
 *Consumes from Phase 3:* relative volume, volatility regime, relative strength,
 market regime.
+*Consumes from Phase 4:* the pattern's resistance boundary, its confidence and
+touch count, and the lifecycle state that says whether it is still live.
+*Still open:* real-market validation, unchanged from Phase 4 and now the binding
+constraint on the platform. The known weakness worth carrying forward is that the
+engine cannot distinguish a genuine level from an arbitrary line — quality and
+confidence discriminate, the state alone does not.
 
 ## Phase 6 — Fundamentals & earnings quality
 

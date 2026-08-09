@@ -203,7 +203,15 @@ class PatternStatus(StrEnum):
 
 
 class BreakoutStatus(StrEnum):
-    """State of a breakout attempt through a pivot level."""
+    """Phase 2 sketch of a breakout's state. **Superseded.**
+
+    The implemented vocabulary is
+    :class:`tradeit.breakouts.lifecycle.BreakoutState`, which distinguishes
+    thirteen states where this distinguishes six — most importantly separating
+    an intraday penetration from a close above, a rejection from a failure, and
+    an expiry from a failure. Retained only because it is a persisted
+    vocabulary; nothing reads it, and new code must use ``BreakoutState``.
+    """
 
     APPROACHING = "approaching"
     TRIGGERED = "triggered"

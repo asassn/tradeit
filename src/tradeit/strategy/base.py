@@ -24,7 +24,8 @@ from decimal import Decimal
 from typing import Protocol, runtime_checkable
 
 from tradeit.analytics.base import FeatureVector
-from tradeit.core.enums import BreakoutStatus, PatternStatus, PatternType, SignalDirection
+from tradeit.breakouts.base import BreakoutEvent
+from tradeit.core.enums import PatternStatus, PatternType, SignalDirection
 from tradeit.core.models import OhlcvBar
 
 
@@ -128,59 +129,17 @@ class PatternDetector(Protocol):
     def detect(self, bars: Sequence[OhlcvBar], as_of_session: dt.date) -> list[DetectedPattern]: ...
 
 
-@dataclass(frozen=True, slots=True)
-class BreakoutEvent:
-    """An attempt to clear a pivot, and what happened next.
-
-    The lifecycle is the point. A breakout that triggers is not a breakout that
-    worked: ``TRIGGERED`` means price cleared the pivot, ``CONFIRMED`` means it
-    held with participation, ``FAILED`` means it did not. Systems that treat
-    trigger and confirmation as the same event buy every false start.
-
-    ``volume_ratio`` is the confirmation evidence — turnover on the breakout
-    session against its recent baseline. A breakout on light volume is a
-    different event from one on triple volume, and the ratio is stored so that
-    the threshold can be re-examined later without re-deriving it.
-    """
-
-    instrument_id: int
-    pattern_id: int | None
-    status: BreakoutStatus
-    pivot_price: Decimal
-    trigger_date: dt.date | None
-    trigger_price: Decimal | None
-    confirmation_date: dt.date | None
-    volume_ratio: float | None
-    follow_through_pct: float | None
-    distance_to_pivot_pct: float | None
-
-    @property
-    def is_tradable(self) -> bool:
-        """Only confirmed breakouts are tradable, by construction."""
-        return self.status is BreakoutStatus.CONFIRMED
-
-
-@runtime_checkable
-class BreakoutMonitor(Protocol):
-    """Tracks instruments approaching, clearing, and holding a pivot.
-
-    Stateful across days in the sense that it reads prior events from storage,
-    but each evaluation is a pure function of (bars visible now, prior events
-    visible now) — so replaying a date reproduces the same event exactly.
-    """
-
-    name: str
-
-    @property
-    def parameters(self) -> dict[str, object]: ...
-
-    def evaluate(
-        self,
-        bars: Sequence[OhlcvBar],
-        pattern: DetectedPattern,
-        prior_event: BreakoutEvent | None,
-        as_of_session: dt.date,
-    ) -> BreakoutEvent | None: ...
+# Phase 2 declared placeholder ``BreakoutEvent`` and ``BreakoutMonitor`` types
+# here. Phase 5 implements both, in :mod:`tradeit.breakouts`, and the real ones
+# differ from the sketches in ways that matter: an event is one *attempt* with an
+# identity and an append-only observation history rather than a status snapshot,
+# and there are four scores rather than one status.
+#
+# The placeholders are removed rather than left alongside. The draft
+# ``BreakoutEvent`` carried an ``is_tradable`` property, which Phase 5 must not
+# express at all — whether a confirmed breakout is worth trading is decided
+# several stages downstream, and a tradability flag on a breakout object is the
+# exact conflation the phase separation exists to prevent.
 
 
 @dataclass(frozen=True, slots=True)
