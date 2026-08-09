@@ -575,3 +575,88 @@ ticker = "AVGO"
 category = "control"
 difficulty = "domicile_change_and_split"
 note = "redomiciled from Singapore to the US in 2018 and split 10-for-1 in 2024"
+
+# --------------------------------------------------------------------------
+# Fiscal-calendar stress. Added for the empirical validation gate.
+#
+# Everything above stresses *price* handling. Nothing in it would catch a
+# fundamental pipeline that assumes a fiscal quarter ends on a calendar quarter
+# boundary -- an assumption common enough to be the default in most tutorial
+# code, and one that silently misattributes every fundamental by up to eleven
+# months.
+#
+# What these test: that `period_end` is read from the data rather than derived
+# from `fiscal_year` and `fiscal_period`, that a join on fiscal_year alone is
+# caught, and that the filing-deadline lag is measured from the real period end.
+#
+# Names that already appear above under another category are deliberately not
+# repeated -- this file is one row per instrument, and a duplicate ticker is a
+# load error. AAPL, MSFT, NVDA and WMT all have non-December fiscal years and
+# are all listed above as split or control cases; the names below were chosen
+# to spread fiscal year-ends across the calendar without colliding.
+# --------------------------------------------------------------------------
+
+[[instruments]]
+ticker = "CRM"
+category = "fiscal_calendar"
+difficulty = "january_fiscal_year"
+note = "fiscal year ends 31 January, so FY2024 is almost entirely calendar 2023. A join on fiscal_year alone attributes results to the wrong year"
+
+[[instruments]]
+ticker = "TGT"
+category = "fiscal_calendar"
+difficulty = "retail_52_53_week_year"
+note = "retail fiscal year ending late January or early February on a 52/53-week calendar, so period lengths are not constant and one year in about six has an extra week"
+
+[[instruments]]
+ticker = "INTU"
+category = "fiscal_calendar"
+difficulty = "july_fiscal_year"
+note = "fiscal year ends 31 July"
+
+[[instruments]]
+ticker = "ACN"
+category = "fiscal_calendar"
+difficulty = "august_fiscal_year"
+note = "fiscal year ends 31 August"
+
+[[instruments]]
+ticker = "HPQ"
+category = "fiscal_calendar"
+difficulty = "october_fiscal_year"
+note = "fiscal year ends 31 October"
+
+[[instruments]]
+ticker = "MU"
+category = "fiscal_calendar"
+difficulty = "late_august_fiscal_year"
+note = "fiscal year ends in late August or early September on a 52/53-week calendar"
+
+# --------------------------------------------------------------------------
+# Restatement stress -- DELIBERATELY EMPTY.
+#
+# `UniverseCategory.RESTATEMENT` exists because the restatement case is the one
+# that separates a real point-in-time store from one that merely keeps history:
+# as of a date before a restatement, the number a strategy could act on is the
+# ORIGINAL one, and the corrected figure must be invisible to that clock. A
+# store that returns today's corrected value for a historical as-of has handed
+# every backtest the auditor's hindsight.
+#
+# No instruments are listed, and that is a decision rather than an omission.
+# Naming a company and a quarter here would be asserting a specific accounting
+# history from memory, and this file's own header says that anything without a
+# real, checkable historical event does not belong in it. Restatement scope and
+# filing dates have to be read off the SEC filing index, and this environment
+# cannot reach it.
+#
+# TO POPULATE: for a candidate issuer, open the EDGAR filing index, find the
+# amended filing (10-K/A or 10-Q/A) or the original filing that discloses the
+# restatement, and record the periods restated together with BOTH filing
+# timestamps -- the original and the amendment. Both are needed: the contract
+# under test is that a read as of a date between them returns the original
+# value, and a read after the amendment returns the corrected one.
+#
+# Until then the restatement contract is exercised by constructed fixtures in
+# `tests/unit/test_phase6_contract.py`, which is weaker evidence than a real
+# case and is labelled as such.
+# --------------------------------------------------------------------------

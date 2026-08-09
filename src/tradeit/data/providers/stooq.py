@@ -34,7 +34,6 @@ import datetime as dt
 import io
 from collections.abc import Iterable, Mapping
 from decimal import Decimal, InvalidOperation
-
 from pathlib import Path
 
 import structlog
@@ -109,10 +108,7 @@ class StooqProvider:
         if timeframe is not Bartimeframe.D1:
             raise ProviderError(f"Stooq serves daily bars only, not {timeframe}")
 
-        url = (
-            f"{BASE_URL}?s={self._ticker(instrument_id)}&i=d"
-            f"&d1={start:%Y%m%d}&d2={end:%Y%m%d}"
-        )
+        url = f"{BASE_URL}?s={self._ticker(instrument_id)}&i=d&d1={start:%Y%m%d}&d2={end:%Y%m%d}"
         body = self.transport.get(url).decode("utf-8", errors="replace")
         if body.strip().lower().startswith("no data"):
             raise ProviderError(

@@ -103,6 +103,32 @@ constraint on the platform. The known weakness worth carrying forward is that th
 engine cannot distinguish a genuine level from an arbitrary line — quality and
 confidence discriminate, the state alone does not.
 
+## Empirical data access & validation gate
+
+Not a numbered phase: a stop placed between Phase 5 and Phase 6 to prevent
+another analytical layer being built on exclusively synthetic data.
+
+Two things came out of it. The weakness carried forward from Phase 5 — that
+`CONFIRMED` does not discriminate while the evidence does — became an
+architectural invariant: no breakout state, by itself, authorizes a trade, an
+opportunity, a position or an allocation. `EvidenceBundle` carries every field a
+downstream stage needs and deliberately has no aggregate; `BoundaryKind` records
+where a level came from and refuses to let a manual one claim to be structural;
+the production monitor accepts only structural boundaries from three pattern
+states. See [`ADR-0025`](adr/0025-breakout-state-is-not-trade-eligibility.md).
+
+And the complete offline path for real data: a package format defined by meaning
+rather than by vendor column names, a four-stage import that discards nothing and
+records every change it makes, a point-in-time layer that will not let a quarter
+become knowable on the day it ends, and an 18-check validation harness that
+reports blocked checks before passed ones and refuses to compute a performance
+statistic.
+
+**Outcome B.** Provider egress is denied in the build environment, so no
+empirical result is claimed and none is fabricated. See
+[`PHASE_05_GATE.md`](PHASE_05_GATE.md) for what remains blocked and
+[`DATA_REQUIRED.md`](../DATA_REQUIRED.md) for what to supply.
+
 ## Phase 6 — Fundamentals & earnings quality
 
 Growth, quality and balance-sheet screens on as-filed data, with

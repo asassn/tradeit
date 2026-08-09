@@ -17,6 +17,37 @@ Prepared at the end of Phase 3, before Phase 4 begins, as the brief requires.
 
 ---
 
+## 0. How to read the evidence in this document
+
+Added at the empirical validation gate, because a document that mixes "we tested
+this" with "their marketing page says this" is a document whose reader has to
+guess which is which — and readers guess generously.
+
+Every factual claim about a vendor carries one of four labels:
+
+| Label | Means | What you may do with it |
+|---|---|---|
+| **VERIFIED** | Someone on this project ran the acceptance test in §6 against a trial and observed this. | Rely on it. Record the date and the trial's scope. |
+| **DOCUMENTATION CLAIM** | The vendor's own docs or marketing say so. Not independently observed. | Use it to shortlist. Never to conclude. |
+| **NEEDS VERIFICATION** | Plausible, commonly reported, not confirmed here. | Turn it into a question for the sales call. |
+| **UNKNOWN** | Not established either way. | Say so. Do not fill the gap with a guess. |
+
+**Everything in §2, §3 and §4 of this document is DOCUMENTATION CLAIM or
+NEEDS VERIFICATION.** No vendor trial has been run. This environment's egress
+policy denies the provider hosts (see `docs/PHASE_05_GATE.md` §2), so nothing
+here has been observed directly, and the tier descriptions are a synthesis of
+publicly described capability rather than measurement.
+
+Pricing specifically is **UNKNOWN**. Figures are not quoted in this document
+because vendor pricing is negotiated, tiered, and changes without notice; an
+"order of magnitude" invented from memory would be treated as a quotation the
+moment it was written down. Get quotes.
+
+The one claim in this document that is **VERIFIED** is the negative one in §7:
+the provider abstraction works, because Phase 3 was built and run against it.
+
+---
+
 ## 1. What we actually need
 
 Ordered by the priority the brief sets, which is deliberately not price-first:
@@ -57,6 +88,9 @@ datasets well.
 
 ### Tier A — Institutional, full point-in-time coverage
 
+*Evidence label for this whole subsection: **DOCUMENTATION CLAIM**. No trial
+run; the capabilities below are as publicly described by the vendors.*
+
 Typified by S&P Global (Compustat point-in-time), Refinitiv/LSEG, FactSet,
 MSCI (for GICS licensing), and CRSP for academic-grade survivorship-safe US
 equity history.
@@ -73,6 +107,10 @@ equity history.
   platform unless the capital at risk justifies it.
 
 ### Tier B — Professional API vendors
+
+*Evidence label for this whole subsection: **NEEDS VERIFICATION**. This is the
+tier where the acceptance test in §6 actually decides the answer, because the
+phrase "point-in-time" is used across it to mean at least two different things.*
 
 Typified by Polygon.io, Nasdaq Data Link, Intrinio, FactSet's lighter offerings,
 Sharadar (via Nasdaq Data Link), and Norgate Data.
@@ -93,6 +131,11 @@ Sharadar (via Nasdaq Data Link), and Norgate Data.
 - **Verdict**: **the tier to shortlist.** Expect to combine two vendors.
 
 ### Tier C — Retail / free
+
+*Evidence label for this whole subsection: **NEEDS VERIFICATION**, except the
+survivorship gap, which is **DOCUMENTATION CLAIM** — these sources generally
+describe themselves as covering listed securities, which is the same thing as
+not covering delisted ones.*
 
 Typified by yfinance, Alpha Vantage free tiers, and similar.
 

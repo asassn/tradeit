@@ -193,10 +193,10 @@ class HttpTransport:
 
         for attempt in range(1, self.max_attempts + 1):
             self._throttle()
-            request = urllib.request.Request(url, headers=headers)  # noqa: S310 - https only
+            request = urllib.request.Request(url, headers=headers)
             try:
                 self._last_request = time.monotonic()
-                with urllib.request.urlopen(request, timeout=self.timeout_s) as response:  # noqa: S310
+                with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
                     return bytes(response.read())
 
             except urllib.error.HTTPError as exc:

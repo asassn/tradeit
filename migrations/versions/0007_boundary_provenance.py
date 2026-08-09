@@ -46,9 +46,7 @@ def upgrade() -> None:
             server_default="other",
         ),
     )
-    op.create_index(
-        "ix_breakout_boundary_kind", "breakout_events", ["boundary_kind", "state"]
-    )
+    op.create_index("ix_breakout_boundary_kind", "breakout_events", ["boundary_kind", "state"])
 
 
 def downgrade() -> None:

@@ -47,9 +47,8 @@ import json
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal, InvalidOperation
-from typing import Any
-
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -214,9 +213,7 @@ class TiingoProvider:
                 "intraday requires their IEX endpoint and a different entitlement"
             )
         ticker = self._ticker(instrument_id)
-        rows = self._get(
-            f"{ticker}/prices", startDate=start.isoformat(), endDate=end.isoformat()
-        )
+        rows = self._get(f"{ticker}/prices", startDate=start.isoformat(), endDate=end.isoformat())
         for row in rows:
             bar = self._bar(instrument_id, row)
             if bar is not None:
@@ -270,9 +267,7 @@ class TiingoProvider:
         price series it could not yet interpret.
         """
         ticker = self._ticker(instrument_id)
-        rows = self._get(
-            f"{ticker}/prices", startDate=start.isoformat(), endDate=end.isoformat()
-        )
+        rows = self._get(f"{ticker}/prices", startDate=start.isoformat(), endDate=end.isoformat())
         for row in rows:
             ex_date = _date(row.get("date"))
             if ex_date is None or not self._calendar.is_session(ex_date):

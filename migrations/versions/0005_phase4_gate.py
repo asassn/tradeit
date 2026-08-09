@@ -64,9 +64,7 @@ def upgrade() -> None:
         sa.Column("label", sa.String(length=24), nullable=False, server_default="positive"),
     )
     op.add_column("pattern_labels", sa.Column("detector_coverage", sa.Float(), nullable=True))
-    op.add_column(
-        "pattern_labels", sa.Column("config_digest", sa.String(length=64), nullable=True)
-    )
+    op.add_column("pattern_labels", sa.Column("config_digest", sa.String(length=64), nullable=True))
 
     # The uniqueness rule changes shape: revision joins the key so a re-review
     # is a new row rather than an overwrite.

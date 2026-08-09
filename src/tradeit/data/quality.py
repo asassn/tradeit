@@ -49,6 +49,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
+from itertools import pairwise
 from typing import Any
 
 from tradeit.core.calendar import TradingCalendar
@@ -312,7 +313,9 @@ def check_volume(
         run_start: dt.date | None = None
         run = 0
 
-        def close_run(start: dt.date | None, length: int) -> None:
+        def close_run(
+            start: dt.date | None, length: int, instrument_id: int = instrument_id
+        ) -> None:
             if length >= limits.zero_volume_sessions and start is not None:
                 findings.append(
                     Finding(
@@ -395,9 +398,10 @@ def check_timestamps(bars: Iterable[OhlcvBar], *, now: dt.datetime) -> list[Find
                     message=f"event_time {bar.event_time.isoformat()} is in the future",
                 )
             )
-        if bar.event_time.date() != bar.session_date and abs(
-            (bar.event_time.date() - bar.session_date).days
-        ) > 1:
+        if (
+            bar.event_time.date() != bar.session_date
+            and abs((bar.event_time.date() - bar.session_date).days) > 1
+        ):
             # One day of slack: a UTC close instant legitimately lands on the
             # next calendar day for some exchanges.
             findings.append(
@@ -573,7 +577,7 @@ def check_corporate_actions(
         by_ex_date[action.ex_date].append(action)
 
     findings: list[Finding] = []
-    for previous, current in zip(series, series[1:], strict=False):
+    for previous, current in pairwise(series):
         if previous.close <= 0:
             continue
         move = float(current.close / previous.close) - 1.0
@@ -650,7 +654,7 @@ def check_extreme_moves(
     limits = thresholds or QualityThresholds()
     series = sorted(bars, key=lambda b: b.session_date)
     findings: list[Finding] = []
-    for previous, current in zip(series, series[1:], strict=False):
+    for previous, current in pairwise(series):
         if previous.close <= 0:
             continue
         move = float(current.close / previous.close) - 1.0
@@ -686,7 +690,7 @@ def check_stale_prices(
 
     run = 1
     run_start = series[0].session_date if series else None
-    for previous, current in zip(series, series[1:], strict=False):
+    for previous, current in pairwise(series):
         identical = (
             current.close == previous.close
             and current.open == previous.open
@@ -697,9 +701,7 @@ def check_stale_prices(
             run += 1
             continue
         if run >= limits.stale_price_sessions and run_start is not None:
-            findings.append(
-                _stale_finding(previous.instrument_id, run_start, run)
-            )
+            findings.append(_stale_finding(previous.instrument_id, run_start, run))
         run, run_start = 1, current.session_date
 
     if run >= limits.stale_price_sessions and run_start is not None and series:
@@ -841,9 +843,7 @@ class QualityReport:
         return {
             f.flag
             for f in self.findings
-            if f.flag is not None
-            and f.instrument_id == instrument_id
-            and f.session_date == session
+            if f.flag is not None and f.instrument_id == instrument_id and f.session_date == session
         }
 
     def by_check(self) -> dict[str, int]:

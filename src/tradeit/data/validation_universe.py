@@ -46,6 +46,15 @@ class UniverseCategory(StrEnum):
     ADR = "adr"
     REIT = "reit"
     DUAL_CLASS = "dual_class"
+    #: Fiscal year that does not end in December. Added for the empirical gate:
+    #: the whole universe until then stressed *price* handling, and nothing in
+    #: it would catch a fundamental pipeline that assumes Q1 ends 31 March.
+    FISCAL_CALENDAR = "fiscal_calendar"
+    #: A company that restated previously reported figures. The case that
+    #: separates a real point-in-time store from one that merely keeps history:
+    #: as of a date before the restatement, the *original* number is what a
+    #: strategy could act on, and the corrected one must be invisible.
+    RESTATEMENT = "restatement"
     CONTROL = "control"
 
     @property
