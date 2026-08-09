@@ -353,6 +353,15 @@ class QuarantinedRow(Base):
     Dropping malformed vendor data on the floor makes gaps invisible. Keeping
     the raw payload alongside the reason turns "why is there no bar for
     2021-03-04?" into a one-query answer.
+
+    ``stage``, ``source_file`` and ``line_number`` were added for the offline
+    package importer and are what make the answer *actionable*. Knowing a row
+    died is not the same as knowing where to look: a row that failed at
+    ``normalized`` means the vendor's date format needs declaring, one that
+    failed at ``validated`` means the vendor's numbers contradict each other,
+    and one that failed at ``point_in_time`` means nothing in the package says
+    when the fact became knowable. Three different fixes, three different
+    people, one column to tell them apart.
     """
 
     __tablename__ = "quarantined_rows"
@@ -361,15 +370,28 @@ class QuarantinedRow(Base):
     ingestion_run_id: Mapped[int] = mapped_column(
         ForeignKey("ingestion_runs.id", ondelete="CASCADE"), nullable=False
     )
+    package_id: Mapped[int | None] = mapped_column(
+        ForeignKey("data_packages.id", ondelete="CASCADE")
+    )
     dataset: Mapped[str] = mapped_column(String(64), nullable=False)
     identifier: Mapped[str | None] = mapped_column(String(64))
+    #: Which pipeline stage rejected it: raw / normalized / validated /
+    #: point_in_time / derived.
+    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="validated")
+    source_file: Mapped[str | None] = mapped_column(String(512))
+    #: 1-based and counting the header, so it matches what a text editor shows.
+    line_number: Mapped[int | None] = mapped_column(BigInteger)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    __table_args__ = (Index("ix_quarantine_run", "ingestion_run_id"),)
+    __table_args__ = (
+        Index("ix_quarantine_run", "ingestion_run_id"),
+        Index("ix_quarantine_package", "package_id", "dataset"),
+        Index("ix_quarantine_stage", "stage"),
+    )
 
 
 # ===========================================================================
@@ -1007,6 +1029,15 @@ class BreakoutEvent(Base):
     atr_at_open: Mapped[float | None] = mapped_column(Float)
     pattern_type: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     pattern_quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    #: "structural_pattern_boundary" | "manual_boundary" |
+    #: "experimental_boundary" | "other". A crossing of a level somebody typed
+    #: into a notebook and a breakout of a causally-derived structure are both
+    #: real observations and are not the same object; downstream systems must be
+    #: able to separate the populations without inferring it from a score.
+    #: See ADR-0025.
+    boundary_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="other", server_default="other"
+    )
 
     #: Frozen at the breakout bar; see ADR-0021.
     breakout_quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
@@ -1053,6 +1084,7 @@ class BreakoutEvent(Base):
         ),
         Index("ix_breakout_active", "state", "last_observed_session"),
         Index("ix_breakout_instrument", "instrument_id", "timeframe", "state"),
+        Index("ix_breakout_boundary_kind", "boundary_kind", "state"),
         Index("ix_breakout_pattern", "pattern_id", "opened_session"),
         CheckConstraint("attempt_number >= 1", name="ck_breakout_attempt"),
         CheckConstraint(
@@ -2244,3 +2276,156 @@ class FeatureSetMember(Base):
     feature_name: Mapped[str] = mapped_column(String(96), nullable=False)
 
     __table_args__ = (Index("ix_feature_set_lookup", "feature_set_digest", "feature_name"),)
+
+
+# ===========================================================================
+# Offline data packages (empirical validation gate).
+#
+# These tables answer one question: which bytes produced this result? A
+# validation run cites a snapshot id; the snapshot id resolves to a package
+# row; the package row lists every file with the SHA-256 that was verified
+# before a single line was read. Nothing here stores market data — the facts
+# land in the Phase 1 tables above. What lands here is provenance.
+# ===========================================================================
+
+
+class DataPackage(Base):
+    """One import of one offline package, with what the package claimed.
+
+    ``adjustment_policy`` is stored rather than referenced because a package's
+    claim about its own prices is part of the evidence: a result computed from
+    split-adjusted prices is a different result from one computed from raw
+    prints, and six months later the only record of which it was is this row.
+
+    ``snapshot_id`` is the identity a validation run cites. It is derived from
+    the manifest digest and the observed row counts, so an import that aborted
+    halfway cannot share an id with one that finished over the same files.
+    """
+
+    __tablename__ = "data_packages"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    format_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    export_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    coverage_start: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    coverage_end: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    #: What the data actually spans, which is not always what it claimed.
+    observed_start: Mapped[dt.date | None] = mapped_column(Date)
+    observed_end: Mapped[dt.date | None] = mapped_column(Date)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
+    adjustment_policy: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_path: Mapped[str | None] = mapped_column(Text)
+    licence_note: Mapped[str | None] = mapped_column(Text)
+    vendor_dataset: Mapped[str | None] = mapped_column(String(128))
+    known_limitations: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    #: The full import report payload: per-dataset counts, quarantine reasons,
+    #: flags, problems and notes. Stored whole so a stale summary elsewhere can
+    #: always be checked against it.
+    report: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    rows_read: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    rows_imported: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    rows_quarantined: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    #: Rows whose knowledge_time came from a lag rule rather than a filing
+    #: timestamp. Counted at the package level so that "how much of this result
+    #: rests on an assumption?" is one column rather than an audit.
+    rows_estimated_knowledge_time: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0
+    )
+    digests_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    #: True when a row limit was in force or the run aborted. A partial package
+    #: is a smoke test and must never be cited as evidence.
+    partial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    aborted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    code_version: Mapped[str | None] = mapped_column(String(64))
+    imported_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("snapshot_id", name="uq_data_package_snapshot"),
+        Index("ix_data_package_name", "name", "imported_at"),
+        CheckConstraint("coverage_end >= coverage_start", name="ck_package_coverage"),
+        CheckConstraint(
+            "adjustment_policy IN ('raw_unadjusted', 'split_adjusted', "
+            "'total_return_adjusted', 'unknown')",
+            name="ck_package_adjustment",
+        ),
+    )
+
+
+class DataPackageFile(Base):
+    """One file inside an imported package, with the digest that was verified.
+
+    The column mapping is stored because it is the interpretation: the same
+    bytes read with ``close`` mapped to an adjusted-close column produce a
+    different history, and without the mapping nobody can tell afterwards which
+    reading happened.
+    """
+
+    __tablename__ = "data_package_files"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    package_id: Mapped[int] = mapped_column(
+        ForeignKey("data_packages.id", ondelete="CASCADE"), nullable=False
+    )
+    dataset: Mapped[str] = mapped_column(String(32), nullable=False)
+    path: Mapped[str] = mapped_column(String(512), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    declared_rows: Mapped[int | None] = mapped_column(BigInteger)
+    observed_rows: Mapped[int | None] = mapped_column(BigInteger)
+    timeframe: Mapped[str | None] = mapped_column(String(8))
+    column_map: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+    note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("package_id", "path", name="uq_package_file"),
+        Index("ix_package_file_dataset", "package_id", "dataset"),
+        Index("ix_package_file_digest", "sha256"),
+    )
+
+
+class ImportCorrection(Base):
+    """Every deviation from the source text, with the rule that made it.
+
+    Normalization is allowed to change things — strip a currency symbol,
+    localise a naive timestamp — and each change is a small decision that could
+    be wrong. This table is what makes "the importer changed my data" a query
+    rather than an accusation: field, raw text, substituted value, rule name and
+    reason, addressable back to the file and line it came from.
+
+    High-volume by construction: a vendor that pads every number produces one
+    row per cell. That is acceptable — the alternative is a pipeline whose
+    changes are invisible — but the importer's report also carries per-dataset
+    counts so the common case does not require reading this table at all.
+    """
+
+    __tablename__ = "import_corrections"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    package_id: Mapped[int | None] = mapped_column(
+        ForeignKey("data_packages.id", ondelete="CASCADE")
+    )
+    ingestion_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ingestion_runs.id", ondelete="CASCADE")
+    )
+    dataset: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_file: Mapped[str] = mapped_column(String(512), nullable=False)
+    line_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    field: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_value: Mapped[str | None] = mapped_column(Text)
+    corrected_value: Mapped[str] = mapped_column(Text, nullable=False)
+    rule: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_correction_package", "package_id", "dataset"),
+        Index("ix_correction_rule", "rule"),
+        Index("ix_correction_source", "source_file", "line_number"),
+    )

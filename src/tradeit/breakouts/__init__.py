@@ -15,15 +15,21 @@ from tradeit.breakouts.base import (
     RetestRecord,
     event_identity,
 )
-from tradeit.breakouts.boundary import BreakoutBoundary, boundary_from_pattern
+from tradeit.breakouts.boundary import (
+    BreakoutBoundary,
+    boundary_from_pattern,
+    manual_boundary,
+)
 from tradeit.breakouts.config import BreakoutEngineConfig
 from tradeit.breakouts.context import BreakoutContext
+from tradeit.breakouts.eligibility import BoundaryKind, EvidenceBundle
 from tradeit.breakouts.engine import BreakoutEngine, SessionInputs
 from tradeit.breakouts.lifecycle import BreakoutState, BreakoutTransition, TransitionReason
 from tradeit.breakouts.monitor import BreakoutMonitor, MonitorResult
 from tradeit.breakouts.volume import VolumeReading
 
 __all__ = [
+    "BoundaryKind",
     "BreakoutBoundary",
     "BreakoutContext",
     "BreakoutEngine",
@@ -35,6 +41,7 @@ __all__ = [
     "BreakoutTransition",
     "ConfirmationPath",
     "EarningsContext",
+    "EvidenceBundle",
     "GapClass",
     "MonitorResult",
     "RetestRecord",
@@ -43,4 +50,5 @@ __all__ = [
     "VolumeReading",
     "boundary_from_pattern",
     "event_identity",
+    "manual_boundary",
 ]

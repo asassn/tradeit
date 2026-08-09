@@ -103,6 +103,7 @@ class BreakoutRepository:
                 atr_at_open=event.boundary.atr_at_open,
                 pattern_type=event.boundary.pattern_type,
                 pattern_quality=event.boundary.pattern_quality,
+                boundary_kind=str(event.boundary.kind),
                 state=str(event.state),
                 last_observed_session=event.last_session,
             )

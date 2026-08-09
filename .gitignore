@@ -12,7 +12,12 @@ build/
 .ruff_cache/
 .coverage
 htmlcov/
-data/
+# Local data directories at the repository root only. Unanchored, this pattern
+# also matched src/tradeit/data/, which silently excluded the entire data
+# package -- providers, registry, quality, validation universe and the offline
+# package importer -- from every commit. A fresh clone did not build.
+/data/
+/var/
 *.db
 *.sqlite3
 .DS_Store

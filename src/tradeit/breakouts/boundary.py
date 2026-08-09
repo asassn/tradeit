@@ -32,11 +32,45 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from tradeit.breakouts.config import ToleranceConfig
 from tradeit.errors import ConfigError
 from tradeit.patterns.base import Boundary
+
+
+class BoundaryKind(StrEnum):
+    """Where the level a breakout was measured against came from.
+
+    The distinction is about *provenance*, not quality. An experimental level
+    may be perfectly sensible and a structural one may be marginal; what the tag
+    guarantees is that a consumer can tell which population a row belongs to
+    without inferring it from the confidence score.
+    """
+
+    #: Derived by a Phase 4 detector from causally-confirmed geometry, carried
+    #: with its pattern identity. The only kind the production monitor accepts.
+    STRUCTURAL_PATTERN_BOUNDARY = "structural_pattern_boundary"
+    #: A level supplied by a human — a research note, a chart annotation. Real,
+    #: and not a detected structure.
+    MANUAL_BOUNDARY = "manual_boundary"
+    #: A level produced by an experimental or unreleased method. Kept separate
+    #: from MANUAL so a research sweep is not mistaken for an analyst's opinion.
+    EXPERIMENTAL_BOUNDARY = "experimental_boundary"
+    #: Anything else, including imported levels of unknown origin. Present so
+    #: that "we do not know where this came from" is expressible; a row that
+    #: cannot say its provenance must not be able to claim a good one.
+    OTHER = "other"
+
+    @property
+    def is_production_eligible(self) -> bool:
+        """Whether the production monitor may open an event against it."""
+        return self is BoundaryKind.STRUCTURAL_PATTERN_BOUNDARY
+
+    @property
+    def is_research_only(self) -> bool:
+        return not self.is_production_eligible
 
 
 def tolerance_for(
@@ -104,6 +138,12 @@ class BreakoutBoundary:
     pattern_key: str = ""
     pattern_type: str = ""
     pattern_quality: float = 0.0
+    #: Where this level came from. A crossing of a level somebody typed into a
+    #: notebook and a breakout of a causally-derived structure are both real
+    #: observations and are not the same object; the production monitor accepts
+    #: only the structural kind, and the tag travels into storage so a query can
+    #: separate the populations. See ADR-0025.
+    kind: BoundaryKind = BoundaryKind.OTHER
 
     def __post_init__(self) -> None:
         if self.nominal <= 0:
@@ -194,6 +234,18 @@ class BreakoutBoundary:
         """
         return bool(self.pattern_key)
 
+    @property
+    def is_production_eligible(self) -> bool:
+        """Whether the production monitor may open an event against this level.
+
+        Both conditions, not either: the kind must be structural *and* a pattern
+        identity must actually be present. A boundary tagged structural with no
+        pattern key is a mislabelled row, and trusting the tag alone would let
+        one bad construction call put research levels into the production
+        population.
+        """
+        return self.kind.is_production_eligible and self.is_attached
+
     def to_payload(self) -> dict[str, Any]:
         return {
             "nominal": round(self.nominal, 6),
@@ -207,6 +259,7 @@ class BreakoutBoundary:
             "pattern_key": self.pattern_key,
             "pattern_type": self.pattern_type,
             "pattern_quality": round(self.pattern_quality, 6),
+            "kind": str(self.kind),
         }
 
 
@@ -218,6 +271,7 @@ def boundary_from_pattern(
     pattern_key: str = "",
     pattern_type: str = "",
     pattern_quality: float = 0.0,
+    kind: BoundaryKind = BoundaryKind.STRUCTURAL_PATTERN_BOUNDARY,
 ) -> BreakoutBoundary:
     """Freeze a pattern's resistance into a breakout boundary.
 
@@ -250,7 +304,55 @@ def boundary_from_pattern(
         pattern_key=pattern_key,
         pattern_type=pattern_type,
         pattern_quality=pattern_quality,
+        kind=kind,
     )
 
 
-__all__ = ["BreakoutBoundary", "boundary_from_pattern", "tolerance_for"]
+def manual_boundary(
+    *,
+    level: float,
+    anchor_date: dt.date,
+    atr: float | None,
+    config: ToleranceConfig,
+    confidence: float = 0.0,
+    touches: int = 0,
+    kind: BoundaryKind = BoundaryKind.MANUAL_BOUNDARY,
+) -> BreakoutBoundary:
+    """A level supplied by a human or an experiment, tagged as such.
+
+    Supported deliberately: research needs to ask "what would the engine say
+    about this level?" without pretending the level is a detected structure. The
+    default confidence is zero and the default touch count is zero, because a
+    level nobody derived has no touches anyone counted — and both feed the
+    confidence score, which is where the difference surfaces.
+
+    Refuses to be tagged structural. The one thing this function must not do is
+    let a research level enter the production population, and a keyword argument
+    is exactly how that would happen.
+    """
+    if kind.is_production_eligible:
+        raise ConfigError(
+            f"{kind} is the production kind and is reserved for boundaries derived "
+            "by a detector from causally-confirmed geometry. Use "
+            "boundary_from_pattern for those; a manual level tagged structural "
+            "would enter the production population indistinguishably."
+        )
+    return BreakoutBoundary(
+        nominal=level,
+        anchor_date=anchor_date,
+        tolerance_pct=tolerance_for(level=level, atr=atr, confidence=confidence, config=config),
+        confidence=confidence,
+        method="supplied",
+        touch_count=touches,
+        atr_at_open=atr,
+        kind=kind,
+    )
+
+
+__all__ = [
+    "BoundaryKind",
+    "BreakoutBoundary",
+    "boundary_from_pattern",
+    "manual_boundary",
+    "tolerance_for",
+]

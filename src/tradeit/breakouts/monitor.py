@@ -39,6 +39,7 @@ from tradeit.breakouts.base import BreakoutEvent
 from tradeit.breakouts.boundary import BreakoutBoundary, boundary_from_pattern
 from tradeit.breakouts.config import BreakoutEngineConfig
 from tradeit.breakouts.context import BreakoutContext
+from tradeit.breakouts.eligibility import BoundaryKind, check_monitor_eligibility
 from tradeit.breakouts.engine import BreakoutEngine, SessionInputs
 from tradeit.breakouts.lifecycle import BreakoutState, TransitionReason
 from tradeit.breakouts.measures import average_true_range
@@ -130,6 +131,10 @@ class BreakoutMonitor:
         profile: str | None = None,
     ) -> None:
         self.config = config or BreakoutEngineConfig()
+        # The architectural floor, checked once at construction rather than per
+        # session. An operator may monitor fewer states; nobody may quietly add
+        # FORMING, whose boundary is still resolving.
+        check_monitor_eligibility(self.config.monitored_states)
         self.engine = engine or BreakoutEngine(self.config, profile=profile)
         #: Keyed by event id. Terminal events stay here so history survives; the
         #: active set is derived rather than maintained separately, which
@@ -194,6 +199,7 @@ class BreakoutMonitor:
                         pattern_key=key,
                         pattern_type=str(instance.pattern_type),
                         pattern_quality=instance.quality,
+                        kind=BoundaryKind.STRUCTURAL_PATTERN_BOUNDARY,
                     ),
                     pattern_key=key,
                     pattern_state=instance.state,
@@ -286,6 +292,20 @@ class BreakoutMonitor:
         for item in live:
             existing = self._attempts_for(instrument_id, timeframe, item.pattern_key)
             if any(e.is_active for e in existing):
+                continue
+            if not item.boundary.is_production_eligible:
+                # Unreachable through ``monitorable``, which only builds
+                # structural boundaries. Kept because the invariant is worth
+                # more than the branch costs: a future caller handing the
+                # monitor a research level should be refused here rather than
+                # discovered downstream.
+                result.skipped.append(
+                    SkippedPattern(
+                        item.pattern_key,
+                        f"boundary is {item.boundary.kind}; the production monitor "
+                        "opens events only against detected structural boundaries",
+                    )
+                )
                 continue
             attempt = len(existing) + 1
             if self._boundary_defeated(existing, item):
