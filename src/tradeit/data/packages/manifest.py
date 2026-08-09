@@ -41,7 +41,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from tradeit.core.enums import Bartimeframe
 from tradeit.data.packages.spec import (
@@ -299,7 +299,15 @@ def load_manifest(path: Path) -> PackageManifest:
                 "replaced with a real value first — they are left unparseable on "
                 "purpose, so an unfilled template cannot be imported by accident."
             ) from error
-    return PackageManifest.model_validate(raw)
+    try:
+        return PackageManifest.model_validate(raw)
+    except ValidationError as error:
+        # Pydantic's own message is precise but arrives as a traceback, which
+        # is not what an operator fixing a hand-written TOML file needs.
+        problems = "; ".join(
+            f"{'.'.join(str(p) for p in item['loc'])}: {item['msg']}" for item in error.errors()
+        )
+        raise ConfigError(f"{path} is not a valid manifest — {problems}") from error
 
 
 def verify_files(manifest: PackageManifest, root: Path) -> list[str]:
@@ -370,14 +378,21 @@ def build_manifest_template(
         "# IANA zone the timestamp columns are expressed in.",
         'timezone = "PLEASE_SET"',
         "",
-        "[coverage]",
-        "start = PLEASE_SET  # e.g. 2004-01-02",
-        "end = PLEASE_SET    # e.g. 2024-12-31",
-        "",
+        "# What you already know is wrong or missing. Surfaced in every import",
+        "# report: a package that declares its gaps is worth more than one that",
+        "# appears complete.",
         "known_limitations = [",
         '  # "no delisted securities before 2010",',
         "]",
         'licence_note = ""',
+        "",
+        # Every top-level key must precede the first table header, or TOML reads
+        # it as a member of that table. Emitting known_limitations after
+        # [coverage] silently made it coverage.known_limitations, which failed
+        # validation with a message pointing at the wrong field.
+        "[coverage]",
+        "start = PLEASE_SET  # e.g. 2004-01-02",
+        "end = PLEASE_SET    # e.g. 2024-12-31",
         "",
     ]
     for candidate in sorted(root.rglob("*")):

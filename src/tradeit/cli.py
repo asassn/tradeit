@@ -1,7 +1,8 @@
 """Command line entry point.
 
-Phase 1 exposes only what exists: configuration inspection, schema creation,
-and a demo ingest against the synthetic provider. Screening, backtesting and
+Exposes only what exists: configuration inspection, schema creation, a demo
+ingest against the synthetic provider, and the offline data-package and
+validation commands (see :mod:`tradeit.cli_data`). Screening, backtesting and
 trading subcommands arrive with the phases that build them.
 """
 
@@ -15,6 +16,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from tradeit.cli_data import add_data_commands
 from tradeit.config import get_settings
 from tradeit.core.calendar import get_calendar
 from tradeit.core.clock import AsOfClock
@@ -165,6 +167,8 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--days", type=int, default=400)
     demo.add_argument("--end", default=None, help="ISO end date (default: today)")
     demo.set_defaults(func=cmd_demo_ingest)
+
+    add_data_commands(sub)
     return parser
 
 
