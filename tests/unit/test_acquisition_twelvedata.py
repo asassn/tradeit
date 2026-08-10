@@ -21,6 +21,7 @@ Three groups matter more than the rest:
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import gzip
 import json
@@ -57,11 +58,13 @@ from tradeit.acquisition.runner import (
 )
 from tradeit.acquisition.twelvedata import (
     DEFAULT_BATCH_SIZE,
+    END_DATE_PROBE_DAYS,
     ENDPOINTS,
     MAX_OUTPUTSIZE,
     TwelveDataAcquisition,
     read_credit_headers,
 )
+from tradeit.core.calendar import get_calendar
 from tradeit.data.packages.database import DatabaseSink
 from tradeit.data.packages.importer import ImportOptions, PackageImporter
 from tradeit.data.packages.manifest import WORKSPACE_DIRNAME, load_manifest
@@ -188,6 +191,74 @@ class FakeTransport:
     @property
     def price_calls(self) -> list[str]:
         return [c for c in self.calls if "/time_series" in c]
+
+
+class _CalendarTransport:
+    """Serves one bar per real trading session, with a chosen end_date semantic.
+
+    Two subclasses differ in one comparison operator, which is the whole
+    question the 2025-12-31 investigation turned on.
+    """
+
+    inclusive: bool
+
+    def __init__(self, *, last_session: dt.date) -> None:
+        self.last_session = last_session
+        self.calls: list[str] = []
+
+    def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
+        self.calls.append(url)
+        symbol = url.split("symbol=")[1].split("&")[0]
+        start = dt.date.fromisoformat(url.split("start_date=")[1].split("&")[0])
+        asked = dt.date.fromisoformat(url.split("end_date=")[1].split("&")[0])
+        calendar = get_calendar()
+        rows = []
+        cursor = start
+        while cursor <= min(
+            asked if self.inclusive else asked - dt.timedelta(days=1), self.last_session
+        ):
+            if calendar.is_session(cursor):
+                rows.append(
+                    {
+                        "datetime": cursor.isoformat(),
+                        "open": "100.00",
+                        "high": "101.00",
+                        "low": "99.00",
+                        "close": "100.50",
+                        "volume": "1000000",
+                    }
+                )
+            cursor += dt.timedelta(days=1)
+        return json.dumps(
+            {
+                "meta": {"symbol": symbol, "exchange": "NASDAQ", "type": "Common Stock"},
+                "values": rows,
+                "status": "ok",
+            }
+        ).encode()
+
+
+class ExclusiveEndDateTransport(_CalendarTransport):
+    """``end_date`` excludes its own day. What the live run behaved like."""
+
+    inclusive = False
+
+
+class InclusiveEndDateTransport(_CalendarTransport):
+    """``end_date`` includes its own day. What the docs may or may not say."""
+
+    inclusive = True
+
+
+def _sessions_written(output: Path) -> list[dt.date]:
+    """Session dates actually in the package, read back off disk."""
+    path = output / "daily_bars.csv.gz"
+    if not path.exists():
+        return []
+    text = gzip.decompress(path.read_bytes()).decode()
+    return sorted(
+        dt.date.fromisoformat(row["session_date"]) for row in csv.DictReader(text.splitlines())
+    )
 
 
 def make_provider(transport: FakeTransport | None = None, **kwargs: Any) -> TwelveDataAcquisition:
@@ -733,7 +804,10 @@ class TestCorporateActions:
         assert report.rows[str(DatasetKind.SPLITS)] == 1
         text = (output / "splits.csv").read_text()
         assert "ex_date" in text and "ratio" in text
-        assert "2010-06-24,2" in text.replace(" ", "")
+        # SPLIT_PAYLOAD is from_factor=1, to_factor=2. Under this vendor's
+        # convention that is a price factor of 2, i.e. a 1-for-2 reverse split,
+        # so the canonical share-count multiplier is 0.5.
+        assert "2010-06-24,0.5" in text.replace(" ", "")
 
     def test_a_dividend_maps_to_cash_amount_not_amount(self, tmp_path: Path) -> None:
         """The canonical column is `cash_amount`. Twelve Data calls it `amount`.
@@ -784,11 +858,19 @@ class TestCorporateActions:
     @pytest.mark.parametrize(
         ("payload", "expected"),
         [
-            ({"from_factor": 1, "to_factor": 2}, Decimal(2)),
-            ({"from_factor": 10, "to_factor": 1}, Decimal("0.1")),
+            # from/to, observed against a live account: Apple's 4-for-1 came
+            # back as 0.25, and Apple's share count did not fall to a quarter.
+            ({"from_factor": 4, "to_factor": 1}, Decimal(4)),
+            ({"from_factor": 7, "to_factor": 1}, Decimal(7)),
+            ({"from_factor": 1, "to_factor": 10}, Decimal("0.1")),
+            # A spelled-out ratio carries its own direction and is read as
+            # written, whatever the vendor's factor convention is.
             ({"factor": "3:1"}, Decimal(3)),
             ({"factor": "1:5"}, Decimal("0.2")),
-            ({"factor": "2"}, Decimal(2)),
+            # A bare decimal has no direction of its own, so the provider's
+            # declared convention settles it: 0.25 is a 4-for-1 here.
+            ({"factor": "0.25"}, Decimal(4)),
+            ({"factor": "8"}, Decimal("0.125")),
         ],
     )
     def test_every_split_notation_resolves_to_a_share_count_multiplier(
@@ -798,6 +880,60 @@ class TestCorporateActions:
         from tradeit.acquisition.twelvedata import _split_ratio
 
         assert _split_ratio(payload) == expected
+
+    @pytest.mark.parametrize(
+        ("payload", "share_count", "vendor_value"),
+        [
+            ({"from_factor": 7, "to_factor": 1}, Decimal(7), Decimal("0.142857142857")),
+            ({"from_factor": 4, "to_factor": 1}, Decimal(4), Decimal("0.25")),
+        ],
+    )
+    def test_the_real_apple_factors_normalize_to_the_real_apple_splits(
+        self,
+        payload: dict[str, Any],
+        share_count: Decimal,
+        vendor_value: Decimal,
+    ) -> None:
+        """The live smoke test's actual numbers, pinned.
+
+        Twelve Data served Apple's 2014 7-for-1 as 0.142857142857... and its
+        2020 4-for-1 as 0.25. Under the previous reading those became the
+        share-count multipliers, which would have multiplied every pre-2014
+        adjusted price by 1/28 instead of 28.
+        """
+        from tradeit.acquisition.reconstruct import ratios_agree
+        from tradeit.acquisition.twelvedata import _split_ratio, _vendor_factor
+
+        normalized = _split_ratio(payload)
+        assert normalized is not None
+        assert ratios_agree(normalized, share_count)
+        # And what the vendor said is kept, not thrown away.
+        observed = _vendor_factor(payload)
+        assert observed is not None
+        assert ratios_agree(observed, vendor_value)
+
+    def test_the_convention_is_declared_not_inferred_from_the_value(self) -> None:
+        """0.25 is a 4-for-1's price factor and a 1-for-4's share factor. The
+        number cannot settle which, so a declaration does."""
+        from tradeit.acquisition.reconstruct import SplitFactorConvention
+        from tradeit.acquisition.twelvedata import SPLIT_FACTOR_CONVENTION
+
+        assert SPLIT_FACTOR_CONVENTION is SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER
+
+    def test_the_split_row_keeps_the_vendors_own_number_beside_the_canonical_one(
+        self, tmp_path: Path
+    ) -> None:
+        output = tmp_path / "pkg"
+        run_acquisition(output, ["SPY"])
+        rows = list(csv.DictReader((output / "splits.csv").read_text().splitlines()))
+        assert rows
+        row = rows[0]
+        # SPLIT_PAYLOAD is from_factor=1, to_factor=2 -> a 1-for-2 reverse split
+        # under this vendor's convention.
+        assert row["ratio"] == "0.5"
+        assert row["vendor_factor"] == "2"
+        assert row["vendor_convention"] == "price_adjustment_multiplier"
+        assert row["source_provider"] == "twelve_data"
 
 
 # ---------------------------------------------------------------------------
@@ -908,7 +1044,100 @@ class TestCoverageVerification:
         provider.fetch(FetchRequest.one(AcquisitionDataset.DAILY_PRICES, "SPY", START, END))
         url = transport.calls[0]
         assert f"start_date={START.isoformat()}" in url
-        assert f"end_date={END.isoformat()}" in url
+        # One day past the requested end, deliberately. See END_DATE_PROBE_DAYS
+        # and the trim tests below: the extra day is discarded before anything
+        # is written, so this cannot leak a session nobody asked for.
+        probe = END + dt.timedelta(days=END_DATE_PROBE_DAYS)
+        assert f"end_date={probe.isoformat()}" in url
+
+    def test_the_requested_final_session_is_not_lost_to_an_exclusive_end_date(
+        self, tmp_path: Path
+    ) -> None:
+        """The 2025-12-31 bug, pinned.
+
+        A live run asked for 2010-01-01..2025-12-31 and got a last session of
+        2025-12-30 for two independent symbols. 2025-12-31 was a US trading
+        session. This transport reproduces that behaviour — it treats end_date
+        as **exclusive** — and the requested final session must still reach the
+        package.
+        """
+        last = dt.date(2025, 12, 31)
+        transport = ExclusiveEndDateTransport(last_session=last)
+        provider = make_provider(transport, fetch_corporate_actions=False)
+        options = AcquisitionOptions(start=dt.date(2025, 12, 1), end=last, max_wait_s=0)
+        output = tmp_path / "pkg"
+        AcquisitionRunner(provider, ["SPY"], output, options).run()
+
+        sessions = _sessions_written(output)
+        assert sessions, "no bars were written at all"
+        assert sessions[-1] == last, (
+            f"the requested final session {last} is missing; the package stops at "
+            f"{sessions[-1]}. An exclusive end_date dropped it."
+        )
+
+    def test_the_probe_day_never_reaches_the_package(self, tmp_path: Path) -> None:
+        """The other half of the fix, and the half that makes it safe.
+
+        This transport treats end_date as **inclusive**, so asking for one day
+        beyond the window returns a bar the operator did not request. It must be
+        discarded: keeping it would be a silent one-day lookahead, which is the
+        exact failure the rest of the platform exists to prevent.
+        """
+        requested_end = dt.date(2025, 12, 30)
+        transport = InclusiveEndDateTransport(last_session=dt.date(2025, 12, 31))
+        provider = make_provider(transport, fetch_corporate_actions=False)
+        options = AcquisitionOptions(start=dt.date(2025, 12, 1), end=requested_end, max_wait_s=0)
+        output = tmp_path / "pkg"
+        report = AcquisitionRunner(provider, ["SPY"], output, options).run()
+
+        sessions = _sessions_written(output)
+        assert sessions[-1] == requested_end
+        assert dt.date(2025, 12, 31) not in sessions
+        assert any("were discarded" in f for f in report.findings)
+
+    def test_both_end_date_semantics_produce_the_same_package(self, tmp_path: Path) -> None:
+        """Why the fix is safe without the vendor's documentation.
+
+        The probe plus the trim gives identical output whether end_date turns
+        out to be inclusive or exclusive, so implementing it costs nothing if
+        the diagnosis is wrong.
+        """
+        requested_end = dt.date(2025, 12, 31)
+        options = AcquisitionOptions(start=dt.date(2025, 12, 1), end=requested_end, max_wait_s=0)
+        written = []
+        for index, transport in enumerate(
+            (
+                ExclusiveEndDateTransport(last_session=requested_end),
+                InclusiveEndDateTransport(last_session=requested_end),
+            )
+        ):
+            output = tmp_path / f"pkg{index}"
+            provider = make_provider(transport, fetch_corporate_actions=False)
+            AcquisitionRunner(provider, ["SPY"], output, options).run()
+            written.append(_sessions_written(output))
+        assert written[0] == written[1]
+        assert written[0][-1] == requested_end
+
+    def test_a_weekend_end_date_is_not_reported_as_missing_sessions(self) -> None:
+        """The check that used to cry wolf on every well-formed package.
+
+        A request ending on a Saturday is complete when it ends on the Friday.
+        Reporting that as a shortfall trained the reader to skip the line, which
+        is how the genuinely missing 2025-12-31 nearly went unnoticed.
+        """
+        saturday = dt.date(2026, 1, 3)
+        friday = dt.date(2026, 1, 2)
+        provider = make_provider(fetch_corporate_actions=False)
+        provider.coverage["SPY"] = (dt.date(2026, 1, 2), friday, 1)
+        findings = provider.coverage_findings(dt.date(2026, 1, 2), saturday)
+        assert not any("session(s) short" in f for f in findings)
+
+    def test_a_genuinely_missing_session_is_reported_as_such(self) -> None:
+        provider = make_provider(fetch_corporate_actions=False)
+        provider.coverage["SPY"] = (dt.date(2025, 12, 1), dt.date(2025, 12, 30), 20)
+        findings = provider.coverage_findings(dt.date(2025, 12, 1), dt.date(2025, 12, 31))
+        assert any("session(s) short" in f for f in findings)
+        assert any("NOT a weekend or holiday" in f for f in findings)
 
     def test_only_documented_endpoints_are_reachable(self) -> None:
         assert set(ENDPOINTS.values()) == {

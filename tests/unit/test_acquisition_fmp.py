@@ -69,6 +69,10 @@ from tradeit.acquisition.reconstruct import (
     RECONSTRUCTION_LABEL,
     ReconstructionQuality,
     SplitEvent,
+    SplitFactorConvention,
+    ratios_agree,
+    take_census,
+    to_share_count_multiplier,
 )
 from tradeit.acquisition.runner import AcquisitionOptions, AcquisitionRunner
 from tradeit.acquisition.twelvedata import TwelveDataAcquisition
@@ -215,10 +219,27 @@ def bars(count: int = 60, *, symbol: str = "AAPL") -> list[dict[str, str]]:
     return rows
 
 
-class FakeTwelveDataTransport:
-    """Twelve Data with `/splits` refused by the plan — the real situation."""
+#: Apple's 2014 and 2020 splits **in Twelve Data's own convention**, exactly as
+#: the live smoke test observed them: from_factor/to_factor reversed relative to
+#: the share count, so the derived single factor is 1/7 and 1/4.
+TD_APPLE_SPLITS: dict[str, Any] = {
+    "splits": [
+        {"date": "2014-06-09", "from_factor": 7, "to_factor": 1},
+        {"date": "2020-08-31", "from_factor": 4, "to_factor": 1},
+    ]
+}
 
-    def __init__(self, *, splits_available: bool = False) -> None:
+
+class FakeTwelveDataTransport:
+    """Twelve Data with `/splits` refused by the plan — the real situation.
+
+    ``splits_available`` takes three values: ``False`` for the plan restriction
+    the free tier actually returns, ``True`` for a single generic split, and
+    ``"apple"`` for the two real Apple events in the vendor's own reciprocal
+    convention, which is what the cross-provider normalization test needs.
+    """
+
+    def __init__(self, *, splits_available: bool | str = False) -> None:
         self.splits_available = splits_available
         self.calls: list[str] = []
 
@@ -237,9 +258,11 @@ class FakeTwelveDataTransport:
             payload = blocks[symbols[0]] if len(symbols) == 1 else blocks
             return json.dumps(payload).encode()
         if "/splits" in url:
+            if self.splits_available == "apple":
+                return json.dumps(TD_APPLE_SPLITS).encode()
             if self.splits_available:
                 return json.dumps(
-                    {"splits": [{"date": "2014-06-09", "from_factor": 1, "to_factor": 7}]}
+                    {"splits": [{"date": "2014-06-09", "from_factor": 7, "to_factor": 1}]}
                 ).encode()
             return json.dumps(
                 {
@@ -253,7 +276,9 @@ class FakeTwelveDataTransport:
         return b"{}"
 
 
-def build_package(output: Path, symbols: list[str], *, splits_available: bool = False) -> Path:
+def build_package(
+    output: Path, symbols: list[str], *, splits_available: bool | str = False
+) -> Path:
     """A real acquisition run against fixtures, producing a real package."""
     provider = TwelveDataAcquisition(
         token=TD_SECRET,
@@ -474,7 +499,7 @@ class TestNormalization:
         from tradeit.acquisition.reconstruct import check_split_consistency
 
         conflicts, notes = check_split_consistency("AAPL", events, None)
-        assert any("identical split records" in f for f in conflicts)
+        assert any("equivalent split records" in f for f in conflicts)
         assert any("NOT merged" in f for f in conflicts)
         assert notes == []
 
@@ -1060,28 +1085,221 @@ class TestProvenance:
 # ---------------------------------------------------------------------------
 
 
+class TestCrossProviderNormalization:
+    """The apparent conflicts the real smoke test produced, and why they are not.
+
+    Twelve Data served Apple's 2014 split as ``0.142857142857…`` and its 2020
+    split as ``0.25``. FMP served the same two events as 7/1 and 4/1. Compared
+    as raw vendor numbers these look like flat contradictions. They are exact
+    reciprocals: the same corporate action measured from opposite ends.
+
+    The fix is to normalize both into a canonical share-count multiplier before
+    comparing anything, which is what these tests hold in place. Everything here
+    uses the real ratios of real corporate actions, so a regression shows up as
+    a recognisably wrong statement about a well-known event.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "ex_date", "vendor_price_factor", "numerator", "denominator", "economic"),
+        [
+            ("AAPL 7-for-1", dt.date(2014, 6, 9), "0.142857142857", 7, 1, Decimal(7)),
+            ("AAPL 4-for-1", dt.date(2020, 8, 31), "0.25", 4, 1, Decimal(4)),
+            ("NVDA 10-for-1", dt.date(2024, 6, 10), "0.1", 10, 1, Decimal(10)),
+            ("NVDA 4-for-1", dt.date(2021, 7, 20), "0.25", 4, 1, Decimal(4)),
+            ("NVDA 3-for-2", dt.date(2007, 9, 11), "0.666666666667", 3, 2, Decimal("1.5")),
+            ("1-for-8 reverse", dt.date(2019, 5, 6), "8", 1, 8, Decimal("0.125")),
+            ("1-for-10 reverse", dt.date(2018, 3, 1), "10", 1, 10, Decimal("0.1")),
+        ],
+    )
+    def test_reciprocal_representations_normalize_to_the_same_split(
+        self,
+        label: str,
+        ex_date: dt.date,
+        vendor_price_factor: str,
+        numerator: int,
+        denominator: int,
+        economic: Decimal,
+    ) -> None:
+        price_side = SplitEvent.from_vendor(
+            ex_date=ex_date,
+            value=Decimal(vendor_price_factor),
+            convention=SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER,
+            source="twelve_data",
+        )
+        share_side = SplitEvent.from_vendor(
+            ex_date=ex_date,
+            value=Decimal(numerator) / Decimal(denominator),
+            convention=SplitFactorConvention.NEW_OVER_OLD_SHARES,
+            source="fmp",
+            numerator=numerator,
+            denominator=denominator,
+        )
+        assert ratios_agree(price_side.economic_ratio, economic), label
+        assert ratios_agree(share_side.economic_ratio, economic), label
+        assert ratios_agree(price_side.economic_ratio, share_side.economic_ratio), label
+
+        conflicts, notes = compare_schedules("X", (price_side,), (share_side,), "fmp")
+        assert conflicts == [], f"{label} was reported as a conflict"
+        assert notes == [], f"{label} produced an unexpected note"
+
+    @pytest.mark.parametrize(
+        ("economic", "price_adjustment"),
+        [
+            (Decimal(7), Decimal(1) / Decimal(7)),
+            (Decimal(4), Decimal("0.25")),
+            (Decimal(10), Decimal("0.1")),
+            (Decimal("1.5"), Decimal(1) / Decimal("1.5")),
+            (Decimal("0.125"), Decimal(8)),
+        ],
+    )
+    def test_the_four_derived_multipliers_are_consistent(
+        self, economic: Decimal, price_adjustment: Decimal
+    ) -> None:
+        """Adjusting and reconstructing are inverses, and price and volume move
+        in opposite directions. Stated as identities rather than examples."""
+        event = SplitEvent(ex_date=dt.date(2020, 1, 2), ratio=economic)
+        assert event.economic_ratio == economic
+        assert ratios_agree(event.price_adjustment_multiplier, price_adjustment)
+        assert event.volume_adjustment_multiplier == economic
+        assert event.raw_price_reconstruction_multiplier == economic
+        assert ratios_agree(event.raw_volume_reconstruction_multiplier, price_adjustment)
+        # Adjust then reconstruct returns the original price.
+        assert ratios_agree(
+            event.price_adjustment_multiplier * event.raw_price_reconstruction_multiplier,
+            Decimal(1),
+        )
+        # Dollar volume survives the adjustment.
+        assert ratios_agree(
+            event.price_adjustment_multiplier * event.volume_adjustment_multiplier,
+            Decimal(1),
+        )
+
+    def test_a_bare_factor_cannot_settle_its_own_direction(self) -> None:
+        """0.25 is a 4-for-1's price factor and a 1-for-4's share factor.
+
+        The single most important reason the convention is declared per provider
+        rather than sniffed from the value.
+        """
+        forward = SplitEvent.from_vendor(
+            ex_date=dt.date(2020, 8, 31),
+            value=Decimal("0.25"),
+            convention=SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER,
+        )
+        reverse = SplitEvent.from_vendor(
+            ex_date=dt.date(2020, 8, 31),
+            value=Decimal("0.25"),
+            convention=SplitFactorConvention.SHARE_COUNT_MULTIPLIER,
+        )
+        assert forward.economic_ratio == Decimal(4)
+        assert forward.is_reverse is False
+        assert reverse.economic_ratio == Decimal("0.25")
+        assert reverse.is_reverse is True
+
+    def test_an_unknown_convention_is_refused_rather_than_assumed(self) -> None:
+        with pytest.raises(ValueError, match="not established"):
+            to_share_count_multiplier(Decimal("0.25"), SplitFactorConvention.UNKNOWN)
+
+    def test_the_vendors_own_value_and_convention_are_preserved(self) -> None:
+        event = SplitEvent.from_vendor(
+            ex_date=dt.date(2014, 6, 9),
+            value=Decimal("0.142857142857"),
+            convention=SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER,
+            source="twelve_data",
+        )
+        assert event.vendor_value == Decimal("0.142857142857")
+        assert event.vendor_convention is SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER
+        assert "0.142857142857" in event.vendor_note
+        assert "price-adjustment multiplier" in event.vendor_note
+
+    def test_the_package_records_what_each_vendor_actually_sent(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        row = next(r for r in read_csv(package / "splits.csv") if r["ex_date"] == "2020-08-31")
+        assert row["ratio"] == "4"
+        assert row["numerator"] == "4"
+        assert row["denominator"] == "1"
+        assert row["vendor_convention"] == "new_over_old_shares"
+
+
 class TestConflicts:
     def test_agreement_produces_no_finding(self) -> None:
         shared = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="twelve_data"),)
-        assert compare_schedules("AAPL", shared, shared, "fmp") == []
+        assert compare_schedules("AAPL", shared, shared, "fmp") == ([], [])
 
-    def test_a_ratio_disagreement_is_reported_not_reconciled(self) -> None:
+    def test_a_reciprocal_pair_is_a_convention_note_not_a_conflict(self) -> None:
+        """If two *normalized* ratios come out reciprocal, a declaration is
+        wrong — which is a different problem from the vendors disagreeing, and
+        has a different fix."""
+        primary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="twelve_data"),)
+        secondary = (
+            SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(1) / Decimal(7), source="fmp"),
+        )
+        conflicts, notes = compare_schedules("AAPL", primary, secondary, "fmp")
+        assert conflicts == []
+        assert len(notes) == 1
+        assert "RECIPROCALS" in notes[0]
+        assert "convention is wrong" in notes[0]
+
+    def test_a_genuine_ratio_disagreement_is_still_reported(self) -> None:
+        """7-for-1 against 2-for-1 is not a representation difference. It must
+        survive the normalization work and stay a conflict."""
         primary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="twelve_data"),)
         secondary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(2), source="fmp"),)
-        findings = compare_schedules("AAPL", primary, secondary, "fmp")
-        assert len(findings) == 1
-        assert "DISAGREE" in findings[0]
-        assert "Not reconciled" in findings[0]
+        conflicts, notes = compare_schedules("AAPL", primary, secondary, "fmp")
+        assert notes == []
+        assert len(conflicts) == 1
+        assert "DISAGREE" in conflicts[0]
+        assert "Not reciprocal and not equal" in conflicts[0]
+        assert "Not reconciled" in conflicts[0]
+
+    def test_a_forward_against_a_reverse_split_is_a_conflict(self) -> None:
+        """4-for-1 against 1-for-8: opposite directions and not reciprocal.
+        The one comparison that must never be smoothed away."""
+        primary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal(4), source="a"),)
+        secondary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal("0.125"), source="b"),)
+        conflicts, _ = compare_schedules("X", primary, secondary, "b")
+        assert len(conflicts) == 1
+        assert "DISAGREE" in conflicts[0]
+
+    def test_vendor_truncation_does_not_manufacture_a_conflict(self) -> None:
+        """A vendor serving 1/7 to twelve digits still round-trips to 7."""
+        primary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="a"),)
+        secondary = (
+            SplitEvent(
+                ex_date=dt.date(2014, 6, 9),
+                ratio=Decimal(1) / Decimal("0.142857142857"),
+                source="b",
+            ),
+        )
+        conflicts, notes = compare_schedules("AAPL", primary, secondary, "b")
+        assert conflicts == []
+        assert notes == []
 
     def test_an_event_only_the_primary_has_is_reported_as_not_applied(self) -> None:
         primary = (SplitEvent(ex_date=dt.date(1999, 1, 4), ratio=Decimal(2), source="twelve_data"),)
-        findings = compare_schedules("AAPL", primary, (), "fmp")
-        assert "NOT applied" in findings[0]
+        conflicts, _ = compare_schedules("AAPL", primary, (), "fmp")
+        assert "NOT applied" in conflicts[0]
 
     def test_an_event_only_the_secondary_has_is_reported(self) -> None:
         secondary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal(4), source="fmp"),)
-        findings = compare_schedules("AAPL", (), secondary, "fmp")
-        assert "fmp records a split" in findings[0]
+        conflicts, _ = compare_schedules("AAPL", (), secondary, "fmp")
+        assert "fmp records a split" in conflicts[0]
+
+    def test_the_real_smoke_test_pair_produces_no_conflict_end_to_end(self, tmp_path: Path) -> None:
+        """The regression itself, over a real package.
+
+        The Twelve Data fixture reports Apple's 2014 and 2020 splits in its own
+        reciprocal convention; FMP reports the same two as explicit share pairs.
+        Once both are normalized, the shared dates must be silent.
+        """
+        package = build_package(tmp_path / "pkg", ["AAPL"], splits_available="apple")
+        report = enrich(package)
+        for date in ("2014-06-09", "2020-08-31"):
+            assert not any(date in item and "DISAGREE" in item for item in report.conflicts), (
+                f"{date} was reported as a cross-provider disagreement"
+            )
+        assert not any("RECIPROCAL" in item for item in report.conflicts)
+        assert not any("RECIPROCAL" in item for item in report.findings)
 
     def test_a_disagreement_over_a_real_package_reaches_the_manifest(self, tmp_path: Path) -> None:
         # Twelve Data's fixture reports the 2014 7-for-1; FMP's reports it too,
@@ -1310,3 +1528,134 @@ class TestCommands:
         assert "Corporate-action sources" in out
         assert "fmp" in out
         assert "cannot be used as --provider" in out
+
+
+# ---------------------------------------------------------------------------
+# Counting splits honestly
+# ---------------------------------------------------------------------------
+
+
+class TestSplitCensus:
+    """ "Reconstructed across 5 split(s)" was true and told the reader nothing.
+
+    Over a 2010-2025 Apple package, three of those five records are from 1987,
+    2000 and 2005 and change no row in it. The line reads as though five splits
+    were applied. Four separate counts replace it, and none of them is the sum
+    of the others.
+    """
+
+    def test_the_four_counts_are_measured_separately(self) -> None:
+        coverage = (dt.date(2010, 1, 4), dt.date(2025, 12, 31))
+        events = tuple(
+            SplitEvent(ex_date=d, ratio=Decimal(2))
+            for d in (
+                dt.date(1987, 6, 16),
+                dt.date(2000, 6, 21),
+                dt.date(2005, 2, 28),
+                dt.date(2014, 6, 9),
+                dt.date(2020, 8, 31),
+            )
+        )
+        census = take_census(events, coverage)
+        assert census.supplied == 5
+        assert census.in_coverage == 2
+        assert census.effective == 2
+        assert census.outside_coverage == 3
+        assert census.before_coverage == 3
+        assert census.after_coverage == 0
+
+    def test_a_split_after_the_window_is_outside_coverage_and_affects_every_row(self) -> None:
+        """The two counts that are easy to conflate, pulled apart.
+
+        Outside coverage does not mean harmless. A split after the window's end
+        touches every session in it.
+        """
+        coverage = (dt.date(2010, 1, 4), dt.date(2011, 3, 31))
+        events = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7)),)
+        census = take_census(events, coverage)
+        assert census.in_coverage == 0
+        assert census.outside_coverage == 1
+        assert census.after_coverage == 1
+        assert census.effective == 1
+
+    def test_a_split_before_the_window_is_outside_coverage_and_affects_nothing(self) -> None:
+        coverage = (dt.date(2010, 1, 4), dt.date(2011, 3, 31))
+        events = (SplitEvent(ex_date=dt.date(2005, 2, 28), ratio=Decimal(2)),)
+        census = take_census(events, coverage)
+        assert census.in_coverage == 0
+        assert census.after_coverage == 0
+        assert census.before_coverage == 1
+        assert census.effective == 0
+
+    def test_a_split_on_the_first_session_affects_no_row(self) -> None:
+        """The ex-date already trades on the new basis, so nothing precedes it
+        inside the package. In coverage, and not effective."""
+        coverage = (dt.date(2010, 1, 4), dt.date(2011, 3, 31))
+        events = (SplitEvent(ex_date=dt.date(2010, 1, 4), ratio=Decimal(2)),)
+        census = take_census(events, coverage)
+        assert census.in_coverage == 1
+        assert census.effective == 0
+
+    def test_the_census_matches_the_rows_the_arithmetic_actually_changed(
+        self, tmp_path: Path
+    ) -> None:
+        """A census that disagreed with the reconstruction it describes would be
+        worse than no census."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package)
+        result = report.reconstruction[0]
+        rows = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")
+        applied = {d for row in rows for d in row["splits_applied"].split(";") if d}
+        assert len(applied) == result.census.effective
+        assert result.census.supplied == 5
+        assert result.census.effective == 2
+        # The fixture package spans early 2010 only, so Apple's 2014 and 2020
+        # splits sit after the window: outside coverage, and affecting every row.
+        assert result.census.in_coverage == 0
+        assert result.census.after_coverage == 2
+        assert result.census.before_coverage == 3
+
+    def test_the_summary_no_longer_says_across_five_splits(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package)
+        summary = report.reconstruction[0].summary()
+        assert "across 5 split" not in summary
+        assert "5 supplied" in summary
+        assert "0 inside price coverage" in summary
+        assert "2 affecting at least one row" in summary
+        assert "5 outside coverage" in summary
+        assert "3 before the window, affecting none" in summary
+        assert "2 after the window, affecting every row" in summary
+
+    def test_the_rendered_report_breaks_the_counts_out_per_symbol(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA"])
+        report = enrich(
+            package, FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": NVDA_SPLITS})
+        )
+        text = report.render()
+        assert "supplied / inside coverage / affecting rows / outside" in text
+        assert "A split before the window affects no row" in text
+
+    def test_the_payload_carries_all_four_counts(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package)
+        payload = report.to_payload()
+        splits = payload["symbols"][0]["splits"]
+        assert splits["supplied"] == 5
+        assert splits["in_coverage"] == 0
+        assert splits["effective"] == 2
+        assert splits["outside_coverage"] == 5
+        assert splits["before_coverage"] == 3
+        assert splits["after_coverage"] == 2
+        assert payload["reconstruction"][0]["splits"] == splits
+
+    def test_nvda_over_the_smoke_window_reports_two_effective_splits(self, tmp_path: Path) -> None:
+        """The other half of the reported complaint: NVDA showed 6."""
+        package = build_package(tmp_path / "pkg", ["NVDA"])
+        report = enrich(package, FakeFmpTransport(by_symbol={"NVDA": NVDA_SPLITS}))
+        census = report.reconstruction[0].census
+        assert census.supplied == 3
+        # The 2007 3-for-2 predates the fixture window; 2021 and 2024 follow it.
+        assert census.before_coverage == 1
+        assert census.after_coverage == 2
+        assert census.effective == 2

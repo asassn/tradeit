@@ -37,7 +37,14 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from tradeit.acquisition.reconstruct import SplitFactorConvention
 from tradeit.data.packages.spec import DatasetKind
+
+#: How Tiingo's ``splitFactor`` is read: it is the share-count multiplier
+#: directly, so no conversion happens. Declared so that "which way round is this
+#: vendor?" has an answer in code for every provider rather than for the two
+#: that happened to be audited.
+SPLIT_FACTOR_CONVENTION = SplitFactorConvention.SHARE_COUNT_MULTIPLIER
 
 #: A split factor within this distance of 1.0 is "no split". Vendors emit
 #: 1.0 on ordinary sessions and occasionally 0.9999999999 through float
@@ -246,7 +253,16 @@ def normalize_prices(
                     {
                         "instrument_id": str(instrument_id),
                         "ex_date": session.isoformat(),
+                        # Tiingo's `splitFactor` is already the share-count
+                        # multiplier — 2.0 on the ex-date of a 2-for-1 — so this
+                        # passes through unchanged. Declared rather than assumed,
+                        # because the same field name means the reciprocal at
+                        # another vendor and that mistake is invisible in the
+                        # output.
                         "ratio": _plain(split),
+                        "source_provider": "tiingo",
+                        "vendor_factor": _plain(split),
+                        "vendor_convention": str(SPLIT_FACTOR_CONVENTION),
                     },
                 )
 

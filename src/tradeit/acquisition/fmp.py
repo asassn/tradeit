@@ -63,7 +63,11 @@ from tradeit.acquisition.base import (
     FetchStatus,
 )
 from tradeit.acquisition.enrich import CorporateActionLookup, register_source
-from tradeit.acquisition.reconstruct import SplitEvent
+from tradeit.acquisition.reconstruct import (
+    SplitEvent,
+    SplitFactorConvention,
+    to_share_count_multiplier,
+)
 from tradeit.acquisition.redaction import credential_hint, redact_text, redact_url
 from tradeit.data.providers.http import (
     HttpTransport,
@@ -100,6 +104,17 @@ BACKOFF_FACTOR = 2.0
 #: Ceiling on the self-imposed interval, so a burst of 429s cannot back the pass
 #: off into an effective hang.
 MAX_INTERVAL_S = 30.0
+
+#: How this source's split numbers are read.
+#:
+#: FMP sends an explicit ``numerator``/``denominator`` pair, which is the only
+#: split representation that carries its own direction: 4-for-1 and 1-for-4 are
+#: different pairs, where the single factors ``4`` and ``0.25`` are each other's
+#: reciprocal and indistinguishable without a declared convention. So this
+#: declaration is a statement of fact rather than an inference, which is not
+#: true of every provider — see
+#: :data:`tradeit.acquisition.twelvedata.SPLIT_FACTOR_CONVENTION`.
+SPLIT_FACTOR_CONVENTION = SplitFactorConvention.NEW_OVER_OLD_SHARES
 
 
 @dataclass(slots=True)
@@ -582,7 +597,12 @@ def normalize_splits(symbol: str, records: list[Any]) -> tuple[tuple[SplitEvent,
             )
             continue
 
-        ratio = Decimal(numerator) / Decimal(denominator)
+        # numerator/denominator is the one unambiguous form: the pair carries
+        # its own direction, so unlike a bare factor it cannot be read as its
+        # own reciprocal. That is why this source needs no convention guess.
+        ratio = to_share_count_multiplier(
+            Decimal(numerator) / Decimal(denominator), SPLIT_FACTOR_CONVENTION
+        )
         events.append(
             SplitEvent(
                 ex_date=ex_date,
@@ -590,6 +610,7 @@ def normalize_splits(symbol: str, records: list[Any]) -> tuple[tuple[SplitEvent,
                 source="fmp/stable/splits",
                 numerator=numerator,
                 denominator=denominator,
+                vendor_convention=SPLIT_FACTOR_CONVENTION,
                 split_type=str(record.get("splitType") or record.get("split_type") or "").strip(),
                 # Never set. FMP's `date` is the effective date; when the split
                 # became publicly knowable is a different fact this endpoint does
@@ -716,6 +737,7 @@ __all__ = [
     "DEFAULT_REQUESTS_PER_MINUTE",
     "ENDPOINTS",
     "MAX_INTERVAL_S",
+    "SPLIT_FACTOR_CONVENTION",
     "FmpSplitSource",
     "RequestPacer",
     "normalize_splits",

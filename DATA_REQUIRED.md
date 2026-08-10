@@ -232,14 +232,29 @@ Requires: instruments
 | `denominator` | int | no | old shares: 1 in a 4-for-1, 10 in a 1-for-10 | — |
 | `split_type` | string | no | the vendor's own label, e.g. stock_split | — |
 | `source_provider` | string | no | which vendor supplied this record, when it is not the vendor that supplied the prices | — |
+| `vendor_factor` | decimal | no | the single number the vendor sent, before normalization | — |
+| `vendor_convention` | string | no | how vendor_factor was read: share_count_multiplier, price_adjustment_multiplier, or new_over_old_shares | — |
 | `announcement_time` | datetime | no | when the split was announced; normally before the ex-date | — |
 
 Enables: corporate-action artefact detection, split-adjusted price reconstruction, ATR and momentum artefact checks
 
+**`ratio` is always the share-count multiplier** — 4 for a 4-for-1, 0.125 for a
+1-for-8 reverse — whatever your vendor's own convention is. This is the field
+the reconstruction arithmetic reads, and getting it backwards inverts every
+price before the event while leaving a series that looks perfectly plausible.
+
+Vendors disagree about which end to measure from, and **the number cannot settle
+it**: `0.25` is the price-adjustment factor of a 4-for-1 forward split and the
+share-count multiplier of a 1-for-4 reverse split. So supply `vendor_factor` and
+`vendor_convention` alongside the canonical `ratio` if your source gives a
+single factor. See `docs/VENDOR_SEMANTICS.md` for the two live cases that made
+this necessary.
+
 `numerator` and `denominator` are kept alongside the derived `ratio` rather than
-replaced by it. A ratio of `0.1` could be 1-for-10 or 2-for-20, and when
-somebody later disputes the direction of a reverse split, the vendor's own pair
-is what the argument gets settled against.
+replaced by it, and are the **preferred** form: an explicit pair carries its own
+direction, which no single factor does. When somebody later disputes the
+direction of a reverse split, the vendor's own pair is what the argument gets
+settled against.
 
 `announcement_time` is the field almost nobody can fill. The split endpoints
 this project can reach carry an **effective** date only, and an effective date

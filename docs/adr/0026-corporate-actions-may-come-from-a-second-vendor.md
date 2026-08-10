@@ -85,6 +85,27 @@ A ratio of `0.1` could be 1-for-10 or 2-for-20. When somebody later disputes the
 direction of a reverse split, the vendor's own pair is what the argument gets
 settled against, and a derived decimal is not.
 
+**4a. (Amended after the first live smoke test.) Split factors are normalized
+through a per-provider declared convention before anything compares them.**
+
+The first real run reported Apple's 2014 and 2020 splits as cross-provider
+conflicts: Twelve Data served `0.142857…` and `0.25` where FMP served 7-for-1
+and 4-for-1. Those are reciprocals of each other — one corporate action seen
+from opposite ends — and the previous code compared raw vendor numbers.
+
+`SplitEvent` now carries one canonical quantity, the share-count multiplier,
+with the price-adjustment, volume-adjustment and reconstruction multipliers as
+derived properties. Each provider **declares** how its factors are read;
+nothing is inferred from a value, because `0.25` is the price factor of a
+4-for-1 and the share factor of a 1-for-4 and no inspection separates them. A
+provider whose convention is not established raises rather than guessing. The
+vendor's own value and its convention are preserved in the package.
+
+This also corrected a live defect: the Twelve Data adapter's factor direction
+was reciprocal to the truth, which would have multiplied pre-2014 Apple prices
+by 1/28 instead of 28 had that plan included the endpoint. Full write-up in
+`docs/VENDOR_SEMANTICS.md`.
+
 **5. An effective date is not an announcement date, and the gap is left open.**
 
 FMP's `/stable/splits` carries the ex-/effective date. When the split became
@@ -107,6 +128,22 @@ A split that merely falls outside the package's date window is *not* a conflict.
 It is correct behaviour — a 2005 split affects nothing in a package that starts
 in 2010 — and is reported as a note, so the conflicts that do need a person are
 not buried.
+
+Neither is a reciprocal pair, after 4a. If two *normalized* ratios come out
+reciprocal, a provider's declared convention is wrong; that is a different
+problem from the vendors disagreeing and has a different fix, so it is reported
+as its own kind of finding rather than as an economic conflict.
+
+**7. (Added after the first live smoke test.) A split count is four numbers.**
+
+The report said "reconstructed across 5 split(s)" for an Apple package spanning
+2010 to 2025. True, and misleading: three of those five are from 1987, 2000 and
+2005 and changed no row in it. `SplitCensus` reports records supplied, records
+inside price coverage, records that changed at least one row, and records
+outside coverage split by side — because a split *after* the window affects
+every row while one *before* it affects none, and merging those loses the
+distinction that matters. The reconstruction arithmetic was not changed for
+this; only what the report says about it.
 
 ## Consequences
 

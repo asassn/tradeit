@@ -486,10 +486,11 @@ that runs exactly the same pass immediately afterwards.
 ### What it changes in the package
 
 - `splits.csv` gains a row per split, carrying FMP's own `numerator` and
-  `denominator` alongside the derived `ratio`, plus a `source_provider` column
-  naming FMP. The pair is kept because a ratio of `0.1` could be 1-for-10 or
-  2-for-20, and if anyone later disputes the direction, the vendor's own numbers
-  are what the argument gets settled against.
+  `denominator` alongside the derived `ratio`, plus `source_provider`,
+  `vendor_factor` and `vendor_convention`. The pair is kept because a ratio of
+  `0.1` could be 1-for-10 or 2-for-20, and if anyone later disputes the
+  direction, the vendor's own numbers are what the argument gets settled
+  against.
 - `_acquisition/reconstructed_raw_prices.csv.gz` is written, every row labelled
   `RECONSTRUCTED_RAW_FROM_SPLIT_ADJUSTED` and naming **both** vendors.
 - `manifest.toml` gains a `[provenance]` table, and the stale
@@ -780,6 +781,26 @@ does not. **Nothing is reconciled automatically** — FMP's schedule is used
 because you named it, and every difference is listed for you. A split that
 simply falls outside your package's date window is *not* listed here; that is
 correct behaviour and appears under Findings.
+
+Two sources describing the *same* split as `7` and `0.142857…` is also **not** a
+conflict, and is no longer reported as one. Those are reciprocals — one event
+measured from opposite ends — and both are normalized to a canonical share-count
+multiplier before anything is compared. See `docs/VENDOR_SEMANTICS.md` §1.
+
+### `N bar(s) after the requested end … were discarded`
+
+Expected, and the line proving the tool is behaving. Twelve Data's `end_date`
+appears to be exclusive, so the request deliberately asks for one calendar day
+beyond your window and throws away anything past it. Without the extra day the
+final trading session of your range goes missing; without the trim you would
+silently get a session you did not ask for. See `docs/VENDOR_SEMANTICS.md` §2.
+
+### `N session(s) short. This is NOT a weekend or holiday`
+
+Real missing data, measured against the exchange calendar rather than the
+calendar date. A range that ends on a Saturday and stops on the Friday is
+complete and says so instead; this message only appears when trading sessions
+you asked for are genuinely absent.
 
 ### `Package status: ACQUISITION_INCOMPLETE_QUOTA`
 

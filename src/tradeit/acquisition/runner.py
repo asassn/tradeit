@@ -368,7 +368,7 @@ class AcquisitionReport:
                     "quality": str(item.quality),
                     "sessions_changed": item.sessions_changed,
                     "sessions_total": item.sessions_total,
-                    "splits_used": len(item.splits_used),
+                    "splits": item.census.to_payload(),
                     "label": RECONSTRUCTION_LABEL,
                 }
                 for item in self.reconstruction

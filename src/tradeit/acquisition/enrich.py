@@ -73,8 +73,13 @@ from tradeit.acquisition.reconstruct import (
     RECONSTRUCTION_LABEL,
     ReconstructionQuality,
     ReconstructionResult,
+    SplitCensus,
     SplitEvent,
+    SplitFactorConvention,
+    are_reciprocal,
+    ratios_agree,
     reconstruct_symbol,
+    take_census,
 )
 from tradeit.data.packages.manifest import (
     WORKSPACE_DIRNAME,
@@ -271,16 +276,25 @@ class EnrichmentOptions:
 
 @dataclass(slots=True)
 class SymbolEnrichment:
-    """Per-symbol result."""
+    """Per-symbol result.
+
+    ``census`` rather than a single split count. "Apple: 5 splits" was true and
+    misleading over a package spanning 2010 to 2025: three of the five are
+    decades older and changed nothing in it. See
+    :class:`~tradeit.acquisition.reconstruct.SplitCensus`.
+    """
 
     symbol: str
     instrument_id: int
     support: CapabilitySupport = CapabilitySupport.UNKNOWN
     status: FetchStatus | None = None
-    splits_found: int = 0
-    splits_in_coverage: int = 0
+    census: SplitCensus = field(default_factory=lambda: SplitCensus())
     sessions_changed: int = 0
     error: str = ""
+
+    @property
+    def splits_found(self) -> int:
+        return self.census.supplied
 
     @property
     def usable(self) -> bool:
@@ -348,6 +362,7 @@ class EnrichmentReport:
             f"Not answered         : {len(self.unenriched)}",
             f"Split records written: {self.splits_written:,}",
             "",
+            *self._split_census_lines(),
             f"Requests issued      : {self.requests:,}",
             f"Answers from cache   : {self.cached:,}",
         ]
@@ -409,6 +424,40 @@ class EnrichmentReport:
             lines.append("  Nothing was written. The package is unchanged.")
         return "\n".join(lines)
 
+    def _split_census_lines(self) -> list[str]:
+        """The four split counts, per symbol, because they are four facts.
+
+        The report used to print one number — "reconstructed across 5 split(s)"
+        — for a symbol where three of those five predate the package entirely.
+        Every count below is measured from the same schedule the arithmetic
+        used.
+        """
+        enriched = self.enriched
+        if not enriched:
+            return []
+        lines = [
+            "Splits per symbol    : supplied / inside coverage / affecting rows / outside",
+        ]
+        for item in enriched:
+            census = item.census
+            lines.append(
+                f"  {item.symbol:<10} {census.supplied:>3} / {census.in_coverage:>3} / "
+                f"{census.effective:>3} / {census.outside_coverage:>3}"
+                + (
+                    f"   ({census.before_coverage} before the window, "
+                    f"{census.after_coverage} after)"
+                    if census.outside_coverage
+                    else ""
+                )
+            )
+        lines += [
+            "",
+            "  A split before the window affects no row; one after it affects every",
+            "  row. Both are outside coverage and they are not interchangeable.",
+            "",
+        ]
+        return lines
+
     def to_payload(self) -> dict[str, Any]:
         return {
             "status": str(self.status),
@@ -426,8 +475,7 @@ class EnrichmentReport:
                     "symbol": item.symbol,
                     "support": str(item.support),
                     "status": str(item.status) if item.status else None,
-                    "splits_found": item.splits_found,
-                    "splits_in_coverage": item.splits_in_coverage,
+                    "splits": item.census.to_payload(),
                     "sessions_changed": item.sessions_changed,
                     "error": item.error,
                 }
@@ -439,7 +487,7 @@ class EnrichmentReport:
                     "quality": str(item.quality),
                     "sessions_changed": item.sessions_changed,
                     "sessions_total": item.sessions_total,
-                    "splits_used": len(item.splits_used),
+                    "splits": item.census.to_payload(),
                     "price_provider": item.price_provider,
                     "split_provider": item.split_provider,
                     "label": RECONSTRUCTION_LABEL,
@@ -550,7 +598,9 @@ class PackageEnricher:
             if not lookup.is_usable:
                 continue
 
-            state.splits_found = len(lookup.splits)
+            # Counted against price coverage in `_write`, once the bars for this
+            # symbol are in hand. Here we only know how many were supplied.
+            state.census = SplitCensus(supplied=len(lookup.splits))
             schedules[symbol] = lookup.splits
 
         self._write(manifest, tickers, bars, schedules, report)
@@ -716,7 +766,9 @@ class PackageEnricher:
             events = schedules[symbol]
             prior = existing.get(symbol, ())
             if prior:
-                report.conflicts.extend(compare_schedules(symbol, prior, events, self.source.name))
+                conflicts, notes = compare_schedules(symbol, prior, events, self.source.name)
+                report.conflicts.extend(conflicts)
+                report.findings.extend(notes)
             chosen[symbol] = events
             rows.extend(
                 _split_row(tickers[symbol], event, self.source.name)
@@ -736,12 +788,14 @@ class PackageEnricher:
 
         report.splits_written = len(rows)
         for state in report.symbols:
-            events = chosen.get(state.symbol, ())
-            coverage = _coverage(bars.get(state.instrument_id, []))
-            if coverage is not None:
-                state.splits_in_coverage = sum(
-                    1 for e in events if coverage[0] <= e.ex_date <= coverage[1]
-                )
+            if state.symbol not in chosen:
+                continue
+            # The same census the reconstruction computes, from the same inputs,
+            # so the per-symbol line and the reconstruction line cannot drift
+            # into disagreeing about how many splits there were.
+            state.census = take_census(
+                chosen[state.symbol], _coverage(bars.get(state.instrument_id, []))
+            )
 
         if self.options.reconstruct:
             self._reconstruct(manifest, tickers, bars, chosen, report)
@@ -765,6 +819,8 @@ class PackageEnricher:
                     "denominator",
                     "split_type",
                     "source_provider",
+                    "vendor_factor",
+                    "vendor_convention",
                 )
             }
             for row in read_rows(self.package / file.path):
@@ -775,13 +831,21 @@ class PackageEnricher:
                     continue
                 try:
                     symbol = by_instrument.get(int(identifier), "")
+                    vendor_factor = row.get(columns["vendor_factor"])
                     event = SplitEvent(
                         ex_date=dt.date.fromisoformat(ex_date),
+                        # The `ratio` column is already canonical — the
+                        # normalization happened in the adapter that wrote it —
+                        # so it is read straight, not converted a second time.
+                        # Converting here would apply a declared convention to a
+                        # number that has already been through it.
                         ratio=Decimal(ratio),
                         source=str(row.get(columns["source_provider"]) or manifest.provider),
                         numerator=_int_or_none(row.get(columns["numerator"])),
                         denominator=_int_or_none(row.get(columns["denominator"])),
                         split_type=str(row.get(columns["split_type"]) or ""),
+                        vendor_value=Decimal(vendor_factor) if vendor_factor else None,
+                        vendor_convention=_convention(row.get(columns["vendor_convention"])),
                     )
                 except (ValueError, ArithmeticError):
                     continue
@@ -980,15 +1044,27 @@ def compare_schedules(
     primary: Sequence[SplitEvent],
     secondary: Sequence[SplitEvent],
     secondary_name: str,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """Where two vendors disagree about a symbol's splits.
 
-    Returns findings. It does **not** merge, pick a winner, or average a ratio.
-    The caller uses the enrichment source's schedule because that is what the
-    operator asked for on the command line, and every place the two differ is
-    reported so that choice is visible rather than assumed.
+    Returns ``(conflicts, notes)``. It does **not** merge, pick a winner, or
+    average a ratio. The caller uses the enrichment source's schedule because
+    that is what the operator asked for on the command line, and every place the
+    two differ is reported so that choice is visible rather than assumed.
+
+    **Comparison is on the canonical share-count multiplier, never on the raw
+    vendor numbers.** A live run had Twelve Data reporting Apple's 2020 split as
+    ``0.25`` and FMP reporting it as 4-for-1, and the previous version of this
+    function called that a conflict. It is not one: those are the same corporate
+    action measured from opposite ends. Both sides arrive here already
+    normalized by their provider's declared convention, so equal splits compare
+    equal; and if two normalized ratios still come out reciprocal, that is
+    reported as a **convention** problem rather than an economic disagreement,
+    because it means a declaration is wrong and no argument with a data vendor
+    will fix it.
     """
     findings: list[str] = []
+    notes: list[str] = []
     by_date_primary: dict[dt.date, list[SplitEvent]] = {}
     for event in primary:
         by_date_primary.setdefault(event.ex_date, []).append(event)
@@ -1014,16 +1090,33 @@ def compare_schedules(
                 f"({right[0].describe}) that {primary_name} does not."
             )
         else:
-            left_ratios = {e.ratio for e in left}
-            right_ratios = {e.ratio for e in right}
-            if left_ratios != right_ratios:
-                findings.append(
-                    f"{symbol}: the two sources DISAGREE about the split on {ex_date} — "
-                    f"{primary_name} says {sorted(str(r) for r in left_ratios)}, "
-                    f"{secondary_name} says {sorted(str(r) for r in right_ratios)}. "
-                    f"The {secondary_name} figure was used. Not reconciled."
+            left_ratio = left[0].ratio
+            right_ratio = right[0].ratio
+            if ratios_agree(left_ratio, right_ratio):
+                # The common case, and the one that used to be reported as a
+                # conflict. Both sources describe the same corporate action;
+                # they merely wrote it down differently, and the canonical form
+                # has already absorbed that. Nothing to say.
+                continue
+            if are_reciprocal(left_ratio, right_ratio):
+                notes.append(
+                    f"{symbol}: the two sources describe the split on {ex_date} as exact "
+                    f"RECIPROCALS ({left_ratio} and {right_ratio}), which is one split "
+                    "seen from opposite ends rather than two different splits. After "
+                    "canonical normalization this should not happen, so it means a "
+                    "provider's declared split-factor convention is wrong rather than "
+                    f"that the vendors disagree. {left[0].vendor_note}; "
+                    f"{right[0].vendor_note}"
                 )
-    return findings
+                continue
+            findings.append(
+                f"{symbol}: the two sources DISAGREE about the split on {ex_date} — "
+                f"{primary_name} says a share-count multiplier of {left_ratio}, "
+                f"{secondary_name} says {right_ratio}. Not reciprocal and not equal, so "
+                f"they describe different events. The {secondary_name} figure was used. "
+                f"Not reconciled. {left[0].vendor_note}; {right[0].vendor_note}"
+            )
+    return findings, notes
 
 
 # ---------------------------------------------------------------------------
@@ -1052,9 +1145,14 @@ def _split_row(instrument_id: int, event: SplitEvent, provider: str) -> dict[str
     row = {
         "instrument_id": str(instrument_id),
         "ex_date": event.ex_date.isoformat(),
+        # Canonical share-count multiplier. Comparable across vendors precisely
+        # because it is not whatever the vendor happened to send.
         "ratio": _plain(event.ratio),
         "source_provider": provider,
+        "vendor_convention": str(event.vendor_convention),
     }
+    if event.vendor_value is not None:
+        row["vendor_factor"] = _plain(event.vendor_value)
     if event.numerator is not None:
         row["numerator"] = str(event.numerator)
     if event.denominator is not None:
@@ -1104,6 +1202,22 @@ def _write_csv(
             handle.write(payload)
     else:
         path.write_bytes(payload)
+
+
+def _convention(value: str | None) -> SplitFactorConvention:
+    """Read a stored convention label, defaulting to UNKNOWN rather than a guess.
+
+    A package written before these columns existed says nothing about how its
+    factors were read, and ``UNKNOWN`` is the honest answer. It is used only for
+    the human-readable note; the stored ``ratio`` is already canonical, so an
+    unknown label degrades an explanation rather than a number.
+    """
+    if not value:
+        return SplitFactorConvention.UNKNOWN
+    try:
+        return SplitFactorConvention(str(value).strip())
+    except ValueError:
+        return SplitFactorConvention.UNKNOWN
 
 
 def _int_or_none(value: str | None) -> int | None:

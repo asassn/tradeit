@@ -60,7 +60,15 @@ from enum import StrEnum
 #: Bumped whenever the arithmetic or its inputs change. Recorded on every
 #: reconstructed row, so a sidecar produced by an older version is identifiable
 #: rather than silently mixed with a newer one.
-RECONSTRUCTION_ALGORITHM_VERSION = "split-inverse-1"
+#:
+#: ``split-inverse-2`` — the arithmetic is unchanged, but what reaches it is
+#: not: vendor split factors are now normalized to a canonical share-count
+#: multiplier through a **declared per-provider convention**, and the Twelve
+#: Data adapter's convention was previously reciprocal to the truth. A sidecar
+#: stamped ``split-inverse-1`` that was built from a Twelve Data split schedule
+#: multiplied by 1/r where it should have multiplied by r. That is exactly what
+#: this version string exists to make findable.
+RECONSTRUCTION_ALGORITHM_VERSION = "split-inverse-2"
 
 #: The label these values carry. Never "raw", never the vendor's name.
 RECONSTRUCTION_LABEL = "RECONSTRUCTED_RAW_FROM_SPLIT_ADJUSTED"
@@ -74,6 +82,102 @@ HIGH_FACTOR_THRESHOLD = Decimal(4)
 #: vendor quotes, so the quantisation happens once at the end rather than
 #: compounding through the product.
 PRICE_PLACES = Decimal("0.000001")
+
+
+class SplitFactorConvention(StrEnum):
+    """What a vendor's split number actually measures.
+
+    This exists because two vendors handed us the same corporate action as
+    ``7`` and ``0.142857142857…`` and a naive comparison called it a
+    disagreement. It was not one. They are reciprocals, which means they are
+    the *same split* described from opposite ends, and the fix is to normalize
+    before comparing rather than to widen a tolerance until the complaint stops.
+
+    **The number alone cannot tell you which convention it is.** ``0.25`` is the
+    price-adjustment multiplier of a 4-for-1 forward split *and* the share-count
+    multiplier of a 1-for-4 reverse split, and those are opposite events. So the
+    convention is **declared per provider**, never inferred per value. A vendor
+    whose convention is not established is :attr:`UNKNOWN` and its factors are
+    refused rather than assumed.
+    """
+
+    #: The multiplier on the **share count**: 4 for a 4-for-1, 0.125 for a
+    #: 1-for-8 reverse. This is the canonical form everything else derives from.
+    SHARE_COUNT_MULTIPLIER = "share_count_multiplier"
+    #: The multiplier applied to **historical prices** to produce the adjusted
+    #: series: 0.25 for a 4-for-1. The reciprocal of the share count.
+    PRICE_ADJUSTMENT_MULTIPLIER = "price_adjustment_multiplier"
+    #: An explicit pair — 4 new shares for 1 old — which is the only
+    #: unambiguous form, because the two numbers carry their own direction.
+    NEW_OVER_OLD_SHARES = "new_over_old_shares"
+    #: Not established. Factors are refused, not guessed.
+    UNKNOWN = "unknown"
+
+    @property
+    def describe(self) -> str:
+        return {
+            SplitFactorConvention.SHARE_COUNT_MULTIPLIER: (
+                "share-count multiplier (4 for a 4-for-1)"
+            ),
+            SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER: (
+                "historical price-adjustment multiplier (0.25 for a 4-for-1)"
+            ),
+            SplitFactorConvention.NEW_OVER_OLD_SHARES: (
+                "explicit new-for-old share pair (4-for-1)"
+            ),
+            SplitFactorConvention.UNKNOWN: "not established",
+        }[self]
+
+
+#: Relative tolerance for deciding two normalized ratios describe the same
+#: split.
+#:
+#: Not zero, because a vendor that serves ``1/7`` as a truncated decimal cannot
+#: round-trip to exactly 7. Not loose either: 1e-6 is nine orders of magnitude
+#: below the gap between a 7-for-1 and a 6-for-1, so nothing this tolerance
+#: merges is a real disagreement. A vendor truncating to fewer than about seven
+#: significant digits will surface as a conflict rather than as agreement —
+#: reported for a person, which is the safe direction.
+RATIO_TOLERANCE = Decimal("1e-6")
+
+
+def to_share_count_multiplier(value: Decimal, convention: SplitFactorConvention) -> Decimal:
+    """Normalize one vendor's factor into the canonical share-count multiplier.
+
+    Raises rather than guessing for :attr:`SplitFactorConvention.UNKNOWN`. An
+    unknown convention applied as though it were the share count inverts every
+    price before the event, and the resulting series looks perfectly plausible.
+    """
+    if value <= 0:
+        raise ValueError(f"split factor {value} is not positive")
+    if convention is SplitFactorConvention.UNKNOWN:
+        raise ValueError(
+            f"cannot normalize the split factor {value}: the provider's convention is "
+            "not established. The same number is a 4-for-1 under one convention and a "
+            "1-for-4 under the other, so this is refused rather than guessed."
+        )
+    if convention is SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER:
+        return Decimal(1) / value
+    return value
+
+
+def ratios_agree(left: Decimal, right: Decimal, tolerance: Decimal = RATIO_TOLERANCE) -> bool:
+    """Whether two canonical ratios describe the same split, within tolerance."""
+    if left <= 0 or right <= 0:
+        return False
+    return abs(left - right) / max(left, right) <= tolerance
+
+
+def are_reciprocal(left: Decimal, right: Decimal, tolerance: Decimal = RATIO_TOLERANCE) -> bool:
+    """Whether two ratios are reciprocals — the same split, described inversely.
+
+    Used *after* normalization, where it should never fire. When it does, it
+    means a provider's declared convention is wrong, which is worth saying
+    precisely rather than reporting as an economic disagreement.
+    """
+    if left <= 0 or right <= 0:
+        return False
+    return ratios_agree(left, Decimal(1) / right, tolerance)
 
 
 class ReconstructionQuality(StrEnum):
@@ -99,18 +203,37 @@ class ReconstructionQuality(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SplitEvent:
-    """One split, normalized, with the vendor's own numbers kept.
+    """One split in canonical form, with the vendor's own numbers preserved.
 
-    ``ratio`` is the multiplier on the **share count**: 4 for a 4-for-1, 0.1 for
-    a 1-for-10 reverse split. Vendors express this at least three ways and
-    getting it backwards inverts every price before the event, so the parsing
-    lives in the adapter that knows the vendor's convention and this type takes
-    the settled number.
+    **One canonical quantity, four derived ones.** ``ratio`` is the multiplier
+    on the **share count** — 4 for a 4-for-1, 0.1 for a 1-for-10 reverse — and
+    every other multiplier anybody needs is a property derived from it, so no
+    caller has to remember which way round a particular use runs:
 
-    ``numerator`` and ``denominator`` are retained rather than discarded once
-    the ratio is derived. A ratio of 0.1 could be 1-for-10 or 2-for-20, and when
-    somebody later disputes the direction, the vendor's own pair is what the
-    argument gets settled against.
+    ======================================  =========  =====================
+    Quantity                                4-for-1    1-for-8 reverse
+    ======================================  =========  =====================
+    ``economic_ratio``                      4          0.125
+    ``price_adjustment_multiplier``         0.25       8
+    ``volume_adjustment_multiplier``        4          0.125
+    ``raw_price_reconstruction_multiplier`` 4          0.125
+    ``raw_volume_reconstruction_multiplier`` 0.25      8
+    ======================================  =========  =====================
+
+    Read the first two rows together and the reason for the type is visible: a
+    4-for-1 split has an economic ratio of ``4`` and a price-adjustment
+    multiplier of ``0.25``, and a vendor that hands you one of those numbers
+    without saying which has handed you something indistinguishable from a
+    1-for-4 reverse split.
+
+    ``vendor_value`` and ``vendor_convention`` keep what the vendor actually
+    said, so a later disagreement about the normalization is settled by looking
+    rather than by re-downloading.
+
+    ``numerator`` and ``denominator`` are likewise retained rather than
+    discarded once the ratio is derived. A ratio of 0.1 could be 1-for-10 or
+    2-for-20, and the vendor's own pair is what an argument about direction gets
+    settled against.
 
     ``announced_at`` is almost always ``None`` and that is deliberate. An
     effective date is not an announcement date, and a split history that carries
@@ -119,16 +242,85 @@ class SplitEvent:
     """
 
     ex_date: dt.date
+    #: Canonical. Always the share-count multiplier, whatever the vendor sent.
     ratio: Decimal
     source: str = ""
     numerator: int | None = None
     denominator: int | None = None
     split_type: str = ""
     announced_at: dt.datetime | None = None
+    #: Exactly what the vendor sent, before normalization. ``None`` when the
+    #: vendor supplied an explicit share pair rather than a single factor.
+    vendor_value: Decimal | None = None
+    #: How that value was read. Declared by the provider adapter, never guessed
+    #: from the number.
+    vendor_convention: SplitFactorConvention = SplitFactorConvention.SHARE_COUNT_MULTIPLIER
 
     def __post_init__(self) -> None:
         if self.ratio <= 0:
             raise ValueError(f"split ratio {self.ratio} is not positive")
+
+    @classmethod
+    def from_vendor(
+        cls,
+        *,
+        ex_date: dt.date,
+        value: Decimal,
+        convention: SplitFactorConvention,
+        source: str = "",
+        numerator: int | None = None,
+        denominator: int | None = None,
+        split_type: str = "",
+    ) -> SplitEvent:
+        """Build a canonical event from a vendor factor and its declared convention.
+
+        The one place a vendor number crosses into canonical semantics. Every
+        adapter goes through it, so "which way round is this vendor?" is
+        answered once per provider rather than at each use site.
+        """
+        return cls(
+            ex_date=ex_date,
+            ratio=to_share_count_multiplier(value, convention),
+            source=source,
+            numerator=numerator,
+            denominator=denominator,
+            split_type=split_type,
+            vendor_value=value,
+            vendor_convention=convention,
+        )
+
+    # -- the canonical quantity and everything derived from it ----------------
+
+    @property
+    def economic_ratio(self) -> Decimal:
+        """What happened to the share count. The canonical fact."""
+        return self.ratio
+
+    @property
+    def price_adjustment_multiplier(self) -> Decimal:
+        """Raw historical price times this gives the vendor's adjusted price."""
+        return Decimal(1) / self.ratio
+
+    @property
+    def volume_adjustment_multiplier(self) -> Decimal:
+        """Raw historical volume times this gives the vendor's adjusted volume.
+
+        The inverse of the price relationship, which is what keeps the money
+        that changed hands unchanged by the adjustment.
+        """
+        return self.ratio
+
+    @property
+    def raw_price_reconstruction_multiplier(self) -> Decimal:
+        """Adjusted price times this gives the raw exchange print."""
+        return self.ratio
+
+    @property
+    def raw_volume_reconstruction_multiplier(self) -> Decimal:
+        """Adjusted volume times this gives the raw printed volume."""
+        return Decimal(1) / self.ratio
+
+    # -- description ----------------------------------------------------------
 
     @property
     def is_reverse(self) -> bool:
@@ -139,6 +331,17 @@ class SplitEvent:
         if self.numerator and self.denominator:
             return f"{self.numerator}-for-{self.denominator}"
         return f"ratio {self.ratio}"
+
+    @property
+    def vendor_note(self) -> str:
+        """What the vendor said, and how it was read. For findings and reports."""
+        if self.vendor_value is None:
+            return f"{self.source or 'source'} supplied {self.describe}"
+        return (
+            f"{self.source or 'source'} supplied {self.vendor_value} as a "
+            f"{self.vendor_convention.describe}, normalized to a share-count "
+            f"multiplier of {self.ratio}"
+        )
 
 
 @dataclass(slots=True)
@@ -157,6 +360,98 @@ class ReconstructedRow:
     @property
     def factor_is_large(self) -> bool:
         return self.factor >= HIGH_FACTOR_THRESHOLD or self.factor <= (1 / HIGH_FACTOR_THRESHOLD)
+
+
+@dataclass(frozen=True, slots=True)
+class SplitCensus:
+    """How a symbol's supplied splits divide up. Four numbers, not one.
+
+    The report used to say "reconstructed across 5 split(s)" for an Apple
+    package spanning 2010 to 2025. All five records are real; three of them are
+    from 1987, 2000 and 2005 and touch nothing in that window. Reading the line,
+    a person would reasonably conclude five splits were applied.
+
+    The four counts are genuinely different quantities, and lumping them
+    together loses the distinction that matters:
+
+    * ``supplied`` — records the enrichment provider handed over, in total.
+    * ``in_coverage`` — records whose ex-date falls inside the package's own
+      first-to-last session window.
+    * ``effective`` — records that changed at least one reconstructed row.
+    * ``outside_coverage`` — the rest, split by side, because the two sides
+      behave in opposite ways.
+
+    ``in_coverage`` and ``effective`` are not the same count and neither is
+    redundant. A split **after** the window's end is outside coverage and
+    affects *every* row; a split **before** the window's start is outside
+    coverage and affects *none*. Apple over 2010 to 2025 has two in coverage, both
+    effective; NVIDIA the same. That is the sentence the report should have
+    been printing.
+    """
+
+    supplied: int = 0
+    in_coverage: int = 0
+    effective: int = 0
+    before_coverage: int = 0
+    after_coverage: int = 0
+
+    @property
+    def outside_coverage(self) -> int:
+        return self.before_coverage + self.after_coverage
+
+    def render(self) -> str:
+        parts = [
+            f"{self.supplied} supplied",
+            f"{self.in_coverage} inside price coverage",
+            f"{self.effective} affecting at least one row",
+        ]
+        if self.outside_coverage:
+            sides = []
+            if self.before_coverage:
+                sides.append(f"{self.before_coverage} before the window, affecting none")
+            if self.after_coverage:
+                sides.append(f"{self.after_coverage} after the window, affecting every row")
+            parts.append(f"{self.outside_coverage} outside coverage ({'; '.join(sides)})")
+        return ", ".join(parts)
+
+    def to_payload(self) -> dict[str, int]:
+        return {
+            "supplied": self.supplied,
+            "in_coverage": self.in_coverage,
+            "effective": self.effective,
+            "outside_coverage": self.outside_coverage,
+            "before_coverage": self.before_coverage,
+            "after_coverage": self.after_coverage,
+        }
+
+
+def take_census(
+    splits: Sequence[SplitEvent],
+    coverage: tuple[dt.date, dt.date] | None,
+) -> SplitCensus:
+    """Count a split schedule against a package's price coverage.
+
+    ``effective`` is derived from the same strictly-after comparison the
+    reconstruction itself uses, rather than being counted separately — a census
+    that disagreed with the arithmetic it describes would be worse than none.
+    """
+    if coverage is None:
+        return SplitCensus(supplied=len(splits))
+    first, last = coverage
+    in_coverage = sum(1 for s in splits if first <= s.ex_date <= last)
+    before = sum(1 for s in splits if s.ex_date < first)
+    after = sum(1 for s in splits if s.ex_date > last)
+    # A split changes a row when at least one session precedes its ex-date,
+    # which is exactly `cumulative_factor`'s condition applied to the earliest
+    # session in the package.
+    effective = sum(1 for s in splits if s.ex_date > first)
+    return SplitCensus(
+        supplied=len(splits),
+        in_coverage=in_coverage,
+        effective=effective,
+        before_coverage=before,
+        after_coverage=after,
+    )
 
 
 @dataclass(slots=True)
@@ -187,6 +482,9 @@ class ReconstructionResult:
     #: the package's window belongs here: it is correct behaviour, and filing
     #: it as a conflict would bury the ones that are not.
     notes: list[str] = field(default_factory=list)
+    #: How the supplied splits divide up. See :class:`SplitCensus` — the four
+    #: numbers are genuinely different and "across 5 splits" said none of them.
+    census: SplitCensus = field(default_factory=lambda: SplitCensus())
 
     def summary(self) -> str:
         if self.quality is ReconstructionQuality.NOT_ATTEMPTED_NO_SPLIT_DATA:
@@ -206,10 +504,10 @@ class ReconstructionResult:
         )
         return (
             f"{self.symbol}: {self.sessions_changed:,} of {self.sessions_total:,} sessions "
-            f"reconstructed across {len(self.splits_used)} split(s){provenance}"
+            f"reconstructed{provenance}; splits {self.census.render()}"
             + (
-                f"; {self.high_factor_sessions:,} carry a factor large enough that "
-                "vendor rounding is magnified above a cent"
+                f"; {self.high_factor_sessions:,} session(s) carry a factor large enough "
+                "that vendor rounding is magnified above a cent"
                 if self.high_factor_sessions
                 else ""
             )
@@ -259,20 +557,43 @@ def check_split_consistency(
     for ex_date, events in sorted(by_date.items()):
         if len(events) == 1:
             continue
-        ratios = {event.ratio for event in events}
-        if len(ratios) == 1:
+        # Compared on the canonical share-count multiplier and with a tolerance,
+        # never on the vendors' raw numbers. Two sources describing one split as
+        # `7` and `0.142857142857…` agree about the world and disagree only
+        # about which end to measure from; calling that a conflict is how a
+        # report fills with noise and the real conflicts stop being read.
+        first = events[0]
+        if all(ratios_agree(first.ratio, event.ratio) for event in events[1:]):
             findings.append(
-                f"{symbol}: {len(events)} identical split records on {ex_date} "
-                f"({events[0].describe}). Duplicates were NOT merged; a repeated "
+                f"{symbol}: {len(events)} equivalent split records on {ex_date} "
+                f"({first.describe}). Duplicates were NOT merged; a repeated "
                 "record may mean the vendor listed one event twice, or that two "
                 "genuinely happened."
             )
+        elif all(
+            ratios_agree(first.ratio, event.ratio) or are_reciprocal(first.ratio, event.ratio)
+            for event in events[1:]
+        ):
+            # Reciprocals *after* normalization mean a provider's declared
+            # convention is wrong, not that the vendors disagree about the
+            # event. Worth saying precisely, because the remedy is a one-line
+            # declaration rather than an argument with a data vendor.
+            notes.append(
+                f"{symbol}: the split records on {ex_date} are RECIPROCALS of each "
+                f"other ({', '.join(sorted(str(e.ratio) for e in events))}), which is "
+                "one split described from opposite ends rather than two different "
+                "splits. After canonical normalization this should not happen: it "
+                "means a provider's declared split-factor convention is wrong. "
+                + "; ".join(sorted(event.vendor_note for event in events))
+            )
         else:
             findings.append(
-                f"{symbol}: CONFLICTING split records on {ex_date} — ratios "
-                f"{sorted(str(r) for r in ratios)}. Not resolved automatically; "
-                "reconstruction over this symbol applies all of them and will be "
-                "wrong if only one is real."
+                f"{symbol}: CONFLICTING split records on {ex_date} — share-count "
+                f"multipliers {sorted(str(e.ratio) for e in events)}. These are not "
+                "reciprocals and not equal, so they describe different events. Not "
+                "resolved automatically; reconstruction over this symbol applies all "
+                "of them and will be wrong if only one is real. "
+                + "; ".join(sorted(event.vendor_note for event in events))
             )
 
     for split in splits:
@@ -341,6 +662,7 @@ def reconstruct_symbol(
         else None
     )
     conflicts, notes = check_split_consistency(symbol, ordered, coverage)
+    census = take_census(ordered, coverage)
     result = ReconstructionResult(
         symbol=symbol,
         quality=ReconstructionQuality.APPLIED,
@@ -350,6 +672,7 @@ def reconstruct_symbol(
         split_provider=split_provider,
         conflicts=conflicts,
         notes=notes,
+        census=census,
     )
 
     for bar in bars:
@@ -449,14 +772,21 @@ def _plain(value: Decimal) -> str:
 
 __all__ = [
     "HIGH_FACTOR_THRESHOLD",
+    "RATIO_TOLERANCE",
     "RECONSTRUCTION_ALGORITHM_VERSION",
     "RECONSTRUCTION_COLUMNS",
     "RECONSTRUCTION_LABEL",
     "ReconstructedRow",
     "ReconstructionQuality",
     "ReconstructionResult",
+    "SplitCensus",
     "SplitEvent",
+    "SplitFactorConvention",
+    "are_reciprocal",
     "check_split_consistency",
     "cumulative_factor",
+    "ratios_agree",
     "reconstruct_symbol",
+    "take_census",
+    "to_share_count_multiplier",
 ]

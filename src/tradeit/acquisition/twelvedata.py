@@ -58,8 +58,13 @@ from tradeit.acquisition.base import (
     register,
 )
 from tradeit.acquisition.normalize import NormalizedRows, canonical_bar_row
-from tradeit.acquisition.reconstruct import SplitEvent
+from tradeit.acquisition.reconstruct import (
+    SplitEvent,
+    SplitFactorConvention,
+    to_share_count_multiplier,
+)
 from tradeit.acquisition.redaction import credential_hint, redact_text, redact_url
+from tradeit.core.calendar import TradingCalendar, get_calendar
 from tradeit.data.packages.spec import AdjustmentPolicyDeclaration, DatasetKind
 from tradeit.data.providers.http import (
     HttpTransport,
@@ -67,7 +72,7 @@ from tradeit.data.providers.http import (
     ProviderRateLimitError,
     ProviderUnreachableError,
 )
-from tradeit.errors import ProviderError
+from tradeit.errors import DataError, ProviderError
 
 BASE_URL = "https://api.twelvedata.com"
 
@@ -106,6 +111,27 @@ MAX_OUTPUTSIZE = 5000
 
 #: Free-plan credits per minute. Overridable; a reported figure always wins.
 DEFAULT_CREDITS_PER_MINUTE = 8
+
+#: How this vendor's split factors are read. See :func:`_split_ratio` for the
+#: evidence and for what went wrong before this was declared explicitly.
+SPLIT_FACTOR_CONVENTION = SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER
+
+#: Days added to the requested ``end_date`` before asking, then trimmed away.
+#:
+#: A live run requesting 2010-01-01..2025-12-31 came back with a last session of
+#: 2025-12-30 for two independent symbols, and 2025-12-31 was a US trading
+#: session. The simplest explanation is that ``end_date`` is exclusive, or is
+#: read as the instant ``2025-12-31T00:00:00`` and compared with ``<``.
+#:
+#: **The fix is safe whether or not that explanation is right**, which is why it
+#: is implemented despite the vendor's documentation being unreadable from this
+#: environment. Asking for one extra calendar day and then discarding every bar
+#: after the requested end produces byte-identical output under an inclusive
+#: ``end_date`` and recovers the missing session under an exclusive one. The
+#: trim is what makes it safe: without it, this would be a silent one-day
+#: lookahead, which is the exact failure the rest of the platform is built to
+#: prevent.
+END_DATE_PROBE_DAYS = 1
 
 
 @register
@@ -344,7 +370,12 @@ class TwelveDataAcquisition:
             if request.start:
                 params.append(f"start_date={request.start.isoformat()}")
             if request.end:
-                params.append(f"end_date={request.end.isoformat()}")
+                # One day past what was asked for, then trimmed back in
+                # `_normalize_prices`. See END_DATE_PROBE_DAYS: this recovers a
+                # final session an exclusive end_date would drop, and changes
+                # nothing at all if end_date turns out to be inclusive.
+                probe = request.end + dt.timedelta(days=END_DATE_PROBE_DAYS)
+                params.append(f"end_date={probe.isoformat()}")
             params.append(f"outputsize={MAX_OUTPUTSIZE}")
             params.append("order=ASC")
         elif request.dataset in (AcquisitionDataset.SPLITS, AcquisitionDataset.DIVIDENDS):
@@ -524,6 +555,12 @@ class TwelveDataAcquisition:
         for row in outcome.rows:
             by_symbol.setdefault(str(row.get("_symbol", "")), []).append(row)
 
+        # What the operator asked for, not what was sent to the vendor. The two
+        # differ by END_DATE_PROBE_DAYS and this is the boundary that decides
+        # what lands in the package.
+        requested_end = outcome.request.end
+        trimmed = 0
+
         for symbol, rows in by_symbol.items():
             instrument_id = ids.get(symbol)
             if instrument_id is None:
@@ -540,6 +577,15 @@ class TwelveDataAcquisition:
                     out.findings.append(
                         f"{symbol}: a row has no readable datetime and was not written"
                     )
+                    continue
+                if requested_end is not None and session > requested_end:
+                    # The other half of END_DATE_PROBE_DAYS. The request asked
+                    # for one day beyond the window to find out whether the
+                    # vendor's end_date is exclusive; anything past the window
+                    # is discarded here, so the package contains exactly the
+                    # range that was asked for and no session the operator did
+                    # not request can reach it.
+                    trimmed += 1
                     continue
                 if session in seen:
                     out.findings.append(
@@ -573,6 +619,18 @@ class TwelveDataAcquisition:
                         meta = block
                         break
                 out.extend(_instrument_rows(symbol, instrument_id, meta, min(sessions)))
+
+        if trimmed:
+            # Said out loud rather than done quietly: this is the line that
+            # proves the probe day is being discarded, and its absence from a
+            # report where end_date turned out to be inclusive is equally
+            # informative.
+            out.findings.append(
+                f"{trimmed} bar(s) after the requested end {requested_end} were "
+                f"discarded. The request asks for {END_DATE_PROBE_DAYS} day(s) beyond "
+                "the window because this vendor's end_date appears to be exclusive; "
+                "the package contains only the range that was requested."
+            )
         return out
 
     def _normalize_splits(self, outcome: FetchOutcome, ids: Mapping[str, int]) -> NormalizedRows:
@@ -588,16 +646,28 @@ class TwelveDataAcquisition:
                     f"(date={row.get('date')!r}, factor={row.get('factor')!r}) and was not written"
                 )
                 continue
+            vendor_value = _vendor_factor(row)
             out.add(
                 DatasetKind.SPLITS,
                 {
                     "instrument_id": str(instrument_id),
                     "ex_date": ex_date.isoformat(),
+                    # Canonical share-count multiplier, never the vendor's own
+                    # number. The vendor's number is kept beside it.
                     "ratio": _plain(ratio),
+                    "source_provider": self.name,
+                    "vendor_factor": _plain(vendor_value) if vendor_value is not None else "",
+                    "vendor_convention": str(SPLIT_FACTOR_CONVENTION),
                 },
             )
             self.splits_by_symbol.setdefault(symbol, []).append(
-                SplitEvent(ex_date=ex_date, ratio=ratio, source="twelve_data/splits")
+                SplitEvent(
+                    ex_date=ex_date,
+                    ratio=ratio,
+                    source="twelve_data/splits",
+                    vendor_value=vendor_value,
+                    vendor_convention=SPLIT_FACTOR_CONVENTION,
+                )
             )
         return out
 
@@ -636,8 +706,17 @@ class TwelveDataAcquisition:
         rows, and the check is not "is the arithmetic under the cap" but "is
         what arrived what was requested". A silently truncated series looks
         exactly like a security that listed late.
+
+        The end-of-range check is measured against the last *trading session* on
+        or before the requested end, not against the calendar date. A request
+        ending on a Saturday is complete when it ends on the Friday, and a check
+        that said otherwise would cry wolf on every well-formed package until
+        nobody read it — which is how the genuinely missing 2025-12-31 session
+        nearly went unnoticed.
         """
         out: list[str] = []
+        calendar = get_calendar()
+        expected_last = _last_session_on_or_before(calendar, end)
         for symbol, (first, last, count) in sorted(self.coverage.items()):
             if count >= MAX_OUTPUTSIZE:
                 out.append(
@@ -651,9 +730,18 @@ class TwelveDataAcquisition:
                     f"{first}. Either the security had not listed, or the provider's "
                     "history begins later"
                 )
-            if last < end:
+            if expected_last is not None and last < expected_last:
+                missing = len(calendar.sessions_between(last, expected_last)) - 1
                 out.append(
-                    f"{symbol}: requested through {end} but the vendor's latest row is {last}"
+                    f"{symbol}: requested through {end}, whose last trading session is "
+                    f"{expected_last}, but the vendor's latest row is {last} — "
+                    f"{missing} session(s) short. This is NOT a weekend or holiday; "
+                    "the sessions are genuinely absent"
+                )
+            elif last < end:
+                out.append(
+                    f"{symbol}: the vendor's latest row is {last}, which is the last "
+                    f"trading session on or before the requested end {end}. Complete"
                 )
         return out
 
@@ -790,20 +878,74 @@ def _decimal(value: Any) -> Decimal | None:
     return parsed if parsed.is_finite() else None
 
 
-def _split_ratio(row: Mapping[str, Any]) -> Decimal | None:
-    """Normalize a split into a share-count multiplier.
+def _last_session_on_or_before(calendar: TradingCalendar, day: dt.date) -> dt.date | None:
+    """The trading session a request ending on ``day`` should reach.
 
-    Vendors express this at least three ways: a decimal factor, a ``"2:1"``
-    string, or separate numerator and denominator fields. Getting the direction
-    wrong inverts every price before the event, so all three shapes are handled
-    explicitly and anything else is refused rather than coerced.
+    ``day`` itself when it is a session, otherwise the previous one. ``None``
+    when no session is found within the calendar's search window, which is a
+    reason to make no claim rather than to invent one.
+    """
+    if calendar.is_session(day):
+        return day
+    try:
+        return calendar.previous_session(day)
+    except DataError:
+        return None
+
+
+def _vendor_factor(row: Mapping[str, Any]) -> Decimal | None:
+    """The single number the vendor sent, before normalization.
+
+    Kept so a later disagreement about which way round Twelve Data measures is
+    settled by looking at the package rather than by re-downloading it.
     """
     to_factor = _decimal(row.get("to_factor"))
     from_factor = _decimal(row.get("from_factor"))
     if to_factor is not None and from_factor is not None and from_factor != 0:
-        # Twelve Data reports a 2-for-1 as from_factor=1, to_factor=2: one old
-        # share becomes two, so the share count multiplies by to/from.
         return to_factor / from_factor
+    raw = row.get("factor") or row.get("ratio") or row.get("split_factor")
+    return _decimal(raw) if raw is not None else None
+
+
+def _split_ratio(row: Mapping[str, Any]) -> Decimal | None:
+    """Normalize a Twelve Data split into a canonical share-count multiplier.
+
+    **This function had the direction backwards until a live smoke test caught
+    it**, and the correction is worth writing down because the failure was
+    silent and severe.
+
+    For AAPL, Twelve Data's ``/splits`` produced ``0.142857142857…`` on
+    2014-06-09 and ``0.25`` on 2020-08-31. Those are Apple's real 7-for-1 and
+    4-for-1 splits, and 1/7 and 1/4 are the **reciprocals** of their share-count
+    multipliers. Apple's share count went *up* sevenfold in 2014; no reading of
+    the world makes 0.142857 the multiplier on its share count. Under the
+    previous ``to_factor / from_factor`` reading, reconstructing raw prices from
+    a Twelve Data schedule would have multiplied every pre-2014 adjusted price
+    by 1/28 instead of 28 — turning a $90 print into $3.21 rather than $2,520 —
+    and the resulting series would have looked like an ordinary penny stock.
+
+    So Twelve Data's factors are the **price-adjustment** multiplier, or
+    equivalently its ``from_factor``/``to_factor`` name the split "4:1" as
+    ``from_factor=4, to_factor=1``. Those two narratives differ in wording and
+    agree exactly in arithmetic — both give share count = ``from / to`` — so the
+    normalization is settled even though which narrative is right is not.
+
+    **What this rests on**, stated plainly: two split events on one security,
+    observed on a live free-tier account, whose values are exact reciprocals of
+    independently known corporate actions and of FMP's explicit
+    numerator/denominator pair for the same dates. Twelve Data's own
+    documentation could not be read from this build environment, whose egress
+    policy blocks the vendor's host. The declaration is
+    :data:`SPLIT_FACTOR_CONVENTION` so it is one line to change, and
+    :func:`~tradeit.acquisition.reconstruct.are_reciprocal` reports loudly if a
+    second source ever disagrees with it in exactly this way.
+    """
+    to_factor = _decimal(row.get("to_factor"))
+    from_factor = _decimal(row.get("from_factor"))
+    if to_factor is not None and from_factor is not None and to_factor != 0:
+        # from/to, not to/from. See the docstring: observed as from_factor=4,
+        # to_factor=1 for Apple's 4-for-1.
+        return from_factor / to_factor
 
     raw = row.get("factor") or row.get("ratio") or row.get("split_factor")
     if raw is None:
@@ -816,9 +958,17 @@ def _split_ratio(row: Mapping[str, Any]) -> Decimal | None:
             denominator = _decimal(right)
             if numerator is None or denominator is None or denominator == 0:
                 return None
-            # "2:1" means two new shares for one old.
+            # "4:1" spells the split out in words rather than as a factor, and
+            # means four new shares for one old whoever writes it.
             return numerator / denominator
-    return _decimal(text)
+    # A bare decimal carries no direction of its own, so the provider's declared
+    # convention settles it rather than the value's magnitude. Reading 0.25 as
+    # "a 1-for-4 reverse split" because it is less than one is exactly the
+    # inference this refuses to make.
+    bare = _decimal(text)
+    if bare is None:
+        return None
+    return to_share_count_multiplier(bare, SPLIT_FACTOR_CONVENTION)
 
 
 def _instrument_rows(
@@ -888,7 +1038,9 @@ __all__ = [
     "CREDITS_PER_SYMBOL",
     "DEFAULT_BATCH_SIZE",
     "ENDPOINTS",
+    "END_DATE_PROBE_DAYS",
     "MAX_OUTPUTSIZE",
+    "SPLIT_FACTOR_CONVENTION",
     "TwelveDataAcquisition",
     "read_credit_headers",
 ]

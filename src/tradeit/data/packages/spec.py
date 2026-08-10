@@ -301,6 +301,25 @@ DATASET_SPECS: Mapping[DatasetKind, DatasetSpec] = {
                 "which vendor supplied this record, when it is not the vendor that "
                 "supplied the prices",
             ),
+            # `ratio` above is canonical and comparable across vendors. These
+            # two say what the vendor actually sent and how it was read, which
+            # is what a later argument about the normalization gets settled
+            # against. One vendor served Apple's 7-for-1 as 0.142857142857 —
+            # the reciprocal — and without these columns the package would have
+            # carried no trace of that.
+            _c(
+                "vendor_factor",
+                "decimal",
+                False,
+                "the single number the vendor sent, before normalization",
+            ),
+            _c(
+                "vendor_convention",
+                "string",
+                False,
+                "how vendor_factor was read: share_count_multiplier, "
+                "price_adjustment_multiplier, or new_over_old_shares",
+            ),
             _c(
                 "announcement_time",
                 "datetime",

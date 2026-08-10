@@ -63,6 +63,8 @@ environment, which still cannot reach any provider host:
 | Twelve Data `/splits` is **not** available on that free plan | **VERIFIED** | The endpoint returned a provider error naming the plan. |
 | FMP `/stable/splits` serves split history on a free key | **VERIFIED** | `?symbol=AAPL` returned real records. |
 | Twelve Data daily bars are split-adjusted | **DOCUMENTATION CLAIM** | The vendor documents it. Not independently confirmed, and the raw-price reconstruction is built on top of this claim. |
+| Twelve Data's split factors are the reciprocal of the share count | **VERIFIED (2 observations)** | AAPL 2014 came back as 0.142857…, AAPL 2020 as 0.25 — 1/7 and 1/4 of the real corporate actions. See `docs/VENDOR_SEMANTICS.md` §1. |
+| Twelve Data's `/time_series` `end_date` is exclusive | **NEEDS VERIFICATION** | A request through 2025-12-31 returned data through 2025-12-30 for two symbols; 2025-12-31 was a session. Best explanation, not confirmed against documentation. Handled by a probe-and-trim that is correct under either semantic. See §2. |
 | FMP split coverage is complete for a given security | **UNKNOWN** | No way to establish it from one vendor. A missing split is invisible in the data. |
 | Either vendor supplies corporate-action *announcement* timestamps | **NOT AVAILABLE** | FMP's `/stable/splits` carries an effective date only. Twelve Data's endpoint was not reachable on this plan to check. |
 
