@@ -67,6 +67,17 @@ start = 2004-01-02
 end = 2024-05-31
 instruments = 8412               # optional
 
+# Optional. Only for packages assembled from more than one vendor. See §2.6.
+[provenance]
+price_provider = "twelve_data"
+price_representation = "split_adjusted"
+dividend_provider = "twelve_data"
+split_provider = "fmp"
+reconstruction_performed = true
+reconstruction_algorithm = "split-inverse-1"
+reconstruction_label = "RECONSTRUCTED_RAW_FROM_SPLIT_ADJUSTED"
+reconstruction_file = "_acquisition/reconstructed_raw_prices.csv.gz"
+
 [[files]]
 path = "bars.csv.gz"             # relative to the package root, never absolute
 dataset = "daily_bars"
@@ -151,6 +162,38 @@ attach one dataset's provenance to another's contents.
 
 Regenerate the digests after changing a file. `tradeit data template --force`
 will do it.
+
+### 2.6 `[provenance]` — optional, and only when one vendor is not the answer
+
+`provider` at the top level names the package's *primary* source, and that is
+enough while one vendor supplied everything. It stops being enough the moment a
+package's prices come from one vendor and its split schedule from another,
+because the derived raw-price series is then a value **neither vendor
+supplied**, and a reader who saw only `provider = "twelve_data"` would attribute
+it to Twelve Data.
+
+| Key | Means |
+|---|---|
+| `price_provider` | Who supplied the OHLCV in the package's price columns. |
+| `price_representation` | What those columns contain; echoes `adjustment_policy`. |
+| `dividend_provider` | Who supplied `dividends`. |
+| `split_provider` | Who supplied `splits`. |
+| `reconstruction_performed` | Whether a raw series was derived by inverting a split adjustment. |
+| `reconstruction_algorithm` | Version of that arithmetic. |
+| `reconstruction_label` | The label those derived values carry. Never a vendor's name. |
+| `reconstruction_file` | Where they live, relative to the package root. |
+
+Every key is optional and empty by default. **An absent key means "not
+recorded", never "not applicable"** — a package written before this table
+existed says nothing here, and inferring a split provider from the price
+provider is exactly the mistake the table exists to prevent.
+
+The reconstruction file is deliberately inside `_acquisition/` and deliberately
+**not** a declared `[[files]]` entry. It is DERIVED, and the importer must never
+read it as prices.
+
+Written automatically by `tradeit data acquire` and updated by
+`tradeit data enrich`. A hand-assembled package may omit it entirely.
 
 ---
 

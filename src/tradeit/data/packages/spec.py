@@ -287,6 +287,20 @@ DATASET_SPECS: Mapping[DatasetKind, DatasetSpec] = {
             _c("instrument_id", "int", True, "surrogate key"),
             _c("ex_date", "date", True, "first session trading at the new count"),
             _c("ratio", "decimal", True, "share-count multiplier: 2-for-1 is 2, 1-for-10 is 0.1"),
+            # Kept alongside the derived ratio rather than replaced by it. A
+            # ratio of 0.1 could be 1-for-10 or 2-for-20; the pair says which,
+            # and a vendor's own numbers are what an argument about direction
+            # gets settled against.
+            _c("numerator", "int", False, "new shares, as the vendor stated it: 4 in a 4-for-1"),
+            _c("denominator", "int", False, "old shares: 1 in a 4-for-1, 10 in a 1-for-10"),
+            _c("split_type", "string", False, "the vendor's own label, e.g. stock_split"),
+            _c(
+                "source_provider",
+                "string",
+                False,
+                "which vendor supplied this record, when it is not the vendor that "
+                "supplied the prices",
+            ),
             _c(
                 "announcement_time",
                 "datetime",

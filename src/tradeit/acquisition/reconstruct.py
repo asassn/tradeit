@@ -99,22 +99,46 @@ class ReconstructionQuality(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SplitEvent:
-    """One split, normalized.
+    """One split, normalized, with the vendor's own numbers kept.
 
-    ``ratio`` is the multiplier on the **share count**: 2 for a 2-for-1, 0.1 for
+    ``ratio`` is the multiplier on the **share count**: 4 for a 4-for-1, 0.1 for
     a 1-for-10 reverse split. Vendors express this at least three ways and
     getting it backwards inverts every price before the event, so the parsing
-    lives in the adapter that knows the vendor's convention, and this type takes
+    lives in the adapter that knows the vendor's convention and this type takes
     the settled number.
+
+    ``numerator`` and ``denominator`` are retained rather than discarded once
+    the ratio is derived. A ratio of 0.1 could be 1-for-10 or 2-for-20, and when
+    somebody later disputes the direction, the vendor's own pair is what the
+    argument gets settled against.
+
+    ``announced_at`` is almost always ``None`` and that is deliberate. An
+    effective date is not an announcement date, and a split history that carries
+    only the former cannot support announcement-time causality research. Leaving
+    it empty says so; inventing it would not.
     """
 
     ex_date: dt.date
     ratio: Decimal
     source: str = ""
+    numerator: int | None = None
+    denominator: int | None = None
+    split_type: str = ""
+    announced_at: dt.datetime | None = None
 
     def __post_init__(self) -> None:
         if self.ratio <= 0:
             raise ValueError(f"split ratio {self.ratio} is not positive")
+
+    @property
+    def is_reverse(self) -> bool:
+        return self.ratio < 1
+
+    @property
+    def describe(self) -> str:
+        if self.numerator and self.denominator:
+            return f"{self.numerator}-for-{self.denominator}"
+        return f"ratio {self.ratio}"
 
 
 @dataclass(slots=True)
@@ -137,7 +161,14 @@ class ReconstructedRow:
 
 @dataclass(slots=True)
 class ReconstructionResult:
-    """The outcome for one symbol."""
+    """The outcome for one symbol.
+
+    ``price_provider`` and ``split_provider`` are separate fields because they
+    are separate facts. When the prices came from Twelve Data and the splits
+    from FMP, the reconstructed series was supplied by neither, and a consumer
+    that assumed otherwise would be attributing one vendor's numbers to the
+    other's record.
+    """
 
     symbol: str
     quality: ReconstructionQuality
@@ -147,6 +178,15 @@ class ReconstructionResult:
     sessions_total: int = 0
     high_factor_sessions: int = 0
     note: str = ""
+    price_provider: str = ""
+    split_provider: str = ""
+    #: Consistency problems found while reconstructing. Reported, never
+    #: silently resolved — each one needs a person.
+    conflicts: list[str] = field(default_factory=list)
+    #: Things a reader should know that nobody has to act on. A split outside
+    #: the package's window belongs here: it is correct behaviour, and filing
+    #: it as a conflict would bury the ones that are not.
+    notes: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         if self.quality is ReconstructionQuality.NOT_ATTEMPTED_NO_SPLIT_DATA:
@@ -159,15 +199,21 @@ class ReconstructionResult:
                 f"{self.symbol}: the vendor reports no splits, so the adjusted and raw "
                 "series coincide. That is only as good as the vendor's split record."
             )
+        provenance = (
+            f" [prices {self.price_provider} + splits {self.split_provider}]"
+            if self.price_provider and self.split_provider
+            else ""
+        )
         return (
             f"{self.symbol}: {self.sessions_changed:,} of {self.sessions_total:,} sessions "
-            f"reconstructed across {len(self.splits_used)} split(s)"
+            f"reconstructed across {len(self.splits_used)} split(s){provenance}"
             + (
                 f"; {self.high_factor_sessions:,} carry a factor large enough that "
                 "vendor rounding is magnified above a cent"
                 if self.high_factor_sessions
                 else ""
             )
+            + (f"; {len(self.conflicts)} consistency finding(s)" if self.conflicts else "")
         )
 
 
@@ -189,6 +235,67 @@ def cumulative_factor(
     return factor, tuple(applied)
 
 
+def check_split_consistency(
+    symbol: str,
+    splits: Sequence[SplitEvent],
+    coverage: tuple[dt.date, dt.date] | None,
+) -> tuple[list[str], list[str]]:
+    """Problems in a split schedule, reported rather than resolved.
+
+    Returns ``(conflicts, notes)``, and the split between the two is the point.
+    A conflict is something a person has to decide about: silently dropping a
+    duplicate, or averaging two conflicting same-day ratios, would produce a
+    reconstruction that looks clean and is wrong in a way nothing downstream
+    could detect. A note is something a reader needs told but nobody has to act
+    on — a split outside the package's window is *correct* behaviour, and
+    filing it as a conflict would bury the ones that are not.
+    """
+    findings: list[str] = []
+    notes: list[str] = []
+    by_date: dict[dt.date, list[SplitEvent]] = {}
+    for split in splits:
+        by_date.setdefault(split.ex_date, []).append(split)
+
+    for ex_date, events in sorted(by_date.items()):
+        if len(events) == 1:
+            continue
+        ratios = {event.ratio for event in events}
+        if len(ratios) == 1:
+            findings.append(
+                f"{symbol}: {len(events)} identical split records on {ex_date} "
+                f"({events[0].describe}). Duplicates were NOT merged; a repeated "
+                "record may mean the vendor listed one event twice, or that two "
+                "genuinely happened."
+            )
+        else:
+            findings.append(
+                f"{symbol}: CONFLICTING split records on {ex_date} — ratios "
+                f"{sorted(str(r) for r in ratios)}. Not resolved automatically; "
+                "reconstruction over this symbol applies all of them and will be "
+                "wrong if only one is real."
+            )
+
+    for split in splits:
+        if split.ratio > _IMPLAUSIBLE_RATIO or split.ratio < (1 / _IMPLAUSIBLE_RATIO):
+            findings.append(
+                f"{symbol}: split on {split.ex_date} has ratio {split.ratio} "
+                f"({split.describe}), beyond anything a real corporate action "
+                "produces. Treat as a vendor data error."
+            )
+        if coverage is not None and not (coverage[0] <= split.ex_date <= coverage[1]):
+            # Not an error: a 2005 split is simply outside a package that starts
+            # in 2010, and correctly affects nothing in it. Worth saying, because
+            # "the split list has five entries and only two changed anything" is
+            # otherwise a puzzle — but a note rather than a conflict, because
+            # nobody has to do anything about it.
+            notes.append(
+                f"{symbol}: split on {split.ex_date} ({split.describe}) falls outside "
+                f"the price coverage {coverage[0]}..{coverage[1]} and affects no row "
+                "in this package."
+            )
+    return findings, notes
+
+
 def reconstruct_symbol(
     symbol: str,
     bars: Sequence[Mapping[str, str]],
@@ -196,6 +303,8 @@ def reconstruct_symbol(
     *,
     splits_available: bool,
     unavailable_reason: str = "",
+    price_provider: str = "",
+    split_provider: str = "",
 ) -> ReconstructionResult:
     """Invert the vendor's split adjustment for one symbol's daily bars.
 
@@ -209,6 +318,8 @@ def reconstruct_symbol(
             quality=ReconstructionQuality.NOT_ATTEMPTED_NO_SPLIT_DATA,
             sessions_total=len(bars),
             note=unavailable_reason or "the splits dataset was not readable",
+            price_provider=price_provider,
+            split_provider=split_provider,
         )
 
     ordered = sorted(splits, key=lambda s: s.ex_date)
@@ -217,13 +328,28 @@ def reconstruct_symbol(
             symbol=symbol,
             quality=ReconstructionQuality.NO_SPLITS_REPORTED,
             sessions_total=len(bars),
+            price_provider=price_provider,
+            split_provider=split_provider,
         )
 
+    coverage = (
+        (
+            dt.date.fromisoformat(bars[0]["session_date"]),
+            dt.date.fromisoformat(bars[-1]["session_date"]),
+        )
+        if bars
+        else None
+    )
+    conflicts, notes = check_split_consistency(symbol, ordered, coverage)
     result = ReconstructionResult(
         symbol=symbol,
         quality=ReconstructionQuality.APPLIED,
         splits_used=tuple(ordered),
         sessions_total=len(bars),
+        price_provider=price_provider,
+        split_provider=split_provider,
+        conflicts=conflicts,
+        notes=notes,
     )
 
     for bar in bars:
@@ -242,6 +368,11 @@ def reconstruct_symbol(
             "session_date": bar["session_date"],
             "factor": _plain(factor),
             "splits_applied": ";".join(d.isoformat() for d in applied),
+            # Both providers on every row. The reconstructed series was supplied
+            # by neither of them, and a consumer reading one field would
+            # otherwise attribute one vendor's numbers to the other's record.
+            "price_provider": price_provider,
+            "split_provider": split_provider,
             "algorithm": RECONSTRUCTION_ALGORITHM_VERSION,
             "label": RECONSTRUCTION_LABEL,
             "rounding_magnified": "true" if large else "false",
@@ -253,6 +384,17 @@ def reconstruct_symbol(
             vendor = Decimal(text)
             row[f"vendor_{name}"] = text
             row[f"reconstructed_{name}"] = _plain((vendor * factor).quantize(PRICE_PLACES))
+        if any(
+            Decimal(row[f"reconstructed_{name}"]) <= 0
+            for name in ("open", "high", "low", "close")
+            if f"reconstructed_{name}" in row
+        ):
+            result.conflicts.append(
+                f"{symbol} {bar['session_date']}: reconstruction produced a "
+                "non-positive price. The split schedule and the price series "
+                "disagree; the row is written and flagged rather than dropped."
+            )
+
         volume_text = bar.get("volume", "")
         if volume_text:
             vendor_volume = Decimal(volume_text)
@@ -286,9 +428,15 @@ RECONSTRUCTION_COLUMNS: tuple[str, ...] = (
     "vendor_volume",
     "reconstructed_volume",
     "rounding_magnified",
+    "price_provider",
+    "split_provider",
     "algorithm",
     "label",
 )
+
+#: A ratio beyond this in either direction is not a corporate action, it is a
+#: data error. A 1000-for-1 split does not happen; a decimal point does.
+_IMPLAUSIBLE_RATIO = Decimal(1000)
 
 
 def _plain(value: Decimal) -> str:
@@ -308,6 +456,7 @@ __all__ = [
     "ReconstructionQuality",
     "ReconstructionResult",
     "SplitEvent",
+    "check_split_consistency",
     "cumulative_factor",
     "reconstruct_symbol",
 ]

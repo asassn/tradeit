@@ -34,7 +34,19 @@ from tradeit.acquisition.base import (
 )
 from tradeit.acquisition.cache import RawCache
 from tradeit.acquisition.credits import CreditLedger
+from tradeit.acquisition.enrich import (
+    ENRICHMENT_TOOL_VERSION,
+    CorporateActionLookup,
+    CorporateActionSource,
+    EnrichmentOptions,
+    EnrichmentReport,
+    EnrichmentStatus,
+    PackageEnricher,
+    available_sources,
+    get_source_class,
+)
 from tradeit.acquisition.eodhd import EodhdAcquisition
+from tradeit.acquisition.fmp import FmpSplitSource
 from tradeit.acquisition.journal import AcquisitionJournal
 from tradeit.acquisition.normalize import assign_instrument_ids
 from tradeit.acquisition.reconstruct import (
@@ -56,6 +68,7 @@ from tradeit.acquisition.twelvedata import TwelveDataAcquisition
 
 __all__ = [
     "ACQUISITION_TOOL_VERSION",
+    "ENRICHMENT_TOOL_VERSION",
     "RECONSTRUCTION_LABEL",
     "AcquisitionDataset",
     "AcquisitionJournal",
@@ -64,12 +77,19 @@ __all__ = [
     "AcquisitionReport",
     "AcquisitionRunner",
     "CapabilitySupport",
+    "CorporateActionLookup",
+    "CorporateActionSource",
     "CreditLedger",
     "CreditUsage",
+    "EnrichmentOptions",
+    "EnrichmentReport",
+    "EnrichmentStatus",
     "EodhdAcquisition",
     "FetchOutcome",
     "FetchRequest",
     "FetchStatus",
+    "FmpSplitSource",
+    "PackageEnricher",
     "PackageStatus",
     "RawCache",
     "ReconstructionQuality",
@@ -78,9 +98,11 @@ __all__ = [
     "TwelveDataAcquisition",
     "assign_instrument_ids",
     "available_providers",
+    "available_sources",
     "credential_hint",
     "estimate_size",
     "get_provider_class",
+    "get_source_class",
     "reconstruct_symbol",
     "redact_url",
 ]

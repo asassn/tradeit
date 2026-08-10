@@ -16,8 +16,8 @@ while you do something else.
 
 ## Which provider?
 
-Two work today. **Use Twelve Data for the first empirical package** — it is the
-one that has been verified against the live API.
+Two price providers work today. **Use Twelve Data for the first empirical
+package** — it is the one that has been verified against the live API.
 
 | | **Twelve Data** | **Tiingo** |
 |---|---|---|
@@ -32,6 +32,28 @@ The **split-adjusted** row is the one that matters and is explained in
 does not make Twelve Data worse; it makes it different, and the tool records the
 difference rather than papering over it.
 
+### And one *corporate-action source*: FMP
+
+Twelve Data's `/splits` endpoint is not on the free plan. Without a split
+schedule the raw exchange prices cannot be recovered from the split-adjusted
+ones, so the tool marks the reconstruction "not attempted" and says why.
+
+**FMP** (Financial Modeling Prep) serves a split history on a free account, so
+the missing piece is obtainable from a second vendor.
+
+| | **FMP** |
+|---|---|
+| Environment variable | `FMP_API_KEY` |
+| What it is asked for | **historical stock splits, and nothing else** |
+| What it is never asked for | prices, dividends, fundamentals, ratios, earnings, estimates, statements, ownership |
+| Endpoint used | `/stable/splits` — the one and only |
+| How you use it | `tradeit data enrich`, or `--split-provider fmp` on `acquire` |
+
+FMP **cannot** be selected with `--provider`. That is structural, not a
+convention: it implements a different, much smaller interface that has no way to
+produce a price bar. A package whose prices quietly came from a different vendor
+than its manifest says would not be detectable by inspection afterwards.
+
 ## Contents
 
 1. [What you need first](#1-what-you-need-first)
@@ -41,12 +63,13 @@ difference rather than papering over it.
 5. [Run the full download](#5-run-the-full-download)
 6. [What success looks like](#6-what-success-looks-like)
 7. [The split-adjusted caveat](#7-the-split-adjusted-caveat-twelve-data-only)
-8. [What was created, and where](#8-what-was-created-and-where)
-9. [Move the package to the project](#9-move-the-package-to-the-project)
-10. [Import and validate](#10-import-and-validate)
-11. [Common errors](#common-errors)
-12. [Resuming and retrying](#resuming-and-retrying)
-13. [A note about licensing and git](#a-note-about-licensing-and-git)
+8. [Adding splits from FMP](#8-adding-splits-from-fmp)
+9. [What was created, and where](#9-what-was-created-and-where)
+10. [Move the package to the project](#10-move-the-package-to-the-project)
+11. [Import and validate](#11-import-and-validate)
+12. [Common errors](#common-errors)
+13. [Resuming and retrying](#resuming-and-retrying)
+14. [A note about licensing and git](#a-note-about-licensing-and-git)
 
 ---
 
@@ -108,6 +131,21 @@ free plan that will very likely take **more than one day**, and that is fine —
 the tool stops cleanly when the daily allowance runs out and picks up where it
 left off when you run the same command again.
 
+### FMP (recommended alongside Twelve Data — splits only)
+
+1. Go to [financialmodelingprep.com](https://financialmodelingprep.com/) and
+   create a free account.
+2. Open your dashboard and find the **API key**.
+3. Copy it.
+
+The free plan has a **daily** request cap. Enrichment costs one request per
+symbol, so the ~91-symbol validation universe is one pass well inside a typical
+free daily allowance. There is no documented per-minute figure for the free
+tier, so the tool paces itself conservatively at 30 requests/minute by its own
+choice — not by quoting a limit it cannot cite — and slows further if FMP ever
+returns a 429. Change it with `--split-rate-limit` if you know your plan's real
+terms.
+
 ### Tiingo (also supported)
 
 1. Go to [tiingo.com](https://www.tiingo.com/) and create an account.
@@ -129,26 +167,29 @@ left off when you run the same command again.
 
 The tool reads the key from an **environment variable** — just a named value
 your terminal hands to the programs it runs. The name depends on the provider:
-`TWELVE_DATA_API_KEY` or `TIINGO_API_KEY`.
+`TWELVE_DATA_API_KEY`, `FMP_API_KEY` or `TIINGO_API_KEY`.
 
 **macOS / Linux** — in the terminal you are going to run the download from:
 
 ```bash
-export TWELVE_DATA_API_KEY="paste-your-key-here"
+export TWELVE_DATA_API_KEY="paste-your-twelve-data-key-here"
+export FMP_API_KEY="paste-your-fmp-key-here"
 ```
 
-(For Tiingo instead, use `export TIINGO_API_KEY="..."`. You can set both.)
+(For Tiingo instead, use `export TIINGO_API_KEY="..."`. You can set all three.)
 
 **Windows PowerShell:**
 
 ```powershell
-$env:TWELVE_DATA_API_KEY = "paste-your-key-here"
+$env:TWELVE_DATA_API_KEY = "paste-your-twelve-data-key-here"
+$env:FMP_API_KEY = "paste-your-fmp-key-here"
 ```
 
 **Windows Command Prompt:**
 
 ```cmd
-set TWELVE_DATA_API_KEY=paste-your-key-here
+set TWELVE_DATA_API_KEY=paste-your-twelve-data-key-here
+set FMP_API_KEY=paste-your-fmp-key-here
 ```
 
 This lasts until you close the terminal window. That is deliberate — a key that
@@ -163,13 +204,17 @@ python -m tradeit.cli_data data providers
 You should see:
 
 ```
-eodhd        stub (see the module docstring)    EODHD_API_KEY=NOT SET
-tiingo       ready                              TIINGO_API_KEY=NOT SET
-twelve_data  ready                              TWELVE_DATA_API_KEY=set
+Price providers  (--provider)
+  eodhd        stub (see the module docstring)    EODHD_API_KEY=NOT SET
+  tiingo       ready                              TIINGO_API_KEY=NOT SET
+  twelve_data  ready                              TWELVE_DATA_API_KEY=set
+
+Corporate-action sources  (--split-provider / tradeit data enrich --source)
+  fmp          splits only                        FMP_API_KEY=set
 ```
 
-If your provider says `NOT SET`, the `export` did not take effect — check for a
-typo, and make sure you are in the same terminal window.
+If your provider or source says `NOT SET`, the `export` did not take effect —
+check for a typo, and make sure you are in the same terminal window.
 
 **Do not** put the key in a file inside the project. Do not commit it anywhere.
 
@@ -184,17 +229,26 @@ downloading.
 ```bash
 python -m tradeit.cli_data data acquire \
     --provider twelve_data \
-    --symbols SPY,AAPL \
-    --start 2025-01-01 \
+    --split-provider fmp \
+    --symbols AAPL,NVDA \
+    --start 2010-01-01 \
+    --end 2025-12-31 \
     --output ./empirical-smoke
 ```
 
-For Tiingo, swap `--provider twelve_data` for `--provider tiingo`.
+`AAPL` and `NVDA` are chosen deliberately: both split inside that window
+(Apple 7-for-1 in 2014 and 4-for-1 in 2020, NVIDIA 4-for-1 in 2021 and 10-for-1
+in 2024), so the smoke test exercises the split path rather than only the happy
+one. Both also have splits *before* 2010, which must affect nothing.
+
+For Tiingo, swap `--provider twelve_data` for `--provider tiingo` and drop
+`--split-provider` — Tiingo's prices are already raw, so there is nothing to
+reconstruct.
 
 On Windows PowerShell, use a backtick `` ` `` instead of `\` at the end of each
 line, or just put the whole command on one line.
 
-You should see a summary ending with:
+You should see an acquisition summary ending with:
 
 ```
 Package status       : PACKAGE_VALID
@@ -202,9 +256,30 @@ Package status       : PACKAGE_VALID
 Snapshot-ready       : YES
 ```
 
-If you see that, everything works. **If not**, go to
+immediately followed by an enrichment summary ending with:
+
+```
+Status               : ENRICHED
+```
+
+If you see both, everything works. **If not**, go to
 [Common errors](#common-errors) before continuing — a problem here will only be
 bigger on the full download.
+
+**Two lines worth checking by eye**, because they are the ones that would be
+wrong silently:
+
+```bash
+# 1. Splits came from FMP and kept FMP's own numerator/denominator.
+cat ./empirical-smoke/splits.csv
+
+# 2. The manifest says who supplied what.
+grep -A 9 '\[provenance\]' ./empirical-smoke/manifest.toml
+```
+
+The second should show `price_provider = "twelve_data"`,
+`split_provider = "fmp"` and
+`reconstruction_label = "RECONSTRUCTED_RAW_FROM_SPLIT_ADJUSTED"`.
 
 ---
 
@@ -267,6 +342,8 @@ covers fewer instruments than you asked for.
 | `--name my-package` | Name recorded in the manifest. Defaults to `tiingo-daily`. |
 | `--force-refresh` | Re-download everything, ignoring what is already on disk. |
 | `--retry-failed` | Attempt only the instruments that failed last time. |
+| `--split-provider fmp` | After acquiring, fetch splits from FMP and reconstruct raw prices. See [section 8](#8-adding-splits-from-fmp). |
+| `--split-rate-limit 30` | Requests per minute for `--split-provider`. Self-imposed; raise it only if you know your plan's terms. |
 
 ### Why 2010, and why not a "cleaner" list
 
@@ -373,11 +450,88 @@ factor with nothing in the data to reveal it.
 If the splits endpoint is not on your plan, the tool does **not** reconstruct
 anything and says so. It does not quietly assume "no splits found" means "no
 splits happened" — those are different facts, and the summary distinguishes
-them.
+them. **That is the situation the free Twelve Data plan is actually in**, and
+section 8 is how you fix it.
 
 ---
 
-## 8. What was created, and where
+## 8. Adding splits from FMP
+
+Twelve Data's `/splits` endpoint answers "not on your plan" for a free account.
+Without a split schedule the reconstruction above cannot run, and the tool
+correctly refuses to guess.
+
+FMP gives you the schedule. If you passed `--split-provider fmp` to `acquire`,
+this already happened and you can skim this section. To run it separately — or
+again, later:
+
+```bash
+python -m tradeit.cli_data data enrich ./empirical-data --source fmp
+```
+
+**It downloads no prices.** It reads the package you already have, asks FMP for
+each symbol's split history, writes `splits.csv`, re-derives the reconstructed
+raw prices from it, and rewrites the manifest to say who supplied what.
+
+### Why it is a separate command
+
+Because a package on a free plan is usable-but-incomplete for days. The daily
+credit allowance runs out, the price download stops cleanly, you resume
+tomorrow. The split schedule for the symbols you *already* have is useful right
+now, and getting it must not mean re-downloading a single bar. So `enrich` is
+the primitive — a pass over an existing package directory, safe to run
+repeatedly at any point — and `--split-provider fmp` on `acquire` is a shortcut
+that runs exactly the same pass immediately afterwards.
+
+### What it changes in the package
+
+- `splits.csv` gains a row per split, carrying FMP's own `numerator` and
+  `denominator` alongside the derived `ratio`, plus a `source_provider` column
+  naming FMP. The pair is kept because a ratio of `0.1` could be 1-for-10 or
+  2-for-20, and if anyone later disputes the direction, the vendor's own numbers
+  are what the argument gets settled against.
+- `_acquisition/reconstructed_raw_prices.csv.gz` is written, every row labelled
+  `RECONSTRUCTED_RAW_FROM_SPLIT_ADJUSTED` and naming **both** vendors.
+- `manifest.toml` gains a `[provenance]` table, and the stale
+  "the splits endpoint is not available on this subscription" limitation is
+  replaced rather than left to contradict the new one.
+
+### Four things it will not do
+
+- **It will not become the price source.** FMP is asked for `/stable/splits` and
+  nothing else — no prices, no fundamentals, no ratios, no earnings, no
+  estimates, no statements, no ownership. The top-level `provider` in the
+  manifest still says `twelve_data`.
+- **It will not call a split date an announcement date.** FMP gives the
+  effective (ex-) date. When the split became publicly *knowable* is a different
+  fact this endpoint does not carry, so the knowledge timestamp stays
+  unavailable and the manifest says announcement-time corporate-action causality
+  is not supported by this package. Reconstructing prices does not solve that.
+- **It will not resolve a disagreement silently.** If your package already had
+  splits and FMP's schedule differs, both facts go in the report and the
+  manifest, FMP's schedule is used because you named it on the command line, and
+  every difference is listed for you to look at.
+- **It will not claim completeness it does not have.** A split FMP does not hold
+  leaves every reconstructed price before it wrong by that split's factor, with
+  nothing in the data to reveal it. The manifest says so. This is better
+  evidence than no split schedule at all; it is not ground truth.
+
+### Options
+
+| Option | What it does |
+|---|---|
+| `--source fmp` | Which corporate-action source. Only `fmp` today. |
+| `--symbols AAPL,NVDA` | Enrich only these. Omit for every symbol in the package. |
+| `--split-rate-limit 30` | Requests per minute. Self-imposed, not quoted from FMP. |
+| `--force-refresh` | Re-ask FMP even where the cached answer is on disk. |
+| `--no-reconstruct` | Fetch and write the split schedule without re-deriving prices. |
+
+Re-running is safe and cheap: answers are cached under `_acquisition/raw/fmp/`,
+so a second pass asks FMP nothing at all.
+
+---
+
+## 9. What was created, and where
 
 Inside `./empirical-data` (or whatever you passed to `--output`):
 
@@ -387,14 +541,16 @@ empirical-data/
   daily_bars.csv.gz          <- the price history (the big one)
   instruments.csv            <- one row per security
   symbol_mappings.csv        <- which ticker meant which security, and when
-  splits.csv                 <- splits and reverse splits
+  splits.csv                 <- splits and reverse splits, with source_provider
   dividends.csv              <- cash dividends
   _acquisition/              <- provenance; keep it, do not edit it
-    journal.jsonl            <- one line per request made
-    acquisition_report.json  <- the full summary as data
+    journal.jsonl            <- one line per request made, to any vendor
+    acquisition_report.json  <- the full acquisition summary as data
+    enrichment_report.json   <- the full enrichment summary as data
     vendor_adjusted_prices.csv.gz     (Tiingo)
-    reconstructed_raw_prices.csv.gz   (Twelve Data — DERIVED, see section 7)
-    raw/<provider>/...       <- every vendor response, exactly as received
+    reconstructed_raw_prices.csv.gz   (Twelve Data + FMP — DERIVED, see section 7)
+    raw/twelve_data/...      <- every vendor response, exactly as received
+    raw/fmp/...              <- likewise, for the split lookups
 ```
 
 **Keep `_acquisition/`.** It is the evidence behind every number: the raw vendor
@@ -408,15 +564,35 @@ prices from Twelve Data. Either way the other version is kept alongside it —
 project's own adjustment maths can be checked against the vendor's rather than
 agreeing with it by construction.
 
+If the package was enriched, the manifest also carries a `[provenance]` table
+naming each vendor's contribution separately:
+
+```toml
+[provenance]
+price_provider = "twelve_data"
+price_representation = "split_adjusted"
+dividend_provider = "twelve_data"
+split_provider = "fmp"
+reconstruction_performed = true
+reconstruction_algorithm = "split-inverse-1"
+reconstruction_label = "RECONSTRUCTED_RAW_FROM_SPLIT_ADJUSTED"
+reconstruction_file = "_acquisition/reconstructed_raw_prices.csv.gz"
+```
+
+It exists because the reconstructed series was computed from one vendor's
+adjusted bars and another vendor's split schedule, which means **neither vendor
+supplied it**. A reader who saw only `provider = "twelve_data"` would attribute
+it to Twelve Data.
+
 ---
 
-## 9. Move the package to the project
+## 10. Move the package to the project
 
 The whole `empirical-data` folder is the deliverable. Move it however you
 normally move files.
 
 **If the project runs on this same computer**, it is already in the right place
-and you can skip to step 10.
+and you can skip to step 11.
 
 **To move it elsewhere**, zip it first:
 
@@ -437,7 +613,7 @@ a `.zip` directly, so there is no need to unpack it.
 
 ---
 
-## 10. Import and validate
+## 11. Import and validate
 
 On the machine where the project runs, with its database configured
 (`TRADEIT_DATABASE__DSN`) and migrations applied (`alembic upgrade head`):
@@ -548,15 +724,62 @@ the tool assumed — pass a smaller `--rate-limit`.
 
 ### `/splits is available with the Grow plan and above` (Twelve Data)
 
-Your subscription does not include the corporate-actions endpoints. The package
-is still usable: prices are unaffected.
+Your subscription does not include Twelve Data's corporate-actions endpoints.
+This is the normal free-plan situation, and the package is still usable: prices
+are unaffected.
 
 Two consequences, both recorded in the manifest rather than hidden:
 
-- there are no splits or dividends rows, and **that absence means "we could not
-  ask", not "these securities had no splits"**;
+- there are no splits rows from this provider, and **that absence means "we
+  could not ask", not "these securities had no splits"**;
 - raw-price reconstruction is skipped, because inverting a split adjustment
   without the split history is guesswork.
+
+**The fix is [section 8](#8-adding-splits-from-fmp):** get the split schedule
+from FMP instead.
+
+### `Exclusive Endpoint: This endpoint is not available under your current subscription` (FMP)
+
+FMP's plan does not include `/stable/splits`. Nothing was written and the
+package is unchanged. The status will be `NOT_ENRICHED`, and — importantly —
+this is recorded as a fact about the plan, never as "these securities had no
+splits".
+
+### `Invalid API KEY` (FMP)
+
+The key is wrong, not the plan. Check for a stray space when you pasted it. The
+tool deliberately does **not** record this as a plan restriction: putting "not
+available on this subscription" in a manifest over a typo would be a lie that
+outlives the typo.
+
+### `Limit Reach` (FMP)
+
+The free plan's daily request allowance is spent. Everything already fetched is
+kept, the pass stops cleanly, and the status will say so. Wait for the reset and
+run `tradeit data enrich` again — cached symbols cost nothing, so only the
+remaining ones are requested.
+
+### `Status: NOT_ENRICHED`
+
+FMP answered usefully for no symbol at all — no key, a plan restriction, or the
+network. **Nothing was written**; the package is byte-for-byte as it was. The
+report's Notes section says which.
+
+### FMP returned an empty split list for a symbol
+
+Recorded, and the finding says exactly what it can and cannot tell you: an empty
+list is FMP holding no split records, and it is *also* precisely what an
+unrecognised ticker returns. If the ticker is one your package has prices for it
+is almost certainly the former, but the tool will not upgrade "no records" into
+"never split" on your behalf.
+
+### `Split-schedule CONFLICTS` in the enrichment summary
+
+Two sources disagree about a corporate action, or one holds a record the other
+does not. **Nothing is reconciled automatically** — FMP's schedule is used
+because you named it, and every difference is listed for you. A split that
+simply falls outside your package's date window is *not* listed here; that is
+correct behaviour and appears under Findings.
 
 ### `Package status: ACQUISITION_INCOMPLETE_QUOTA`
 
@@ -610,8 +833,8 @@ asking for help.
 
 Market-data licences commonly **prohibit redistribution**. As a rule:
 
-- **Do not push downloaded market data to a public repository.** Twelve Data's
-  and Tiingo's terms are between you and them — read them. The project's
+- **Do not push downloaded market data to a public repository.** Twelve Data's,
+  FMP's and Tiingo's terms are between you and them — read them. The project's
   `.gitignore` already excludes `**/_acquisition/`, `/empirical-data/` and
   `/empirical-smoke/`, so this will not happen by accident from the default
   locations. If you use a different output directory, check `git status` before

@@ -46,6 +46,30 @@ moment it was written down. Get quotes.
 The one claim in this document that is **VERIFIED** is the negative one in §7:
 the provider abstraction works, because Phase 3 was built and run against it.
 
+### 0.1 What has since been observed against live free-tier accounts
+
+Not a vendor trial in the §6 sense — no point-in-time acceptance test was run,
+no fundamentals were touched, and the accounts are free tiers rather than
+representative subscriptions. Recorded here because it is the only directly
+observed vendor behaviour this project has, and because it changed a design
+decision (see `ADR-0026`).
+
+Observed by the project owner from their own machine, not from this build
+environment, which still cannot reach any provider host:
+
+| Claim | Label | Detail |
+|---|---|---|
+| Twelve Data `/time_series` serves daily bars on a free key | **VERIFIED** | Smoke test over SPY and AAPL succeeded. |
+| Twelve Data `/splits` is **not** available on that free plan | **VERIFIED** | The endpoint returned a provider error naming the plan. |
+| FMP `/stable/splits` serves split history on a free key | **VERIFIED** | `?symbol=AAPL` returned real records. |
+| Twelve Data daily bars are split-adjusted | **DOCUMENTATION CLAIM** | The vendor documents it. Not independently confirmed, and the raw-price reconstruction is built on top of this claim. |
+| FMP split coverage is complete for a given security | **UNKNOWN** | No way to establish it from one vendor. A missing split is invisible in the data. |
+| Either vendor supplies corporate-action *announcement* timestamps | **NOT AVAILABLE** | FMP's `/stable/splits` carries an effective date only. Twelve Data's endpoint was not reachable on this plan to check. |
+
+Nothing about fundamentals, filing timestamps, delisted coverage or historical
+universe membership was tested at either vendor. Those remain as §2–§4 describe
+them, which is to say unverified.
+
 ---
 
 ## 1. What we actually need

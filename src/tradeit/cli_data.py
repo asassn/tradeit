@@ -32,6 +32,12 @@ from pathlib import Path
 from typing import Any
 
 from tradeit.acquisition.base import available_providers, get_provider_class
+from tradeit.acquisition.enrich import (
+    EnrichmentOptions,
+    PackageEnricher,
+    available_sources,
+    get_source_class,
+)
 from tradeit.acquisition.runner import (
     AcquisitionOptions,
     AcquisitionRunner,
@@ -247,7 +253,76 @@ def cmd_acquire(args: argparse.Namespace) -> int:
     print(f"\nfull report: {payload_path}")
     print(f"journal    : {Path(args.output) / WORKSPACE_DIRNAME / 'journal.jsonl'}")
 
-    return 0 if report.status.snapshot_ready else 1
+    if not report.status.snapshot_ready:
+        return 1
+    if getattr(args, "split_provider", None):
+        # Sugar, not a second code path: the same enrichment pass `tradeit data
+        # enrich` runs, invoked here so the common case is one command. It runs
+        # after the package is written, over the package on disk, which is why
+        # a quota-truncated acquisition still gets its splits for the symbols it
+        # did manage to download.
+        print()
+        return _run_enrichment(Path(args.output), args)
+    return 0
+
+
+def cmd_enrich(args: argparse.Namespace) -> int:
+    """Add a second vendor's corporate actions to an existing package.
+
+    Separate from ``acquire`` because a package exists in a usable-but-
+    incomplete state for a long time on a free plan: the daily credit allowance
+    runs out, the run stops cleanly, and the operator resumes tomorrow. The
+    split schedule for the symbols already downloaded is useful immediately, and
+    getting it must not mean re-downloading a single bar.
+    """
+    package = Path(args.package)
+    if not (package / "manifest.toml").exists():
+        print(f"{package} has no manifest.toml, so it is not a package", file=sys.stderr)
+        return 2
+    return _run_enrichment(package, args)
+
+
+def _run_enrichment(package: Path, args: argparse.Namespace) -> int:
+    source = _build_source(args)
+    print(f"enriching  : {package}")
+    print(f"source     : {source.name}  (splits only)")
+    hint = getattr(source, "credential_hint", None)
+    print(f"credential : {hint() if hint else 'unknown'}   (from {source.credential_env})")
+    print()
+
+    options = EnrichmentOptions(
+        force_refresh=getattr(args, "force_refresh", False),
+        reconstruct=not getattr(args, "no_reconstruct", False),
+        symbols=tuple(_split_symbols(getattr(args, "symbols", None))),
+    )
+    report = PackageEnricher(package, source, options).run()
+    print(report.render())
+
+    payload_path = package / WORKSPACE_DIRNAME / "enrichment_report.json"
+    payload_path.parent.mkdir(parents=True, exist_ok=True)
+    payload_path.write_text(
+        json.dumps(report.to_payload(), indent=2, sort_keys=True), encoding="utf-8"
+    )
+    print(f"\nfull report: {payload_path}")
+    return 0 if report.status.wrote_anything else 1
+
+
+def _build_source(args: argparse.Namespace) -> Any:
+    """Construct the corporate-action source, passing only options it accepts."""
+    name = getattr(args, "split_provider", None) or getattr(args, "source", None)
+    source_class = get_source_class(str(name))
+    candidates = {"requests_per_minute": getattr(args, "split_rate_limit", None)}
+    accepted = inspect.signature(source_class).parameters
+    kwargs = {
+        key: value for key, value in candidates.items() if value is not None and key in accepted
+    }
+    return source_class(**kwargs)
+
+
+def _split_symbols(raw: list[str] | None) -> list[str]:
+    if not raw:
+        return []
+    return [s.strip().upper() for s in ",".join(raw).split(",") if s.strip()]
 
 
 def _build_provider(args: argparse.Namespace) -> Any:
@@ -295,13 +370,27 @@ def _last_completed_session() -> dt.date:
 
 def cmd_providers(_: argparse.Namespace) -> int:
     """List acquisition providers and whether each is usable right now."""
+    print("Price providers  (--provider)")
     for name in available_providers():
         cls = get_provider_class(name)
         implemented = getattr(cls, "implemented", True)
         env = getattr(cls, "credential_env", "?")
         present = "set" if os.environ.get(env) else "NOT SET"
         state = "ready" if implemented else "stub (see the module docstring)"
-        print(f"{name:<12} {state:<34} {env}={present}")
+        print(f"  {name:<12} {state:<34} {env}={present}")
+    print()
+    print("Corporate-action sources  (--split-provider / tradeit data enrich --source)")
+    for name in available_sources():
+        cls = get_source_class(name)
+        env = getattr(cls, "credential_env", "?")
+        present = "set" if os.environ.get(env) else "NOT SET"
+        dataset = getattr(cls, "dataset", "?")
+        print(f"  {name:<12} {f'{dataset} only':<34} {env}={present}")
+    print()
+    print("A corporate-action source cannot be used as --provider. It has no way to")
+    print("produce a price bar, which is deliberate: a package whose prices quietly")
+    print("came from a different vendor than its manifest says is not detectable by")
+    print("inspection.")
     return 0
 
 
@@ -436,7 +525,64 @@ def add_data_commands(sub: argparse._SubParsersAction) -> None:  # type: ignore[
         action="store_true",
         help="print the size estimate and exit without requesting anything",
     )
+    acquire.add_argument(
+        "--split-provider",
+        default=None,
+        choices=available_sources(),
+        help=(
+            "after acquiring, run the same pass as `tradeit data enrich` to fetch "
+            "splits from a second vendor. Needed when the price provider's own "
+            "splits endpoint is not on your plan"
+        ),
+    )
+    acquire.add_argument(
+        "--split-rate-limit",
+        type=int,
+        default=None,
+        help="requests per minute for --split-provider; defaults to a conservative value",
+    )
     acquire.set_defaults(func=cmd_acquire)
+
+    enrich = data_sub.add_parser(
+        "enrich",
+        help="add a second vendor's corporate actions to an existing package",
+        description=(
+            "Fetches historical splits from a corporate-action source and writes them "
+            "into a package that already has prices, then re-derives the raw price "
+            "reconstruction from them. Re-downloads no bars, so it is safe to run "
+            "repeatedly while a multi-day acquisition is still in progress."
+        ),
+    )
+    enrich.add_argument("package", help="package directory written by `tradeit data acquire`")
+    enrich.add_argument(
+        "--source",
+        default="fmp",
+        choices=available_sources(),
+        help="corporate-action source to consult",
+    )
+    enrich.add_argument(
+        "--symbols",
+        nargs="*",
+        default=None,
+        help="explicit tickers. Omit for every symbol the package has prices for",
+    )
+    enrich.add_argument(
+        "--split-rate-limit",
+        type=int,
+        default=None,
+        help="requests per minute; defaults to a conservative self-imposed value",
+    )
+    enrich.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="re-ask the vendor even where the raw cache already holds its answer",
+    )
+    enrich.add_argument(
+        "--no-reconstruct",
+        action="store_true",
+        help=("fetch and write the split schedule without re-deriving raw prices from it"),
+    )
+    enrich.set_defaults(func=cmd_enrich)
 
     data_sub.add_parser(
         "providers", help="list acquisition providers and credential status"
@@ -465,7 +611,9 @@ def main(argv: list[str] | None = None) -> int:
 
 __all__ = [
     "add_data_commands",
+    "cmd_acquire",
     "cmd_datasets",
+    "cmd_enrich",
     "cmd_import",
     "cmd_inspect",
     "cmd_package_spec",

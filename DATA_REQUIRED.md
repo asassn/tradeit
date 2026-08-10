@@ -228,9 +228,23 @@ Requires: instruments
 | `instrument_id` | int | yes | surrogate key | — |
 | `ex_date` | date | yes | first session trading at the new count | — |
 | `ratio` | decimal | yes | share-count multiplier: 2-for-1 is 2, 1-for-10 is 0.1 | — |
+| `numerator` | int | no | new shares, as the vendor stated it: 4 in a 4-for-1 | — |
+| `denominator` | int | no | old shares: 1 in a 4-for-1, 10 in a 1-for-10 | — |
+| `split_type` | string | no | the vendor's own label, e.g. stock_split | — |
+| `source_provider` | string | no | which vendor supplied this record, when it is not the vendor that supplied the prices | — |
 | `announcement_time` | datetime | no | when the split was announced; normally before the ex-date | — |
 
 Enables: corporate-action artefact detection, split-adjusted price reconstruction, ATR and momentum artefact checks
+
+`numerator` and `denominator` are kept alongside the derived `ratio` rather than
+replaced by it. A ratio of `0.1` could be 1-for-10 or 2-for-20, and when
+somebody later disputes the direction of a reverse split, the vendor's own pair
+is what the argument gets settled against.
+
+`announcement_time` is the field almost nobody can fill. The split endpoints
+this project can reach carry an **effective** date only, and an effective date
+presented as an announcement would license research the data cannot support.
+Leave it empty rather than deriving it.
 
 ### dividends
 
