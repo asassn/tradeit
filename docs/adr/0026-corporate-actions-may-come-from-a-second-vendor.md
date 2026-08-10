@@ -134,6 +134,27 @@ reciprocal, a provider's declared convention is wrong; that is a different
 problem from the vendors disagreeing and has a different fix, so it is reported
 as its own kind of finding rather than as an economic conflict.
 
+**6a. (Amended after the second live smoke test.) Every observation carries a
+typed kind, and "conflict" means one thing in both views of a run.**
+
+The rendered report listed Apple's 1987, 2000 and 2005 splits under a CONFLICTS
+heading for a package beginning in 2010, while the JSON payload recorded none.
+Two independent partitions of the same observations.
+
+`ScheduleFindingKind` classifies each observation once and `kind.is_conflict`
+is the only place the distinction lives; the report and the payload both
+partition that single list. A split outside the package's price coverage is
+`OUTSIDE_COVERAGE` and never a conflict — the price provider's corporate-action
+endpoints were queried for the *requested range* and were never asked about
+1987, so their silence is expected rather than contradictory.
+
+The one genuinely ambiguous case is decided explicitly: an in-coverage event
+present in one source and absent from the other is a conflict **only if that
+other source supplied at least one in-coverage split for the same symbol**. A
+provider with in-window records is asserting a schedule; a provider with none is
+silent, and treating silence as disagreement would turn every plan-restricted
+package into a wall of conflicts about events it could not report.
+
 **7. (Added after the first live smoke test.) A split count is four numbers.**
 
 The report said "reconstructed across 5 split(s)" for an Apple package spanning

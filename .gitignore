@@ -43,8 +43,17 @@ htmlcov/
 # sidecar. Lives inside a package directory and is always vendor data.
 **/_acquisition/
 
-# Conventional acquisition output directories at the repository root.
-/empirical-data/
-/empirical-smoke/
+# Acquisition output directories at the repository ROOT only.
+#
+# The leading `/` is doing the important work. `empirical-*/` unanchored would
+# match any directory anywhere whose name starts with "empirical"; anchored, it
+# matches only children of the repository root, which is where the CLI's
+# `--output` conventionally points. Nothing under `src/`, `docs/` or `tests/`
+# can be caught by it, and `git check-ignore` is run against those paths in the
+# test suite so the guarantee is enforced rather than asserted in a comment.
+#
+# Covers /empirical-smoke/, /empirical-smoke-2/, /empirical-smoke-fmp/,
+# /empirical-validation-2010-2026/ and anything else following the convention.
+/empirical-*/
 /market-data/
 /packages/

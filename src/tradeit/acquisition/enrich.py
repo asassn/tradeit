@@ -73,6 +73,8 @@ from tradeit.acquisition.reconstruct import (
     RECONSTRUCTION_LABEL,
     ReconstructionQuality,
     ReconstructionResult,
+    ScheduleFinding,
+    ScheduleFindingKind,
     SplitCensus,
     SplitEvent,
     SplitFactorConvention,
@@ -317,7 +319,11 @@ class EnrichmentReport:
     reconstruction: list[ReconstructionResult] = field(default_factory=list)
     splits_written: int = 0
     findings: list[str] = field(default_factory=list)
-    conflicts: list[str] = field(default_factory=list)
+    #: Everything observed about the split schedules, classified once. The
+    #: rendered report and the JSON payload both partition *this* list, so a
+    #: reader greping the payload for what the report called a CONFLICT finds
+    #: exactly the same records.
+    schedule_findings: list[ScheduleFinding] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
@@ -328,6 +334,24 @@ class EnrichmentReport:
     cached: int = 0
     waited_s: float = 0.0
     quota_stopped: bool = False
+
+    @property
+    def conflicts(self) -> list[str]:
+        """Split-schedule findings a person has to decide about."""
+        return [f.render() for f in self.schedule_findings if f.is_conflict]
+
+    @property
+    def schedule_notes(self) -> list[str]:
+        """Split-schedule findings a person should know and need not act on."""
+        return [f.render() for f in self.schedule_findings if not f.is_conflict]
+
+    @property
+    def all_findings(self) -> list[str]:
+        """Everything informational, in the order the report prints it."""
+        return self.findings + self.schedule_notes
+
+    def findings_of(self, kind: ScheduleFindingKind) -> list[ScheduleFinding]:
+        return [f for f in self.schedule_findings if f.kind is kind]
 
     @property
     def enriched(self) -> list[SymbolEnrichment]:
@@ -404,11 +428,12 @@ class EnrichmentReport:
         if self.problems:
             lines += ["", "Problems", "-" * 72]
             lines += [f"  - {item}" for item in self.problems]
-        if self.findings:
-            lines += ["", f"Findings ({len(self.findings)})", "-" * 72]
-            lines += [f"  - {item}" for item in self.findings[:15]]
-            if len(self.findings) > 15:
-                lines.append(f"  ... and {len(self.findings) - 15} more; see the report file")
+        informational = self.all_findings
+        if informational:
+            lines += ["", f"Findings ({len(informational)})", "-" * 72]
+            lines += [f"  - {item}" for item in informational[:15]]
+            if len(informational) > 15:
+                lines.append(f"  ... and {len(informational) - 15} more; see the report file")
         if self.capabilities:
             lines += ["", "Source capabilities as exercised", "-" * 72]
             for name, state in sorted(self.capabilities.items()):
@@ -496,6 +521,8 @@ class EnrichmentReport:
                 for item in self.reconstruction
             ],
             "conflicts": list(self.conflicts),
+            "conflict_count": len(self.conflicts),
+            "schedule_findings": [item.to_payload() for item in self.schedule_findings],
             "findings": list(self.findings),
             "problems": list(self.problems),
             "notes": list(self.notes),
@@ -766,9 +793,15 @@ class PackageEnricher:
             events = schedules[symbol]
             prior = existing.get(symbol, ())
             if prior:
-                conflicts, notes = compare_schedules(symbol, prior, events, self.source.name)
-                report.conflicts.extend(conflicts)
-                report.findings.extend(notes)
+                report.schedule_findings.extend(
+                    compare_schedules(
+                        symbol,
+                        prior,
+                        events,
+                        self.source.name,
+                        coverage=_coverage(bars.get(tickers[symbol], [])),
+                    )
+                )
             chosen[symbol] = events
             rows.extend(
                 _split_row(tickers[symbol], event, self.source.name)
@@ -889,8 +922,7 @@ class PackageEnricher:
                 split_provider=self.source.name,
             )
             report.reconstruction.append(result)
-            report.conflicts.extend(result.conflicts)
-            report.findings.extend(result.notes)
+            report.schedule_findings.extend(result.findings)
             for state in report.symbols:
                 if state.symbol == symbol:
                     state.sessions_changed = result.sessions_changed
@@ -1044,27 +1076,47 @@ def compare_schedules(
     primary: Sequence[SplitEvent],
     secondary: Sequence[SplitEvent],
     secondary_name: str,
-) -> tuple[list[str], list[str]]:
-    """Where two vendors disagree about a symbol's splits.
+    *,
+    coverage: tuple[dt.date, dt.date] | None = None,
+) -> list[ScheduleFinding]:
+    """Where two vendors disagree about a symbol's splits, and where they do not.
 
-    Returns ``(conflicts, notes)``. It does **not** merge, pick a winner, or
-    average a ratio. The caller uses the enrichment source's schedule because
-    that is what the operator asked for on the command line, and every place the
-    two differ is reported so that choice is visible rather than assumed.
+    Returns classified :class:`ScheduleFinding`s. It does **not** merge, pick a
+    winner, or average a ratio. The caller uses the enrichment source's schedule
+    because that is what the operator asked for on the command line, and every
+    place the two differ is reported so that choice is visible rather than
+    assumed.
 
-    **Comparison is on the canonical share-count multiplier, never on the raw
-    vendor numbers.** A live run had Twelve Data reporting Apple's 2020 split as
-    ``0.25`` and FMP reporting it as 4-for-1, and the previous version of this
-    function called that a conflict. It is not one: those are the same corporate
-    action measured from opposite ends. Both sides arrive here already
-    normalized by their provider's declared convention, so equal splits compare
-    equal; and if two normalized ratios still come out reciprocal, that is
-    reported as a **convention** problem rather than an economic disagreement,
-    because it means a declaration is wrong and no argument with a data vendor
+    Three rules, each of which exists because of a false conflict a real run
+    produced.
+
+    **1. Comparison is on the canonical share-count multiplier, never on raw
+    vendor numbers.** Twelve Data reported Apple's 2020 split as ``0.25`` and
+    FMP reported it as 4-for-1, and an earlier version called that a
+    disagreement. It is the same corporate action measured from opposite ends.
+    Both sides arrive here already normalized by their provider's declared
+    convention. If two *normalized* ratios still come out reciprocal, that is a
+    :attr:`~...ScheduleFindingKind.REPRESENTATION_MISMATCH` — a declaration is
+    wrong — and not an economic conflict, because no argument with a data vendor
     will fix it.
+
+    **2. Outside the price coverage window, an absence proves nothing.** The
+    price provider's corporate-action endpoints were queried for the *requested
+    range*, so its records were never asked about a 1987 split and cannot be
+    expected to contain one. Reporting "FMP has a 1987 split that Twelve Data
+    does not" as a conflict demands of one vendor a history nobody requested from
+    it. Every out-of-window difference is
+    :attr:`~...ScheduleFindingKind.OUTSIDE_COVERAGE`, informational.
+
+    **3. Inside the window, an absence is meaningful only if the other source
+    claimed that window at all.** A provider that supplied *some* in-coverage
+    splits for this symbol is asserting a schedule for it, so a gap is a real
+    contradiction — ``MISSING_FROM_*``, a conflict. A provider that supplied no
+    in-coverage splits at all is silent rather than contradicting, and the caller
+    does not even reach this function in that case: it compares only when the
+    package already holds split records.
     """
-    findings: list[str] = []
-    notes: list[str] = []
+    out: list[ScheduleFinding] = []
     by_date_primary: dict[dt.date, list[SplitEvent]] = {}
     for event in primary:
         by_date_primary.setdefault(event.ex_date, []).append(event)
@@ -1074,49 +1126,120 @@ def compare_schedules(
 
     primary_name = next((e.source for e in primary if e.source), "the primary provider")
 
+    def in_window(day: dt.date) -> bool:
+        return coverage is None or coverage[0] <= day <= coverage[1]
+
+    # Whether the price provider asserts a schedule for the covered window at
+    # all. Rule 3: without an in-window record of its own it is silent, and
+    # silence is not contradiction.
+    primary_claims_window = any(in_window(event.ex_date) for event in primary)
+
     for ex_date in sorted(set(by_date_primary) | set(by_date_secondary)):
         left = by_date_primary.get(ex_date, [])
         right = by_date_secondary.get(ex_date, [])
-        if left and not right:
-            findings.append(
-                f"{symbol}: {primary_name} records a split on {ex_date} "
-                f"({left[0].describe}) that {secondary_name} does not. The "
-                f"{secondary_name} schedule was used for reconstruction, so this "
-                "event was NOT applied."
-            )
-        elif right and not left:
-            findings.append(
-                f"{symbol}: {secondary_name} records a split on {ex_date} "
-                f"({right[0].describe}) that {primary_name} does not."
-            )
-        else:
+
+        if left and right:
             left_ratio = left[0].ratio
             right_ratio = right[0].ratio
             if ratios_agree(left_ratio, right_ratio):
                 # The common case, and the one that used to be reported as a
-                # conflict. Both sources describe the same corporate action;
-                # they merely wrote it down differently, and the canonical form
-                # has already absorbed that. Nothing to say.
+                # conflict. Both sources describe the same corporate action; they
+                # merely wrote it down differently, and the canonical form has
+                # already absorbed that. Nothing to say.
                 continue
             if are_reciprocal(left_ratio, right_ratio):
-                notes.append(
-                    f"{symbol}: the two sources describe the split on {ex_date} as exact "
-                    f"RECIPROCALS ({left_ratio} and {right_ratio}), which is one split "
-                    "seen from opposite ends rather than two different splits. After "
-                    "canonical normalization this should not happen, so it means a "
-                    "provider's declared split-factor convention is wrong rather than "
-                    f"that the vendors disagree. {left[0].vendor_note}; "
-                    f"{right[0].vendor_note}"
+                out.append(
+                    ScheduleFinding(
+                        kind=ScheduleFindingKind.REPRESENTATION_MISMATCH,
+                        symbol=symbol,
+                        ex_date=ex_date,
+                        message=(
+                            f"{symbol}: the two sources describe the split on {ex_date} "
+                            f"as exact RECIPROCALS ({left_ratio} and {right_ratio}), "
+                            "which is one split seen from opposite ends rather than two "
+                            "different splits. After canonical normalization this should "
+                            "not happen, so it means a provider's declared split-factor "
+                            "convention is wrong rather than that the vendors disagree. "
+                            f"{left[0].vendor_note}; {right[0].vendor_note}"
+                        ),
+                    )
                 )
                 continue
-            findings.append(
-                f"{symbol}: the two sources DISAGREE about the split on {ex_date} — "
-                f"{primary_name} says a share-count multiplier of {left_ratio}, "
-                f"{secondary_name} says {right_ratio}. Not reciprocal and not equal, so "
-                f"they describe different events. The {secondary_name} figure was used. "
-                f"Not reconciled. {left[0].vendor_note}; {right[0].vendor_note}"
+            out.append(
+                ScheduleFinding(
+                    kind=ScheduleFindingKind.CROSS_PROVIDER_CONFLICT,
+                    symbol=symbol,
+                    ex_date=ex_date,
+                    message=(
+                        f"{symbol}: the two sources DISAGREE about the split on {ex_date}"
+                        f" — {primary_name} says a share-count multiplier of "
+                        f"{left_ratio}, {secondary_name} says {right_ratio}. Not "
+                        "reciprocal and not equal, so they describe different events. The "
+                        f"{secondary_name} figure was used. Not reconciled. "
+                        f"{left[0].vendor_note}; {right[0].vendor_note}"
+                    ),
+                )
             )
-    return findings, notes
+            continue
+
+        present, missing_from = (left[0], secondary_name) if left else (right[0], primary_name)
+        if not in_window(ex_date):
+            # Rule 2. The price provider was queried for the requested range
+            # only, so its silence about a pre-window or post-window event is
+            # not evidence of anything.
+            window = f"{coverage[0]}..{coverage[1]}" if coverage else "the package window"
+            out.append(
+                ScheduleFinding(
+                    kind=ScheduleFindingKind.OUTSIDE_COVERAGE,
+                    symbol=symbol,
+                    ex_date=ex_date,
+                    message=(
+                        f"{symbol}: the split on {ex_date} ({present.describe}) is "
+                        f"outside the price coverage {window}, so its absence from "
+                        f"{missing_from} is expected rather than contradictory — that "
+                        "source was only ever asked about the requested range."
+                    ),
+                )
+            )
+            continue
+
+        if left:
+            if not primary_claims_window:
+                continue
+            out.append(
+                ScheduleFinding(
+                    kind=ScheduleFindingKind.MISSING_FROM_SPLIT_PROVIDER,
+                    symbol=symbol,
+                    ex_date=ex_date,
+                    message=(
+                        f"{symbol}: {primary_name} records an in-coverage split on "
+                        f"{ex_date} ({present.describe}) that {secondary_name} does not. "
+                        f"The {secondary_name} schedule was used for reconstruction, so "
+                        "this event was NOT applied."
+                    ),
+                )
+            )
+            continue
+
+        if not primary_claims_window:
+            # Rule 3. The price provider supplied no in-window splits for this
+            # symbol, so it is not asserting an empty schedule — it simply has
+            # nothing to say, and demanding agreement would invent a conflict.
+            continue
+        out.append(
+            ScheduleFinding(
+                kind=ScheduleFindingKind.MISSING_FROM_PRICE_PROVIDER,
+                symbol=symbol,
+                ex_date=ex_date,
+                message=(
+                    f"{symbol}: {secondary_name} records an in-coverage split on "
+                    f"{ex_date} ({present.describe}) that {primary_name} does not, "
+                    f"although {primary_name} does supply other in-coverage splits for "
+                    "this symbol. One of the two schedules is incomplete."
+                ),
+            )
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------

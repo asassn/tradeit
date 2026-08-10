@@ -68,6 +68,7 @@ from tradeit.acquisition.reconstruct import (
     RECONSTRUCTION_ALGORITHM_VERSION,
     RECONSTRUCTION_LABEL,
     ReconstructionQuality,
+    ScheduleFindingKind,
     SplitEvent,
     SplitFactorConvention,
     ratios_agree,
@@ -498,10 +499,10 @@ class TestNormalization:
         assert findings == []
         from tradeit.acquisition.reconstruct import check_split_consistency
 
-        conflicts, notes = check_split_consistency("AAPL", events, None)
-        assert any("equivalent split records" in f for f in conflicts)
-        assert any("NOT merged" in f for f in conflicts)
-        assert notes == []
+        found = check_split_consistency("AAPL", events, None)
+        assert [f.kind for f in found] == [ScheduleFindingKind.DUPLICATE_RECORD]
+        assert found[0].is_conflict is True
+        assert "NOT merged" in found[0].message
 
 
 # ---------------------------------------------------------------------------
@@ -892,9 +893,12 @@ class TestReconstructionArithmetic:
         """Five splits and only two affecting anything is otherwise a puzzle."""
         package = build_package(tmp_path / "pkg", ["AAPL"])
         report = enrich(package)
-        assert any("1987-06-16" in item and "affects no row" in item for item in report.findings)
-        # A note, not a conflict: nothing is wrong and nobody has to act.
-        assert not any("affects no row" in item for item in report.conflicts)
+        assert any(
+            "1987-06-16" in item and "affects no row" in item for item in report.all_findings
+        )
+        # Informational, not a conflict: nothing is wrong and nobody has to act.
+        assert report.conflicts == []
+        assert all(f.kind is ScheduleFindingKind.OUTSIDE_COVERAGE for f in report.schedule_findings)
 
     def test_prices_are_multiplied_and_volume_divided(self, tmp_path: Path) -> None:
         package = build_package(tmp_path / "pkg", ["AAPL"])
@@ -1138,9 +1142,8 @@ class TestCrossProviderNormalization:
         assert ratios_agree(share_side.economic_ratio, economic), label
         assert ratios_agree(price_side.economic_ratio, share_side.economic_ratio), label
 
-        conflicts, notes = compare_schedules("X", (price_side,), (share_side,), "fmp")
-        assert conflicts == [], f"{label} was reported as a conflict"
-        assert notes == [], f"{label} produced an unexpected note"
+        found = compare_schedules("X", (price_side,), (share_side,), "fmp")
+        assert found == [], f"{label} produced a finding of any kind"
 
     @pytest.mark.parametrize(
         ("economic", "price_adjustment"),
@@ -1221,45 +1224,185 @@ class TestCrossProviderNormalization:
         assert row["vendor_convention"] == "new_over_old_shares"
 
 
-class TestConflicts:
-    def test_agreement_produces_no_finding(self) -> None:
-        shared = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="twelve_data"),)
-        assert compare_schedules("AAPL", shared, shared, "fmp") == ([], [])
+class TestConflictSemantics:
+    """What counts as a CONFLICT, and what is merely worth saying.
 
-    def test_a_reciprocal_pair_is_a_convention_note_not_a_conflict(self) -> None:
+    A real run reported three AAPL splits from 1987, 2000 and 2005 under a
+    heading that told the reader a person had to resolve them. They fall before
+    the package's 2010 price coverage, affect no row, and their absence from the
+    price provider's records proves nothing — that provider was only ever asked
+    about 2010 onward. Demanding that Twelve Data's package-local corporate
+    actions contain a 1987 split is asking a vendor for a history nobody
+    requested from it.
+
+    Every observation is now classified once, by kind, and both the rendered
+    report and the JSON payload partition that single list. `is_conflict` is the
+    whole distinction.
+    """
+
+    IN_WINDOW = (dt.date(2010, 1, 4), dt.date(2025, 12, 31))
+
+    def _fmp(self, day: dt.date, num: int, den: int) -> SplitEvent:
+        return SplitEvent.from_vendor(
+            ex_date=day,
+            value=Decimal(num) / Decimal(den),
+            convention=SplitFactorConvention.NEW_OVER_OLD_SHARES,
+            source="fmp",
+            numerator=num,
+            denominator=den,
+        )
+
+    def _price_side(self, day: dt.date, factor: str) -> SplitEvent:
+        return SplitEvent.from_vendor(
+            ex_date=day,
+            value=Decimal(factor),
+            convention=SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER,
+            source="twelve_data",
+        )
+
+    # -- the reported defect --------------------------------------------------
+
+    def test_a_pre_window_split_absent_from_the_price_provider_is_not_a_conflict(
+        self,
+    ) -> None:
+        """AAPL 2005-02-28 against a package that starts in 2010."""
+        secondary = (self._fmp(dt.date(2005, 2, 28), 2, 1),)
+        primary = (self._price_side(dt.date(2014, 6, 9), "0.142857142857"),)
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        outside = [f for f in found if f.ex_date == dt.date(2005, 2, 28)]
+        assert len(outside) == 1
+        assert outside[0].kind is ScheduleFindingKind.OUTSIDE_COVERAGE
+        assert outside[0].is_conflict is False
+        assert "expected rather than contradictory" in outside[0].message
+
+    def test_a_post_window_split_absent_from_the_price_provider_is_not_a_conflict(
+        self,
+    ) -> None:
+        secondary = (self._fmp(dt.date(2026, 5, 1), 2, 1),)
+        primary = (self._price_side(dt.date(2014, 6, 9), "0.142857142857"),)
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        outside = [f for f in found if f.ex_date == dt.date(2026, 5, 1)]
+        assert len(outside) == 1
+        assert outside[0].kind is ScheduleFindingKind.OUTSIDE_COVERAGE
+        assert outside[0].is_conflict is False
+
+    def test_the_real_aapl_run_produces_zero_conflicts(self, tmp_path: Path) -> None:
+        """The end-to-end assertion the reported defect asks for.
+
+        FMP supplies five AAPL splits; Twelve Data's package supplies its two
+        in-window ones in its own reciprocal convention. Nothing here needs a
+        person.
+        """
+        package = build_package(tmp_path / "pkg", ["AAPL"], splits_available="apple")
+        report = enrich(package)
+        assert report.conflicts == [], report.conflicts
+        assert report.to_payload()["conflict_count"] == 0
+        kinds = {f.kind for f in report.schedule_findings}
+        assert kinds <= {ScheduleFindingKind.OUTSIDE_COVERAGE}
+
+    def test_the_two_views_of_a_run_agree_about_what_a_conflict_is(self, tmp_path: Path) -> None:
+        """The reported inconsistency: the rendered report showed CONFLICTS
+        where the payload showed none. One classification, read by both."""
+        package = build_package(tmp_path / "pkg", ["AAPL"], splits_available="apple")
+        report = enrich(package)
+        payload = report.to_payload()
+        rendered = report.render()
+
+        assert payload["conflict_count"] == len(report.conflicts)
+        assert payload["conflicts"] == report.conflicts
+        typed = [f for f in payload["schedule_findings"] if f["is_conflict"]]
+        assert len(typed) == payload["conflict_count"]
+        if not report.conflicts:
+            assert "CONFLICTS" not in rendered
+        # Every informational finding names its kind in both views.
+        for item in payload["schedule_findings"]:
+            if not item["is_conflict"]:
+                assert item["kind"] in {str(k) for k in ScheduleFindingKind}
+
+    # -- what remains a conflict ---------------------------------------------
+
+    def test_a_same_date_equivalent_normalized_split_is_not_a_conflict(self) -> None:
+        primary = (self._price_side(dt.date(2020, 8, 31), "0.25"),)
+        secondary = (self._fmp(dt.date(2020, 8, 31), 4, 1),)
+        assert compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW) == []
+
+    def test_a_same_date_genuinely_differing_ratio_is_a_conflict(self) -> None:
+        primary = (self._price_side(dt.date(2020, 8, 31), "0.5"),)
+        secondary = (self._fmp(dt.date(2020, 8, 31), 4, 1),)
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert len(found) == 1
+        assert found[0].kind is ScheduleFindingKind.CROSS_PROVIDER_CONFLICT
+        assert found[0].is_conflict is True
+        assert "Not reconciled" in found[0].message
+
+    def test_an_in_window_event_missing_from_a_source_that_claims_the_window(
+        self,
+    ) -> None:
+        """The documented semantics for the ambiguous case.
+
+        The price provider supplied an in-coverage split of its own, so it is
+        asserting a schedule for that window rather than staying silent. A gap
+        in it is then a real contradiction between two schedules.
+        """
+        primary = (self._price_side(dt.date(2014, 6, 9), "0.142857142857"),)
+        secondary = (
+            self._fmp(dt.date(2014, 6, 9), 7, 1),
+            self._fmp(dt.date(2020, 8, 31), 4, 1),
+        )
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert len(found) == 1
+        assert found[0].kind is ScheduleFindingKind.MISSING_FROM_PRICE_PROVIDER
+        assert found[0].is_conflict is True
+        assert found[0].ex_date == dt.date(2020, 8, 31)
+
+    def test_an_in_window_event_missing_from_a_source_that_claims_nothing(self) -> None:
+        """The mirror of the case above, and the reason it is not symmetric.
+
+        A price provider with no in-window splits at all is silent, not
+        contradicting. Treating silence as disagreement would turn every
+        plan-restricted package into a wall of conflicts.
+        """
+        primary = (self._price_side(dt.date(2005, 2, 28), "0.5"),)
+        secondary = (
+            self._fmp(dt.date(2005, 2, 28), 2, 1),
+            self._fmp(dt.date(2020, 8, 31), 4, 1),
+        )
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert [f.kind for f in found] == []
+
+    def test_an_in_window_event_the_split_provider_lacks_is_a_conflict(self) -> None:
+        primary = (
+            self._price_side(dt.date(2014, 6, 9), "0.142857142857"),
+            self._price_side(dt.date(2020, 8, 31), "0.25"),
+        )
+        secondary = (self._fmp(dt.date(2014, 6, 9), 7, 1),)
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert len(found) == 1
+        assert found[0].kind is ScheduleFindingKind.MISSING_FROM_SPLIT_PROVIDER
+        assert found[0].is_conflict is True
+        assert "NOT applied" in found[0].message
+
+    def test_a_reciprocal_pair_is_a_convention_finding_not_a_conflict(self) -> None:
         """If two *normalized* ratios come out reciprocal, a declaration is
-        wrong — which is a different problem from the vendors disagreeing, and
-        has a different fix."""
+        wrong — a different problem from the vendors disagreeing, with a
+        different fix."""
         primary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="twelve_data"),)
         secondary = (
             SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(1) / Decimal(7), source="fmp"),
         )
-        conflicts, notes = compare_schedules("AAPL", primary, secondary, "fmp")
-        assert conflicts == []
-        assert len(notes) == 1
-        assert "RECIPROCALS" in notes[0]
-        assert "convention is wrong" in notes[0]
-
-    def test_a_genuine_ratio_disagreement_is_still_reported(self) -> None:
-        """7-for-1 against 2-for-1 is not a representation difference. It must
-        survive the normalization work and stay a conflict."""
-        primary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="twelve_data"),)
-        secondary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(2), source="fmp"),)
-        conflicts, notes = compare_schedules("AAPL", primary, secondary, "fmp")
-        assert notes == []
-        assert len(conflicts) == 1
-        assert "DISAGREE" in conflicts[0]
-        assert "Not reciprocal and not equal" in conflicts[0]
-        assert "Not reconciled" in conflicts[0]
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert len(found) == 1
+        assert found[0].kind is ScheduleFindingKind.REPRESENTATION_MISMATCH
+        assert found[0].is_conflict is False
+        assert "convention is wrong" in found[0].message
 
     def test_a_forward_against_a_reverse_split_is_a_conflict(self) -> None:
         """4-for-1 against 1-for-8: opposite directions and not reciprocal.
         The one comparison that must never be smoothed away."""
         primary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal(4), source="a"),)
         secondary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal("0.125"), source="b"),)
-        conflicts, _ = compare_schedules("X", primary, secondary, "b")
-        assert len(conflicts) == 1
-        assert "DISAGREE" in conflicts[0]
+        found = compare_schedules("X", primary, secondary, "b", coverage=self.IN_WINDOW)
+        assert [f.kind for f in found] == [ScheduleFindingKind.CROSS_PROVIDER_CONFLICT]
 
     def test_vendor_truncation_does_not_manufacture_a_conflict(self) -> None:
         """A vendor serving 1/7 to twelve digits still round-trips to 7."""
@@ -1271,45 +1414,29 @@ class TestConflicts:
                 source="b",
             ),
         )
-        conflicts, notes = compare_schedules("AAPL", primary, secondary, "b")
-        assert conflicts == []
-        assert notes == []
+        assert compare_schedules("AAPL", primary, secondary, "b", coverage=self.IN_WINDOW) == []
 
-    def test_an_event_only_the_primary_has_is_reported_as_not_applied(self) -> None:
-        primary = (SplitEvent(ex_date=dt.date(1999, 1, 4), ratio=Decimal(2), source="twelve_data"),)
-        conflicts, _ = compare_schedules("AAPL", primary, (), "fmp")
-        assert "NOT applied" in conflicts[0]
+    def test_agreement_produces_no_finding(self) -> None:
+        shared = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="twelve_data"),)
+        assert compare_schedules("AAPL", shared, shared, "fmp", coverage=self.IN_WINDOW) == []
 
-    def test_an_event_only_the_secondary_has_is_reported(self) -> None:
-        secondary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal(4), source="fmp"),)
-        conflicts, _ = compare_schedules("AAPL", (), secondary, "fmp")
-        assert "fmp records a split" in conflicts[0]
+    def test_without_a_coverage_window_nothing_is_assumed_out_of_range(self) -> None:
+        """No bars means no window, and a claim about what is inside it would be
+        invented. Everything is treated as in-range and the silence rule still
+        applies."""
+        primary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="a"),)
+        secondary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal(4), source="b"),)
+        found = compare_schedules("AAPL", primary, secondary, "b", coverage=None)
+        assert {f.kind for f in found} == {
+            ScheduleFindingKind.MISSING_FROM_SPLIT_PROVIDER,
+            ScheduleFindingKind.MISSING_FROM_PRICE_PROVIDER,
+        }
 
-    def test_the_real_smoke_test_pair_produces_no_conflict_end_to_end(self, tmp_path: Path) -> None:
-        """The regression itself, over a real package.
-
-        The Twelve Data fixture reports Apple's 2014 and 2020 splits in its own
-        reciprocal convention; FMP reports the same two as explicit share pairs.
-        Once both are normalized, the shared dates must be silent.
-        """
+    def test_the_manifest_only_mentions_conflicts_when_there_are_some(self, tmp_path: Path) -> None:
         package = build_package(tmp_path / "pkg", ["AAPL"], splits_available="apple")
-        report = enrich(package)
-        for date in ("2014-06-09", "2020-08-31"):
-            assert not any(date in item and "DISAGREE" in item for item in report.conflicts), (
-                f"{date} was reported as a cross-provider disagreement"
-            )
-        assert not any("RECIPROCAL" in item for item in report.conflicts)
-        assert not any("RECIPROCAL" in item for item in report.findings)
-
-    def test_a_disagreement_over_a_real_package_reaches_the_manifest(self, tmp_path: Path) -> None:
-        # Twelve Data's fixture reports the 2014 7-for-1; FMP's reports it too,
-        # plus four more. The 2014 record agrees, so the findings are about the
-        # events only one source has.
-        package = build_package(tmp_path / "pkg", ["AAPL"], splits_available=True)
-        report = enrich(package)
-        assert any("does not" in item for item in report.conflicts)
+        enrich(package)
         limitations = load_manifest(package / "manifest.toml").known_limitations
-        assert any("NOT resolved automatically" in item for item in limitations)
+        assert not any("NOT resolved automatically" in item for item in limitations)
 
     def test_the_secondary_schedule_is_the_one_reconstruction_uses(self, tmp_path: Path) -> None:
         """Named on the command line, so used — and every difference reported."""

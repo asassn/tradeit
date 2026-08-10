@@ -707,15 +707,21 @@ class TwelveDataAcquisition:
         what arrived what was requested". A silently truncated series looks
         exactly like a security that listed late.
 
-        The end-of-range check is measured against the last *trading session* on
-        or before the requested end, not against the calendar date. A request
-        ending on a Saturday is complete when it ends on the Friday, and a check
-        that said otherwise would cry wolf on every well-formed package until
-        nobody read it — which is how the genuinely missing 2025-12-31 session
-        nearly went unnoticed.
+        **Both ends are measured against the exchange calendar, not against the
+        calendar date.** A request for 2010-01-01 through a Saturday is complete
+        when it runs 2010-01-04 to the Friday: 1 January is a market holiday, the
+        2nd and 3rd were a weekend, and no vendor owes anybody a bar for a day
+        the exchange was shut. A check that said otherwise would cry wolf on
+        every well-formed package until nobody read it — which is how the
+        genuinely missing 2025-12-31 session nearly went unnoticed.
+
+        What survives is the check that matters: a first or last row that misses
+        real *sessions* the request covered. Truncated coverage is still
+        reported, and reported with the number of sessions lost.
         """
         out: list[str] = []
         calendar = get_calendar()
+        expected_first = _first_session_on_or_after(calendar, start)
         expected_last = _last_session_on_or_before(calendar, end)
         for symbol, (first, last, count) in sorted(self.coverage.items()):
             if count >= MAX_OUTPUTSIZE:
@@ -724,11 +730,13 @@ class TwelveDataAcquisition:
                     "response cap. The series may be truncated; narrow the date range "
                     "and acquire in two passes"
                 )
-            if first > start:
+            if expected_first is not None and first > expected_first:
+                missing = len(calendar.sessions_between(expected_first, first)) - 1
                 out.append(
-                    f"{symbol}: requested from {start} but the vendor's earliest row is "
-                    f"{first}. Either the security had not listed, or the provider's "
-                    "history begins later"
+                    f"{symbol}: requested from {start}, whose first trading session is "
+                    f"{expected_first}, but the vendor's earliest row is {first} — "
+                    f"{missing} session(s) short at the start. Either the security had "
+                    "not listed, or the provider's history begins later"
                 )
             if expected_last is not None and last < expected_last:
                 missing = len(calendar.sessions_between(last, expected_last)) - 1
@@ -738,11 +746,12 @@ class TwelveDataAcquisition:
                     f"{missing} session(s) short. This is NOT a weekend or holiday; "
                     "the sessions are genuinely absent"
                 )
-            elif last < end:
-                out.append(
-                    f"{symbol}: the vendor's latest row is {last}, which is the last "
-                    f"trading session on or before the requested end {end}. Complete"
-                )
+        # A complete range produces **no line at all**, deliberately. Every
+        # finding here reaches `AcquisitionReport.findings`, and a non-empty
+        # findings list downgrades the package to VALID_WITH_WARNINGS. An
+        # informational "this range is complete" per symbol would therefore mark
+        # a perfect 91-symbol download as warned-about, which is both noise and
+        # a lie about the package's state.
         return out
 
 
@@ -876,6 +885,24 @@ def _decimal(value: Any) -> Decimal | None:
     except InvalidOperation:
         return None
     return parsed if parsed.is_finite() else None
+
+
+def _first_session_on_or_after(calendar: TradingCalendar, day: dt.date) -> dt.date | None:
+    """The trading session a request starting on ``day`` should reach.
+
+    ``day`` itself when it is a session, otherwise the next one. The 2010-01-01
+    case: New Year's Day is a market holiday and the 2nd and 3rd were a weekend,
+    so a request from 2010-01-01 is complete when its first bar is 2010-01-04.
+
+    ``None`` when no session is found within the calendar's search window, which
+    is a reason to make no claim rather than to invent one.
+    """
+    if calendar.is_session(day):
+        return day
+    try:
+        return calendar.next_session(day)
+    except DataError:
+        return None
 
 
 def _last_session_on_or_before(calendar: TradingCalendar, day: dt.date) -> dt.date | None:

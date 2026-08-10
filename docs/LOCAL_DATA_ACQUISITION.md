@@ -776,16 +776,24 @@ is almost certainly the former, but the tool will not upgrade "no records" into
 
 ### `Split-schedule CONFLICTS` in the enrichment summary
 
-Two sources disagree about a corporate action, or one holds a record the other
-does not. **Nothing is reconciled automatically** — FMP's schedule is used
-because you named it, and every difference is listed for you. A split that
-simply falls outside your package's date window is *not* listed here; that is
-correct behaviour and appears under Findings.
+Two sources give genuinely different ratios for the same date, or one is missing
+an in-window event the other has. **Nothing is reconciled automatically** — FMP's
+schedule is used because you named it, and every difference is listed for you.
 
-Two sources describing the *same* split as `7` and `0.142857…` is also **not** a
-conflict, and is no longer reported as one. Those are reciprocals — one event
-measured from opposite ends — and both are normalized to a canonical share-count
-multiplier before anything is compared. See `docs/VENDOR_SEMANTICS.md` §1.
+Three things that look like disagreements and are **not** reported here:
+
+- A split outside your package's price window. FMP holds Apple's 1987, 2000 and
+  2005 splits; a package starting in 2010 never asked the price provider about
+  them, and they change no row. Reported as `[OUTSIDE_COVERAGE]` under Findings.
+- The same split written as `7` by one source and `0.142857…` by the other.
+  Those are reciprocals — one event measured from opposite ends — normalized
+  before anything is compared.
+- An in-window event missing from a source that supplied no in-window splits at
+  all. That source is silent, not contradicting.
+
+Every finding line is prefixed with its kind, and the JSON report carries the
+same classification under `schedule_findings` with `conflict_count`. See
+`docs/VENDOR_SEMANTICS.md` §1 and §4.
 
 ### `N bar(s) after the requested end … were discarded`
 
@@ -856,10 +864,19 @@ Market-data licences commonly **prohibit redistribution**. As a rule:
 
 - **Do not push downloaded market data to a public repository.** Twelve Data's,
   FMP's and Tiingo's terms are between you and them — read them. The project's
-  `.gitignore` already excludes `**/_acquisition/`, `/empirical-data/` and
-  `/empirical-smoke/`, so this will not happen by accident from the default
-  locations. If you use a different output directory, check `git status` before
-  committing.
+  `.gitignore` excludes `**/_acquisition/` and, at the repository root only,
+  `/empirical-*/`, `/market-data/` and `/packages/`. So `./empirical-smoke`,
+  `./empirical-smoke-2` and `./empirical-validation-2010-2026` are all ignored
+  without you doing anything.
+
+  The leading `/` matters. An unanchored `data/` rule in this file once also
+  matched `src/tradeit/data/` and kept the entire data package out of every
+  commit; a fresh clone did not build. `tests/unit/test_repository_hygiene.py`
+  now runs `git check-ignore` against both acquisition paths and source paths,
+  so that failure mode is a test rather than a comment.
+
+  If you use an output directory outside those conventions, check `git status`
+  before committing.
 - Source code, the manifest, small test fixtures and validation reports are
   fine to version-control.
 - The raw vendor responses and the bar files are not.

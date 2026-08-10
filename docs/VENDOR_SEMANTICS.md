@@ -176,20 +176,33 @@ allowed.
 The number of trimmed bars is reported as a finding rather than dropped
 quietly, so the probe's behaviour is visible in every run.
 
-### The coverage check was also crying wolf
+### The coverage check was also crying wolf, at both ends
 
-`coverage_findings` previously reported "requested through X but the latest row
-is Y" whenever `Y < X`, which fires on every package whose range ends on a
-weekend or a holiday — that is, most of them. Trained to skip the line, a reader
-would have skipped the one that mattered.
+`coverage_findings` previously compared the observed first and last rows against
+the **calendar dates** in the request. Both comparisons produce false positives
+on well-formed packages:
 
-It now measures against the **last trading session on or before the requested
-end**, using the project's own `TradingCalendar`, and distinguishes:
+- *"requested through X but the latest row is Y"* fires on every range that ends
+  on a weekend or holiday.
+- *"requested from 2010-01-01 but the vendor's earliest row is 2010-01-04.
+  Either the security had not listed, or the provider's history begins later"* —
+  the message the live run produced for both AAPL and NVDA. **Both explanations
+  were wrong.** 1 January is a market holiday, the 2nd and 3rd were a weekend,
+  and 2010-01-04 is exactly the first session on or after the requested start.
 
-- a genuinely absent session → *"N session(s) short. This is NOT a weekend or
-  holiday; the sessions are genuinely absent"*
-- a range ending on a non-session → *"which is the last trading session on or
-  before the requested end. Complete"*
+Both ends now measure against the exchange calendar, using the project's own
+`TradingCalendar`:
+
+- expected first = the first trading session **on or after** `start`
+- expected last = the last trading session **on or before** `end`
+
+A shortfall is reported with the number of sessions lost — *"N session(s) short
+at the start"* — and a complete range produces **no line at all**. That last
+detail is not cosmetic: every coverage finding lands in
+`AcquisitionReport.findings`, and a non-empty findings list downgrades the
+package to `PACKAGE_VALID_WITH_WARNINGS`. An informational "this range is
+complete" per symbol would mark a flawless 91-symbol download as warned-about,
+which is both noise and a false statement about the package.
 
 ---
 
@@ -226,6 +239,75 @@ distinct split dates appearing in the written sidecar.
 
 **The reconstruction arithmetic was not touched.** This is a reporting change
 only.
+
+---
+
+---
+
+## 4. A split outside the price window is not a cross-provider conflict
+
+### What was observed
+
+The rendered enrichment report showed:
+
+```
+Split-schedule CONFLICTS (3)
+  AAPL: 1987-06-16 …
+  AAPL: 2000-06-21 …
+  AAPL: 2005-02-28 …
+```
+
+for a package whose price coverage begins 2010-01-04, while the JSON payload
+recorded none. Two problems in one output.
+
+### Why they are not conflicts
+
+Twelve Data's corporate-action endpoints were queried **for the requested
+range**. They were never asked about 1987. Reporting "FMP has a 1987 split that
+Twelve Data does not" as a conflict demands of one vendor a history nobody
+requested from it, and the events change no row in the package either way.
+
+### The classification
+
+Observations are now typed by `ScheduleFindingKind`, and `kind.is_conflict` is
+the single place the distinction lives:
+
+| Kind | Conflict? | Means |
+|---|---|---|
+| `OUTSIDE_COVERAGE` | no | Ex-date outside the price window. Absence from the other source is expected, not contradictory. |
+| `REPRESENTATION_MISMATCH` | no | Two *normalized* ratios are reciprocal. A provider's declared convention is wrong; the vendors agree about the world. |
+| `CROSS_PROVIDER_CONFLICT` | **yes** | Same date, genuinely different share-count multipliers. Neither equal nor reciprocal. |
+| `MISSING_FROM_PRICE_PROVIDER` | **yes** | In-coverage event the split provider has and the price provider lacks — where the price provider does supply other in-coverage splits. |
+| `MISSING_FROM_SPLIT_PROVIDER` | **yes** | The mirror case. The schedule about to drive reconstruction is missing an event. |
+| `DUPLICATE_RECORD` | **yes** | The same event listed twice. Not merged. |
+| `IMPLAUSIBLE_RATIO` | **yes** | Beyond anything a corporate action produces. |
+| `NON_POSITIVE_RECONSTRUCTION` | **yes** | The split schedule and the price series contradict each other. |
+
+### The in-window absence rule, stated explicitly
+
+This is the case that needed a decision rather than a lookup, so the rule is
+written down rather than left to the code:
+
+> An in-coverage event present in one source and absent from the other is a
+> conflict **only if that other source supplied at least one in-coverage split
+> for the same symbol.** A provider that supplied some in-window splits is
+> asserting a schedule for that window, so a gap in it is a real contradiction.
+> A provider that supplied none is *silent*, not contradicting, and treating
+> silence as disagreement would turn every plan-restricted package into a wall
+> of conflicts about events it was never able to report.
+
+### One classification, two views
+
+The rendered report and the JSON payload now partition the **same** list. The
+payload carries `conflict_count`, the `conflicts` messages, and
+`schedule_findings` with every observation's `kind` and `is_conflict`. Each
+rendered line is prefixed with its kind — `[OUTSIDE_COVERAGE] …` — so the two
+views can be matched by eye and by grep. A test asserts the counts agree and
+that the report prints no CONFLICTS heading when the payload has none.
+
+After this change the AAPL/NVDA run has **zero** genuine conflicts, with the
+seven outside-coverage records reported as informational findings and counted in
+the census.
 
 ---
 

@@ -209,6 +209,18 @@ class _CalendarTransport:
     def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
         self.calls.append(url)
         symbol = url.split("symbol=")[1].split("&")[0]
+        if "/time_series" not in url:
+            # The free plan this project runs on refuses the corporate-action
+            # endpoints. Answering them with a price payload would feed every
+            # bar into the split normalizer and bury the report in findings,
+            # which is a fixture bug that once looked like a product one.
+            return json.dumps(
+                {
+                    "code": 403,
+                    "message": "/splits is available with the Grow plan and above",
+                    "status": "error",
+                }
+            ).encode()
         start = dt.date.fromisoformat(url.split("start_date=")[1].split("&")[0])
         asked = dt.date.fromisoformat(url.split("end_date=")[1].split("&")[0])
         calendar = get_calendar()
@@ -1029,8 +1041,13 @@ class TestCoverageVerification:
         report = run_acquisition(
             tmp_path / "pkg", ["SPY"], FakeTransport(rows=values(count=10, split_at=None))
         )
-        assert any("earliest row is" in f for f in report.findings)
-        assert any("latest row is" in f for f in report.findings)
+        # Ten bars from 2010-01-04 against a window ending 2011-03-31: hundreds
+        # of real sessions are missing at the end and the report says so.
+        assert any("session(s) short" in f for f in report.findings)
+        # The *start* is complete. 2010-01-01 is New Year's Day and the first
+        # session on or after it is 2010-01-04, which is exactly what arrived.
+        # The old check called this a shortfall; that was the false positive.
+        assert not any("short at the start" in f for f in report.findings)
 
     def test_a_response_at_the_output_cap_warns_about_truncation(self, tmp_path: Path) -> None:
         provider = make_provider(FakeTransport(), fetch_corporate_actions=False)
@@ -1117,6 +1134,77 @@ class TestCoverageVerification:
             written.append(_sessions_written(output))
         assert written[0] == written[1]
         assert written[0][-1] == requested_end
+
+    # -- the start of the range, measured the same way as the end -------------
+
+    def test_a_holiday_start_date_is_not_reported_as_missing_sessions(self) -> None:
+        """The 2010-01-01 case, which is what the real run actually requested.
+
+        New Year's Day is a market holiday and the 2nd and 3rd were a weekend,
+        so a request from 2010-01-01 whose first bar is 2010-01-04 is complete.
+        The old check called that a shortfall and offered two explanations, both
+        wrong: the security had listed, and the provider's history did not begin
+        later.
+        """
+        provider = make_provider(fetch_corporate_actions=False)
+        provider.coverage["AAPL"] = (dt.date(2010, 1, 4), dt.date(2025, 12, 31), 4020)
+        findings = provider.coverage_findings(dt.date(2010, 1, 1), dt.date(2025, 12, 31))
+        assert not any("short at the start" in f for f in findings)
+        assert not any("had not listed" in f for f in findings)
+
+    def test_a_weekend_start_date_is_not_reported_as_missing_sessions(self) -> None:
+        saturday = dt.date(2026, 1, 3)
+        monday = dt.date(2026, 1, 5)
+        provider = make_provider(fetch_corporate_actions=False)
+        provider.coverage["SPY"] = (monday, monday, 1)
+        findings = provider.coverage_findings(saturday, monday)
+        assert not any("short at the start" in f for f in findings)
+
+    def test_a_trading_day_start_that_is_met_exactly_is_silent(self) -> None:
+        session = dt.date(2010, 1, 4)
+        provider = make_provider(fetch_corporate_actions=False)
+        provider.coverage["SPY"] = (session, session, 1)
+        findings = provider.coverage_findings(session, session)
+        assert findings == []
+
+    def test_a_genuinely_missing_first_session_is_still_reported(self) -> None:
+        """Do not hide truncated coverage. 2010-01-04 was a session and it is
+        absent, so the package really is short."""
+        provider = make_provider(fetch_corporate_actions=False)
+        provider.coverage["SPY"] = (dt.date(2010, 1, 11), dt.date(2010, 3, 31), 55)
+        findings = provider.coverage_findings(dt.date(2010, 1, 1), dt.date(2010, 3, 31))
+        short = [f for f in findings if "short at the start" in f]
+        assert len(short) == 1
+        assert "2010-01-04" in short[0]
+        # Five sessions in the week of the 4th precede the 11th.
+        assert "5 session(s) short" in short[0]
+
+    def test_an_ipo_after_the_requested_range_is_reported_as_short(self) -> None:
+        """Indistinguishable in the data from a provider whose history starts
+        late, and the message says both possibilities rather than picking."""
+        provider = make_provider(fetch_corporate_actions=False)
+        provider.coverage["NEWCO"] = (dt.date(2024, 6, 3), dt.date(2025, 12, 31), 400)
+        findings = provider.coverage_findings(dt.date(2010, 1, 1), dt.date(2025, 12, 31))
+        short = [f for f in findings if "short at the start" in f]
+        assert len(short) == 1
+        assert "had not listed" in short[0]
+        assert "history begins later" in short[0]
+
+    def test_a_provider_history_beginning_late_is_reported_as_short(self) -> None:
+        provider = make_provider(fetch_corporate_actions=False)
+        provider.coverage["SPY"] = (dt.date(2015, 1, 2), dt.date(2025, 12, 31), 2760)
+        findings = provider.coverage_findings(dt.date(2010, 1, 1), dt.date(2025, 12, 31))
+        assert any("short at the start" in f for f in findings)
+
+    def test_the_real_run_window_produces_no_coverage_complaint_at_all(self) -> None:
+        """2010-01-01 to 2025-12-31, the exact window of the live smoke test,
+        against the exact coverage it returned."""
+        provider = make_provider(fetch_corporate_actions=False)
+        provider.coverage["AAPL"] = (dt.date(2010, 1, 4), dt.date(2025, 12, 31), 4024)
+        provider.coverage["NVDA"] = (dt.date(2010, 1, 4), dt.date(2025, 12, 31), 4024)
+        findings = provider.coverage_findings(dt.date(2010, 1, 1), dt.date(2025, 12, 31))
+        assert not any("short" in f for f in findings)
+        assert not any("had not listed" in f for f in findings)
 
     def test_a_weekend_end_date_is_not_reported_as_missing_sessions(self) -> None:
         """The check that used to cry wolf on every well-formed package.

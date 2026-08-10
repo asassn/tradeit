@@ -56,6 +56,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 #: Bumped whenever the arithmetic or its inputs change. Recorded on every
 #: reconstructed row, so a sidecar produced by an older version is identifiable
@@ -178,6 +179,94 @@ def are_reciprocal(left: Decimal, right: Decimal, tolerance: Decimal = RATIO_TOL
     if left <= 0 or right <= 0:
         return False
     return ratios_agree(left, Decimal(1) / right, tolerance)
+
+
+class ScheduleFindingKind(StrEnum):
+    """What kind of problem a split-schedule observation is.
+
+    A typed kind rather than "which list did the string land in". The two views
+    of a run — the rendered report and the JSON payload — used to partition the
+    same observations independently, so a reader greping the payload for what
+    the report called a CONFLICT could find nothing. One classification, applied
+    once, is read by both.
+
+    :attr:`is_conflict` is the whole point of the type. A conflict is something
+    a person has to decide about. Everything else is context a person should be
+    told and does not have to act on, and mixing the two trains the reader to
+    skip the section that matters.
+    """
+
+    #: A split whose ex-date is outside the package's price coverage. **Not a
+    #: conflict.** A 2005 split affects nothing in a package that starts in
+    #: 2010, and its absence from the price provider's records proves nothing
+    #: either, because that provider was only ever asked about 2010 onward.
+    OUTSIDE_COVERAGE = "OUTSIDE_COVERAGE"
+    #: Two normalized ratios that are exact reciprocals. A provider's declared
+    #: split-factor convention is wrong. **Not a conflict**: the vendors agree
+    #: about the world, this code disagrees with one of them about notation.
+    REPRESENTATION_MISMATCH = "REPRESENTATION_MISMATCH"
+    #: Two sources give genuinely different share-count multipliers for the same
+    #: date. Neither equal nor reciprocal.
+    CROSS_PROVIDER_CONFLICT = "CROSS_PROVIDER_CONFLICT"
+    #: An in-coverage event the split provider has and the price provider does
+    #: not, where the price provider did supply other in-coverage splits for
+    #: this symbol and so is asserting a schedule for that window.
+    MISSING_FROM_PRICE_PROVIDER = "MISSING_FROM_PRICE_PROVIDER"
+    #: The mirror case: in-coverage, present in the price provider's records,
+    #: absent from the schedule the reconstruction is about to use.
+    MISSING_FROM_SPLIT_PROVIDER = "MISSING_FROM_SPLIT_PROVIDER"
+    #: The same event listed more than once. Not merged; a repeat may be a
+    #: vendor listing one event twice or two events genuinely happening.
+    DUPLICATE_RECORD = "DUPLICATE_RECORD"
+    #: A ratio beyond anything a corporate action produces.
+    IMPLAUSIBLE_RATIO = "IMPLAUSIBLE_RATIO"
+    #: Reconstruction produced a price at or below zero.
+    NON_POSITIVE_RECONSTRUCTION = "NON_POSITIVE_RECONSTRUCTION"
+
+    @property
+    def is_conflict(self) -> bool:
+        """Whether this needs a person before the package is trusted."""
+        return self in _CONFLICT_KINDS
+
+
+_CONFLICT_KINDS = frozenset(
+    {
+        ScheduleFindingKind.CROSS_PROVIDER_CONFLICT,
+        ScheduleFindingKind.MISSING_FROM_PRICE_PROVIDER,
+        ScheduleFindingKind.MISSING_FROM_SPLIT_PROVIDER,
+        ScheduleFindingKind.DUPLICATE_RECORD,
+        ScheduleFindingKind.IMPLAUSIBLE_RATIO,
+        ScheduleFindingKind.NON_POSITIVE_RECONSTRUCTION,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleFinding:
+    """One observation about a split schedule, classified once."""
+
+    kind: ScheduleFindingKind
+    symbol: str
+    message: str
+    ex_date: dt.date | None = None
+
+    @property
+    def is_conflict(self) -> bool:
+        return self.kind.is_conflict
+
+    def render(self) -> str:
+        """For the human report. The kind is in the text so the two views of a
+        run can be matched by eye and by grep."""
+        return f"[{self.kind}] {self.message}"
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "kind": str(self.kind),
+            "is_conflict": self.is_conflict,
+            "symbol": self.symbol,
+            "ex_date": self.ex_date.isoformat() if self.ex_date else None,
+            "message": self.message,
+        }
 
 
 class ReconstructionQuality(StrEnum):
@@ -475,16 +564,24 @@ class ReconstructionResult:
     note: str = ""
     price_provider: str = ""
     split_provider: str = ""
-    #: Consistency problems found while reconstructing. Reported, never
-    #: silently resolved — each one needs a person.
-    conflicts: list[str] = field(default_factory=list)
-    #: Things a reader should know that nobody has to act on. A split outside
-    #: the package's window belongs here: it is correct behaviour, and filing
-    #: it as a conflict would bury the ones that are not.
-    notes: list[str] = field(default_factory=list)
+    #: Everything observed about the split schedule, each classified once by
+    #: :class:`ScheduleFindingKind`. ``conflicts`` and ``notes`` are views over
+    #: this list rather than separate stores, so the rendered report and the
+    #: JSON payload cannot disagree about what counts as a conflict.
+    findings: list[ScheduleFinding] = field(default_factory=list)
     #: How the supplied splits divide up. See :class:`SplitCensus` — the four
     #: numbers are genuinely different and "across 5 splits" said none of them.
     census: SplitCensus = field(default_factory=lambda: SplitCensus())
+
+    @property
+    def conflicts(self) -> list[str]:
+        """Findings a person has to decide about."""
+        return [f.render() for f in self.findings if f.is_conflict]
+
+    @property
+    def notes(self) -> list[str]:
+        """Findings a person should be told and does not have to act on."""
+        return [f.render() for f in self.findings if not f.is_conflict]
 
     def summary(self) -> str:
         if self.quality is ReconstructionQuality.NOT_ATTEMPTED_NO_SPLIT_DATA:
@@ -537,19 +634,18 @@ def check_split_consistency(
     symbol: str,
     splits: Sequence[SplitEvent],
     coverage: tuple[dt.date, dt.date] | None,
-) -> tuple[list[str], list[str]]:
+) -> list[ScheduleFinding]:
     """Problems in a split schedule, reported rather than resolved.
 
-    Returns ``(conflicts, notes)``, and the split between the two is the point.
-    A conflict is something a person has to decide about: silently dropping a
-    duplicate, or averaging two conflicting same-day ratios, would produce a
-    reconstruction that looks clean and is wrong in a way nothing downstream
-    could detect. A note is something a reader needs told but nobody has to act
-    on — a split outside the package's window is *correct* behaviour, and
+    Every observation is classified by :class:`ScheduleFindingKind`, and
+    ``kind.is_conflict`` is what separates "a person must decide this" from
+    "a person should know this". Silently dropping a duplicate, or averaging two
+    conflicting same-day ratios, would produce a reconstruction that looks clean
+    and is wrong in a way nothing downstream could detect. A split outside the
+    package's window is the opposite: correct behaviour, worth stating, and
     filing it as a conflict would bury the ones that are not.
     """
-    findings: list[str] = []
-    notes: list[str] = []
+    out: list[ScheduleFinding] = []
     by_date: dict[dt.date, list[SplitEvent]] = {}
     for split in splits:
         by_date.setdefault(split.ex_date, []).append(split)
@@ -564,11 +660,18 @@ def check_split_consistency(
         # report fills with noise and the real conflicts stop being read.
         first = events[0]
         if all(ratios_agree(first.ratio, event.ratio) for event in events[1:]):
-            findings.append(
-                f"{symbol}: {len(events)} equivalent split records on {ex_date} "
-                f"({first.describe}). Duplicates were NOT merged; a repeated "
-                "record may mean the vendor listed one event twice, or that two "
-                "genuinely happened."
+            out.append(
+                ScheduleFinding(
+                    kind=ScheduleFindingKind.DUPLICATE_RECORD,
+                    symbol=symbol,
+                    ex_date=ex_date,
+                    message=(
+                        f"{symbol}: {len(events)} equivalent split records on {ex_date} "
+                        f"({first.describe}). Duplicates were NOT merged; a repeated "
+                        "record may mean the vendor listed one event twice, or that two "
+                        "genuinely happened."
+                    ),
+                )
             )
         elif all(
             ratios_agree(first.ratio, event.ratio) or are_reciprocal(first.ratio, event.ratio)
@@ -578,43 +681,73 @@ def check_split_consistency(
             # convention is wrong, not that the vendors disagree about the
             # event. Worth saying precisely, because the remedy is a one-line
             # declaration rather than an argument with a data vendor.
-            notes.append(
-                f"{symbol}: the split records on {ex_date} are RECIPROCALS of each "
-                f"other ({', '.join(sorted(str(e.ratio) for e in events))}), which is "
-                "one split described from opposite ends rather than two different "
-                "splits. After canonical normalization this should not happen: it "
-                "means a provider's declared split-factor convention is wrong. "
-                + "; ".join(sorted(event.vendor_note for event in events))
+            out.append(
+                ScheduleFinding(
+                    kind=ScheduleFindingKind.REPRESENTATION_MISMATCH,
+                    symbol=symbol,
+                    ex_date=ex_date,
+                    message=(
+                        f"{symbol}: the split records on {ex_date} are RECIPROCALS of "
+                        f"each other ({', '.join(sorted(str(e.ratio) for e in events))}), "
+                        "which is one split described from opposite ends rather than two "
+                        "different splits. After canonical normalization this should not "
+                        "happen: it means a provider's declared split-factor convention "
+                        "is wrong. " + "; ".join(sorted(e.vendor_note for e in events))
+                    ),
+                )
             )
         else:
-            findings.append(
-                f"{symbol}: CONFLICTING split records on {ex_date} — share-count "
-                f"multipliers {sorted(str(e.ratio) for e in events)}. These are not "
-                "reciprocals and not equal, so they describe different events. Not "
-                "resolved automatically; reconstruction over this symbol applies all "
-                "of them and will be wrong if only one is real. "
-                + "; ".join(sorted(event.vendor_note for event in events))
+            out.append(
+                ScheduleFinding(
+                    kind=ScheduleFindingKind.CROSS_PROVIDER_CONFLICT,
+                    symbol=symbol,
+                    ex_date=ex_date,
+                    message=(
+                        f"{symbol}: CONFLICTING split records on {ex_date} — share-count "
+                        f"multipliers {sorted(str(e.ratio) for e in events)}. These are "
+                        "not reciprocals and not equal, so they describe different "
+                        "events. Not resolved automatically; reconstruction over this "
+                        "symbol applies all of them and will be wrong if only one is "
+                        "real. " + "; ".join(sorted(e.vendor_note for e in events))
+                    ),
+                )
             )
 
     for split in splits:
         if split.ratio > _IMPLAUSIBLE_RATIO or split.ratio < (1 / _IMPLAUSIBLE_RATIO):
-            findings.append(
-                f"{symbol}: split on {split.ex_date} has ratio {split.ratio} "
-                f"({split.describe}), beyond anything a real corporate action "
-                "produces. Treat as a vendor data error."
+            out.append(
+                ScheduleFinding(
+                    kind=ScheduleFindingKind.IMPLAUSIBLE_RATIO,
+                    symbol=symbol,
+                    ex_date=split.ex_date,
+                    message=(
+                        f"{symbol}: split on {split.ex_date} has ratio {split.ratio} "
+                        f"({split.describe}), beyond anything a real corporate action "
+                        "produces. Treat as a vendor data error."
+                    ),
+                )
             )
         if coverage is not None and not (coverage[0] <= split.ex_date <= coverage[1]):
             # Not an error: a 2005 split is simply outside a package that starts
             # in 2010, and correctly affects nothing in it. Worth saying, because
             # "the split list has five entries and only two changed anything" is
-            # otherwise a puzzle — but a note rather than a conflict, because
-            # nobody has to do anything about it.
-            notes.append(
-                f"{symbol}: split on {split.ex_date} ({split.describe}) falls outside "
-                f"the price coverage {coverage[0]}..{coverage[1]} and affects no row "
-                "in this package."
+            # otherwise a puzzle — but informational, because nobody has to do
+            # anything about it.
+            side = "before" if split.ex_date < coverage[0] else "after"
+            effect = "affects no row" if side == "before" else "affects every row"
+            out.append(
+                ScheduleFinding(
+                    kind=ScheduleFindingKind.OUTSIDE_COVERAGE,
+                    symbol=symbol,
+                    ex_date=split.ex_date,
+                    message=(
+                        f"{symbol}: split on {split.ex_date} ({split.describe}) falls "
+                        f"{side} the price coverage {coverage[0]}..{coverage[1]} and "
+                        f"{effect} in this package."
+                    ),
+                )
             )
-    return findings, notes
+    return out
 
 
 def reconstruct_symbol(
@@ -661,7 +794,6 @@ def reconstruct_symbol(
         if bars
         else None
     )
-    conflicts, notes = check_split_consistency(symbol, ordered, coverage)
     census = take_census(ordered, coverage)
     result = ReconstructionResult(
         symbol=symbol,
@@ -670,8 +802,7 @@ def reconstruct_symbol(
         sessions_total=len(bars),
         price_provider=price_provider,
         split_provider=split_provider,
-        conflicts=conflicts,
-        notes=notes,
+        findings=check_split_consistency(symbol, ordered, coverage),
         census=census,
     )
 
@@ -712,10 +843,17 @@ def reconstruct_symbol(
             for name in ("open", "high", "low", "close")
             if f"reconstructed_{name}" in row
         ):
-            result.conflicts.append(
-                f"{symbol} {bar['session_date']}: reconstruction produced a "
-                "non-positive price. The split schedule and the price series "
-                "disagree; the row is written and flagged rather than dropped."
+            result.findings.append(
+                ScheduleFinding(
+                    kind=ScheduleFindingKind.NON_POSITIVE_RECONSTRUCTION,
+                    symbol=symbol,
+                    ex_date=session,
+                    message=(
+                        f"{symbol} {bar['session_date']}: reconstruction produced a "
+                        "non-positive price. The split schedule and the price series "
+                        "disagree; the row is written and flagged rather than dropped."
+                    ),
+                )
             )
 
         volume_text = bar.get("volume", "")
@@ -779,6 +917,8 @@ __all__ = [
     "ReconstructedRow",
     "ReconstructionQuality",
     "ReconstructionResult",
+    "ScheduleFinding",
+    "ScheduleFindingKind",
     "SplitCensus",
     "SplitEvent",
     "SplitFactorConvention",
