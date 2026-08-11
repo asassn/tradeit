@@ -257,9 +257,7 @@ class TestSchemaAfterTheChain:
 class TestTransactionalFailure:
     """A failed migration must not leave a database that looks half-upgraded."""
 
-    def test_a_real_failing_revision_leaves_no_partial_state(
-        self, empty_database: object
-    ) -> None:
+    def test_a_real_failing_revision_leaves_no_partial_state(self, empty_database: object) -> None:
         """A genuine Alembic revision that half-succeeds, driven through Alembic.
 
         Not a hand-rolled transaction: a temporary revision is written on top of

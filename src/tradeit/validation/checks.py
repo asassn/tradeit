@@ -120,6 +120,12 @@ class CheckResult:
     needs: tuple[str, ...] = ()
     #: Sample rows, file/line references, offending identities — bounded.
     examples: tuple[str, ...] = ()
+    #: Lines printed in full, never sampled. For the case where the finding
+    #: *is* the enumeration: a survivorship roster abbreviated to five rows
+    #: hides exactly the names the reader opened the report to look for.
+    #: Use ``examples`` for "here are five of 4,000"; use this only when the
+    #: complete list is small and each row is load-bearing.
+    detail: tuple[str, ...] = ()
     duration_seconds: float = 0.0
 
     def __post_init__(self) -> None:
@@ -142,9 +148,10 @@ class CheckResult:
         }[self.status]
         lines = [f"  [{mark}] {self.check_id}: {self.summary}"]
         for key, value in sorted(self.evidence.items()):
-            lines.append(f"           {key}: {value}")
+            lines.append(f"           {key}: {_summarise(value)}")
         for example in self.examples[:5]:
             lines.append(f"           e.g. {example}")
+        lines.extend(f"         {line}" for line in self.detail)
         if self.needs:
             lines.append(f"           needs: {', '.join(self.needs)}")
         return "\n".join(lines)
@@ -159,8 +166,36 @@ class CheckResult:
             "evidence": dict(self.evidence),
             "needs": list(self.needs),
             "examples": list(self.examples),
+            "detail": list(self.detail),
             "duration_seconds": round(self.duration_seconds, 4),
         }
+
+
+#: Longest evidence value printed literally in a terminal report.
+_EVIDENCE_INLINE_LIMIT = 100
+
+
+def _summarise(value: object) -> str:
+    """One evidence value, at a length a person will actually read.
+
+    A check may carry structured evidence — a per-instrument roster, a census —
+    so that a later run can be diffed against this one rather than re-read.
+    Printing a hundred-entry list inline buries the scalars either side of it,
+    which is how a reader ends up skipping the whole block. The full value is
+    always in ``to_payload``; only the terminal line is abbreviated, and the
+    line says so rather than trailing off.
+    """
+    if isinstance(value, list | tuple):
+        rendered = str(list(value))
+        if len(rendered) > _EVIDENCE_INLINE_LIMIT:
+            return f"{len(value)} entries (see the report payload)"
+        return rendered
+    if isinstance(value, Mapping):
+        rendered = str(dict(value))
+        if len(rendered) > _EVIDENCE_INLINE_LIMIT:
+            return f"{len(value)} keys (see the report payload)"
+        return rendered
+    return str(value)
 
 
 @runtime_checkable

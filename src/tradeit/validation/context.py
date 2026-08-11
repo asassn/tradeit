@@ -29,6 +29,7 @@ from tradeit.errors import ConfigError
 from tradeit.reproducibility.versioning import content_hash
 from tradeit.storage import tables as t
 from tradeit.validation.checks import CheckClock
+from tradeit.validation.survivorship import AcquisitionRecordView
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     pass
@@ -48,6 +49,7 @@ class ValidationContext:
     config_digests: dict[str, str] = field(default_factory=dict)
     _datasets: frozenset[DatasetKind] | None = field(default=None, init=False)
     _capabilities: CapabilityIndex | None = field(default=None, init=False)
+    _acquisition: AcquisitionRecordView | None = field(default=None, init=False)
 
     @property
     def as_of(self) -> dt.datetime:
@@ -101,6 +103,24 @@ class ValidationContext:
                 raw if isinstance(raw, list) else None
             )
         return self._capabilities
+
+    @property
+    def acquisition(self) -> AcquisitionRecordView:
+        """What the run that produced this snapshot asked for, and got.
+
+        The requested window and the per-symbol outcomes — *including the
+        symbols that returned nothing*, which by construction appear nowhere in
+        the snapshot's tables. Without this, "why is LEH absent?" has no answer
+        available to a check, and one word has to cover a request that asked
+        for the wrong years, a symbol the vendor renamed, and a vendor that
+        genuinely has no delisted coverage.
+
+        An empty record means **not recorded**, never "nothing failed".
+        """
+        if self._acquisition is None:
+            report = self.package.report if isinstance(self.package.report, dict) else {}
+            self._acquisition = AcquisitionRecordView.from_payload(report.get("acquisition"))
+        return self._acquisition
 
     def missing(self, required: tuple[DatasetKind, ...]) -> tuple[DatasetKind, ...]:
         return tuple(kind for kind in required if kind not in self.datasets)

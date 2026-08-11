@@ -23,6 +23,7 @@ from tradeit.data.packages.spec import DatasetKind
 from tradeit.storage import tables as t
 from tradeit.validation.checks import CheckResult, CheckStatus, Phase
 from tradeit.validation.context import ValidationContext
+from tradeit.validation.survivorship import classify_roster, render_roster
 
 #: A quarantine rate above this is reported as a failure rather than a warning.
 #: Chosen as "one row in twenty", which is well beyond what a clean vendor
@@ -484,27 +485,52 @@ class SurvivorshipCoverage(_Check):
         present = {row.ticker for row in context.session.scalars(select(t.SymbolMapping))} or {
             row.name for row in context.session.scalars(select(t.Instrument))
         }
-        missing = sorted(i.ticker for i in expected if i.ticker not in present)
+        record = context.acquisition
+        # The requested start, not the observed one. A snapshot beginning
+        # 2010-01-04 because that is where the request began and one beginning
+        # there because the vendor had nothing earlier are the same row in
+        # `data_packages`, and only the first explains a 2008 delisting's
+        # absence. Falling back to declared coverage is a weaker but honest
+        # approximation for packages written before the record existed.
+        requested_start = record.requested_start or context.package.coverage_start
+        roster = classify_roster(expected, present, record, requested_start=requested_start)
+        missing = roster.missing
+
+        # Classification changes the remedy, never the verdict. A control that
+        # is not in the snapshot is not in the snapshot, whoever's fault that
+        # is, and every rate computed here is computed over survivors.
         status = CheckStatus.PASS if not missing else CheckStatus.FAIL
+        ours = [entry for entry in missing if entry.status.is_our_defect]
+        headline = (
+            f"all {len(expected)} delisted names in the universe are present"
+            if not missing
+            else (
+                f"{len(missing)} of {len(expected)} delisted names are absent. "
+                "Every rate computed over this snapshot is computed over survivors, "
+                "which is the single most flattering mistake available."
+                + (
+                    f" {len(ours)} of them are absent for a reason on our side of the "
+                    "vendor boundary, not the vendor's."
+                    if ours
+                    else ""
+                )
+            )
+        )
         return CheckResult(
             check_id=self.check_id,
             title=self.title,
             phase=self.phase,
             status=status,
-            summary=(
-                f"all {len(expected)} delisted names in the universe are present"
-                if not missing
-                else (
-                    f"{len(missing)} of {len(expected)} delisted names are absent. "
-                    "Every rate computed over this snapshot is computed over survivors, "
-                    "which is the single most flattering mistake available."
-                )
-            ),
+            summary=headline,
             evidence={
                 "delisted_expected": len(expected),
                 "delisted_missing": len(missing),
+                "requested_start": requested_start.isoformat(),
+                "acquisition_outcomes_recorded": not record.is_empty,
+                "by_status": roster.counts,
+                "roster": roster.to_payload()["roster"],
             },
-            examples=tuple(missing[:10]),
+            detail=tuple(render_roster(roster)),
         )
 
 

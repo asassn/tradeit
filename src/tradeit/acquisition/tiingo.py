@@ -62,7 +62,7 @@ from tradeit.acquisition.normalize import (
     normalize_metadata,
     normalize_prices,
 )
-from tradeit.acquisition.redaction import credential_hint, redact_url
+from tradeit.acquisition.redaction import credential_hint, redact_text, redact_url
 from tradeit.data.packages.spec import AdjustmentPolicyDeclaration, DatasetKind
 from tradeit.data.providers.http import (
     HttpTransport,
@@ -237,7 +237,7 @@ class TiingoAcquisition:
                 status=FetchStatus.MALFORMED,
                 url=redact_url(url),
                 raw=body,
-                error=f"response was not JSON: {error}",
+                error=redact_text(f"response was not JSON: {error}", self._token),
                 elapsed_s=elapsed,
             )
 
@@ -264,7 +264,11 @@ class TiingoAcquisition:
             request=request,
             status=status,
             url=redact_url(url),
-            error=redact_url(str(error)),
+            # redact_text, not redact_url: the URL regex only catches
+            # `param=value`, and a vendor that echoes the rejected key in prose
+            # inside a JSON error body writes it in neither shape. This string
+            # reaches the journal and the manifest, both of which get shared.
+            error=redact_text(str(error), self._token),
             elapsed_s=time.perf_counter() - started,
         )
 

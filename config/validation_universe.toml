@@ -169,11 +169,22 @@ note = "large special dividends alongside a low share price, where a dividend ad
 # nothing for these is survivorship-biased and must say so.
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# Delisted names. `alias_candidates` lists other symbols the SAME security has
+# traded under -- almost always the bankruptcy rename, where an NYSE listing
+# moves over the counter and gains a Q. They are historical ticker facts, not
+# verified vendor symbols: nothing here claims any provider serves them. Their
+# job is to make a provider's "unknown symbol" answer classifiable as identity
+# resolution we never attempted, rather than as delisted coverage the vendor
+# does not have. Which of the two it really is gets settled by asking.
+# --------------------------------------------------------------------------
+
 [[instruments]]
 ticker = "LEH"
 category = "delisted"
 difficulty = "bankruptcy"
 last_trade_date = 2008-09-17
+alias_candidates = ["LEHMQ"]
 note = "Lehman Brothers. Bankruptcy September 2008. The canonical survivorship test: a 2007 screen that cannot see LEH is not a 2007 screen"
 
 [[instruments]]
@@ -188,6 +199,10 @@ ticker = "WAMUQ"
 category = "delisted"
 difficulty = "bankruptcy_ticker_suffix"
 last_trade_date = 2009-03-20
+# WM on the NYSE until the September 2008 seizure. WM is Waste Management
+# today, so resolving this one by string alone returns the wrong company --
+# which is the failure this instrument exists to provoke.
+alias_candidates = ["WAMU", "WM"]
 note = "Washington Mutual. The Q suffix appears on bankruptcy, so identity resolution must handle a ticker that changes at the worst moment"
 
 [[instruments]]
@@ -195,6 +210,8 @@ ticker = "ENRNQ"
 category = "delisted"
 difficulty = "fraud_collapse"
 last_trade_date = 2004-01-01
+# ENE on the NYSE until the 2001 filing.
+alias_candidates = ["ENE", "ENRN"]
 note = "Enron. Tests whether history reaches back past 2004 at all"
 
 [[instruments]]
@@ -222,6 +239,7 @@ ticker = "SIVB"
 category = "delisted"
 difficulty = "sudden_failure"
 last_trade_date = 2023-03-09
+alias_candidates = ["SIVBQ"]
 note = "Silicon Valley Bank. Went from investment-grade to closed in two sessions, with a trading halt in between"
 
 [[instruments]]
@@ -229,6 +247,7 @@ ticker = "FRC"
 category = "delisted"
 difficulty = "sudden_failure"
 last_trade_date = 2023-05-01
+alias_candidates = ["FRCB"]
 note = "First Republic. Same episode, different failure mode"
 
 [[instruments]]
@@ -243,6 +262,7 @@ ticker = "BBBY"
 category = "delisted"
 difficulty = "meme_then_bankruptcy"
 last_trade_date = 2023-05-03
+alias_candidates = ["BBBYQ"]
 note = "extreme squeeze volume in 2021 and 2022, then Chapter 11. Relative-volume and volatility features both see values far outside anything a normal name produces"
 
 # --------------------------------------------------------------------------

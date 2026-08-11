@@ -67,6 +67,8 @@ from tradeit.acquisition.reconstruct import (
 )
 from tradeit.data.packages.manifest import (
     WORKSPACE_DIRNAME,
+    AcquisitionOutcomeEntry,
+    AcquisitionRecord,
     Coverage,
     DatasetFile,
     PackageManifest,
@@ -840,6 +842,26 @@ class AcquisitionRunner:
             ),
         )
 
+        # Every requested symbol, not only the ones that produced rows. The
+        # failures are the entire point: a delisted control that came back
+        # `not_found` and one that was never requested are indistinguishable
+        # from the package contents alone, and they call for opposite fixes.
+        acquisition = AcquisitionRecord(
+            provider=self.provider.name,
+            requested_start=self.options.start,
+            requested_end=self.options.end,
+            outcomes=tuple(
+                AcquisitionOutcomeEntry(
+                    ticker=outcome.symbol,
+                    symbol_status=str(outcome.symbol_status) if outcome.symbol_status else "",
+                    fetch_status=str(outcome.prices) if outcome.prices else "",
+                    bars=outcome.bars,
+                    error=outcome.error[:200],
+                )
+                for outcome in sorted(report.symbols, key=lambda s: s.symbol)
+            ),
+        )
+
         return PackageManifest(
             name=self.options.package_name or f"{self.provider.name}-daily",
             provider=self.provider.name,
@@ -853,6 +875,7 @@ class AcquisitionRunner:
             timezone=self.options.timezone,
             adjustment_policy=self._policy(),
             files=tuple(files),
+            acquisition=acquisition,
             known_limitations=tuple(limitations),
             vendor_dataset=f"{self.provider.name}:daily",
             description=(

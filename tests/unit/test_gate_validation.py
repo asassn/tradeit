@@ -480,6 +480,42 @@ class TestDataChecks:
         assert result.status is CheckStatus.FAIL
         assert "survivors" in result.summary
 
+    def test_survivorship_names_the_reason_and_still_fails(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        """Classification changes the remedy, never the verdict."""
+        from tradeit.data.validation_universe import UniverseCategory
+
+        write_package(tmp_path)
+        package = import_package(db_session, tmp_path, build_manifest(tmp_path))
+        # Whatever the package's coverage actually is, this name stopped
+        # trading long before it — so no request over that window could have
+        # returned it, and the finding belongs to our acquisition plan.
+        universe = ValidationUniverse(
+            name="delisted-only",
+            description="",
+            instruments=(
+                ValidationInstrument(
+                    "LEH",
+                    UniverseCategory.DELISTED,
+                    "survivorship",
+                    last_trade_date=package.coverage_start - dt.timedelta(days=365),
+                    alias_candidates=("LEHMQ",),
+                ),
+            ),
+        )
+        context = load_context(db_session, package.snapshot_id, universe=universe)
+        result = SurvivorshipCoverage().run(context)
+
+        assert result.status is CheckStatus.FAIL
+        assert result.evidence["by_status"] == {"outside_requested_window": 1}
+        assert result.evidence["acquisition_outcomes_recorded"] is False
+        rendered = "\n".join(result.detail)
+        assert "LEH" in rendered
+        assert "outside_requested_window" in rendered
+        # The remedy is stated, and it is ours: widen the requested window.
+        assert "start date at or before" in rendered
+
 
 class TestPhaseChecks:
     def test_indicators_are_deterministic_on_real_bars(self, context: ValidationContext) -> None:

@@ -167,12 +167,40 @@ class TestCredentialSafety:
         """The test that matters. A key in a journal line is invisible until
         somebody shares the file to ask for help with a failed download."""
         output = tmp_path / "pkg"
-        run_acquisition(output, ["SPY", "AAPL"])
+        # Includes a failing symbol whose vendor message quotes the key. The
+        # success path alone never exercises the strings that carry one.
+        run_acquisition(
+            output,
+            ["SPY", "AAPL", "BADSYM"],
+            FakeTransport(fail_symbols={"BADSYM": ProviderError(f"401 rejected {SECRET}")}),
+        )
         written = [p for p in output.rglob("*") if p.is_file()]
         assert written
         for path in written:
             blob = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
             assert SECRET.encode() not in blob, f"{path} contains the API key"
+
+    def test_a_failure_message_carrying_the_key_is_redacted_before_the_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        """The manifest now quotes the vendor's own failure text.
+
+        That text comes from a response body, and a vendor that echoes the
+        credential it rejected would otherwise write it into a file whose whole
+        purpose is to be shared with the next person who reads the package.
+        """
+        output = tmp_path / "pkg"
+        run_acquisition(
+            output,
+            ["SPY", "BADSYM"],
+            FakeTransport(fail_symbols={"BADSYM": ProviderError(f"401 for token {SECRET}")}),
+        )
+        manifest = load_manifest(output / "manifest.toml")
+        assert manifest.acquisition is not None
+        entry = manifest.acquisition.by_ticker()["BADSYM"]
+        assert entry.error
+        assert SECRET not in entry.error
+        assert SECRET not in (output / "manifest.toml").read_text(encoding="utf-8")
 
     def test_a_credential_shaped_query_parameter_is_redacted(self) -> None:
         url = "https://api.example.com/x?token=abc123&symbol=SPY&api_key=zzz"
@@ -327,6 +355,44 @@ class TestFailureHandling:
         )
         manifest = load_manifest(output / "manifest.toml")
         assert any("BADSYM" in item for item in manifest.known_limitations)
+
+    def test_the_manifest_records_what_happened_to_every_requested_symbol(
+        self, tmp_path: Path
+    ) -> None:
+        """The failures are the point.
+
+        A symbol that produced no rows appears nowhere in the package's data
+        files, so from the contents alone "requested and refused" and "never
+        asked for" are the same observation. Downstream, that is the difference
+        between a vendor with no delisted coverage and an acquisition plan that
+        asked for the wrong thing.
+        """
+        output = tmp_path / "pkg"
+        run_acquisition(
+            output, ["SPY", "BADSYM"], FakeTransport(fail_symbols={"BADSYM": ProviderError("404")})
+        )
+        manifest = load_manifest(output / "manifest.toml")
+        assert manifest.acquisition is not None
+        assert manifest.acquisition.requested_start == START
+        assert manifest.acquisition.requested_end == END
+
+        outcomes = manifest.acquisition.by_ticker()
+        assert set(outcomes) == {"SPY", "BADSYM"}
+        assert outcomes["SPY"].bars > 0
+        assert outcomes["BADSYM"].bars == 0
+        assert outcomes["BADSYM"].fetch_status == str(FetchStatus.REJECTED)
+
+    def test_the_recorded_outcomes_survive_a_manifest_round_trip(self, tmp_path: Path) -> None:
+        from tradeit.data.packages.manifest import render_manifest
+
+        output = tmp_path / "pkg"
+        run_acquisition(
+            output, ["SPY", "BADSYM"], FakeTransport(fail_symbols={"BADSYM": ProviderError("404")})
+        )
+        first = load_manifest(output / "manifest.toml")
+        (output / "manifest.toml").write_text(render_manifest(first), encoding="utf-8")
+        second = load_manifest(output / "manifest.toml")
+        assert second.acquisition == first.acquisition
 
     def test_a_rejected_symbol_is_not_retried_automatically(self, tmp_path: Path) -> None:
         # Retrying a 403 forever is how a typo in a key becomes an IP ban.

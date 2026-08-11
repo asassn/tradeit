@@ -226,6 +226,67 @@ class InstrumentCapabilityEntry(PackageSection):
     http_status: int | None = None
 
 
+class AcquisitionOutcomeEntry(PackageSection):
+    """What happened to one *requested* symbol, including the ones that failed.
+
+    A package records the instruments it contains. That is exactly the wrong
+    list for answering "why is LEH not here?", because a symbol that produced
+    nothing produces no row anywhere, and its absence is then indistinguishable
+    from never having been asked for.
+
+    The acquisition run already knows: :class:`~tradeit.acquisition.base.SymbolStatus`
+    separates ``not_found`` from ``plan_restricted`` from ``ambiguous`` from
+    ``unavailable_historically``. That classification used to stop at the
+    manifest boundary, so the survivorship check downstream could only say
+    "absent" — one word covering six different problems with six different
+    remedies. This carries it across.
+    """
+
+    ticker: str = Field(min_length=1)
+    #: ``tradeit.acquisition.base.SymbolStatus``, as a string so a package
+    #: written by a newer build still loads.
+    symbol_status: str = ""
+    #: ``tradeit.acquisition.base.FetchStatus`` for the price request.
+    fetch_status: str = ""
+    bars: int = Field(default=0, ge=0)
+    error: str = ""
+
+
+class AcquisitionRecord(PackageSection):
+    """The requested window and the per-symbol result of asking for it.
+
+    ``requested_start`` is not ``coverage.start``. Coverage is what came back;
+    a security that stopped trading before the request even began cannot appear
+    in it, and telling those two cases apart is the difference between "the
+    vendor has no delisted coverage" and "we asked for the wrong years".
+    """
+
+    provider: str = ""
+    requested_start: dt.date | None = None
+    requested_end: dt.date | None = None
+    outcomes: tuple[AcquisitionOutcomeEntry, ...] = ()
+
+    def by_ticker(self) -> dict[str, AcquisitionOutcomeEntry]:
+        return {entry.ticker: entry for entry in self.outcomes}
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "provider": self.provider,
+            "requested_start": (self.requested_start.isoformat() if self.requested_start else None),
+            "requested_end": self.requested_end.isoformat() if self.requested_end else None,
+            "outcomes": [
+                {
+                    "ticker": entry.ticker,
+                    "symbol_status": entry.symbol_status,
+                    "fetch_status": entry.fetch_status,
+                    "bars": entry.bars,
+                    "error": entry.error,
+                }
+                for entry in self.outcomes
+            ],
+        }
+
+
 class PackageManifest(PackageSection):
     """Everything a package says about itself."""
 
@@ -273,6 +334,11 @@ class PackageManifest(PackageSection):
     #: says nothing here, and validation reports that as unknown rather than as
     #: zero eligible instruments.
     instrument_capabilities: tuple[InstrumentCapabilityEntry, ...] = ()
+
+    #: What was asked for and what came back, symbol by symbol — including the
+    #: symbols that came back with nothing. ``None`` means "not recorded",
+    #: which downstream must report as unknown rather than as "nothing failed".
+    acquisition: AcquisitionRecord | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> Self:
@@ -373,6 +439,7 @@ class PackageManifest(PackageSection):
                 }
                 for entry in self.instrument_capabilities
             ],
+            "acquisition": self.acquisition.to_payload() if self.acquisition else None,
             "digest": self.digest(),
             "snapshot_id": self.snapshot_id(),
         }
@@ -521,6 +588,32 @@ def render_manifest(manifest: PackageManifest) -> str:
             f"reconstruction_file = {_toml_string(source.reconstruction_file)}",
             "",
         ]
+
+    if manifest.acquisition is not None:
+        record = manifest.acquisition
+        lines += [
+            "# What was requested and what came back. The requested window is not the",
+            "# coverage above: coverage is what arrived, and a security that stopped",
+            "# trading before the request began could never have been in it.",
+            "[acquisition]",
+            f"provider = {_toml_string(record.provider)}",
+        ]
+        if record.requested_start is not None:
+            lines.append(f"requested_start = {record.requested_start.isoformat()}")
+        if record.requested_end is not None:
+            lines.append(f"requested_end = {record.requested_end.isoformat()}")
+        lines.append("")
+        for outcome in record.outcomes:
+            lines += [
+                "[[acquisition.outcomes]]",
+                f"ticker = {_toml_string(outcome.ticker)}",
+                f"symbol_status = {_toml_string(outcome.symbol_status)}",
+                f"fetch_status = {_toml_string(outcome.fetch_status)}",
+                f"bars = {outcome.bars}",
+            ]
+            if outcome.error:
+                lines.append(f"error = {_toml_string(outcome.error)}")
+            lines.append("")
 
     if manifest.instrument_capabilities:
         lines += [

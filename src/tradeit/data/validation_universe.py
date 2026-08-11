@@ -76,6 +76,17 @@ class ValidationInstrument:
     note: str = ""
     first_trade_date: dt.date | None = None
     last_trade_date: dt.date | None = None
+    #: Other symbols the *same security* has traded under — typically the
+    #: bankruptcy rename, where NYSE-listed ``LEH`` becomes over-the-counter
+    #: ``LEHMQ`` on the day of the Chapter 11 filing.
+    #:
+    #: These are historical ticker facts, **not** verified vendor symbols. No
+    #: vendor is claimed to serve any of them. They exist so that a provider
+    #: answering "unknown symbol" for ``LEH`` is reported as *identity
+    #: resolution not attempted* rather than as *the vendor has no delisted
+    #: coverage* — two findings with different owners and different fixes.
+    #: Whether a given vendor actually resolves one is settled by asking it.
+    alias_candidates: tuple[str, ...] = ()
 
     @property
     def is_delisted(self) -> bool:
@@ -177,6 +188,7 @@ def load_universe(path: Path | str | None = None) -> ValidationUniverse:
                 note=str(entry.get("note", "")),
                 first_trade_date=_as_date(entry.get("first_trade_date")),
                 last_trade_date=_as_date(entry.get("last_trade_date")),
+                alias_candidates=_as_tickers(entry.get("alias_candidates")),
             )
         )
 
@@ -193,6 +205,16 @@ def load_universe(path: Path | str | None = None) -> ValidationUniverse:
 @lru_cache(maxsize=4)
 def default_universe() -> ValidationUniverse:
     return load_universe()
+
+
+def _as_tickers(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, list | tuple):
+        return tuple(str(item) for item in value)
+    raise ConfigError(f"alias_candidates must be a list of strings, got {value!r}")
 
 
 def _as_date(value: object) -> dt.date | None:

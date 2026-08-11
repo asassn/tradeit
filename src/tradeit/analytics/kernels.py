@@ -38,6 +38,43 @@ from numpy.typing import NDArray
 Floats = NDArray[np.float64]
 
 
+#: Multiplier on machine epsilon for deciding that two price-derived quantities
+#: are *equal* rather than merely close.
+#:
+#: This is not a fudge factor for output noise. It exists because several
+#: indicators make a **discrete** decision -- which directional move wins, where
+#: a value ranks -- by comparing two floats, and a difference smaller than the
+#: representation error of the inputs is not a real difference. Deciding such a
+#: case with `>` does not produce a slightly wrong answer; it produces a
+#: categorically different one, chosen by whichever way the binary
+#: approximation of a decimal price happened to fall.
+#:
+#: A worked case from real-shaped data: high goes 3.01 -> 3.06 and low goes 3.01
+#: -> 2.96, so up-move and down-move are both exactly 0.05 and Wilder's rule
+#: says *both* directional movements are zero. In IEEE-754 they come out as
+#: 0.050000000000000266 and 0.049999999999999822, so `up > down` is True and the
+#: bar is recorded as +DM = 0.05. Quote the same bars in a different unit and
+#: the comparison flips.
+#:
+#: 32 is chosen with margin: the error in `a - b` is bounded by
+#: `eps * max(|a|, |b|)`, and these quantities pass through a multiplication and
+#: two subtractions before they are compared.
+TIE_EPSILON_FACTOR = 32.0
+
+_FLOAT_EPS = float(np.finfo(np.float64).eps)
+
+
+def tie_tolerance(reference: Floats) -> Floats:
+    """Absolute tolerance below which two values derived from ``reference`` are tied.
+
+    Proportional to the magnitude of the *inputs*, not of their difference,
+    because that is what bounds cancellation error -- and because a tolerance
+    proportional to the inputs scales with them, which is what makes the
+    comparisons built on it invariant under a change of units.
+    """
+    return TIE_EPSILON_FACTOR * _FLOAT_EPS * np.abs(_as_float(reference))
+
+
 def _empty_like(values: Floats) -> Floats:
     return np.full(values.shape[0], np.nan, dtype=np.float64)
 
@@ -254,7 +291,14 @@ def realized_volatility(close: Floats, period: int, annualisation: int = 252) ->
         return out
 
     with np.errstate(divide="ignore", invalid="ignore"):
-        log_returns = np.diff(np.log(np.where(close > 0, close, np.nan)))
+        # log(p1 / p0), not log(p1) - log(p0). Algebraically the same and
+        # numerically not: differencing two logs of nearby prices cancels most
+        # of the significand, so the result carries far less precision than the
+        # ratio does. It also leaves the value dependent on the units -- the
+        # cancellation error changes with the price level -- which showed up
+        # downstream as a percentile whose rank moved when prices were rescaled.
+        positive = np.where(close > 0, close, np.nan)
+        log_returns = np.log(positive[1:] / positive[:-1])
 
     scale = float(np.sqrt(annualisation))
     if log_returns.shape[0] < period:
@@ -316,8 +360,26 @@ def adx(
 
     up_move = high[1:] - high[:-1]
     down_move = low[:-1] - low[1:]
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+    # Wilder's rule: the larger move wins, and a tie gives *both* directional
+    # movements zero. Implementing that with a bare `>` on two floats delegates
+    # the tie to representation error -- 3.01 -> 3.06 against 3.01 -> 2.96 is a
+    # genuine tie that IEEE-754 renders as 0.050000000000000266 against
+    # 0.049999999999999822 -- so the bar's direction is decided by the binary
+    # approximation of a decimal price rather than by the market. Quoting the
+    # same bars in cents flips it.
+    #
+    # The tolerance is proportional to the price level, which is what bounds the
+    # cancellation error in these differences, and which makes the whole
+    # comparison invariant to the units the prices are quoted in.
+    reference = np.maximum(
+        np.maximum(np.abs(high[1:]), np.abs(high[:-1])),
+        np.maximum(np.abs(low[1:]), np.abs(low[:-1])),
+    )
+    tolerance = tie_tolerance(reference)
+    decisive = np.abs(up_move - down_move) > tolerance
+    plus_dm = np.where(decisive & (up_move > down_move) & (up_move > tolerance), up_move, 0.0)
+    minus_dm = np.where(decisive & (down_move > up_move) & (down_move > tolerance), down_move, 0.0)
 
     tr = true_range(high, low, close)[1:]
     smoothed_tr = wilder_smooth(tr, period)
@@ -550,7 +612,13 @@ def percent_rank(values: Floats, period: int) -> Floats:
     counts = finite.sum(axis=1)
 
     with np.errstate(invalid="ignore"):
-        at_or_below = (finite & (windows <= subjects)).sum(axis=1)
+        # `<=` with a tie tolerance, because this is a discrete count and two
+        # values equal to within representation error are the same value. A bare
+        # `<=` moves the rank by a whole step -- 1/(counts - 1), percent points
+        # rather than rounding -- on a difference of one ulp, which is how a
+        # percentile of an invariant series stopped being invariant.
+        tolerance = tie_tolerance(np.maximum(np.abs(windows), np.abs(subjects)))
+        at_or_below = (finite & (windows <= subjects + tolerance)).sum(axis=1)
 
     usable = (counts >= 2) & ~np.isnan(values[period - 1 :])
     ranks = np.full(windows.shape[0], np.nan, dtype=np.float64)

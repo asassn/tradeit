@@ -78,6 +78,19 @@ reconstruction_algorithm = "split-inverse-1"
 reconstruction_label = "RECONSTRUCTED_RAW_FROM_SPLIT_ADJUSTED"
 reconstruction_file = "_acquisition/reconstructed_raw_prices.csv.gz"
 
+# Optional. Written by `tradeit data acquire`. See §2.7.
+[acquisition]
+provider = "twelve_data"
+requested_start = 2010-01-01
+requested_end = 2026-08-07
+
+[[acquisition.outcomes]]
+ticker = "LEH"
+symbol_status = "not_found"
+fetch_status = "rejected"
+bars = 0
+error = "symbol not recognised"
+
 [[files]]
 path = "bars.csv.gz"             # relative to the package root, never absolute
 dataset = "daily_bars"
@@ -194,6 +207,35 @@ read it as prices.
 
 Written automatically by `tradeit data acquire` and updated by
 `tradeit data enrich`. A hand-assembled package may omit it entirely.
+
+### 2.7 `[acquisition]` — what was asked for, including what did not arrive
+
+A package records the instruments it *contains*. That is the wrong list for
+answering "why is LEH not here?", because a symbol that produced no rows
+produces no row anywhere — and its absence is then indistinguishable from never
+having been requested.
+
+| Key | Means |
+|---|---|
+| `provider` | Who was asked. |
+| `requested_start`, `requested_end` | The window the request covered. **Not `[coverage]`**, which is what came back. |
+| `[[acquisition.outcomes]]` | One entry per *requested* symbol, failures included. |
+
+Each outcome carries `ticker`, `symbol_status`
+(`tradeit.acquisition.base.SymbolStatus` — `not_found`,
+`unavailable_historically`, `plan_restricted`, `ambiguous`, `valid`),
+`fetch_status` (`FetchStatus`), the `bars` count, and the vendor's own error
+text with credentials redacted.
+
+The requested window is the load-bearing part. A snapshot that starts
+2010-01-04 because that is where the request began and one that starts there
+because the vendor had nothing earlier are the same row in `data_packages`, and
+only the first explains why a security that stopped trading in 2008 is absent.
+`data.survivorship_coverage` reads this to separate "our acquisition plan is
+wrong" from "this vendor has no delisted coverage"; see
+`docs/SURVIVORSHIP_COVERAGE.md`.
+
+**An absent section means "not recorded", never "nothing failed".**
 
 ---
 

@@ -166,13 +166,13 @@ to the same shape as the live one (78 instruments, 325,762 rows, 34 enriched /
 | `data.session_continuity` | **PASS after a fix** — see below |
 | `data.instrument_capability` | PASS, 78 / 34 reported separately |
 | `data.adjustment_declared` | WARN — prices are split-adjusted, so corporate-action artefact checks cannot run |
-| `data.survivorship_coverage` | PASS — all 11 delisted names present |
+| `data.survivorship_coverage` | PASS in the rehearsal; **FAIL on the real snapshot** — see `docs/SURVIVORSHIP_COVERAGE.md` |
 | `data.point_in_time_fundamentals` | BLOCKED — no fundamentals; that is Phase 6 |
 | `data.unexplained_price_jumps` | SKIP — adjusted prices, so absent artefacts prove nothing |
 | `phase3.indicator_determinism` | PASS — 1,160 series reproduce exactly |
 | `phase3.indicator_prefix_consistency` | PASS — 1,160 prefix comparisons agree exactly |
 | `phase3.indicator_warmup` | WARN — 20 of 290 series defined earlier than declared, the safe direction |
-| `phase3.scale_invariance` | **PASS** — 0 violations, 0 unclassified, 8 instruments × 6 factors |
+| `phase3.scale_invariance` | PASS in the rehearsal; **FAILED on the real snapshot** with 32 violations, now fixed — see `docs/SCALE_INVARIANCE_INVESTIGATION.md` |
 | `phase4.*`, `phase5.*` | **SKIP — see §6** |
 
 ### A second calendar bug, found by the rehearsal

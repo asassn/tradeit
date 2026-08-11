@@ -222,6 +222,12 @@ class DatabaseSink:
             }
             for entry in self.manifest.instrument_capabilities
         ]
+        # Same reasoning, for the symbols that produced no rows at all. These
+        # are invisible in the snapshot's tables by construction, so if the
+        # record is not copied here the question "why is this delisted control
+        # absent?" has no answer available to a validation run.
+        if self.manifest.acquisition is not None:
+            payload["acquisition"] = self.manifest.acquisition.to_payload()
         if self.unmapped:
             payload["unmapped_datasets"] = dict(sorted(self.unmapped.items()))
             report.notes.append(

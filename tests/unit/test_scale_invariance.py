@@ -27,8 +27,10 @@ import datetime as dt
 import itertools
 from decimal import Decimal
 
+import numpy as np
 import pytest
 
+import tradeit.analytics.kernels as k
 from tradeit.analytics.indicators import IndicatorEngine
 from tradeit.core.enums import Bartimeframe, KnowledgeTimeSource
 from tradeit.core.models import OhlcvBar
@@ -433,3 +435,246 @@ class TestRuleTable:
 
     def test_an_unknown_name_is_unknown_rather_than_invariant(self) -> None:
         assert classify_feature("brand_new_feature")[0] is ScaleSensitivity.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# The numerical defects the first real snapshot exposed
+# ---------------------------------------------------------------------------
+
+
+class TestDirectionalMovementTies:
+    """ADX, +DI and -DI were not invariant, and the cause was a real defect.
+
+    The first PostgreSQL snapshot (twelve_data-daily-e3ddc03209bb25b4, 78
+    instruments) reported 32 scale-invariance violations including adx_14,
+    plus_di and minus_di. They reproduce on low-priced and illiquid series and
+    not on smooth large-cap ones, and only at non-dyadic rescaling factors —
+    which is the signature of a **discrete branch decided by representation
+    error**, not of accumulated rounding.
+
+    The mechanism, traced end to end: high goes 3.01 -> 3.06 while low goes
+    3.01 -> 2.96. Both moves are exactly 0.05, so Wilder's rule gives *both*
+    directional movements zero. IEEE-754 renders them 0.050000000000000266 and
+    0.049999999999999822, so a bare ``up > down`` records +DM = 0.05. Multiply
+    every price by 3.7 and the same comparison comes out the other way.
+
+    So the pre-fix indicator gave a different answer for the same bars quoted in
+    dollars and in cents. That is a correctness bug in its own right; scale
+    invariance is how it surfaced.
+    """
+
+    def test_an_exact_tie_gives_both_directional_movements_zero(self) -> None:
+        """Wilder's definition, which the float comparison was overriding."""
+        high = np.array([3.01, 3.06])
+        low = np.array([3.01, 2.96])
+        close = np.array([3.01, 3.00])
+        up, down = high[1] - high[0], low[0] - low[1]
+        assert up != down, "fixture assumption: the floats are not bit-equal"
+        assert abs(up - down) < 1e-14, "fixture assumption: the tie is real"
+
+        reference = max(abs(high[0]), abs(high[1]), abs(low[0]), abs(low[1]))
+        assert abs(up - down) <= float(k.tie_tolerance(np.array(reference)))
+        _ = close
+
+    def test_the_same_bars_in_cents_give_the_same_adx(self) -> None:
+        """The deeper property. A change of units is not a change of market."""
+        bars = make_bars(count=500, start_price=3.07)
+        engine = IndicatorEngine(IndicatorConfig())
+        dollars = engine.compute(bars, instrument_id=1).values
+        cents = engine.compute(rescale_bars(bars, 100), instrument_id=1).values
+        for name in ("adx_14", "plus_di", "minus_di"):
+            invariant, worst = series_is_invariant(dollars[name], cents[name])
+            assert invariant, f"{name} changed when the prices were quoted in cents ({worst:.3g})"
+
+    @pytest.mark.parametrize("factor", [*DEFAULT_SCALE_FACTORS, 0.001, 7.13, 137.0])
+    def test_penny_priced_series_are_invariant(self, factor: float) -> None:
+        """The regime that failed. Low-priced, tick-quantized data produces
+        ties constantly; a smooth large-cap series produces almost none, which
+        is why the original fixture passed while real data did not."""
+        bars = _penny_bars()
+        engine = IndicatorEngine(IndicatorConfig())
+        report = scale_invariance_report(
+            lambda series: engine.compute(series, instrument_id=1).values, bars, factor
+        )
+        assert report.violations == (), [o.name for o in report.violations]
+
+    def test_the_tolerance_is_far_below_one_tick(self) -> None:
+        """The tolerance must not blunt the indicator.
+
+        A one-cent move on a $3 stock is a relative 3.3e-3. The tie tolerance is
+        ~7e-15 relative — eleven orders of magnitude smaller — so it can absorb
+        representation error and nothing else.
+        """
+        tolerance = float(k.tie_tolerance(np.array(3.0)))
+        assert tolerance < 1e-13
+        assert tolerance < 0.01 / 1e10
+
+    def test_a_genuine_directional_move_still_registers(self) -> None:
+        """Guards against the fix silencing real signal: a clear up-move must
+        still produce +DM and no -DM."""
+        high = np.array([10.0, 11.0])
+        low = np.array([9.0, 9.5])
+        up, down = high[1] - high[0], low[0] - low[1]
+        tolerance = float(k.tie_tolerance(np.array(11.0)))
+        assert up > down and up > tolerance
+        assert not (down > up)
+
+    def test_the_tolerance_changes_nothing_where_the_moves_are_distinguishable(
+        self,
+    ) -> None:
+        """The scope of the fix, stated as a property.
+
+        A tolerance that only absorbs representation error must be a *no-op*
+        at every index where the two directional movements differ by more than
+        that. Only the indistinguishable ones may change, and there they must
+        change to Wilder's answer: both zero.
+
+        If a future change widens the tolerance far enough to swallow a real
+        move, the first assertion is what fails.
+        """
+        bars = make_bars(count=400, start_price=137.11)
+        high = np.array([float(b.high) for b in bars])
+        low = np.array([float(b.low) for b in bars])
+        up_move = high[1:] - high[:-1]
+        down_move = low[:-1] - low[1:]
+
+        # The pre-fix formulation, inline: bare comparisons, no tolerance.
+        naive_plus = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+        naive_minus = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+        tolerance = k.tie_tolerance(
+            np.maximum(
+                np.maximum(np.abs(high[1:]), np.abs(high[:-1])),
+                np.maximum(np.abs(low[1:]), np.abs(low[:-1])),
+            )
+        )
+        decisive = np.abs(up_move - down_move) > tolerance
+        shipped_plus = np.where(
+            decisive & (up_move > down_move) & (up_move > tolerance), up_move, 0.0
+        )
+        shipped_minus = np.where(
+            decisive & (down_move > up_move) & (down_move > tolerance), down_move, 0.0
+        )
+
+        assert np.array_equal(naive_plus[decisive], shipped_plus[decisive])
+        assert np.array_equal(naive_minus[decisive], shipped_minus[decisive])
+        assert not np.any(shipped_plus[~decisive])
+        assert not np.any(shipped_minus[~decisive])
+        # And the fixture must actually contain at least one of each case, or
+        # the assertions above are vacuous.
+        assert decisive.any() and not decisive.all()
+
+
+class TestPercentileTies:
+    """`volatility_percentile` moved at *every* factor, including exact powers
+    of two — a different mechanism from the ADX one.
+
+    `realized_volatility` differenced two logs of nearby prices, which cancels
+    most of the significand and leaves a value whose last bits depend on the
+    price level. `percent_rank` then made a discrete count on those values, so a
+    one-ulp difference moved the rank a whole step: 1/(count - 1), percent
+    points rather than rounding.
+
+    Two fixes, each defensible on its own: the volatility now takes the log of
+    the price *ratio* rather than the difference of logs, and the rank counts
+    values equal within representation error as tied — which is also the correct
+    statistical treatment of ties in a percentile.
+    """
+
+    def test_log_returns_come_from_the_ratio_not_the_difference_of_logs(self) -> None:
+        close = np.array([100.0, 100.01, 100.02, 99.99, 100.05])
+        precise = np.log(close[1:] / close[:-1])
+        cancelled = np.diff(np.log(close))
+        # Both are "right"; the ratio keeps more significant digits, which is
+        # what stopped the downstream percentile from moving.
+        assert np.allclose(precise, cancelled, rtol=1e-12)
+        assert k.realized_volatility(close, 2).shape == close.shape
+
+    def test_values_equal_within_representation_error_rank_as_tied(self) -> None:
+        base = 1.0
+        nudged = base + 4 * np.finfo(np.float64).eps
+        values = np.array([base, nudged, base, nudged, base, nudged])
+        ranks = k.percent_rank(values, 4)
+        finite = ranks[~np.isnan(ranks)]
+        assert np.allclose(finite, finite[0]), (
+            f"values differing by a few ulps produced different ranks: {finite}"
+        )
+
+    def test_a_genuinely_different_value_still_ranks_differently(self) -> None:
+        """The fix must not flatten real dispersion."""
+        # Non-monotonic, or every window ranks its last value top and the
+        # assertion would pass without proving anything.
+        values = np.array([5.0, 1.0, 4.0, 2.0, 6.0, 3.0])
+        ranks = k.percent_rank(values, 4)
+        finite = ranks[~np.isnan(ranks)]
+        assert finite.min() < finite.max(), f"real dispersion was flattened: {finite}"
+
+
+class TestTheHarnessStillCatchesRealDefects:
+    """A tolerance that hides the defect it was added for is worse than none."""
+
+    def test_a_scale_sensitive_feature_injected_into_the_report_is_caught(self) -> None:
+        """Mutation test. If the harness cannot fail, its passes mean nothing."""
+        bars = _penny_bars()
+        engine = IndicatorEngine(IndicatorConfig())
+
+        def values_with_a_planted_defect(series: list[OhlcvBar]) -> dict[str, object]:
+            values = dict(engine.compute(series, instrument_id=1).values)
+            # A price level wearing an invariant feature's name.
+            values["rsi_14"] = np.array([float(b.close) for b in series])
+            return values
+
+        report = scale_invariance_report(values_with_a_planted_defect, bars, 3.7)
+        assert "rsi_14" in {o.name for o in report.violations}
+
+    def test_a_one_ulp_defect_would_not_be_caught_and_a_one_tick_one_would(self) -> None:
+        """Bounds what the harness can see, honestly.
+
+        `series_is_invariant` uses a 1e-9 relative tolerance, so a difference at
+        the last bit is invisible and a difference of one cent in a hundred
+        dollars is not. Stating the boundary is better than implying there is
+        none.
+        """
+        base = np.array([100.0, 200.0, 300.0])
+        one_ulp = base * (1 + np.finfo(np.float64).eps)
+        one_tick = base + 0.01
+        assert series_is_invariant(base, one_ulp)[0]
+        assert not series_is_invariant(base, one_tick)[0]
+
+
+def _penny_bars(count: int = 700) -> list[OhlcvBar]:
+    """A low-priced, tick-quantized series: the regime that actually failed.
+
+    Deterministic. The point is the density of exact ties between the up-move
+    and the down-move, which is high when the tick is a large fraction of the
+    price and near zero on a smooth large-cap series.
+    """
+    rng = np.random.default_rng(11)
+    close = np.round(np.cumsum(rng.normal(0, 0.02, count)) + 3.0, 2)
+    close = np.maximum(close, 0.5)
+    high = np.round(close + np.round(np.abs(rng.normal(0, 0.03, count)), 2), 2)
+    low = np.round(close - np.round(np.abs(rng.normal(0, 0.03, count)), 2), 2)
+    high, low = np.maximum(high, close), np.minimum(low, close)
+    bars: list[OhlcvBar] = []
+    day = dt.date(2010, 1, 4)
+    for index in range(count):
+        while day.weekday() >= 5:
+            day += dt.timedelta(days=1)
+        moment = dt.datetime.combine(day, dt.time(21, 0), tzinfo=dt.UTC)
+        bars.append(
+            OhlcvBar(
+                instrument_id=1,
+                timeframe=Bartimeframe.D1,
+                session_date=day,
+                event_time=moment,
+                knowledge_time=moment,
+                knowledge_source=KnowledgeTimeSource.SYNTHETIC,
+                open=Decimal(str(close[index])),
+                high=Decimal(str(high[index])),
+                low=Decimal(str(max(low[index], 0.01))),
+                close=Decimal(str(close[index])),
+                volume=Decimal(100_000 + index),
+            )
+        )
+        day += dt.timedelta(days=1)
+    return bars
