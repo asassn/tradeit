@@ -18,6 +18,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from tradeit.core.calendar import get_calendar
 from tradeit.data.packages.spec import DatasetKind
 from tradeit.storage import tables as t
 from tradeit.validation.checks import CheckResult, CheckStatus, Phase
@@ -342,15 +343,22 @@ class SessionContinuity(_Check):
                 summary="no daily bars to check for continuity",
             )
 
+        # Sessions, not weekdays. The weekday count was a deliberate cheap upper
+        # bound, and over a sixteen-year window it stops being cheap and starts
+        # being wrong: roughly ten US market holidays a year is about 3.6% of
+        # weekdays, above the 2% threshold, so **every** well-formed series in
+        # the first real universe import was reported as gappy. A check that
+        # fires on all 78 of 78 teaches the reader to skip it.
+        #
+        # The calendar is the exchange's, and this project's own. It does not
+        # know which venue a vendor's instrument trades on — that is what the
+        # EXCHANGES dataset is for and it is usually absent — so a genuine
+        # foreign listing may still show a shortfall. That is a smaller and more
+        # honest error than counting Thanksgiving as missing data.
+        calendar = get_calendar()
         gaps: list[tuple[int, int, int]] = []
         for instrument_id, first, last, count in rows:
-            # Weekday count is the cheap upper bound on trading sessions: it
-            # ignores holidays, so a small shortfall is expected and only a
-            # large one is a gap. Using the exchange calendar here would be
-            # more precise and would also make this check depend on which
-            # calendar the vendor's instruments trade on, which is exactly the
-            # thing the EXCHANGES dataset exists to supply and is usually absent.
-            expected = _weekdays_between(first, last)
+            expected = calendar.session_count(first, last)
             if expected and count < expected * (1 - self.max_gap_ratio):
                 gaps.append((instrument_id, expected - count, expected))
 
@@ -362,8 +370,9 @@ class SessionContinuity(_Check):
             phase=self.phase,
             status=status,
             summary=(
-                f"{len(rows)} series checked; {len(gaps)} have more than "
-                f"{self.max_gap_ratio:.0%} of their weekdays missing"
+                f"{len(rows)} series checked against the exchange calendar; "
+                f"{len(gaps)} have more than {self.max_gap_ratio:.0%} of their "
+                "trading sessions missing"
             ),
             evidence={
                 "series": len(rows),
@@ -371,7 +380,7 @@ class SessionContinuity(_Check):
                 "missing_sessions_total": sum(g[1] for g in gaps),
             },
             examples=tuple(
-                f"instrument={i} missing≈{missing} of {expected} weekdays"
+                f"instrument={i} missing {missing} of {expected} trading sessions"
                 for i, missing, expected in worst
             ),
         )
@@ -547,17 +556,59 @@ class DuplicateFacts(_Check):
         )
 
 
-def _weekdays_between(first: dt.date, last: dt.date) -> int:
-    days = (last - first).days + 1
-    if days <= 0:
-        return 0
-    full_weeks, remainder = divmod(days, 7)
-    count = full_weeks * 5
-    start_weekday = first.weekday()
-    for offset in range(remainder):
-        if (start_weekday + offset) % 7 < 5:
-            count += 1
-    return count
+class InstrumentCapabilityCoverage(_Check):
+    """How many instruments support which kind of claim.
+
+    Reports **two sample sizes and never one**. The first real universe import
+    has 78 instruments with price history and 34 with a verified split
+    schedule; a result quoted over "78 instruments" that silently needed raw
+    prices would be describing a sample it did not have.
+
+    Never FAILs on a low raw-verified count. An entitlement answer from a
+    corporate-action vendor is not a defect in the price data, and failing here
+    would push the operator toward deleting good bars to make a check go green.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            check_id="data.instrument_capability",
+            title="Per-instrument capability: what may each instrument be used for?",
+            phase=Phase.DATA,
+            requires=(DatasetKind.DAILY_BARS,),
+        )
+
+    def run(self, context: ValidationContext) -> CheckResult:
+        index = context.capabilities
+        if index.is_empty:
+            return self.result(
+                status=CheckStatus.WARN,
+                summary=(
+                    "this package carries no per-instrument capability record, so "
+                    "eligibility is UNKNOWN rather than established. Checks that need "
+                    "a verified raw price series cannot name their sample."
+                ),
+                evidence={"capability_recorded": False},
+                examples=("re-run `tradeit data enrich <package> --source fmp` to produce one",),
+            )
+
+        price_eligible = len(index.price_eligible)
+        raw_verified = len(index.raw_verified)
+        reasons = index.reasons()
+        summary = (
+            f"{price_eligible} instrument(s) carry price data; {raw_verified} of them "
+            "have a verified raw price series. Scale-invariant analytics may use all "
+            f"{price_eligible}; absolute-price analytics may use {raw_verified}."
+        )
+        return self.result(
+            status=CheckStatus.PASS if raw_verified else CheckStatus.WARN,
+            summary=summary,
+            evidence={
+                "instruments_price_eligible": price_eligible,
+                "instruments_raw_verified": raw_verified,
+                **index.counts(),
+            },
+            examples=tuple(f"{count} x {reason}" for reason, count in reasons.items())[:5],
+        )
 
 
 def data_checks() -> list[_Check]:
@@ -566,6 +617,7 @@ def data_checks() -> list[_Check]:
         RowsPresent(),
         QuarantineRate(),
         AdjustmentDeclared(),
+        InstrumentCapabilityCoverage(),
         KnowledgeTimeOrdering(),
         PointInTimeFundamentals(),
         DuplicateFacts(),
@@ -580,6 +632,7 @@ __all__ = [
     "SPLIT_SUSPECT_RATIO",
     "AdjustmentDeclared",
     "DuplicateFacts",
+    "InstrumentCapabilityCoverage",
     "KnowledgeTimeOrdering",
     "PointInTimeFundamentals",
     "QuarantineRate",

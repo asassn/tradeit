@@ -206,6 +206,22 @@ class DatabaseSink:
         self.package.partial = report.partial
         self.package.aborted = report.aborted
         payload = report.to_payload()
+        # Carried from the manifest into the package row so a validation run can
+        # ask "which instruments may this check use?" from the snapshot alone.
+        # Without it the only way to tell an instrument whose split source
+        # answered from one whose source was refused is to still have the
+        # package directory, which a validation run does not.
+        payload["instrument_capabilities"] = [
+            {
+                "instrument_id": entry.instrument_id,
+                "ticker": entry.ticker,
+                "flags": list(entry.flags),
+                "reason": entry.reason,
+                "split_provider": entry.split_provider,
+                "http_status": entry.http_status,
+            }
+            for entry in self.manifest.instrument_capabilities
+        ]
         if self.unmapped:
             payload["unmapped_datasets"] = dict(sorted(self.unmapped.items()))
             report.notes.append(

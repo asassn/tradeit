@@ -24,7 +24,10 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import gzip
+import io
 import json
+import urllib.error
+import urllib.request
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -69,7 +72,7 @@ from tradeit.data.packages.database import DatabaseSink
 from tradeit.data.packages.importer import ImportOptions, PackageImporter
 from tradeit.data.packages.manifest import WORKSPACE_DIRNAME, load_manifest
 from tradeit.data.packages.spec import AdjustmentPolicyDeclaration, DatasetKind
-from tradeit.data.providers.http import ProviderUnreachableError
+from tradeit.data.providers.http import HttpTransport, ProviderUnreachableError
 
 SECRET = "TWELVEDATASECRET99887766"
 START = dt.date(2010, 1, 1)
@@ -1319,3 +1322,113 @@ class TestCrossProviderArchitecture:
         report = run_tiingo(tmp_path / "pkg", ["SPY", "AAPL"])
         assert report.status is PackageStatus.VALID
         assert report.rows[str(DatasetKind.DAILY_BARS)] > 0
+
+
+# ---------------------------------------------------------------------------
+# Entitlement, as the full universe run met it
+# ---------------------------------------------------------------------------
+
+
+class RaisingTransport:
+    """Answers prices normally and raises a chosen error for one dataset.
+
+    Shaped after the real journal: `/time_series` returned 200s on the same key
+    that `/dividends` answered 403 for, which is what makes the credential
+    provably innocent.
+    """
+
+    def __init__(self, *, error: Exception, on: str, serve_prices: bool = True) -> None:
+        self.error = error
+        self.on = on
+        self.serve_prices = serve_prices
+        self.calls: list[str] = []
+
+    def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
+        self.calls.append(url)
+        if self.on in url:
+            raise self.error
+        if "/time_series" in url and self.serve_prices:
+            symbol = url.split("symbol=")[1].split("&")[0]
+            return json.dumps(series_block(symbol, values(count=30, split_at=None))).encode()
+        raise self.error
+
+
+def _http_error(code: int, body: bytes = b"") -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "https://api.twelvedata.com/dividends?symbol=SPY&apikey=REDACTED",
+        code,
+        "Forbidden",
+        {},  # type: ignore[arg-type]
+        io.BytesIO(body),
+    )
+
+
+class TestEntitlementClassification:
+    """A 403 on a corporate-action endpoint is not "no dividends"."""
+
+    def _fetch_dividends(self, code: int, body: bytes = b"", *, prices_first: bool) -> Any:
+        transport = HttpTransport(cache=None, timeout_s=1.0, max_attempts=2, min_interval_s=0.0)
+        original = urllib.request.urlopen
+
+        def fake(*args: Any, **kwargs: Any) -> Any:
+            raise _http_error(code, body)
+
+        provider = TwelveDataAcquisition(
+            token=SECRET, transport=transport, credits_per_minute=100_000
+        )
+        if prices_first:
+            # The key demonstrably works: mark the price dataset as proven, the
+            # way a real run does after `/time_series` answers with data.
+            provider.support[AcquisitionDataset.DAILY_PRICES] = CapabilitySupport.AVAILABLE
+        urllib.request.urlopen = fake  # type: ignore[assignment]
+        try:
+            outcome = provider.fetch(FetchRequest.one(AcquisitionDataset.DIVIDENDS, "SPY"))
+        finally:
+            urllib.request.urlopen = original  # type: ignore[assignment]
+        return provider, outcome
+
+    def test_a_403_after_the_key_has_worked_is_a_plan_restriction(self) -> None:
+        """The signal that resolved the real case. One run, one key, one
+        account: if `/time_series` answered, a 403 elsewhere is entitlement."""
+        provider, outcome = self._fetch_dividends(403, prices_first=True)
+        assert provider.support[AcquisitionDataset.DIVIDENDS] is (
+            CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+        )
+        assert "same credential returned data" in outcome.error
+        assert outcome.http_status == 403
+
+    def test_a_403_is_never_read_as_an_absence_of_dividends(self) -> None:
+        provider, _ = self._fetch_dividends(403, prices_first=True)
+        state = provider.support[AcquisitionDataset.DIVIDENDS]
+        assert state.is_evidence_of_absence is False
+
+    def test_a_403_before_the_key_has_proved_itself_is_unknown_not_error(self) -> None:
+        """Without the corroborating success it could be a bad key. UNKNOWN is
+        the honest answer, and PROVIDER_ERROR would overstate what we know."""
+        provider, _ = self._fetch_dividends(403, prices_first=False)
+        state = provider.support[AcquisitionDataset.DIVIDENDS]
+        assert state is CapabilitySupport.UNKNOWN
+        assert state.is_evidence_of_absence is False
+
+    def test_a_vendor_message_naming_a_plan_settles_it_on_its_own(self) -> None:
+        body = json.dumps(
+            {"code": 403, "message": "/dividends is available with the Grow plan and above"}
+        ).encode()
+        provider, outcome = self._fetch_dividends(403, body, prices_first=False)
+        assert provider.support[AcquisitionDataset.DIVIDENDS] is (
+            CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+        )
+        assert "Grow plan" in outcome.error
+
+    def test_a_402_is_an_entitlement_answer(self) -> None:
+        provider, outcome = self._fetch_dividends(402, prices_first=False)
+        assert provider.support[AcquisitionDataset.DIVIDENDS] is (
+            CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+        )
+        assert outcome.http_status == 402
+        assert outcome.status.is_retryable is False
+
+    def test_the_limitation_says_an_absence_is_not_evidence(self) -> None:
+        provider, _ = self._fetch_dividends(403, prices_first=True)
+        text = " ".join(provider.limitations())
+        assert "NOT about" in text or "not available on this subscription" in text

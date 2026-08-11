@@ -202,6 +202,30 @@ class Provenance(PackageSection):
         }
 
 
+class InstrumentCapabilityEntry(PackageSection):
+    """What one instrument's data supports, as recorded in the package.
+
+    The TOML face of
+    :class:`~tradeit.data.packages.capability.InstrumentCapabilityRecord`. A real
+    universe acquisition is not uniform — the first full run had 78 instruments
+    with prices and 34 with a verified split schedule — and a validation result
+    over "78 instruments" that silently mixed the two would be uninterpretable.
+
+    ``flags`` is a list of strings rather than an enum so that a package written
+    by a newer build still loads here: an unrecognised flag is carried and
+    ignored rather than making the manifest unreadable.
+    """
+
+    instrument_id: int = Field(ge=0)
+    ticker: str = ""
+    flags: tuple[str, ...] = ()
+    #: Why a capability is absent. "the split source answered HTTP 402" names
+    #: both the cause and the remedy where a bare count names neither.
+    reason: str = ""
+    split_provider: str = ""
+    http_status: int | None = None
+
+
 class PackageManifest(PackageSection):
     """Everything a package says about itself."""
 
@@ -243,6 +267,12 @@ class PackageManifest(PackageSection):
     #: Per-part attribution, for packages assembled from more than one vendor.
     #: ``None`` on a single-vendor package, where ``provider`` says everything.
     provenance: Provenance | None = None
+
+    #: Per-instrument capability flags. Empty means "not recorded", which is not
+    #: the same as "nothing is capable" — a package written before this existed
+    #: says nothing here, and validation reports that as unknown rather than as
+    #: zero eligible instruments.
+    instrument_capabilities: tuple[InstrumentCapabilityEntry, ...] = ()
 
     @model_validator(mode="after")
     def _validate(self) -> Self:
@@ -332,6 +362,17 @@ class PackageManifest(PackageSection):
             "licence_note": self.licence_note,
             "vendor_dataset": self.vendor_dataset,
             "provenance": self.provenance.to_payload() if self.provenance else None,
+            "instrument_capabilities": [
+                {
+                    "instrument_id": entry.instrument_id,
+                    "ticker": entry.ticker,
+                    "flags": list(entry.flags),
+                    "reason": entry.reason,
+                    "split_provider": entry.split_provider,
+                    "http_status": entry.http_status,
+                }
+                for entry in self.instrument_capabilities
+            ],
             "digest": self.digest(),
             "snapshot_id": self.snapshot_id(),
         }
@@ -464,22 +505,44 @@ def render_manifest(manifest: PackageManifest) -> str:
     lines.append("")
 
     if manifest.provenance is not None:
-        item = manifest.provenance
+        source = manifest.provenance
         lines += [
             "# Which vendor supplied which part. A reconstructed raw price derived",
             "# from one vendor's adjusted bars and another's split schedule was",
             "# supplied by neither, and this table is what says so.",
             "[provenance]",
-            f"price_provider = {_toml_string(item.price_provider)}",
-            f"price_representation = {_toml_string(item.price_representation)}",
-            f"dividend_provider = {_toml_string(item.dividend_provider)}",
-            f"split_provider = {_toml_string(item.split_provider)}",
-            f"reconstruction_performed = {'true' if item.reconstruction_performed else 'false'}",
-            f"reconstruction_algorithm = {_toml_string(item.reconstruction_algorithm)}",
-            f"reconstruction_label = {_toml_string(item.reconstruction_label)}",
-            f"reconstruction_file = {_toml_string(item.reconstruction_file)}",
+            f"price_provider = {_toml_string(source.price_provider)}",
+            f"price_representation = {_toml_string(source.price_representation)}",
+            f"dividend_provider = {_toml_string(source.dividend_provider)}",
+            f"split_provider = {_toml_string(source.split_provider)}",
+            f"reconstruction_performed = {'true' if source.reconstruction_performed else 'false'}",
+            f"reconstruction_algorithm = {_toml_string(source.reconstruction_algorithm)}",
+            f"reconstruction_label = {_toml_string(source.reconstruction_label)}",
+            f"reconstruction_file = {_toml_string(source.reconstruction_file)}",
             "",
         ]
+
+    if manifest.instrument_capabilities:
+        lines += [
+            "# What each instrument's data supports. A universe acquisition is not",
+            "# uniform: price history and a verified split schedule are different",
+            "# facts, and a result that mixed them could not be interpreted.",
+        ]
+        for entry in manifest.instrument_capabilities:
+            rendered_flags = ", ".join(_toml_string(flag) for flag in entry.flags)
+            lines += [
+                "[[instrument_capabilities]]",
+                f"instrument_id = {entry.instrument_id}",
+                f"ticker = {_toml_string(entry.ticker)}",
+                f"flags = [{rendered_flags}]",
+            ]
+            if entry.reason:
+                lines.append(f"reason = {_toml_string(entry.reason)}")
+            if entry.split_provider:
+                lines.append(f"split_provider = {_toml_string(entry.split_provider)}")
+            if entry.http_status is not None:
+                lines.append(f"http_status = {entry.http_status}")
+            lines.append("")
 
     for file in manifest.files:
         lines += [
@@ -578,6 +641,7 @@ __all__ = [
     "WORKSPACE_DIRNAME",
     "Coverage",
     "DatasetFile",
+    "InstrumentCapabilityEntry",
     "PackageManifest",
     "Provenance",
     "build_manifest_template",

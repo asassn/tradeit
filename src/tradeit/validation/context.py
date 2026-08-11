@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from tradeit.data.packages.capability import CapabilityIndex
 from tradeit.data.packages.spec import DatasetKind
 from tradeit.data.validation_universe import ValidationUniverse, default_universe
 from tradeit.errors import ConfigError
@@ -46,6 +47,7 @@ class ValidationContext:
     #: differs can say whether the data changed or the settings did.
     config_digests: dict[str, str] = field(default_factory=dict)
     _datasets: frozenset[DatasetKind] | None = field(default=None, init=False)
+    _capabilities: CapabilityIndex | None = field(default=None, init=False)
 
     @property
     def as_of(self) -> dt.datetime:
@@ -77,6 +79,28 @@ class ValidationContext:
                     continue
             self._datasets = frozenset(kinds)
         return self._datasets
+
+    @property
+    def capabilities(self) -> CapabilityIndex:
+        """What each instrument's data supports, as recorded at acquisition.
+
+        Read from the stored import report rather than re-derived here, because
+        the distinction it carries cannot be re-derived: an instrument with no
+        split rows is either one that never split or one whose split source
+        answered HTTP 402, and the database looks identical either way. Only the
+        acquisition knew, so only the acquisition can say.
+
+        An empty index means **not recorded**, never "nothing is eligible". A
+        package imported before capabilities existed says nothing, and checks
+        must report that as unknown rather than as a sample of zero.
+        """
+        if self._capabilities is None:
+            report = self.package.report if isinstance(self.package.report, dict) else {}
+            raw = report.get("instrument_capabilities")
+            self._capabilities = CapabilityIndex.from_payload(
+                raw if isinstance(raw, list) else None
+            )
+        return self._capabilities
 
     def missing(self, required: tuple[DatasetKind, ...]) -> tuple[DatasetKind, ...]:
         return tuple(kind for kind in required if kind not in self.datasets)
@@ -134,6 +158,14 @@ class ValidationContext:
             "universe": self.universe.name,
             "universe_digest": self.universe_digest(),
             "universe_size": len(self.universe),
+            # Two sample sizes, never one. A result over every instrument with
+            # price data and a result over those whose raw series is verified
+            # are different statistics, and reporting a single N would let them
+            # be read as the same.
+            "instruments_price_eligible": len(self.capabilities.price_eligible),
+            "instruments_raw_verified": len(self.capabilities.raw_verified),
+            "capability_counts": self.capabilities.counts(),
+            "capability_recorded": not self.capabilities.is_empty,
             "code_version": self.code_version,
             "config_digests": dict(sorted(self.config_digests.items())),
         }

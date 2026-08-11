@@ -32,6 +32,8 @@ import gzip
 import io
 import json
 import tomllib
+import urllib.error
+import urllib.request
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -80,6 +82,7 @@ from tradeit.acquisition.twelvedata import TwelveDataAcquisition
 from tradeit.data.packages.manifest import WORKSPACE_DIRNAME, load_manifest
 from tradeit.data.packages.spec import DATASET_SPECS, DatasetKind
 from tradeit.data.providers.http import (
+    HttpTransport,
     ProviderAuthError,
     ProviderRateLimitError,
     ProviderUnreachableError,
@@ -1786,3 +1789,125 @@ class TestSplitCensus:
         assert census.before_coverage == 1
         assert census.after_coverage == 2
         assert census.effective == 2
+
+
+# ---------------------------------------------------------------------------
+# Entitlement, as the full universe run met it
+# ---------------------------------------------------------------------------
+
+
+def http_error(code: int, body: bytes = b"") -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "https://financialmodelingprep.com/stable/splits?symbol=X&apikey=REDACTED",
+        code,
+        "Payment Required",
+        {},  # type: ignore[arg-type]
+        io.BytesIO(body),
+    )
+
+
+class RealTransport(HttpTransport):
+    """The real transport with urlopen replaced, so status handling is exercised."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(cache=None, timeout_s=1.0, max_attempts=3, min_interval_s=0.0)
+        self.error = error
+        self.attempts = 0
+
+    def _fetch(self, url: str, headers: dict[str, str]) -> bytes:  # type: ignore[override]
+        self.attempts += 1
+        return super()._fetch(url, headers)
+
+
+class TestEntitlementSemantics:
+    """HTTP 402 is a subscription answer, not a failure.
+
+    The full universe run met it on 44 of 78 symbols, interleaved with 200s —
+    so it is per-symbol entitlement, not a rate or daily-quota event. Recording
+    it as PROVIDER_ERROR would leave those 44 "unexplained" and invite a retry
+    loop against a certainty.
+    """
+
+    def _source(self, code: int, body: bytes = b"") -> FmpSplitSource:
+        transport = RealTransport(http_error(code, body))
+        original = urllib.request.urlopen
+
+        def fake(*args: Any, **kwargs: Any) -> Any:
+            raise transport.error
+
+        urllib.request.urlopen = fake  # type: ignore[assignment]
+        try:
+            source = FmpSplitSource(
+                token=FMP_SECRET, transport=transport, requests_per_minute=600_000
+            )
+            source._live_lookup = source.lookup("AAPL")  # type: ignore[attr-defined]
+        finally:
+            urllib.request.urlopen = original  # type: ignore[assignment]
+        return source
+
+    def test_402_is_an_entitlement_answer_not_a_provider_error(self) -> None:
+        source = self._source(402)
+        lookup = source._live_lookup  # type: ignore[attr-defined]
+        assert lookup.support is CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+        assert lookup.support is not CapabilitySupport.PROVIDER_ERROR
+        assert lookup.support.is_evidence_of_absence is False
+
+    def test_402_is_never_retried(self) -> None:
+        """Retrying an answer the vendor will repeat spends the day's allowance
+        on a certainty."""
+        source = self._source(402)
+        assert source.transport.attempts == 1  # type: ignore[attr-defined]
+
+    def test_the_http_status_survives_into_provenance(self) -> None:
+        lookup = self._source(402)._live_lookup  # type: ignore[attr-defined]
+        assert lookup.http_status == 402
+        assert lookup.status is FetchStatus.REJECTED
+        assert lookup.status.is_retryable is False
+
+    def test_the_vendors_own_message_is_preserved(self) -> None:
+        body = json.dumps({"Error Message": "Special Endpoint: upgrade required"}).encode()
+        lookup = self._source(402, body)._live_lookup  # type: ignore[attr-defined]
+        assert "Special Endpoint: upgrade required" in lookup.error
+        assert "402" in lookup.error
+
+    def test_a_402_symbol_keeps_its_price_data_capability(self, tmp_path: Path) -> None:
+        """The consequence that matters: a second vendor's billing does not
+        delete a legitimately acquired price history."""
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA"])
+        report = enrich(
+            package,
+            FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": PLAN_ERROR}),
+        )
+        index = report.instrument_capabilities
+        nvda = next(r for r in index.records if r.ticker == "NVDA")
+        assert nvda.price_data_available is True
+        assert nvda.raw_reconstruction_available is False
+        assert nvda.split_schedule_verified is False
+        assert len(index.price_eligible) == 2
+        assert len(index.raw_verified) == 1
+
+    def test_the_summary_separates_the_four_outcomes(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA"])
+        report = enrich(
+            package,
+            FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": PLAN_ERROR}),
+        )
+        counts = report.outcome_counts
+        assert counts["answered"] == 1
+        assert counts["not_available_on_plan"] == 1
+        assert counts["provider_or_network_error"] == 0
+        text = report.render()
+        assert "NOT AVAILABLE ON PLAN" in text
+        assert "an entitlement answer" in text
+        assert report.to_payload()["outcome_counts"] == counts
+
+    def test_an_entitlement_answer_is_not_a_true_error(self, tmp_path: Path) -> None:
+        """The distinction the request asked for: a plan answer and a network
+        failure both produce zero splits and mean different things."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        broken = enrich(
+            package,
+            FakeFmpTransport(raise_on={"*": ProviderUnreachableError("no route to host")}),
+        )
+        assert broken.outcome_counts["provider_or_network_error"] == 1
+        assert broken.outcome_counts["not_available_on_plan"] == 0

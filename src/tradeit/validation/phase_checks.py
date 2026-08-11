@@ -39,13 +39,23 @@ from tradeit.core.models import OhlcvBar
 from tradeit.data.packages.spec import DatasetKind
 from tradeit.storage import tables as tbl
 from tradeit.strategy.config import IndicatorConfig
-from tradeit.validation.checks import CheckResult, CheckStatus, Phase
+from tradeit.validation.checks import CheckResult, CheckStatus, Phase, blocked
 from tradeit.validation.context import ValidationContext
+from tradeit.validation.scale import DEFAULT_SCALE_FACTORS, scale_invariance_report
 
 #: Instruments sampled for the expensive recompute checks. The whole universe
 #: would be more thorough and would also make a validation run take long enough
 #: that people stop running it, which is a worse failure than a smaller sample.
 SAMPLE_INSTRUMENTS = 20
+
+#: Instruments sampled for the rescaling sweep. Smaller than SAMPLE_INSTRUMENTS
+#: because each instrument is computed once per factor, and the property being
+#: checked is structural rather than statistical — it either holds on real data
+#: or it does not, and eight instruments across six factors is enough to say.
+SCALE_SAMPLE_INSTRUMENTS = 8
+
+#: Below this the warm-up regions dominate and the comparison is mostly NaN.
+MIN_BARS_FOR_SCALE_CHECK = 260
 
 #: Where a prefix-consistency check cuts the series. Two thirds through: far
 #: enough in that warm-up is long past, far enough from the end that the
@@ -708,12 +718,111 @@ def _instrument_years(context: ValidationContext) -> float:
     return float(span * instruments)
 
 
+class IndicatorScaleInvariance(_Check):
+    """Do the analytics declared scale-invariant actually survive a rescaling?
+
+    This is the check that licenses using the instruments whose raw price series
+    could not be recovered. A split adjustment is a rescaling of the price
+    series, so a feature whose answer is unchanged when every price is
+    multiplied by a positive constant gives the same answer on adjusted prices
+    as on raw ones.
+
+    Run against the snapshot's **own bars** rather than a fixture, because the
+    property is about this data: a feature can be invariant on a smooth
+    synthetic ramp and not on a series with gaps, halts and near-zero prices.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            check_id="phase3.scale_invariance",
+            title="Scale invariance: do the declared invariants hold on this data?",
+            phase=Phase.PHASE_3,
+            requires=(DatasetKind.DAILY_BARS,),
+        )
+
+    def run(self, context: ValidationContext) -> CheckResult:
+        missing = context.missing(self.requires)
+        if missing:
+            return blocked(self, missing)
+        series = _load_series(context, limit=SCALE_SAMPLE_INSTRUMENTS)
+        if not series:
+            return blocked(self, self.requires, "no daily bars are present")
+
+        engine = IndicatorEngine(IndicatorConfig())
+
+        def values_for(bars: list[OhlcvBar]) -> dict[str, Any]:
+            return engine.compute(bars, instrument_id=bars[0].instrument_id).values
+
+        violations: list[str] = []
+        unclassified: set[str] = set()
+        checked = 0
+        for instrument_id, bars in sorted(series.items()):
+            if len(bars) < MIN_BARS_FOR_SCALE_CHECK:
+                continue
+            checked += 1
+            for factor in DEFAULT_SCALE_FACTORS:
+                report = scale_invariance_report(values_for, bars, factor)
+                unclassified.update(report.unclassified)
+                violations.extend(
+                    f"instrument {instrument_id} feature {item.name} moved by "
+                    f"{item.max_relative_difference:.3g} at factor {factor}"
+                    for item in report.violations
+                )
+        if not checked:
+            return blocked(
+                self,
+                self.requires,
+                f"no instrument has the {MIN_BARS_FOR_SCALE_CHECK} bars this check needs",
+            )
+
+        capabilities = context.capabilities
+        evidence = {
+            "instruments_checked": checked,
+            "factors": list(DEFAULT_SCALE_FACTORS),
+            "violations": len(violations),
+            "unclassified_features": len(unclassified),
+            # Both sample sizes, because a reader will otherwise assume one.
+            "instruments_price_eligible": len(capabilities.price_eligible),
+            "instruments_raw_verified": len(capabilities.raw_verified),
+        }
+        if violations or unclassified:
+            return CheckResult(
+                check_id=self.check_id,
+                title=self.title,
+                phase=self.phase,
+                status=CheckStatus.FAIL,
+                summary=(
+                    f"{len(violations)} declared-invariant feature reading(s) moved under "
+                    f"rescaling and {len(unclassified)} feature(s) have no classification. "
+                    "Analytics may NOT be run on instruments without a verified raw price "
+                    "series until this is resolved."
+                ),
+                evidence=evidence,
+                examples=tuple(sorted(violations)[:5] + sorted(unclassified)[:5]),
+            )
+        return CheckResult(
+            check_id=self.check_id,
+            title=self.title,
+            phase=self.phase,
+            status=CheckStatus.PASS,
+            summary=(
+                f"every feature declared scale-invariant returned the identical answer "
+                f"over {checked} instrument(s) at {len(DEFAULT_SCALE_FACTORS)} rescaling "
+                "factors, so those analytics are valid on split-adjusted prices without a "
+                "verified raw series. Scale-SENSITIVE analytics are not, and are limited "
+                f"to the {len(capabilities.raw_verified)} instrument(s) that have one."
+            ),
+            evidence=evidence,
+        )
+
+
 def phase_checks() -> list[Any]:
     """Every phase check, grouped by the layer it interrogates."""
     return [
         IndicatorWarmup(),
         IndicatorDeterminism(),
         IndicatorPrefixConsistency(),
+        IndicatorScaleInvariance(),
         PatternDetectionRate(),
         PatternCausality(),
         BreakoutStateDistribution(),
@@ -724,14 +833,17 @@ def phase_checks() -> list[Any]:
 
 
 __all__ = [
+    "MIN_BARS_FOR_SCALE_CHECK",
     "PREFIX_FRACTION",
     "SAMPLE_INSTRUMENTS",
+    "SCALE_SAMPLE_INSTRUMENTS",
     "BreakoutBoundaryProvenance",
     "BreakoutMonitorFloor",
     "BreakoutQualityFrozen",
     "BreakoutStateDistribution",
     "IndicatorDeterminism",
     "IndicatorPrefixConsistency",
+    "IndicatorScaleInvariance",
     "IndicatorWarmup",
     "PatternCausality",
     "PatternDetectionRate",

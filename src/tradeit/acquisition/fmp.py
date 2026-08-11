@@ -72,6 +72,7 @@ from tradeit.acquisition.redaction import credential_hint, redact_text, redact_u
 from tradeit.data.providers.http import (
     HttpTransport,
     ProviderAuthError,
+    ProviderEntitlementError,
     ProviderRateLimitError,
     ProviderUnreachableError,
 )
@@ -250,9 +251,10 @@ class FmpSplitSource:
         ]
         if self.support is CapabilitySupport.NOT_AVAILABLE_ON_PLAN:
             out.append(
-                "the FMP splits endpoint is not available on this subscription. The "
-                "absence of split rows is a statement about the plan, NOT about "
-                "whether these securities had splits"
+                "the FMP splits endpoint is not available on this subscription for at "
+                "least some symbols (HTTP 402 Payment Required). The absence of split "
+                "rows for those symbols is a statement about the plan, NOT about "
+                "whether these securities had splits, and they were not retried"
             )
         elif self.support is CapabilitySupport.PROVIDER_ERROR:
             out.append(
@@ -296,6 +298,12 @@ class FmpSplitSource:
         started = time.perf_counter()
         try:
             body = self.transport.get(url)
+        except ProviderEntitlementError as error:
+            # HTTP 402 Payment Required. The live universe run met this on 44 of
+            # 78 symbols, interleaved with 200s — so it is per-symbol
+            # entitlement, not a rate or daily-quota event, and retrying it
+            # would spend the day's allowance on a certainty.
+            return self._failure(ticker, safe_url, error, started, entitlement=True)
         except ProviderAuthError as error:
             return self._failure(ticker, safe_url, error, started, auth=True)
         except ProviderRateLimitError as error:
@@ -334,8 +342,29 @@ class FmpSplitSource:
         *,
         auth: bool = False,
         rate_limited: bool = False,
+        entitlement: bool = False,
     ) -> CorporateActionLookup:
         message = redact_text(str(error), self._token)
+        vendor_message = _vendor_message(error, self._token)
+        if vendor_message:
+            message = f"{message} Vendor said: {vendor_message}"
+        status_code = getattr(error, "status_code", None)
+        if entitlement:
+            # An entitlement answer, not a failure of the endpoint. The
+            # distinction matters downstream: PROVIDER_ERROR would leave the
+            # absence of splits "unexplained", where this says plainly that the
+            # plan does not cover this symbol and the securities may well have
+            # split.
+            self._note_support(CapabilitySupport.NOT_AVAILABLE_ON_PLAN)
+            return CorporateActionLookup(
+                symbol=symbol,
+                support=CapabilitySupport.NOT_AVAILABLE_ON_PLAN,
+                status=FetchStatus.REJECTED,
+                url=safe_url,
+                error=message,
+                http_status=status_code or 402,
+                elapsed_s=time.perf_counter() - started,
+            )
         if rate_limited:
             status = (
                 FetchStatus.QUOTA_EXHAUSTED
@@ -358,6 +387,7 @@ class FmpSplitSource:
             status=status,
             url=safe_url,
             error=message,
+            http_status=status_code,
             elapsed_s=time.perf_counter() - started,
         )
 
@@ -683,6 +713,28 @@ def _looks_like_daily_cap(message: str) -> bool:
 # ---------------------------------------------------------------------------
 # Parsing
 # ---------------------------------------------------------------------------
+
+
+def _vendor_message(error: Exception, secret: str) -> str:
+    """The vendor's own words from an error body, redacted and bounded.
+
+    Kept because "402 Payment Required" is our reading of a status code, while
+    the body is the vendor stating which entitlement is missing. Provenance
+    should carry both rather than only our interpretation.
+    """
+    body = getattr(error, "body", b"")
+    if not body:
+        return ""
+    try:
+        decoded = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return redact_text(body.decode("utf-8", "replace")[:300].strip(), secret)
+    if isinstance(decoded, dict):
+        for key in ("Error Message", "error", "message"):
+            value = decoded.get(key)
+            if value:
+                return redact_text(str(value)[:300], secret)
+    return redact_text(str(decoded)[:300], secret)
 
 
 def _first(record: Mapping[str, Any], keys: tuple[str, ...]) -> Any:

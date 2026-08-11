@@ -83,9 +83,15 @@ from tradeit.acquisition.reconstruct import (
     reconstruct_symbol,
     take_census,
 )
+from tradeit.data.packages.capability import (
+    CapabilityIndex,
+    InstrumentCapability,
+    InstrumentCapabilityRecord,
+)
 from tradeit.data.packages.manifest import (
     WORKSPACE_DIRNAME,
     DatasetFile,
+    InstrumentCapabilityEntry,
     PackageManifest,
     Provenance,
     file_digest,
@@ -290,6 +296,9 @@ class SymbolEnrichment:
     instrument_id: int
     support: CapabilitySupport = CapabilitySupport.UNKNOWN
     status: FetchStatus | None = None
+    #: The vendor's own HTTP status, kept so "402" survives into provenance
+    #: rather than only this project's reading of it.
+    http_status: int | None = None
     census: SplitCensus = field(default_factory=lambda: SplitCensus())
     sessions_changed: int = 0
     error: str = ""
@@ -330,6 +339,10 @@ class EnrichmentReport:
     capabilities: dict[str, str] = field(default_factory=dict)
     files: dict[str, int] = field(default_factory=dict)
     manifest_path: Path | None = None
+    #: Per-instrument flags written into the package. Empty until `_write` runs.
+    #: Distinct from `capabilities`, which is what the *source* can do; this is
+    #: what each *instrument's data* supports.
+    instrument_capabilities: CapabilityIndex = field(default_factory=CapabilityIndex)
     requests: int = 0
     cached: int = 0
     waited_s: float = 0.0
@@ -344,6 +357,33 @@ class EnrichmentReport:
     def schedule_notes(self) -> list[str]:
         """Split-schedule findings a person should know and need not act on."""
         return [f.render() for f in self.schedule_findings if not f.is_conflict]
+
+    @property
+    def outcome_counts(self) -> dict[str, int]:
+        """Symbols by what the source actually said, not by pass/fail.
+
+        Four outcomes, because they call for four different responses and the
+        live universe run produced three of them at once. Collapsing them into
+        "34 succeeded, 44 failed" would have hidden that the 44 were an
+        entitlement answer — a subscription question — rather than anything that
+        retrying, waiting or fixing code could change.
+        """
+        tally = {
+            "answered": 0,
+            "empty_valid_response": 0,
+            "not_available_on_plan": 0,
+            "provider_or_network_error": 0,
+        }
+        for item in self.symbols:
+            if item.support is CapabilitySupport.AVAILABLE:
+                tally["answered"] += 1
+            elif item.support is CapabilitySupport.EMPTY_VALID_RESPONSE:
+                tally["empty_valid_response"] += 1
+            elif item.support is CapabilitySupport.NOT_AVAILABLE_ON_PLAN:
+                tally["not_available_on_plan"] += 1
+            else:
+                tally["provider_or_network_error"] += 1
+        return tally
 
     @property
     def all_findings(self) -> list[str]:
@@ -373,6 +413,7 @@ class EnrichmentReport:
 
     def render(self) -> str:
         status = self.status
+        counts = self.outcome_counts
         lines = [
             "ENRICHMENT SUMMARY",
             "=" * 72,
@@ -386,6 +427,17 @@ class EnrichmentReport:
             f"Not answered         : {len(self.unenriched)}",
             f"Split records written: {self.splits_written:,}",
             "",
+            "Outcome by kind      : these are four different situations, not one",
+            f"  answered with data           : {counts['answered']}",
+            f"  answered, no splits on record: {counts['empty_valid_response']}",
+            f"  NOT AVAILABLE ON PLAN        : {counts['not_available_on_plan']}"
+            + (
+                "   <- an entitlement answer. NOT retried, and NOT evidence"
+                if counts["not_available_on_plan"]
+                else ""
+            ),
+            f"  provider or network error    : {counts['provider_or_network_error']}",
+            "",
             *self._split_census_lines(),
             f"Requests issued      : {self.requests:,}",
             f"Answers from cache   : {self.cached:,}",
@@ -397,13 +449,23 @@ class EnrichmentReport:
         if self.unenriched:
             lines += ["", "Not enriched", "-" * 72]
             for item in self.unenriched:
-                lines.append(f"  {item.symbol:<10} {item.support:<24} {item.error[:60]}")
+                code = f"HTTP {item.http_status}" if item.http_status else ""
+                lines.append(f"  {item.symbol:<10} {item.support:<24} {code:<9} {item.error[:50]}")
             lines += [
                 "",
                 "  These symbols have NO split schedule from this source. Their prices",
                 "  keep the primary provider's adjustment and the reconstruction for",
                 "  them is marked not attempted. That is not a claim that they never",
                 "  split.",
+            ]
+        if not self.instrument_capabilities.is_empty:
+            lines += ["", "Per-instrument capability (what validation may use)", "-" * 72]
+            lines += self.instrument_capabilities.render()
+            lines += [
+                "",
+                "  An instrument without a verified split schedule keeps its price",
+                "  history. Scale-invariant analytics run over it unchanged; only",
+                "  absolute-price work needs the raw series.",
             ]
         if self.reconstruction:
             lines += ["", "Raw-price reconstruction (DERIVED, not vendor raw)", "-" * 72]
@@ -493,6 +555,7 @@ class EnrichmentReport:
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "tool_version": ENRICHMENT_TOOL_VERSION,
             "splits_written": self.splits_written,
+            "outcome_counts": self.outcome_counts,
             "requests": self.requests,
             "cached": self.cached,
             "symbols": [
@@ -500,6 +563,7 @@ class EnrichmentReport:
                     "symbol": item.symbol,
                     "support": str(item.support),
                     "status": str(item.status) if item.status else None,
+                    "http_status": item.http_status,
                     "splits": item.census.to_payload(),
                     "sessions_changed": item.sessions_changed,
                     "error": item.error,
@@ -520,6 +584,8 @@ class EnrichmentReport:
                 }
                 for item in self.reconstruction
             ],
+            "instrument_capabilities": self.instrument_capabilities.to_payload(),
+            "capability_counts": self.instrument_capabilities.counts(),
             "conflicts": list(self.conflicts),
             "conflict_count": len(self.conflicts),
             "schedule_findings": [item.to_payload() for item in self.schedule_findings],
@@ -609,6 +675,7 @@ class PackageEnricher:
             lookup = self._lookup(symbol, report)
             state.support = lookup.support
             state.status = lookup.status
+            state.http_status = lookup.http_status
             state.error = lookup.error
             report.findings.extend(lookup.findings)
 
@@ -985,10 +1052,22 @@ class PackageEnricher:
             ),
         )
 
+        report.instrument_capabilities = self._capability_index(manifest, report)
         updated = manifest.model_copy(
             update={
                 "files": tuple(files),
                 "provenance": provenance,
+                "instrument_capabilities": tuple(
+                    InstrumentCapabilityEntry(
+                        instrument_id=record.instrument_id,
+                        ticker=record.ticker,
+                        flags=tuple(sorted(str(flag) for flag in record.flags)),
+                        reason=record.reason,
+                        split_provider=record.split_provider,
+                        http_status=record.http_status,
+                    )
+                    for record in report.instrument_capabilities.records
+                ),
                 "known_limitations": tuple(
                     self._limitations(manifest, report, reconstructed=bool(applied))
                 ),
@@ -998,6 +1077,58 @@ class PackageEnricher:
         target.write_text(render_manifest(updated), encoding="utf-8")
         report.manifest_path = target
         report.problems.extend(verify_files(updated, self.package))
+
+    def _capability_index(
+        self, manifest: PackageManifest, report: EnrichmentReport
+    ) -> CapabilityIndex:
+        """One record per instrument, saying what its data supports.
+
+        The whole point is to keep a legitimately acquired price history usable
+        when a *second* vendor's plan refuses its split schedule. Every
+        instrument here has bars; only some have a verified schedule; and the
+        difference is recorded rather than resolved by throwing one group away.
+        """
+        raw_already = manifest.adjustment_policy is AdjustmentPolicyDeclaration.RAW_UNADJUSTED
+        records: list[InstrumentCapabilityRecord] = []
+        for state in report.symbols:
+            flags = {InstrumentCapability.PRICE_DATA_AVAILABLE}
+            reason = ""
+            if state.usable:
+                # "Answered" includes a valid empty response: a source that says
+                # it holds no splits for this symbol has given a schedule of
+                # zero, which inverts to the identity.
+                flags.add(InstrumentCapability.SPLIT_SCHEDULE_VERIFIED)
+                flags.add(InstrumentCapability.RAW_RECONSTRUCTION_AVAILABLE)
+            elif raw_already:
+                # Nothing to invert. The package's prices are already the
+                # exchange prints, so a missing split schedule costs corporate
+                # -action analysis but not the raw series.
+                flags.add(InstrumentCapability.RAW_RECONSTRUCTION_AVAILABLE)
+                reason = (
+                    f"prices are already {manifest.adjustment_policy}; no reconstruction "
+                    "is needed, though the split schedule itself is unverified"
+                )
+            else:
+                flags.add(InstrumentCapability.RAW_RECONSTRUCTION_INCOMPLETE_OR_UNKNOWN)
+                code = f" (HTTP {state.http_status})" if state.http_status else ""
+                reason = (
+                    f"{self.source.name} returned {state.support}{code} for this symbol, "
+                    "so the split schedule could not be verified and the split-adjusted "
+                    "prices cannot be inverted. This is NOT a defect in the price "
+                    "history and NOT evidence that the security never split"
+                )
+            records.append(
+                InstrumentCapabilityRecord(
+                    instrument_id=state.instrument_id,
+                    ticker=state.symbol,
+                    flags=frozenset(flags),
+                    reason=reason,
+                    split_provider=self.source.name if state.usable else "",
+                    http_status=state.http_status,
+                    observed_at=report.started_at.date(),
+                )
+            )
+        return CapabilityIndex(records=tuple(records))
 
     def _limitations(
         self, manifest: PackageManifest, report: EnrichmentReport, *, reconstructed: bool

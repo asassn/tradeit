@@ -161,6 +161,38 @@ class ValidationRun:
             "",
         ]
 
+        capabilities = self.context.capabilities
+        lines += ["Sample size", "-" * 78]
+        if capabilities.is_empty:
+            lines += [
+                "  This package carries no per-instrument capability record, so the two",
+                "  samples below cannot be separated. Eligibility is UNKNOWN rather than",
+                "  established; re-run enrichment to produce one.",
+                "",
+            ]
+        else:
+            lines += [
+                f"  real-price-eligible instruments      {len(capabilities.price_eligible):>4}"
+                "   (scale-invariant analytics)",
+                f"  raw-reconstruction-verified          {len(capabilities.raw_verified):>4}"
+                "   (absolute-price analytics)",
+                "",
+                "  These are two different samples and are never combined. A result over",
+                "  the first says nothing about analytics that need the second, and a",
+                "  single N would let them be read as the same claim.",
+                "",
+            ]
+            reasons = capabilities.reasons()
+            if reasons:
+                lines.append("  Why instruments lack a verified raw price series:")
+                lines += [f"    {count:>4}  {reason}" for reason, count in reasons.items()]
+                lines += [
+                    "",
+                    "  An instrument in that list keeps its price history. It is excluded",
+                    "  from absolute-price work and from nothing else.",
+                    "",
+                ]
+
         usable, reason = self.is_evidence
         lines += ["Conclusion", "-" * 78]
         if usable:
@@ -188,6 +220,11 @@ class ValidationRun:
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "counts": self.counts,
+            "sample_sizes": {
+                "real_price_eligible": len(self.context.capabilities.price_eligible),
+                "raw_reconstruction_verified": len(self.context.capabilities.raw_verified),
+                "capability_recorded": not self.context.capabilities.is_empty,
+            },
             "is_evidence": usable,
             "conclusion": reason or "all checks ran and passed",
             "not_measured": list(NOT_MEASURED),

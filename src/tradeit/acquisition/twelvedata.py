@@ -69,6 +69,7 @@ from tradeit.data.packages.spec import AdjustmentPolicyDeclaration, DatasetKind
 from tradeit.data.providers.http import (
     HttpTransport,
     ProviderAuthError,
+    ProviderEntitlementError,
     ProviderRateLimitError,
     ProviderUnreachableError,
 )
@@ -268,7 +269,12 @@ class TwelveDataAcquisition:
                     "absence of events"
                 )
             elif state is CapabilitySupport.UNKNOWN:
-                out.append(f"the {dataset} endpoint was not exercised; availability is UNKNOWN")
+                out.append(
+                    f"the {dataset} endpoint was not exercised, or was refused in a way "
+                    "that could not be attributed to either the plan or the credential; "
+                    "availability is UNKNOWN and the absence of rows is NOT evidence "
+                    "that these securities had no such events"
+                )
         return out
 
     # -- planning ------------------------------------------------------------
@@ -334,6 +340,10 @@ class TwelveDataAcquisition:
         started = time.perf_counter()
         try:
             body = self.transport.get(url)
+        except ProviderEntitlementError as error:
+            return self._failure(
+                request, safe_url, FetchStatus.REJECTED, error, started, entitlement=True
+            )
         except ProviderAuthError as error:
             return self._failure(request, safe_url, FetchStatus.REJECTED, error, started)
         except ProviderRateLimitError as error:
@@ -392,21 +402,62 @@ class TwelveDataAcquisition:
         status: FetchStatus,
         error: Exception,
         started: float,
+        *,
+        entitlement: bool = False,
     ) -> FetchOutcome:
+        """Turn a transport exception into a classified outcome.
+
+        The interesting case is a bare HTTP 403 on a corporate-action endpoint,
+        which the live universe run produced for ``/dividends``. The transport
+        cannot tell a wrong key from an unentitled endpoint — both are 403 — so
+        three signals are consulted, in order of how much they prove:
+
+        1. The vendor's own words. A message naming a plan settles it.
+        2. **Whether this key has already worked in this run.** If
+           ``/time_series`` answered with data on the same credential minutes
+           ago, a 403 on ``/dividends`` cannot be a bad key. This is the signal
+           that actually resolved the real case, and it is sound: one run, one
+           key, one account.
+        3. Neither — then the honest answer is UNKNOWN, not PROVIDER_ERROR and
+           certainly not "this security pays no dividends".
+        """
         message = redact_text(str(error), self._token)
-        if status is FetchStatus.REJECTED and _looks_like_plan_restriction(message):
-            self._note_support(request.dataset, CapabilitySupport.NOT_AVAILABLE_ON_PLAN)
-        elif status is FetchStatus.REJECTED:
-            self._note_support(request.dataset, CapabilitySupport.PROVIDER_ERROR)
+        vendor_message = _vendor_message(error, self._token)
+        if vendor_message:
+            message = f"{message} Vendor said: {vendor_message}"
+        code = getattr(error, "status_code", None)
+
+        if status is FetchStatus.REJECTED:
+            if entitlement or _looks_like_plan_restriction(message):
+                support = CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+            elif code == 403 and self._credential_already_worked():
+                support = CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+                message = (
+                    f"{message} Classified as a plan entitlement rather than a bad key: "
+                    "the same credential returned data for another dataset in this run."
+                )
+            elif code in (401, 403):
+                # A credential problem, or a plan restriction we cannot prove.
+                # Either way it is NOT evidence that the events are absent.
+                support = CapabilitySupport.UNKNOWN
+            else:
+                support = CapabilitySupport.PROVIDER_ERROR
+            self._note_support(request.dataset, support)
+
         if _looks_like_daily_quota(message):
             status = FetchStatus.QUOTA_EXHAUSTED
         return FetchOutcome(
             request=request,
             status=status,
             url=safe_url,
+            http_status=code,
             error=message,
             elapsed_s=time.perf_counter() - started,
         )
+
+    def _credential_already_worked(self) -> bool:
+        """Whether this key has been accepted for any dataset in this run."""
+        return any(state is CapabilitySupport.AVAILABLE for state in self.support.values())
 
     # -- interpreting the payload --------------------------------------------
 
@@ -903,6 +954,27 @@ def _first_session_on_or_after(calendar: TradingCalendar, day: dt.date) -> dt.da
         return calendar.next_session(day)
     except DataError:
         return None
+
+
+def _vendor_message(error: Exception, secret: str) -> str:
+    """The vendor's own words from an error body, redacted and bounded.
+
+    Kept in provenance because "403" is our reading of a status code while the
+    body is the vendor stating which entitlement is missing.
+    """
+    body = getattr(error, "body", b"")
+    if not body:
+        return ""
+    try:
+        decoded = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return redact_text(body.decode("utf-8", "replace")[:300].strip(), secret)
+    if isinstance(decoded, dict):
+        for key in ("message", "Error Message", "error"):
+            value = decoded.get(key)
+            if value:
+                return redact_text(str(value)[:300], secret)
+    return redact_text(str(decoded)[:300], secret)
 
 
 def _last_session_on_or_before(calendar: TradingCalendar, day: dt.date) -> dt.date | None:

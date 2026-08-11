@@ -59,7 +59,35 @@ class ProviderUnreachableError(ProviderError):
 
 
 class ProviderAuthError(ProviderError):
-    """The vendor rejected our credential, or we had none to send."""
+    """The vendor rejected our credential, or we had none to send.
+
+    Carries the HTTP status and the vendor's own response body where there was
+    one, because "401 or 403" is not enough to tell a wrong key from a plan that
+    does not include the endpoint, and those lead to opposite conclusions about
+    whether the data exists.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None, body: bytes = b"") -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
+
+
+class ProviderEntitlementError(ProviderError):
+    """The vendor understood the request and the plan does not cover it.
+
+    Raised for **HTTP 402 Payment Required**, which is not ambiguous the way a
+    403 is: the request was understood, the credential was accepted, and the
+    answer is that this account is not entitled to the data. That is a fact
+    about a subscription, never about whether the underlying corporate actions
+    happened, and it is **not retryable** — re-asking a question the vendor has
+    answered "not on your plan" burns quota against a certainty.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None, body: bytes = b"") -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
 
 
 class ProviderRateLimitError(ProviderError):
@@ -202,11 +230,28 @@ class HttpTransport:
             except urllib.error.HTTPError as exc:
                 # A status code is the vendor answering. Retrying a 401 forever
                 # is how a typo in a key becomes an IP ban.
+                #
+                # The body is read once and passed on. Without it an adapter
+                # cannot tell "your key is wrong" from "your plan lacks this",
+                # and it is the vendor's own message that separates them.
+                body = _read_error_body(exc)
+                if exc.code == 402:
+                    # Payment Required. Unlike a 403 this is unambiguous: the
+                    # request was understood and the account is not entitled.
+                    raise ProviderEntitlementError(
+                        f"{safe} returned 402 Payment Required: this account's plan does "
+                        "not include what was requested. Not retried -- the answer will "
+                        "not change until the subscription does.",
+                        status_code=402,
+                        body=body,
+                    ) from exc
                 if exc.code in (401, 403):
                     raise ProviderAuthError(
                         f"{safe} returned {exc.code}: the vendor rejected the request. "
                         "Check the API key and the plan's entitlements -- a free tier "
-                        "commonly returns 403 for endpoints it does not include."
+                        "commonly returns 403 for endpoints it does not include.",
+                        status_code=exc.code,
+                        body=body,
                     ) from exc
                 if exc.code == 429:
                     retry_after = float(exc.headers.get("Retry-After") or 0) or 2**attempt
@@ -243,6 +288,19 @@ class HttpTransport:
         raise ProviderUnreachableError(f"could not reach {safe}: {last}")
 
 
+def _read_error_body(exc: urllib.error.HTTPError, limit: int = 4096) -> bytes:
+    """The vendor's own message from an error response, best effort.
+
+    Bounded and never raising: this runs on a path that is already failing, and
+    a second failure while reading the explanation would replace a diagnosable
+    error with an undiagnosable one.
+    """
+    try:
+        return bytes(exc.read()[:limit])
+    except Exception:  # pragma: no cover - defensive; the body is a bonus
+        return b""
+
+
 def reachability_report(hosts: list[str], transport: HttpTransport | None = None) -> dict[str, str]:
     """Probe hosts and classify each outcome.
 
@@ -256,6 +314,8 @@ def reachability_report(hosts: list[str], transport: HttpTransport | None = None
         try:
             probe.get(f"https://{host}/")
             out[host] = "reachable"
+        except ProviderEntitlementError:
+            out[host] = "reachable (not included in this plan)"
         except ProviderAuthError:
             out[host] = "reachable (credential rejected)"
         except ProviderRateLimitError:
