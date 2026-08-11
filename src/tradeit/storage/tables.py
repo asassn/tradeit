@@ -2429,3 +2429,95 @@ class ImportCorrection(Base):
         Index("ix_correction_rule", "rule"),
         Index("ix_correction_source", "source_file", "line_number"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Scanning: driving Phase 4 and Phase 5 over an imported snapshot
+# ---------------------------------------------------------------------------
+
+
+class ScanRun(Base):
+    """One execution of the pattern/breakout scan over one snapshot.
+
+    The provenance anchor for every pattern and breakout produced empirically.
+    Given a scan id you can say which snapshot, which code, which detector and
+    engine configuration, and over which sessions — and without one, a stored
+    pattern is an assertion nobody can reproduce.
+
+    Separate from :class:`RunManifest`, which anchors *decision*-producing runs
+    and requires a strategy configuration. A scan produces observations, not
+    decisions; forcing it through a table that demands a strategy digest would
+    mean inventing one, and an invented digest is worse than an absent row.
+    """
+
+    __tablename__ = "scan_runs"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    #: Stable across resumes. Two invocations with the same scan_id are the
+    #: same scan continuing, which is what makes resume meaningful.
+    scan_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    snapshot_id: Mapped[str] = mapped_column(String(96), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False)
+    as_of: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    start_session: Mapped[dt.date | None] = mapped_column(Date)
+    end_session: Mapped[dt.date | None] = mapped_column(Date)
+    code_version: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    pattern_config_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    breakout_config_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    breakout_profile: Mapped[str | None] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    started_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    instruments_requested: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    instruments_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: Counts and per-detector tallies. A mapping rather than columns because
+    #: the detector roster changes and a schema migration per detector would be
+    #: a tax on adding one.
+    report: Mapped[dict[str, object] | None] = mapped_column(JSONB_OR_JSON)
+
+    __table_args__ = (
+        Index("ix_scan_run_snapshot", "snapshot_id", "started_at"),
+        Index("ix_scan_run_status", "status"),
+    )
+
+
+class ScanProgress(Base):
+    """One completed instrument within one scan. The resume ledger.
+
+    Written in the same transaction as that instrument's patterns and breakouts,
+    so the two cannot disagree: a progress row exists if and only if the
+    instrument's observations were committed. An interrupted scan therefore
+    resumes at instrument granularity with no duplicates and no silently
+    half-scanned series — and because the pattern and breakout repositories are
+    themselves idempotent by session, re-running a completed instrument is safe
+    rather than merely unnecessary.
+    """
+
+    __tablename__ = "scan_progress"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    scan_run_id: Mapped[int] = mapped_column(
+        ForeignKey("scan_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    instrument_id: Mapped[int] = mapped_column(PK, nullable=False)
+    ticker: Mapped[str | None] = mapped_column(String(16))
+    first_session: Mapped[dt.date | None] = mapped_column(Date)
+    last_session: Mapped[dt.date | None] = mapped_column(Date)
+    sessions_scanned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bars_read: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    patterns_persisted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    breakouts_persisted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: How the causal series was obtained: a single point-in-time read whose
+    #: precondition was verified, or one read per session.
+    feed_mode: Mapped[str] = mapped_column(String(24), nullable=False, default="")
+    elapsed_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    finished_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("scan_run_id", "instrument_id", name="uq_scan_progress"),
+        Index("ix_scan_progress_run", "scan_run_id"),
+    )

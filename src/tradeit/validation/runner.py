@@ -40,6 +40,7 @@ from tradeit.validation.checks import (
 from tradeit.validation.context import ValidationContext
 from tradeit.validation.data_checks import data_checks
 from tradeit.validation.phase_checks import phase_checks
+from tradeit.validation.scan_checks import scan_checks
 
 #: What this gate does not compute, quoted verbatim in every conclusion.
 NOT_MEASURED: tuple[str, ...] = (
@@ -53,7 +54,7 @@ NOT_MEASURED: tuple[str, ...] = (
 
 def all_checks() -> list[ValidationCheck]:
     """Every check, data layer first."""
-    checks: list[Any] = [*data_checks(), *phase_checks()]
+    checks: list[Any] = [*data_checks(), *phase_checks(), *scan_checks()]
     seen = Counter(c.check_id for c in checks)
     duplicates = sorted(k for k, v in seen.items() if v > 1)
     if duplicates:

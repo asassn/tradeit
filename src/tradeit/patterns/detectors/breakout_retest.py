@@ -65,6 +65,7 @@ evidence on its own and real labelled data is what will say by how much.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 
 import numpy as np
 
@@ -283,6 +284,8 @@ class BreakoutRetestDetector(BaseDetector):
                         "level": level,
                         "last_touch": last_touch,
                         "break_index": break_index,
+                        "peak_index": peak_index,
+                        "break_high": float(inputs.bars[peak_index].high),
                         "retest_index": retest_index,
                         "retest_low": retest_low,
                         "proximity": proximity,
@@ -544,16 +547,32 @@ class BreakoutRetestDetector(BaseDetector):
                 "break": (bars[break_index].session_date, bars[retest_index].session_date),
                 "retest": (bars[retest_index].session_date, bars[inputs.last_index].session_date),
             },
-            resistance=level,
-            support=Boundary(
-                kind="support",
-                method="retest_low",
-                level=float(structure.parts["retest_low"]),
-                anchor_date=bars[retest_index].session_date,
+            # Which boundary is which, after a break, is not the same question
+            # as before one. The level was resistance until price closed
+            # through it; a retest that *held* is the market re-reading that
+            # line as support, which is why `invalidation` is derived from it.
+            # Resistance is now the high of the excursion — the price the move
+            # has to clear to resume.
+            #
+            # Reported the other way round, this pattern wrote support above
+            # resistance and the schema's own `ck_pattern_support_below_
+            # resistance` refused it. Worse than the crash: Phase 5 would have
+            # monitored a boundary price was *already above*, opening a
+            # spurious breakout event on the first session of every retest.
+            resistance=Boundary(
+                kind="resistance",
+                method="breakout_high",
+                level=float(structure.parts["break_high"]),
+                anchor_date=bars[int(structure.parts["peak_index"])].session_date,
                 confidence=50.0,
             ),
+            support=replace(level, kind="support"),
             key_points={
                 "break": PricePoint(bars[break_index].session_date, float(bars[break_index].close)),
+                "break_high": PricePoint(
+                    bars[int(structure.parts["peak_index"])].session_date,
+                    float(structure.parts["break_high"]),
+                ),
                 "retest_low": PricePoint(
                     bars[retest_index].session_date, float(structure.parts["retest_low"])
                 ),

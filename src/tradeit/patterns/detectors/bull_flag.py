@@ -489,6 +489,13 @@ class BullFlagDetector:
             ),
         )
 
+        if not geometry.boundaries_are_ordered:
+            # This detector assembles its own instance rather than going through
+            # `BaseDetector._build`, so the shared guard has to be repeated. See
+            # `PatternGeometry.boundaries_are_ordered`: support at or above
+            # resistance is not a consolidation, and the database refuses it.
+            return None
+
         return PatternInstance(
             instrument_id=bars[0].instrument_id,
             pattern_type=self.pattern_type,

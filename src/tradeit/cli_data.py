@@ -60,9 +60,11 @@ from tradeit.data.packages.sinks import CountingSink, JsonlSink, RecordSink
 from tradeit.data.packages.spec import DATASET_SPECS, DatasetKind, describe_dataset
 from tradeit.data.validation_universe import default_universe
 from tradeit.errors import TradeitError
+from tradeit.scanning import ScanOptions, SnapshotScanner
 from tradeit.storage.session import session_scope
 from tradeit.validation.context import load_context
 from tradeit.validation.runner import run_validation
+from tradeit.validation.survivorship import control_required_start, required_history_start
 
 
 def cmd_package_spec(args: argparse.Namespace) -> int:
@@ -200,6 +202,45 @@ def cmd_validate(args: argparse.Namespace) -> int:
     # Exit non-zero when the run is not citable. A CI job that treats a
     # half-blocked run as success is a CI job that will eventually approve one.
     return 0 if usable else 1
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Run the Phase 4 detectors and the Phase 5 engine over an imported snapshot.
+
+    The step that was missing between import and the Phase 4/5 gate checks.
+    Both engines existed; nothing drove them causally across real bars and
+    persisted what they produced, so those checks had nothing to read and
+    SKIPPED.
+    """
+    options = ScanOptions(
+        scan_id=args.scan_id or "",
+        tickers=tuple(_split_symbols(args.symbols)),
+        start=dt.date.fromisoformat(args.start) if args.start else None,
+        end=dt.date.fromisoformat(args.end) if args.end else None,
+        respect_capabilities=not args.ignore_capabilities,
+        force=args.force,
+        breakout_profile=args.profile,
+        code_version=args.code_version,
+    )
+    with session_scope() as session:
+        context = load_context(session, args.snapshot, code_version=args.code_version)
+        scanner = SnapshotScanner(
+            session,
+            args.snapshot,
+            options=options,
+            capabilities=context.capabilities,
+            on_progress=(lambda line: print(line, flush=True)) if args.progress else None,
+        )
+        report = scanner.run()
+
+    print()
+    print(report.render())
+    if args.json:
+        Path(args.json).write_text(
+            json.dumps(report.to_payload(), indent=2, sort_keys=True), encoding="utf-8"
+        )
+        print(f"\nwrote {args.json}")
+    return 1 if report.problems else 0
 
 
 def cmd_acquire(args: argparse.Namespace) -> int:
@@ -371,19 +412,24 @@ def _unreachable_delisted(symbols: list[str], start: dt.date) -> list[str]:
         instrument
         for instrument in universe.delisted
         if instrument.ticker.upper() in wanted
-        and instrument.last_trade_date is not None
-        and instrument.last_trade_date < start
+        and (required := control_required_start(instrument)) is not None
+        and required < start
     ]
     if not unreachable:
         return []
-    earliest = min(i.last_trade_date for i in unreachable if i.last_trade_date)
+    # The preflight number: not the earliest last-trade date, but the earliest
+    # date a request must *reach* for every control to be usable. A series that
+    # begins the week a company collapses cannot warm up an indicator and shows
+    # no pre-collapse regime, so it exercises nothing.
+    needed = required_history_start(universe)
     lines = [
         "",
-        f"WARNING    : {len(unreachable)} requested security(ies) stopped trading before "
-        f"{start.isoformat()}",
+        f"WARNING    : {len(unreachable)} requested security(ies) need history from "
+        f"before {start.isoformat()}",
     ]
     lines += [
         f"             {i.ticker:<8} last traded {i.last_trade_date}"
+        f"   needs history from {control_required_start(i)}"
         for i in sorted(unreachable, key=lambda i: i.last_trade_date or start)
     ]
     lines += [
@@ -391,8 +437,12 @@ def _unreachable_delisted(symbols: list[str], start: dt.date) -> list[str]:
         "             security did not exist, so these will come back empty and the",
         "             survivorship check will fail. They are delisted controls: their",
         "             whole purpose is to be present.",
-        f"             To include them all, use --start {earliest.isoformat()} or earlier.",
     ]
+    if needed is not None:
+        lines.append(
+            f"             To exercise every configured control, use --start "
+            f"{needed.isoformat()} or earlier."
+        )
     return lines
 
 
@@ -638,6 +688,50 @@ def add_data_commands(sub: argparse._SubParsersAction) -> None:  # type: ignore[
         "providers", help="list acquisition providers and credential status"
     ).set_defaults(func=cmd_providers)
 
+    scan = sub.add_parser(
+        "scan",
+        help="run the Phase 4 detectors and Phase 5 breakout engine over a snapshot",
+        description=(
+            "Walks an imported snapshot session by session, hands each session only "
+            "what was knowable then, and persists the patterns and breakout events "
+            "the two phases produce. Resumable: re-running with the same --scan-id "
+            "skips instruments already completed. Produces observations, never "
+            "recommendations -- no ranking, no selection, no profitability."
+        ),
+    )
+    scan.add_argument("--snapshot", required=True, help="snapshot id from a data import")
+    scan.add_argument(
+        "--scan-id",
+        default=None,
+        help="stable id for this scan; re-running with the same one resumes it",
+    )
+    scan.add_argument(
+        "--symbols",
+        nargs="*",
+        default=None,
+        help="restrict to these tickers. Omit to scan every instrument in the snapshot",
+    )
+    scan.add_argument("--start", default=None, help="ISO date; earliest session to evaluate")
+    scan.add_argument("--end", default=None, help="ISO date; latest session to evaluate")
+    scan.add_argument("--profile", default=None, help="breakout confirmation profile name")
+    scan.add_argument(
+        "--ignore-capabilities",
+        action="store_true",
+        help=(
+            "scan instruments the snapshot's capability index does not mark as "
+            "carrying price data. Widens the sample; say so when reporting from it"
+        ),
+    )
+    scan.add_argument(
+        "--force",
+        action="store_true",
+        help="re-scan instruments already completed under this --scan-id",
+    )
+    scan.add_argument("--progress", action="store_true", help="print per-instrument progress")
+    scan.add_argument("--json", default=None, help="also write the scan report payload here")
+    scan.add_argument("--code-version", default="unknown")
+    scan.set_defaults(func=cmd_scan)
+
     validate = sub.add_parser("validate", help="run the empirical checks over a snapshot")
     validate.add_argument("--snapshot", required=True, help="snapshot id from a data import")
     validate.add_argument("--as-of", default=None, help="ISO date; defaults to the export date")
@@ -667,6 +761,7 @@ __all__ = [
     "cmd_import",
     "cmd_inspect",
     "cmd_package_spec",
+    "cmd_scan",
     "cmd_template",
     "cmd_validate",
 ]

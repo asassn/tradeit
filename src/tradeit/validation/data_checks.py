@@ -25,7 +25,7 @@ from tradeit.storage import tables as t
 from tradeit.validation.checks import CheckResult, CheckStatus, Phase
 from tradeit.validation.context import ValidationContext
 from tradeit.validation.continuity import analyse_series
-from tradeit.validation.survivorship import classify_roster, render_roster
+from tradeit.validation.survivorship import ObservedSeries, classify_roster, render_roster
 
 #: A quarantine rate above this is reported as a failure rather than a warning.
 #: Chosen as "one row in twenty", which is well beyond what a clean vendor
@@ -613,23 +613,32 @@ class SurvivorshipCoverage(_Check):
         # absence. Falling back to declared coverage is a weaker but honest
         # approximation for packages written before the record existed.
         requested_start = record.requested_start or context.package.coverage_start
-        roster = classify_roster(expected, present, record, requested_start=requested_start)
-        missing = roster.missing
+        requested_end = record.requested_end or context.package.coverage_end
+        roster = classify_roster(
+            expected,
+            present,
+            record,
+            requested_start=requested_start,
+            requested_end=requested_end,
+            observed=self._observed_series(context),
+        )
+        uncovered = roster.uncovered
 
-        # Classification changes the remedy, never the verdict. A control that
-        # is not in the snapshot is not in the snapshot, whoever's fault that
-        # is, and every rate computed here is computed over survivors.
-        status = CheckStatus.PASS if not missing else CheckStatus.FAIL
-        ours = [entry for entry in missing if entry.status.is_our_defect]
+        # Classification changes the remedy, never the verdict. A control whose
+        # usable history is not in the snapshot is not in the snapshot, whoever
+        # is at fault, and every rate computed here is a rate over survivors.
+        status = CheckStatus.PASS if not uncovered else CheckStatus.FAIL
+        ours = [entry for entry in uncovered if entry.status.is_our_defect]
         headline = (
-            f"all {len(expected)} delisted names in the universe are present"
-            if not missing
+            f"all {len(expected)} survivorship controls are covered by usable history"
+            if not uncovered
             else (
-                f"{len(missing)} of {len(expected)} delisted names are absent. "
-                "Every rate computed over this snapshot is computed over survivors, "
-                "which is the single most flattering mistake available."
+                f"{len(uncovered)} of {len(expected)} survivorship controls are not "
+                "covered by usable historical data. Every rate computed over this "
+                "snapshot is computed over survivors, which is the single most "
+                "flattering mistake available."
                 + (
-                    f" {len(ours)} of them are absent for a reason on our side of the "
+                    f" {len(ours)} of them are missing for a reason on our side of the "
                     "vendor boundary, not the vendor's."
                     if ours
                     else ""
@@ -643,15 +652,47 @@ class SurvivorshipCoverage(_Check):
             status=status,
             summary=headline,
             evidence={
-                "delisted_expected": len(expected),
-                "delisted_missing": len(missing),
+                "controls_expected": len(expected),
+                "controls_covered": len(roster.covered),
+                "controls_uncovered": len(uncovered),
                 "requested_start": requested_start.isoformat(),
+                "required_history_start": (
+                    roster.required_history_start.isoformat()
+                    if roster.required_history_start
+                    else None
+                ),
                 "acquisition_outcomes_recorded": not record.is_empty,
                 "by_status": roster.counts,
-                "roster": roster.to_payload()["roster"],
+                "controls": roster.to_payload()["controls"],
             },
             detail=tuple(render_roster(roster)),
         )
+
+    @staticmethod
+    def _observed_series(context: ValidationContext) -> dict[str, ObservedSeries]:
+        """What the snapshot actually holds, per ticker.
+
+        Presence in ``symbol_mappings`` is not coverage: a ticker row with forty
+        bars proves nothing about what a screen would have seen in 2008. The
+        bars are what decides, so they are measured rather than assumed.
+        """
+        rows = context.session.execute(
+            select(
+                t.SymbolMapping.ticker,
+                func.min(t.OhlcvBar.session_date),
+                func.max(t.OhlcvBar.session_date),
+                func.count(),
+            )
+            .join(t.OhlcvBar, t.OhlcvBar.instrument_id == t.SymbolMapping.instrument_id)
+            .where(t.OhlcvBar.timeframe == "1d")
+            .group_by(t.SymbolMapping.ticker)
+        ).all()
+        return {
+            ticker: ObservedSeries(
+                ticker=ticker, first_session=first, last_session=last, bars=int(count)
+            )
+            for ticker, first, last, count in rows
+        }
 
 
 class DuplicateFacts(_Check):

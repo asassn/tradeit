@@ -335,6 +335,28 @@ class PatternGeometry:
         """Calendar span in days. Session count lives in the instance."""
         return (self.end_date - self.start_date).days
 
+    @property
+    def boundaries_are_ordered(self) -> bool:
+        """Whether support sits strictly below resistance, as a range must.
+
+        False means the detector has described something that is not a
+        consolidation. Each boundary can be locally defensible and the pair
+        still incoherent: `structural_support` clusters swing lows and
+        `structural_resistance` clusters swing highs, and in a base that drifts
+        upward the late lows can sit above the early highs. Every measurement
+        drawn from such a pair — depth, width, penetration, position within the
+        range — is then a difference between two lines in the wrong order.
+
+        The database asserts the same invariant in
+        ``ck_pattern_support_below_resistance``, where it can only abort a run.
+        Detectors consult this first so the structure is *rejected* with a
+        reason instead. Real multi-year series produce these; the synthetic
+        corpora, whose bases bracket their lows by construction, never did.
+        """
+        if self.resistance is None or self.support is None:
+            return True
+        return self.support.level < self.resistance.level
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "start_date": self.start_date.isoformat(),

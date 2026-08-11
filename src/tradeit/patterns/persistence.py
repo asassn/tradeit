@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Sequence
+from dataclasses import replace
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -160,7 +161,7 @@ class PatternRepository:
                 )
             )
         }
-        for transition in tracked.history:
+        for transition in _one_per_session(tracked.history):
             if transition.session_date in existing:
                 continue
             self.session.add(self._observation_row(row, tracked.current, transition))
@@ -298,6 +299,44 @@ class PatternRepository:
                 )
             )
         )
+
+
+def _one_per_session(history: Sequence[StateTransition]) -> list[StateTransition]:
+    """Collapse transitions that share a session into one net change.
+
+    ``pattern_observations`` is unique on ``(pattern_id, session_date)``, which
+    is the schema asserting a real property: a session has one answer to "what
+    happened to this pattern today?". A history carrying two entries for one
+    date used to make the insert fail outright, taking the whole run with it —
+    which is how a tracker defect (a forked identity aged on its own birth
+    session) surfaced as a database error four layers away.
+
+    Collapsing loses nothing that the row can express: the surviving record runs
+    from the first transition's ``from_state`` to the last's ``to_state``, which
+    is exactly the day's net change, and keeps the last one's scores because
+    those are the values the pattern ended the session holding. Every reason and
+    note is preserved in the collapsed row's note so the intermediate step is
+    still readable.
+
+    This is a backstop, not the fix. Two transitions on one session almost
+    always means something upstream advanced a pattern twice in a day, and that
+    is worth finding rather than smoothing over.
+    """
+    out: list[StateTransition] = []
+    for transition in history:
+        if out and out[-1].session_date == transition.session_date:
+            first = out[-1]
+            notes = [n for n in (first.note, transition.note) if n]
+            if first.reason is not transition.reason:
+                notes.insert(0, f"collapsed {first.reason} then {transition.reason}")
+            out[-1] = replace(
+                transition,
+                from_state=first.from_state,
+                note="; ".join(notes),
+            )
+            continue
+        out.append(transition)
+    return out
 
 
 def _as_decimal(value: float | None) -> Decimal | None:

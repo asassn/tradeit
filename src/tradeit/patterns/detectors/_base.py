@@ -258,6 +258,21 @@ class BaseDetector(ABC):
         )
 
         geometry = self.geometry(inputs, structure)
+        if not geometry.boundaries_are_ordered:
+            # Support above resistance is not a consolidation. Each boundary can
+            # be locally defensible — `structural_support` clusters swing lows
+            # and `structural_resistance` clusters swing highs, and in a base
+            # that drifts upward the late lows can sit above the early highs —
+            # but jointly they describe no structure the detector claims to
+            # have found, and every measurement drawn from them (depth, width,
+            # penetration) is a difference between two lines in the wrong order.
+            #
+            # Rejected here rather than at the database, which asserts the same
+            # invariant in `ck_pattern_support_below_resistance` and could only
+            # abort a whole run over it. Real multi-year series produce these;
+            # the synthetic corpora, which build bases whose highs bracket their
+            # lows by construction, never did.
+            return None
         invalidation = self.invalidation(inputs, structure)
         coverage = _coverage(components)
 

@@ -596,13 +596,16 @@ class TestDataChecks:
         result = SurvivorshipCoverage().run(context)
 
         assert result.status is CheckStatus.FAIL
-        assert result.evidence["by_status"] == {"outside_requested_window": 1}
+        assert result.evidence["by_status"] == {"REQUEST_WINDOW_EXCLUDED": 1}
         assert result.evidence["acquisition_outcomes_recorded"] is False
+        assert result.evidence["controls_covered"] == 0
         rendered = "\n".join(result.detail)
         assert "LEH" in rendered
-        assert "outside_requested_window" in rendered
+        assert "REQUEST_WINDOW_EXCLUDED" in rendered
         # The remedy is stated, and it is ours: widen the requested window.
         assert "start date at or before" in rendered
+        # And the preflight number that would have prevented it.
+        assert "PREFLIGHT" in rendered
 
 
 class TestPhaseChecks:

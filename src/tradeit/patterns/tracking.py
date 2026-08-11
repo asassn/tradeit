@@ -141,6 +141,12 @@ class PatternTracker:
     resolution_carry_sessions: int = 10
     _open: dict[str, TrackedPattern] = field(default_factory=dict)
     _closed: list[TrackedPattern] = field(default_factory=list)
+    #: Identity keys that have already reached a terminal state. Consulted when
+    #: a detection arrives for a key that is not open, so a re-detected
+    #: structure gets a *new* identity instead of silently reusing a finished
+    #: one. Kept separately from `_closed` because that list holds objects and
+    #: this question is about keys.
+    _retired: set[str] = field(default_factory=set)
 
     def observe(
         self,
@@ -181,6 +187,19 @@ class PatternTracker:
             seen_keys.add(key)
             existing = self._open.get(key)
             if existing is None:
+                # A structure whose identity has already terminated and is
+                # detected again is a *second life*, not a resurrection. Reusing
+                # the key silently merged them: over a four-year walk one key
+                # was re-minted 151 times, and persisting all 151 wrote them
+                # into a single `patterns` row whose history is an
+                # interleaving of separate lives that nothing can separate
+                # afterwards. `_fork` already handles the sibling case by
+                # appending the session; this is the same rule for the same
+                # reason.
+                if key in self._retired:
+                    key = f"{key}:{session.isoformat()}"
+                    seen_keys.add(key)
+                self._retired.discard(key)
                 self._open[key] = TrackedPattern(
                     identity_key=key,
                     instrument_id=instance.instrument_id,
@@ -196,6 +215,14 @@ class PatternTracker:
                             reason=TransitionReason.DETECTED,
                             quality=instance.quality,
                             evidence_coverage=instance.evidence_coverage,
+                            note=(
+                                ""
+                                if key == instance.identity_key
+                                else (
+                                    f"new life: {instance.identity_key} had already "
+                                    "terminated when this structure was detected again"
+                                )
+                            ),
                         ),
                     ),
                 )
@@ -208,7 +235,16 @@ class PatternTracker:
                     # happens to start on the same date. Minting a new identity
                     # preserves the fact that the first one failed, which is the
                     # fact a false-positive rate is computed from.
-                    self._fork(existing, instance, session)
+                    # The forked identity was *detected* this session, so it
+                    # counts as seen. Without this it falls through to
+                    # `_age_unseen` on its own birth session, which resolves it
+                    # from price against a zero-session gap — recording a
+                    # pattern as carried forward before a single session has
+                    # passed, and putting two transitions on one date. The
+                    # second is what the `(pattern_id, session_date)` unique
+                    # constraint forbids, so it also broke persistence outright
+                    # the first time a real multi-year walk produced a fork.
+                    seen_keys.add(self._fork(existing, instance, session))
                     continue
                 self._open[key] = existing.with_transition(instance, TransitionReason.ADVANCED)
 
@@ -216,8 +252,10 @@ class PatternTracker:
         self._retire_terminal()
         return self.open_patterns()
 
-    def _fork(self, existing: TrackedPattern, instance: PatternInstance, session: dt.date) -> None:
+    def _fork(self, existing: TrackedPattern, instance: PatternInstance, session: dt.date) -> str:
         """Retire an identity and start a new one for genuinely new structure.
+
+        Returns the forked key so the caller can mark it seen this session.
 
         Reached when a detection would require an illegal edge -- almost always
         a terminal pattern whose instrument has produced a fresh structure with
@@ -238,6 +276,7 @@ class PatternTracker:
             )
         )
         self._closed.append(retired)
+        self._retired.add(existing.identity_key)
         del self._open[existing.identity_key]
 
         forked = f"{instance.identity_key}:{session.isoformat()}"
@@ -263,6 +302,8 @@ class PatternTracker:
                 ),
             ),
         )
+
+        return forked
 
     def _age_unseen(
         self, seen_keys: set[str], session: dt.date, closes: Mapping[int, float]
@@ -364,6 +405,7 @@ class PatternTracker:
         for key, tracked in list(self._open.items()):
             if not tracked.is_open:
                 self._closed.append(tracked)
+                self._retired.add(key)
                 del self._open[key]
 
     # -- reads ---------------------------------------------------------------
