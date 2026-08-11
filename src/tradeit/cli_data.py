@@ -229,6 +229,8 @@ def cmd_acquire(args: argparse.Namespace) -> int:
     print(f"range      : {start} .. {end}")
     print(f"output     : {args.output}")
     print(f"estimate   : {estimate_size(symbols, start, end)}")
+    for line in _unreachable_delisted(symbols, start):
+        print(line)
     print()
     if args.estimate_only:
         print("--estimate-only: nothing was requested.")
@@ -344,6 +346,54 @@ def _build_provider(args: argparse.Namespace) -> Any:
         name: value for name, value in candidates.items() if value is not None and name in accepted
     }
     return provider_class(**kwargs)
+
+
+def _unreachable_delisted(symbols: list[str], start: dt.date) -> list[str]:
+    """Warn before spending credits on a request that cannot return a control.
+
+    A delisted security that stopped trading before ``start`` cannot appear in
+    the result, on any plan, from any vendor. The first full universe
+    acquisition asked from 2010-01-01 and so could never have returned Enron
+    (2004), Bear Stearns or Lehman (2008) or Washington Mutual (2009) — and the
+    absence then arrived at the survivorship check looking like a vendor
+    coverage gap.
+
+    Printed before the download rather than diagnosed after it, because the
+    remedy is one argument and it costs nothing to say so first. Not an error:
+    a deliberately recent window is a legitimate thing to ask for.
+    """
+    try:
+        universe = default_universe()
+    except Exception:  # pragma: no cover - a broken universe file says so elsewhere
+        return []
+    wanted = {s.upper() for s in symbols}
+    unreachable = [
+        instrument
+        for instrument in universe.delisted
+        if instrument.ticker.upper() in wanted
+        and instrument.last_trade_date is not None
+        and instrument.last_trade_date < start
+    ]
+    if not unreachable:
+        return []
+    earliest = min(i.last_trade_date for i in unreachable if i.last_trade_date)
+    lines = [
+        "",
+        f"WARNING    : {len(unreachable)} requested security(ies) stopped trading before "
+        f"{start.isoformat()}",
+    ]
+    lines += [
+        f"             {i.ticker:<8} last traded {i.last_trade_date}"
+        for i in sorted(unreachable, key=lambda i: i.last_trade_date or start)
+    ]
+    lines += [
+        "             No vendor can return a price series for years in which a",
+        "             security did not exist, so these will come back empty and the",
+        "             survivorship check will fail. They are delisted controls: their",
+        "             whole purpose is to be present.",
+        f"             To include them all, use --start {earliest.isoformat()} or earlier.",
+    ]
+    return lines
 
 
 def _resolve_symbols(args: argparse.Namespace) -> list[str]:

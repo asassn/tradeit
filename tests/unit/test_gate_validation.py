@@ -45,6 +45,7 @@ from tradeit.validation.data_checks import (
     PointInTimeFundamentals,
     QuarantineRate,
     RowsPresent,
+    SessionContinuity,
     SurvivorshipCoverage,
 )
 from tradeit.validation.phase_checks import (
@@ -73,7 +74,14 @@ EMPTY_UNIVERSE = ValidationUniverse(name="empty", description="no delisted names
 # ---------------------------------------------------------------------------
 
 
-def write_package(root: Path, *, sessions: int = 320, fundamentals: bool = True) -> None:
+def write_package(
+    root: Path,
+    *,
+    sessions: int = 320,
+    fundamentals: bool = True,
+    gap: tuple[int, int, int] | None = None,
+) -> None:
+    """``gap`` is ``(instrument_id, first_index, length)`` — sessions to omit."""
     rows = ["date,symbol,open,high,low,close,volume"]
     for instrument_id in (1, 2):
         price = 50.0 + instrument_id * 10
@@ -82,10 +90,16 @@ def write_package(root: Path, *, sessions: int = 320, fundamentals: bool = True)
         while written < sessions:
             if day.weekday() < 5:
                 price *= 1.0 + (0.004 if written % 7 else -0.011)
-                rows.append(
-                    f"{day},{instrument_id},{price * 0.99:.2f},{price * 1.02:.2f},"
-                    f"{price * 0.97:.2f},{price:.2f},1000000"
+                skip = (
+                    gap is not None
+                    and gap[0] == instrument_id
+                    and gap[1] <= written < gap[1] + gap[2]
                 )
+                if not skip:
+                    rows.append(
+                        f"{day},{instrument_id},{price * 0.99:.2f},{price * 1.02:.2f},"
+                        f"{price * 0.97:.2f},{price:.2f},1000000"
+                    )
                 written += 1
             day += dt.timedelta(days=1)
     (root / "bars.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
@@ -354,7 +368,43 @@ class TestDataChecks:
         assert result.evidence["instruments"] == 2
 
     def test_quarantine_rate_passes_on_a_clean_import(self, context: ValidationContext) -> None:
-        assert QuarantineRate().run(context).status is CheckStatus.PASS
+        result = QuarantineRate().run(context)
+        assert result.status is CheckStatus.PASS
+        assert result.detail == (), "nothing was rejected, so there is nothing to list"
+
+    def test_a_handful_of_rejected_rows_are_named_individually(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        """A count says how bad; only the rows say what happened.
+
+        Four rejected bars out of 294,000 is a rate of 0.001% and still worth
+        looking at, because four self-contradictory vendor prints and the first
+        four symptoms of a misread column are the same number.
+        """
+        write_package(tmp_path)
+        text = (tmp_path / "bars.csv").read_text(encoding="utf-8").splitlines()
+        # low above high: internally inconsistent, and impossible to repair
+        # without inventing a price.
+        text.append("2020-05-04,1,50.00,49.00,51.00,50.00,1000000")
+        text.append("2020-05-05,2,60.00,59.00,61.00,60.00,1000000")
+        (tmp_path / "bars.csv").write_text("\n".join(text) + "\n", encoding="utf-8")
+
+        package = import_package(db_session, tmp_path, build_manifest(tmp_path))
+        context = load_context(db_session, package.snapshot_id, universe=EMPTY_UNIVERSE)
+        result = QuarantineRate().run(context)
+
+        assert result.status is CheckStatus.WARN
+        assert result.evidence["rows_quarantined"] == 2
+        rows = result.evidence["rows"]
+        assert isinstance(rows, list) and len(rows) == 2
+        assert {row["identifier"] for row in rows} == {"1", "2"}
+        assert all(row["source_file"] and row["line_number"] for row in rows)
+        assert all(row["reason"] for row in rows)
+
+        rendered = "\n".join(result.detail)
+        assert "bars.csv" in rendered
+        # The connection a reader would otherwise have to make themselves.
+        assert "session_continuity" in rendered
 
     def test_an_unknown_adjustment_policy_fails(self, db_session: Session, tmp_path: Path) -> None:
         write_package(tmp_path)
@@ -479,6 +529,44 @@ class TestDataChecks:
         result = SurvivorshipCoverage().run(context)
         assert result.status is CheckStatus.FAIL
         assert "survivors" in result.summary
+
+    def test_a_clean_series_is_not_reported_as_gappy(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        """The regression that made this check useless.
+
+        Comparing bar counts against *weekday* counts flagged all 78 of 78
+        series in the first real import, because US markets close about ten
+        weekdays a year and the threshold is 2%.
+        """
+        write_package(tmp_path)
+        package = import_package(db_session, tmp_path, build_manifest(tmp_path))
+        context = load_context(db_session, package.snapshot_id, universe=EMPTY_UNIVERSE)
+        result = SessionContinuity().run(context)
+        assert result.status is CheckStatus.PASS
+        assert result.evidence["series_with_gaps"] == 0
+
+    def test_a_long_hole_is_reported_as_a_structural_break_with_its_dates(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        write_package(tmp_path, gap=(2, 120, 60))
+        package = import_package(db_session, tmp_path, build_manifest(tmp_path))
+        context = load_context(db_session, package.snapshot_id, universe=EMPTY_UNIVERSE)
+        result = SessionContinuity().run(context)
+
+        assert result.status is CheckStatus.WARN
+        assert result.evidence["series_with_gaps"] == 1
+        assert result.evidence["structural_breaks"] == 1
+        analysed = result.evidence["analysed"]
+        assert isinstance(analysed, list) and len(analysed) == 1
+        found = analysed[0]
+        assert found["shape"] == "structural_break"
+        # One hole, not sixty separate findings, and its dates are stated.
+        assert len(found["gap_runs"]) == 1
+        assert found["gap_runs"][0]["sessions"] >= 55
+        assert "spliced" in found["diagnosis"]
+        rendered = "\n".join(result.detail)
+        assert found["gap_runs"][0]["start"] in rendered
 
     def test_survivorship_names_the_reason_and_still_fails(
         self, db_session: Session, tmp_path: Path

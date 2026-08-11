@@ -17,12 +17,14 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from tradeit.core.calendar import get_calendar
 from tradeit.data.packages.spec import DatasetKind
 from tradeit.storage import tables as t
 from tradeit.validation.checks import CheckResult, CheckStatus, Phase
 from tradeit.validation.context import ValidationContext
+from tradeit.validation.continuity import analyse_series
 from tradeit.validation.survivorship import classify_roster, render_roster
 
 #: A quarantine rate above this is reported as a failure rather than a warning.
@@ -35,6 +37,17 @@ MAX_ACCEPTABLE_QUARANTINE_RATE = 0.05
 #: A 2-for-1 split shows as a 0.5x gap; the threshold sits between "a big day"
 #: and "the price series changed units".
 SPLIT_SUSPECT_RATIO = Decimal("1.9")
+
+#: How many flagged series get their gap runs enumerated. The analysis costs one
+#: query per series, so it is bounded by the number of *findings*; a snapshot
+#: where every series is flagged is a calendar bug, and the first few will say so
+#: as clearly as all of them would.
+MAX_GAP_ANALYSES = 10
+
+#: How many quarantined rows are named individually. Below this the rows are the
+#: finding; above it the stage tally is, and a wall of near-identical lines
+#: hides the one that differs.
+MAX_QUARANTINE_ROWS = 25
 
 
 class _Check:
@@ -108,12 +121,14 @@ class QuarantineRate(_Check):
         package = context.package
         read = package.rows_read or 0
         rate = (package.rows_quarantined / read) if read else 0.0
-        by_stage = Counter(
-            row.stage
-            for row in context.session.scalars(
-                select(t.QuarantinedRow).where(t.QuarantinedRow.package_id == package.id)
+        quarantined = list(
+            context.session.scalars(
+                select(t.QuarantinedRow)
+                .where(t.QuarantinedRow.package_id == package.id)
+                .order_by(t.QuarantinedRow.source_file, t.QuarantinedRow.line_number)
             )
         )
+        by_stage = Counter(row.stage for row in quarantined)
         if rate > MAX_ACCEPTABLE_QUARANTINE_RATE:
             status = CheckStatus.FAIL
         elif package.rows_quarantined:
@@ -138,8 +153,63 @@ class QuarantineRate(_Check):
                 "rows_quarantined": package.rows_quarantined,
                 "rate": round(rate, 6),
                 "by_stage": dict(sorted(by_stage.items())),
+                "rows": [_quarantine_payload(row) for row in quarantined[:MAX_QUARANTINE_ROWS]],
             },
+            detail=tuple(_render_quarantine(quarantined)),
         )
+
+
+def _quarantine_payload(row: t.QuarantinedRow) -> dict[str, Any]:
+    return {
+        "dataset": row.dataset,
+        "identifier": row.identifier,
+        "stage": row.stage,
+        "source_file": row.source_file,
+        "line_number": row.line_number,
+        "reason": row.reason,
+        "payload": row.payload[:400],
+    }
+
+
+def _render_quarantine(rows: list[t.QuarantinedRow]) -> list[str]:
+    """Name the rejected rows while there are few enough to read.
+
+    A count answers "how bad?" and nothing else. Four quarantined bars in a
+    294,000-row import is a rate of 0.001% and still worth a minute of a
+    person's attention, because the four are either four genuinely
+    self-contradictory vendor prints or the first sign of a systematic
+    misreading — and the only way to tell is to look at them. The identifier,
+    the file and the line number are all stored; printing them costs nothing
+    and saves the reader writing a query.
+
+    Above :data:`MAX_QUARANTINE_ROWS` the individual rows stop being the story
+    and the stage tally is the better summary, so the list is capped and says
+    it was.
+    """
+    if not rows:
+        return []
+    lines = [
+        "  quarantined rows (kept verbatim; they are absent from every downstream count)",
+        f"  {'dataset':<14} {'identifier':<12} {'stage':<13} {'source':<22} reason",
+        f"  {'-' * 14} {'-' * 12} {'-' * 13} {'-' * 22} {'-' * 24}",
+    ]
+    for row in rows[:MAX_QUARANTINE_ROWS]:
+        where = f"{row.source_file or '?'}:{row.line_number if row.line_number else '?'}"
+        lines.append(
+            f"  {row.dataset:<14} {(row.identifier or '?'):<12} {row.stage:<13} "
+            f"{where[:22]:<22} {row.reason[:70]}"
+        )
+    if len(rows) > MAX_QUARANTINE_ROWS:
+        lines.append(
+            f"  ... and {len(rows) - MAX_QUARANTINE_ROWS:,} more; at this volume read the "
+            "stage tally rather than the rows"
+        )
+    lines += [
+        "",
+        "  A quarantined bar is a session with no row, so these also appear as gaps in",
+        "  data.session_continuity. They are the same rows, not two separate findings.",
+    ]
+    return lines
 
 
 class AdjustmentDeclared(_Check):
@@ -356,34 +426,84 @@ class SessionContinuity(_Check):
         # EXCHANGES dataset is for and it is usually absent — so a genuine
         # foreign listing may still show a shortfall. That is a smaller and more
         # honest error than counting Thanksgiving as missing data.
+        # Symbols, so a finding names a security rather than a surrogate key.
+        # "instrument 13 is missing 536 sessions" cannot be acted on without a
+        # second query that the reader has to think to run.
+        tickers = {
+            row.instrument_id: row.ticker for row in session.scalars(select(t.SymbolMapping)).all()
+        }
+
         calendar = get_calendar()
-        gaps: list[tuple[int, int, int]] = []
+        flagged: list[tuple[int, dt.date, dt.date, int, int]] = []
         for instrument_id, first, last, count in rows:
             expected = calendar.session_count(first, last)
             if expected and count < expected * (1 - self.max_gap_ratio):
-                gaps.append((instrument_id, expected - count, expected))
+                flagged.append((instrument_id, first, last, count, expected))
 
-        worst = sorted(gaps, key=lambda g: -g[1])[:5]
-        status = CheckStatus.PASS if not gaps else CheckStatus.WARN
+        # The shape of the holes, for the flagged series only. "Missing 536 of
+        # 4,174" is the same integer whether it is one 26-month block or 536
+        # scattered days, and those are different defects with different
+        # responses — so the runs are computed rather than left to the reader
+        # to guess at. Only for flagged series, so the extra query is bounded
+        # by the number of findings rather than by the universe.
+        flagged.sort(key=lambda row: row[4] - row[3], reverse=True)
+        analyses = [
+            analyse_series(
+                instrument_id,
+                tickers.get(instrument_id, ""),
+                self._sessions_for(session, instrument_id),
+                calendar.sessions_between(first, last),
+            )
+            for instrument_id, first, last, _count, _expected in flagged[:MAX_GAP_ANALYSES]
+        ]
+        broken = [a for a in analyses if a.shape.breaks_the_series]
+
+        status = CheckStatus.PASS if not flagged else CheckStatus.WARN
+        detail: list[str] = []
+        for analysis in analyses:
+            detail.extend(analysis.render())
+        if len(flagged) > len(analyses):
+            detail.append(
+                f"  ... and {len(flagged) - len(analyses)} more flagged series; "
+                "see the report payload"
+            )
         return CheckResult(
             check_id=self.check_id,
             title=self.title,
             phase=self.phase,
             status=status,
             summary=(
-                f"{len(rows)} series checked against the exchange calendar; "
-                f"{len(gaps)} have more than {self.max_gap_ratio:.0%} of their "
-                "trading sessions missing"
+                f"{len(rows)} series checked against the exchange calendar over the "
+                f"interval each one actually traded; {len(flagged)} are missing more "
+                f"than {self.max_gap_ratio:.0%} of their sessions"
+                + (
+                    f", of which {len(broken)} have a structural break rather than "
+                    "scattered absences"
+                    if broken
+                    else ""
+                )
             ),
             evidence={
                 "series": len(rows),
-                "series_with_gaps": len(gaps),
-                "missing_sessions_total": sum(g[1] for g in gaps),
+                "series_with_gaps": len(flagged),
+                "missing_sessions_total": sum(e - c for _, _, _, c, e in flagged),
+                "structural_breaks": len(broken),
+                "analysed": [a.to_payload() for a in analyses],
             },
-            examples=tuple(
-                f"instrument={i} missing {missing} of {expected} trading sessions"
-                for i, missing, expected in worst
-            ),
+            detail=tuple(detail),
+        )
+
+    @staticmethod
+    def _sessions_for(session: Session, instrument_id: int) -> list[dt.date]:
+        return list(
+            session.scalars(
+                select(t.OhlcvBar.session_date)
+                .where(
+                    t.OhlcvBar.instrument_id == instrument_id,
+                    t.OhlcvBar.timeframe == "1d",
+                )
+                .order_by(t.OhlcvBar.session_date)
+            )
         )
 
 

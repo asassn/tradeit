@@ -266,6 +266,31 @@ class TestUniverseAliases:
         assert not roster.entries[0].is_covered
 
 
+class TestTheWarningBeforeTheDownload:
+    """The cheapest place to catch this is before any credits are spent."""
+
+    def test_a_2010_start_warns_about_the_four_it_cannot_return(self) -> None:
+        from tradeit.cli_data import _unreachable_delisted
+
+        lines = _unreachable_delisted(default_universe().tickers, dt.date(2010, 1, 1))
+        text = "\n".join(lines)
+        for ticker in ("LEH", "BSC", "WAMUQ", "ENRNQ"):
+            assert ticker in text
+        assert "TWTR" not in text, "TWTR traded well inside the window"
+        # It names the argument that fixes it, with the date that covers all four.
+        assert "--start 2004-01-01" in text
+
+    def test_an_early_enough_start_says_nothing(self) -> None:
+        from tradeit.cli_data import _unreachable_delisted
+
+        assert _unreachable_delisted(default_universe().tickers, dt.date(2001, 1, 1)) == []
+
+    def test_a_symbol_list_without_delisted_names_says_nothing(self) -> None:
+        from tradeit.cli_data import _unreachable_delisted
+
+        assert _unreachable_delisted(["SPY", "AAPL"], dt.date(2020, 1, 1)) == []
+
+
 @pytest.mark.parametrize(
     ("symbol_status", "expected"),
     [
