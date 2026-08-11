@@ -22,6 +22,12 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from tradeit.storage.migration_support import (
+    detach_references,
+    references_to,
+    restore_references,
+    supports_constraint_drop,
+)
 from tradeit.storage.tables import JSONB_OR_JSON, PRICE, UTCDateTime
 
 revision: str = "0004_phase4_patterns"
@@ -30,25 +36,25 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-#: Dependents that carry a foreign key to `patterns.id`.
-_DEPENDENTS = ("breakout_events", "orders")
-
-
 def upgrade() -> None:
-    dialect = op.get_bind().dialect.name
+    bind = op.get_bind()
 
     # PostgreSQL refuses to drop a table that is still referenced, so the
-    # dependents' foreign keys come off first and go back on at the end.
+    # referring foreign keys come off first and go back on at the end.
     #
-    # SQLite is skipped deliberately rather than defensively. It has no
-    # ALTER-based constraint drop -- Alembic emulates one by recreating the
-    # whole table -- and it does not enforce the reference in the first place
-    # unless foreign_keys pragma is on. Attempting the drop there fails on a
-    # constraint name that never existed.
-    if dialect != "sqlite":
-        for table in _DEPENDENTS:
-            with op.batch_alter_table(table) as batch:
-                batch.drop_constraint(f"{table}_pattern_id_fkey", type_="foreignkey")
+    # Which ones those are is **reflected, never assumed**. The version of this
+    # file that assumed ("breakout_events", "orders") was wrong about the second
+    # -- `orders` has no pattern_id column; the other referrer 0002 creates is
+    # `opportunity_scores` -- so every fresh `alembic upgrade head` died here and
+    # rolled back to an empty database. See tradeit.storage.migration_support.
+    #
+    # Two referrers exist at revision 0003; finding fewer means this database is
+    # not in the state 0004 migrates from, and references_to raises rather than
+    # dropping `patterns` out from under an unverified schema.
+    references = []
+    if supports_constraint_drop(bind):
+        references = references_to(bind, "patterns", expect_at_least=2)
+        detach_references(op, references)
 
     op.drop_table("patterns")
 
@@ -196,16 +202,9 @@ def upgrade() -> None:
     )
     op.create_index("ix_pattern_label_lookup", "pattern_labels", ["pattern_type", "as_of_session"])
 
-    if dialect != "sqlite":
-        for table in _DEPENDENTS:
-            with op.batch_alter_table(table) as batch:
-                batch.create_foreign_key(
-                    f"{table}_pattern_id_fkey",
-                    "patterns",
-                    ["pattern_id"],
-                    ["id"],
-                    ondelete="SET NULL",
-                )
+    # Restored under their original names, on their original columns, with the
+    # original ON DELETE -- symmetric with the detach above by construction.
+    restore_references(op, references, "patterns")
 
 
 def downgrade() -> None:

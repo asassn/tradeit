@@ -9,9 +9,20 @@ jobs:
   check:
     runs-on: ubuntu-latest
 
+    # The migration chain is exercised against every PostgreSQL major version a
+    # developer is likely to have. A fresh `alembic upgrade head` broke on an
+    # empty database and was reported from a Postgres.app 18 install; it
+    # reproduced identically on 16, so the defect was never version-specific --
+    # but "we only ever ran it on one major version" is exactly the gap that let
+    # the question be asked at all.
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["16", "18"]
+
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_USER: tradeit
           POSTGRES_PASSWORD: tradeit

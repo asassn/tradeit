@@ -14,7 +14,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -95,9 +95,20 @@ def _is_partition_child(entry: object) -> bool:
 class TestMigration:
     def test_the_schema_is_at_the_latest_migration(self, session):
         """Pinned to head deliberately: a stale head means later tests are
-        validating a schema the application no longer uses."""
+        validating a schema the application no longer uses.
+
+        Compared against the script directory rather than against a literal. The
+        literal said ``0003_phase3_analytics`` for five revisions — the
+        assertion meant to notice a stale schema had itself gone stale, and it
+        could only have failed on a database that reached head, which no fresh
+        one could.
+        """
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        expected = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
         version = session.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert version == "0003_phase3_analytics"
+        assert version == expected
 
     def test_every_orm_table_exists_in_the_database(self, session):
         present = {
@@ -239,58 +250,18 @@ class TestConstraints:
         with pytest.raises(IntegrityError, match="ck_portfolio_mode"):
             self._portfolio(session, mode="production")
 
-    def test_a_pattern_stop_above_its_pivot_is_refused(self, session):
-        """Stop above pivot means negative risk per share, which would make
-        position sizing divide by a negative number and size backwards."""
-        session.execute(
-            text(
-                "INSERT INTO artifact_versions (digest, kind, name, payload) "
-                "VALUES ('d1', 'strategy_config', 'x', '{}'::jsonb), "
-                "('d2', 'data_snapshot', 'x', '{}'::jsonb) ON CONFLICT DO NOTHING"
-            )
-        )
-        session.add(
-            tables.RunManifest(
-                run_id=f"r-{uuid.uuid4().hex[:8]}",
-                run_kind="scan",
-                as_of=dt.datetime(2024, 3, 8, 21, tzinfo=UTC),
-                manifest_digest="m1",
-                strategy_config_digest="d1",
-                data_snapshot_digest="d2",
-                code_version="0.2.0",
-            )
-        )
-        session.flush()
-        manifest_id = session.execute(select(func.max(tables.RunManifest.id))).scalar_one()
-
-        session.add(
-            tables.Instrument(
-                instrument_id=902,
-                primary_exchange="XNYS",
-                asset_class="common_stock",
-                name="T2",
-                source="test",
-            )
-        )
-        session.flush()
-        session.add(
-            tables.Pattern(
-                instrument_id=902,
-                pattern_type="flat_base",
-                status="complete",
-                start_date=dt.date(2024, 1, 2),
-                end_date=dt.date(2024, 3, 1),
-                detected_on=dt.date(2024, 3, 1),
-                last_evaluated_on=dt.date(2024, 3, 1),
-                pivot_price=Decimal("50"),
-                stop_price=Decimal("55"),
-                length_sessions=40,
-                quality=0.8,
-                run_manifest_id=manifest_id,
-            )
-        )
-        with pytest.raises(IntegrityError, match="ck_pattern_stop_below_pivot"):
-            session.flush()
+    # `test_a_pattern_stop_above_its_pivot_is_refused` lived here and has been
+    # removed rather than repaired. It asserted `ck_pattern_stop_below_pivot` on
+    # the Phase 2 draft `patterns` table, which revision 0004 drops outright —
+    # that table keyed identity on `(instrument, type, start_date, detected_on)`
+    # and minted a new row every day the same structure was re-detected, which
+    # is the failure the Phase 4 brief forbids. Neither the constraint nor the
+    # columns it guarded (`status`, `stop_price`, `length_sessions`) exist at
+    # head, so the test could only pass on a database frozen at 0003.
+    #
+    # The rule it protected is not lost: risk-per-share sign is enforced in the
+    # Phase 5 breakout schema, where the boundary a stop is measured against
+    # actually lives.
 
     def test_a_monte_carlo_run_below_one_hundred_iterations_is_refused(self, session):
         with pytest.raises(IntegrityError, match="ck_montecarlo_iterations"):

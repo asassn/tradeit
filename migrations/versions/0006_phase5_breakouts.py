@@ -40,6 +40,12 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from tradeit.storage.migration_support import (
+    detach_references,
+    references_to,
+    restore_references,
+    supports_constraint_drop,
+)
 from tradeit.storage.tables import JSONB_OR_JSON, PK, PRICE, UTCDateTime
 
 revision: str = "0006_phase5_breakouts"
@@ -49,6 +55,25 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+
+    # The same detach-and-restore 0004 does for `patterns`, for the same reason.
+    # This revision replaces `breakout_events` outright, and PostgreSQL refuses
+    # to drop a table anything still references --
+    # `opportunity_scores.breakout_event_id` does. The first version of this
+    # file had no detach step at all, so `alembic upgrade head` on an empty
+    # database failed here with "cannot drop table breakout_events because other
+    # objects depend on it" and rolled the whole chain back.
+    #
+    # Reflected rather than named, so it stays right if a later revision adds
+    # another referrer. The replacement table below keeps `id` as its primary
+    # key, which is what makes restoring the reference meaningful rather than
+    # merely possible.
+    references = []
+    if supports_constraint_drop(bind):
+        references = references_to(bind, "breakout_events", expect_at_least=1)
+        detach_references(op, references)
+
     op.drop_table("breakout_events")
 
     op.create_table(
@@ -57,7 +82,12 @@ def upgrade() -> None:
         sa.Column("event_key", sa.String(length=32), nullable=False),
         sa.Column(
             "instrument_id",
-            sa.Integer(),
+            # PK, not Integer. `instruments.instrument_id` is a BigInteger and
+            # so is the ORM's column here; writing Integer created a real type
+            # drift that autogenerate reports, and an INTEGER foreign key onto a
+            # BIGINT primary key breaks silently the first time an instrument id
+            # passes 2^31.
+            PK,
             sa.ForeignKey("instruments.instrument_id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -228,7 +258,12 @@ def upgrade() -> None:
         ),
         sa.Column(
             "instrument_id",
-            sa.Integer(),
+            # PK, not Integer. `instruments.instrument_id` is a BigInteger and
+            # so is the ORM's column here; writing Integer created a real type
+            # drift that autogenerate reports, and an INTEGER foreign key onto a
+            # BIGINT primary key breaks silently the first time an instrument id
+            # passes 2^31.
+            PK,
             sa.ForeignKey("instruments.instrument_id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -263,6 +298,9 @@ def upgrade() -> None:
     op.create_index("ix_breakout_label_lookup", "breakout_labels", ["label", "as_of_session"])
 
 
+    restore_references(op, references, "breakout_events")
+
+
 def downgrade() -> None:
     op.drop_index("ix_breakout_label_lookup", table_name="breakout_labels")
     op.drop_table("breakout_labels")
@@ -282,7 +320,12 @@ def downgrade() -> None:
         sa.Column("id", PK, primary_key=True, autoincrement=True),
         sa.Column(
             "instrument_id",
-            sa.Integer(),
+            # PK, not Integer. `instruments.instrument_id` is a BigInteger and
+            # so is the ORM's column here; writing Integer created a real type
+            # drift that autogenerate reports, and an INTEGER foreign key onto a
+            # BIGINT primary key breaks silently the first time an instrument id
+            # passes 2^31.
+            PK,
             sa.ForeignKey("instruments.instrument_id", ondelete="CASCADE"),
             nullable=False,
         ),
