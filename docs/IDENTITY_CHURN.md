@@ -44,72 +44,96 @@ Two further numbers decide the question:
   beginning on the same date, was re-minted 209 times over eight years.
 - **Re-mints by cause: 36,933 after termination, 550 on an illegal transition.**
 
-## The determination: fragmentation
+## The determination: fragmentation, from a lookup defect
 
-A structure whose start date is fixed and which is re-minted 209 times, with a
-median identity lifespan of six days, is not 209 structures. It is one structure
-observed through a lifecycle that keeps declaring it over.
+The first reading of these numbers was that terminations were too eager —
+patterns ageing out and being re-detected as new structures — and the proposed
+remedy was to stop terminating a structure that is still being detected. Two
+further measurements ruled that out, and it is worth recording why, because the
+wrong fix would have merged genuinely separate lives to work around a defect
+that would still have been there.
 
-The mechanism is a chain of four rules, each defensible alone:
+**72.6% of re-mints overlap their predecessor.** Measuring the gap between a
+predecessor's last observation and its successor's first detection:
 
-1. A detector re-measures from scratch each session and reports a state derived
-   from the current geometry. That state is **not monotonic** — price
-   oscillating around resistance moves a pattern between NEAR_BREAKOUT and
-   BROKEN_OUT_UNCONFIRMED freely.
-2. The lifecycle **is** monotonic. `BROKEN_OUT_UNCONFIRMED` may only go to
-   `{BROKEN_OUT_UNCONFIRMED, EXPIRED, INVALIDATED}`.
-3. `PatternTracker` ages a pattern out after `grace_sessions = 3` sessions
-   without re-detection, and terminates it.
-4. A detection arriving for an identity that has already terminated gets a new
-   identity — the `_retired` rule, added because reusing the key merged separate
-   lives into one row whose history could not be untangled afterwards.
+| gap | share of re-mints |
+|---|---|
+| ≤ 0 days (overlapping) | 72.6% |
+| ≤ 1 day | 93.2% |
+| ≤ 3 days | 98.6% |
+| ≤ 5 days | 99.8% |
 
-Rule 4 is right, and it is not the cause. The dominant path is rules 1–3:
-**36,933 of 37,483 re-mints (98.5%) follow a termination**, not an illegal
-transition. Patterns are ending — mostly by ageing out — and being re-detected
-immediately afterwards as new structures.
+A negative gap means the new identity was minted **while the previous life was
+still open**. No termination rule can produce that. And the 209-identity base
+shows first-detection dates on consecutive trading days:
 
-The `superseded` path (550) is the smaller one and is the clearer illustration:
-409 of those identities were in `BROKEN_OUT_UNCONFIRMED` and were re-detected as
-`NEAR_BREAKOUT` (275) or `MATURE` (87). A structure that closed above resistance
-and fell back is a *failed breakout of the same structure*, not a different
-structure that happens to start on the same date.
+```
+a0adf03763  2016-08-25..2016-08-31  near_breakout -> broken_out_unconfirmed
+2016-08-31  2016-08-31..2016-09-06  near_breakout -> expired (lost)
+2016-09-01  2016-09-01..2016-09-23  near_breakout -> broken_out -> expired
+2016-09-02  2016-09-02..2016-09-23  near_breakout -> broken_out -> expired
+2016-09-06  2016-09-06..2016-09-23  ...
+```
 
-## What this does and does not invalidate
+The cause is that **the tracker could not find its own live identity.** A
+detector emits the same content hash every session. After one re-mint the
+tracker holds that structure under a suffixed key (`<hash>:<session>`). The
+lookup went straight into the open set with the detector's key, missed, fell
+through to the re-mint branch — and minted another identity. Every session, for
+as long as the structure kept being detected. `_retired.discard(key)` was also
+called with the *suffixed* key, so the base stayed retired permanently and the
+branch could never stop firing.
 
-**Does not:** anything about causality, boundary provenance, lifecycle legality
-or point-in-time correctness. Every identity is individually well-formed, every
-transition is legal, and `phase5.lifecycle` passes with zero illegal
-transitions. Fragmentation makes the corpus *finer*, not wrong.
+A second, smaller mechanism: **10,024 identities were born already terminal** —
+their only observation is `detected -> invalidated`. A detector that keeps
+reporting a dead structure minted one such identity per session, each of which
+recorded nothing the identity that actually lived it did not already carry.
 
-**Does:** every rate whose denominator is an identity. "Patterns per
-instrument-year", "share of identities reaching a breakout", "mean observations
-per identity" and anything a later phase computes per pattern are all measured
-against a denominator inflated by roughly the fragmentation factor. Breakout
-counts are affected the same way, since each re-minted identity can open its own
-event.
+## The fix
 
-## What is deliberately not done here
+Two rules, no threshold moved. Both are stated in full in
+[PATTERN_IDENTITY.md](PATTERN_IDENTITY.md).
 
-No threshold is changed. `grace_sessions`, `resolution_carry_sessions` and the
-detectors' own parameters are exactly where they were, because tuning them
-against a real-data result is the selection-bias failure the phase order exists
-to prevent — and because the remedy is a lifecycle decision rather than a
-number.
+1. **`_live`**, a one-entry-per-structure index from the detector's key to the
+   tracked identity currently alive for it. Corrects the lookup.
+2. **A life cannot begin already over.** A detection arriving in a terminal
+   state, for a structure whose previous life has already terminated, does not
+   mint a new identity.
 
-The options, for a decision that is not the validator's to make:
+`grace_sessions`, `resolution_carry_sessions`, the lifecycle's legal edges and
+every detector parameter are untouched.
 
-1. **Accept it.** Identities are short-lived by design; report every rate per
-   *base hash* rather than per identity, and treat the identity as an
-   observation episode.
-2. **Let the lifecycle absorb a fade.** Give `BROKEN_OUT_UNCONFIRMED` an edge
-   back to `MATURE`/`NEAR_BREAKOUT`, so a failed breakout stays the same
-   structure. Removes the 550; leaves the 36,933.
-3. **Stop ageing a structure out while it is still being detected.** The 36,933
-   are patterns that terminated and were then re-detected. If the same geometry
-   is still present, the termination was the error, not the re-detection.
+## Before and after
 
-Option 3 addresses 98.5% of the churn and is the one the evidence points at.
-None of them should be chosen from these numbers alone without deciding what a
-pattern identity is *for*, which is a Phase 6/7 question about what a screen
-surfaces and what a backtest counts.
+Same corpus, same detectors, same configuration; only the tracker changed.
+
+| | before | after | change |
+|---|---|---|---|
+| total identities | 39,218 | 5,548 | **−85.9%** |
+| re-minted identities | 37,483 (95.6%) | 3,813 (68.7%) | −89.8% |
+|  … after termination | 36,933 | 1,609 | −95.6% |
+|  … on an illegal transition | 550 | 2,204 | +301% |
+| single-observation identities | 10,095 (25.7%) | 275 (5.0%) | −97.3% |
+|  … born already terminal | 10,024 | 273 | −97.3% |
+| observations/identity med / p90 / p99 | 2 / 3 / 13 | 5 / 20 / 59 | — |
+| lifespan days med / p90 / p99 | 6 / 18 / 24 | 8 / 32 / 91 | — |
+| identities per base med / p90 / **max** | 11 / 64 / **209** | 2 / 7 / **21** | **−89.9%** |
+| breakout events | 34,061 | 6,187 | −81.8% |
+
+The one number that rises is the honest one. Illegal-transition forks went from
+550 to 2,204 because most detections previously never reached the legality
+check at all — the lookup missed first and the re-mint branch swallowed them.
+That class was always this large; it was hidden underneath the larger defect.
+Total forks still fall from 37,483 to 3,813.
+
+## What remains, and what it is
+
+The residual churn is now dominated by the legality fork: a detection proposing
+an edge the lifecycle does not have — overwhelmingly `BROKEN_OUT_UNCONFIRMED`
+re-detected as `NEAR_BREAKOUT` or `MATURE`, which is a *failed breakout of the
+same structure*. Whether that should be an edge of the state machine rather than
+a new identity is a separate and much smaller question, and it is a lifecycle
+decision rather than a defect. It is deliberately left open.
+
+Nothing here was chosen against a market outcome. No forward return, win rate,
+profitability or trading result was computed, consulted, or available.

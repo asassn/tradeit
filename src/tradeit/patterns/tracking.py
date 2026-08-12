@@ -140,13 +140,29 @@ class PatternTracker:
     #: Sessions a resolved pattern is carried after its last detection, so a
     #: breakout stays visible past the re-detection window that produced it.
     resolution_carry_sessions: int = 10
+    #: Keyed by *tracked* identity, which is the detector's key for a first
+    #: life and a suffixed one thereafter.
     _open: dict[str, TrackedPattern] = field(default_factory=dict)
     _closed: list[TrackedPattern] = field(default_factory=list)
-    #: Identity keys that have already reached a terminal state. Consulted when
-    #: a detection arrives for a key that is not open, so a re-detected
-    #: structure gets a *new* identity instead of silently reusing a finished
-    #: one. Kept separately from `_closed` because that list holds objects and
-    #: this question is about keys.
+    #: Detector key -> the tracked identity currently alive for that structure.
+    #:
+    #: **The index that makes re-detection work after a re-mint.** A detector
+    #: emits the same content hash every session; the tracker may be holding
+    #: that structure under a suffixed key. Looking the detection up in
+    #: :attr:`_open` by the detector's key therefore found nothing, fell through
+    #: to the re-mint branch, and minted *another* identity — every session, for
+    #: as long as the structure kept being detected. One `double_bottom` on the
+    #: diagnostic corpus was minted 209 times this way, on consecutive trading
+    #: days, while the previous life was still open.
+    #:
+    #: At most one entry per structure, removed when that life terminates, so
+    #: this can only ever resolve to a life the tracker itself is holding open.
+    _live: dict[str, str] = field(default_factory=dict)
+    #: Detector keys whose identity has reached a terminal state. Consulted when
+    #: a detection arrives for a structure with no live identity, so a
+    #: re-detected structure gets a *new* identity instead of silently reusing a
+    #: finished one. Kept separately from `_closed` because that list holds
+    #: objects and this question is about keys.
     _retired: set[str] = field(default_factory=set)
 
     def observe(
@@ -184,8 +200,11 @@ class PatternTracker:
 
         seen_keys: set[str] = set()
         for instance in detections:
-            key = instance.identity_key
-            seen_keys.add(key)
+            base = instance.identity_key
+            # Through the index, never straight into `_open`: after a re-mint
+            # the live identity is filed under a suffixed key that the detector
+            # does not know about.
+            key = self._live.get(base, base)
             existing = self._open.get(key)
             if existing is None:
                 # A structure whose identity has already terminated and is
@@ -197,10 +216,22 @@ class PatternTracker:
                 # afterwards. `_fork` already handles the sibling case by
                 # appending the session; this is the same rule for the same
                 # reason.
-                if key in self._retired:
-                    key = f"{key}:{session.isoformat()}"
-                    seen_keys.add(key)
-                self._retired.discard(key)
+                #
+                # A life cannot *begin* already over, though. A detection that
+                # arrives in a terminal state for a structure whose previous
+                # life already terminated records nothing the predecessor does
+                # not: terminal states are absorbing, so the new identity would
+                # hold one observation, never transition, and be retired on the
+                # same session — 10,024 of them on the diagnostic corpus, one
+                # per session for as long as the dead geometry stayed visible.
+                # The outcome is already on file under the identity that
+                # actually lived it.
+                if base in self._retired and instance.state.is_terminal:
+                    continue
+                if base in self._retired:
+                    key = f"{base}:{session.isoformat()}"
+                seen_keys.add(key)
+                self._live[base] = key
                 self._open[key] = TrackedPattern(
                     identity_key=key,
                     instrument_id=instance.instrument_id,
@@ -278,10 +309,15 @@ class PatternTracker:
             )
         )
         self._closed.append(retired)
-        self._retired.add(existing.identity_key)
+        # The *detector's* key, not the tracked one. `_retired` is consulted
+        # with what a detector emits, so filing a suffixed key here would make
+        # the membership test miss and the structure would be minted afresh
+        # under the base key — a third identity for one structure.
+        self._retired.add(existing.current.identity_key)
         del self._open[existing.identity_key]
 
         forked = f"{instance.identity_key}:{session.isoformat()}"
+        self._live[instance.identity_key] = forked
         self._open[forked] = TrackedPattern(
             identity_key=forked,
             instrument_id=instance.instrument_id,
@@ -405,10 +441,20 @@ class PatternTracker:
         return None
 
     def _retire_terminal(self) -> None:
+        """Move finished identities out of the live set.
+
+        Both bookkeeping structures are keyed by what a *detector* emits, so
+        both are updated with ``tracked.current.identity_key`` rather than the
+        tracked key: the detector will keep emitting the base hash, and that is
+        the string the next session's lookup will present.
+        """
         for key, tracked in list(self._open.items()):
             if not tracked.is_open:
+                base = tracked.current.identity_key
                 self._closed.append(tracked)
-                self._retired.add(key)
+                self._retired.add(base)
+                if self._live.get(base) == key:
+                    del self._live[base]
                 del self._open[key]
 
     # -- reads ---------------------------------------------------------------
