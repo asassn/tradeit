@@ -62,6 +62,7 @@ from tradeit.patterns.base import (
     PricePoint,
 )
 from tradeit.patterns.config import PatternEngineConfig, VcpConfig
+from tradeit.patterns.invariants import check_geometry
 from tradeit.patterns.primitives import (
     ContractionSequence,
     build_contractions,
@@ -329,11 +330,12 @@ class VcpDetector:
             swing_lows=tuple(PricePoint(leg.low_date, leg.low) for leg in sequence.legs),
         )
 
-        if not geometry.boundaries_are_ordered:
-            # This detector assembles its own instance rather than going through
-            # `BaseDetector._build`, so the shared guard has to be repeated. See
-            # `PatternGeometry.boundaries_are_ordered`: support at or above
-            # resistance is not a consolidation, and the database refuses it.
+        # This detector assembles its own instance rather than going through
+        # `BaseDetector._build`, so the shared validator has to be called here
+        # too. See `tradeit.patterns.invariants`: the rules are checked against
+        # the *persisted* representation, because two prices a nanocent apart
+        # become one price at Numeric(18, 6).
+        if check_geometry(geometry, invalidation=invalidation, detector=self.name):
             return None
 
         return PatternInstance(

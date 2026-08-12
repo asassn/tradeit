@@ -43,6 +43,7 @@ from tradeit.patterns.base import (
     PatternState,
 )
 from tradeit.patterns.config import PatternEngineConfig
+from tradeit.patterns.invariants import check_geometry
 from tradeit.patterns.scoring import combine, confidence_from
 from tradeit.patterns.swings import Swing, SwingKind, confirmed_swings
 
@@ -258,22 +259,15 @@ class BaseDetector(ABC):
         )
 
         geometry = self.geometry(inputs, structure)
-        if not geometry.boundaries_are_ordered:
-            # Support above resistance is not a consolidation. Each boundary can
-            # be locally defensible — `structural_support` clusters swing lows
-            # and `structural_resistance` clusters swing highs, and in a base
-            # that drifts upward the late lows can sit above the early highs —
-            # but jointly they describe no structure the detector claims to
-            # have found, and every measurement drawn from them (depth, width,
-            # penetration) is a difference between two lines in the wrong order.
-            #
-            # Rejected here rather than at the database, which asserts the same
-            # invariant in `ck_pattern_support_below_resistance` and could only
-            # abort a whole run over it. Real multi-year series produce these;
-            # the synthetic corpora, which build bases whose highs bracket their
-            # lows by construction, never did.
-            return None
         invalidation = self.invalidation(inputs, structure)
+        # One choke point for every invariant the persisted row must satisfy.
+        # Three real scans crashed on a check constraint before this existed —
+        # support above resistance, then support *equal* to resistance once
+        # quantised — and a constraint can only abort a run, never say which
+        # structure was wrong. See `tradeit.patterns.invariants`.
+        violations = check_geometry(geometry, invalidation=invalidation, detector=self.name)
+        if violations:
+            return None
         coverage = _coverage(components)
 
         supporting: list[Evidence] = []
