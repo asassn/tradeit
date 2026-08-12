@@ -83,6 +83,28 @@ DateTime = UTCDateTime
 #: the narrower type. Nothing else in the codebase depends on the width.
 PK = BigInteger().with_variant(Integer, "sqlite")
 
+#: Width of every column that stores a pattern or breakout identity key.
+#:
+#: Derived, not guessed. A pattern identity is ``content_hash(...)[:24]`` — 24
+#: hex characters — and the tracker appends ``":YYYY-MM-DD"`` (11 characters)
+#: when a structure is re-detected after its identity terminated, or when a
+#: detection would move an identity along an edge the lifecycle does not have.
+#: The maximum a correct key can reach is therefore **35**.
+#:
+#: It was 32, which fitted the hash and nothing else, and a real scan of AAPL
+#: produced ``671a05b24082ef63e6f16232:2026-07-23`` on session ~4,000 of 4,174
+#: and PostgreSQL refused it. The suffix is not incidental — it is what keeps
+#: two separate lives of the same structure from being merged into one row — so
+#: the column has to hold it.
+#:
+#: 64 rather than 35: one more qualifier of the same shape would take it to 46,
+#: and a migration is a worse thing to need than 29 unused bytes that
+#: PostgreSQL does not store anyway. Bounded rather than ``Text`` because the
+#: maximum is computable and a column that admits a kilobyte will eventually
+#: hold one. :func:`tests.unit.test_pattern_identity_width` asserts the code's
+#: own worst case stays inside this.
+IDENTITY_KEY_LENGTH = 64
+
 #: Structured payloads (score components, config snapshots, journal context).
 #: JSONB on PostgreSQL for indexable containment queries; plain JSON on SQLite
 #: so the unit suite still runs. Used only where the shape is genuinely open --
@@ -717,7 +739,7 @@ class Pattern(Base):
     id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
     #: Stable across the pattern's life. Content hash of instrument, type,
     #: timeframe and structural start.
-    identity_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    identity_key: Mapped[str] = mapped_column(String(IDENTITY_KEY_LENGTH), nullable=False)
     instrument_id: Mapped[int] = mapped_column(
         ForeignKey("instruments.instrument_id", ondelete="CASCADE"), nullable=False
     )
@@ -975,7 +997,7 @@ class BreakoutEvent(Base):
     id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
     #: Stable across the attempt's life. Content hash of instrument, timeframe,
     #: pattern identity and attempt number.
-    event_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_key: Mapped[str] = mapped_column(String(IDENTITY_KEY_LENGTH), nullable=False)
     instrument_id: Mapped[int] = mapped_column(
         ForeignKey("instruments.instrument_id", ondelete="CASCADE"), nullable=False
     )
@@ -983,7 +1005,9 @@ class BreakoutEvent(Base):
     #: The pattern's own identity key, kept alongside the foreign key so an
     #: event survives the pattern row being pruned without losing what it was
     #: attached to.
-    pattern_key: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    pattern_key: Mapped[str] = mapped_column(
+        String(IDENTITY_KEY_LENGTH), nullable=False, default=""
+    )
     timeframe: Mapped[str] = mapped_column(String(8), nullable=False, default="1d")
     #: 1 for the first go at this boundary. Never reused, never overwritten.
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

@@ -380,23 +380,46 @@ class SnapshotScanner:
             )
 
         run_row = self._scan_run_row(report)
+        # The run row is committed before any instrument is scanned. Without
+        # this a crash on the *first* instrument rolls back the row too, so the
+        # scan leaves no trace at all — which is safe but tells an operator
+        # nothing about whether their scan id exists.
+        self.session.commit()
+
         done = self._completed_instruments(run_row.id)
         targets = self._targets()
         report.notes.append(f"{len(targets)} instrument(s) selected from the snapshot")
 
-        for position, (instrument_id, ticker) in enumerate(targets, start=1):
-            if instrument_id in done and not self.options.force:
-                report.resumed_instruments.append(ticker or str(instrument_id))
-                continue
-            self.on_progress(f"[{position}/{len(targets)}] {ticker or instrument_id}")
-            outcome = self._scan_instrument(instrument_id, ticker, as_of=as_of)
-            report.instruments.append(outcome)
-            if outcome.was_scanned:
-                self._record_progress(run_row.id, outcome)
-            # One commit per instrument, with its progress row. An interrupt
-            # loses at most the instrument in flight, and the database rolls it
-            # back rather than leaving it half-scanned.
+        try:
+            for position, (instrument_id, ticker) in enumerate(targets, start=1):
+                if instrument_id in done and not self.options.force:
+                    report.resumed_instruments.append(ticker or str(instrument_id))
+                    continue
+                self.on_progress(f"[{position}/{len(targets)}] {ticker or instrument_id}")
+                outcome = self._scan_instrument(instrument_id, ticker, as_of=as_of)
+                report.instruments.append(outcome)
+                if outcome.was_scanned:
+                    self._record_progress(run_row.id, outcome)
+                # One commit per instrument, with its progress row. An interrupt
+                # loses at most the instrument in flight, and the database rolls
+                # it back rather than leaving it half-scanned.
+                self.session.commit()
+        except Exception as error:
+            # Record that the run stopped, without losing the instruments that
+            # did commit. The session is unusable after a database error, so it
+            # is rolled back first — which discards only the instrument in
+            # flight, exactly the one whose work is incomplete.
+            self.session.rollback()
+            run_row = self.session.scalars(
+                select(t.ScanRun).where(t.ScanRun.scan_id == report.scan_id)
+            ).one()
+            run_row.status = "failed"
+            run_row.finished_at = dt.datetime.now(dt.UTC)
+            run_row.instruments_completed = len(self._completed_instruments(run_row.id))
+            report.problems.append(f"{type(error).__name__}: {error}")
+            run_row.report = report.to_payload()
             self.session.commit()
+            raise
 
         run_row.status = "completed"
         run_row.finished_at = dt.datetime.now(dt.UTC)

@@ -485,3 +485,120 @@ class TestAStructuralBreakResetsEverything:
             )
         )
         assert inside == 0, "the gap must stay a gap"
+
+
+class TestACrashLeavesAResumableScan:
+    """What the real AAPL failure did to `diag-01`, tested rather than assumed.
+
+    The scan is instrument-transactional: everything for one instrument commits
+    with its progress row or not at all. These assert the consequences that
+    matter after a crash — no half-written instrument, no false progress row,
+    and a re-run that finishes the job without duplicating what committed.
+    """
+
+    def test_a_crash_writes_nothing_for_the_instrument_in_flight(
+        self, db_session: Session, snapshot: str
+    ) -> None:
+        scanner = SnapshotScanner(
+            db_session,
+            snapshot,
+            options=ScanOptions(scan_id="crashy", code_version="test", progress_every=0),
+        )
+        real_persist = scanner._persist
+        calls = {"n": 0}
+
+        def explode(*args: object, **kwargs: object) -> None:
+            calls["n"] += 1
+            if calls["n"] == 2:  # let the first instrument through, break the second
+                raise RuntimeError("simulated database failure mid-persist")
+            real_persist(*args, **kwargs)  # type: ignore[arg-type]
+
+        scanner._persist = explode  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="simulated"):
+            scanner.run()
+
+        run = db_session.scalars(select(t.ScanRun).where(t.ScanRun.scan_id == "crashy")).one()
+        # The run row survives the crash and says what happened, so an operator
+        # can tell "never started" from "stopped part way".
+        assert run.status == "failed"
+        progress = db_session.scalars(
+            select(t.ScanProgress).where(t.ScanProgress.scan_run_id == run.id)
+        ).all()
+        assert [row.instrument_id for row in progress] == [1], (
+            "exactly the instrument that committed has a progress row"
+        )
+        # Nothing at all for the instrument that was in flight.
+        assert (
+            db_session.scalar(
+                select(func.count()).select_from(t.Pattern).where(t.Pattern.instrument_id == 2)
+            )
+            == 0
+        )
+        assert (
+            db_session.scalar(
+                select(func.count())
+                .select_from(t.BreakoutEvent)
+                .where(t.BreakoutEvent.instrument_id == 2)
+            )
+            == 0
+        )
+
+    def test_rerunning_the_same_scan_id_finishes_it_without_duplicating(
+        self, db_session: Session, snapshot: str
+    ) -> None:
+        """The operator's actual next step after a crash."""
+        scanner = SnapshotScanner(
+            db_session,
+            snapshot,
+            options=ScanOptions(scan_id="crashy", code_version="test", progress_every=0),
+        )
+        real_persist = scanner._persist
+        calls = {"n": 0}
+
+        def explode(*args: object, **kwargs: object) -> None:
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("simulated database failure mid-persist")
+            real_persist(*args, **kwargs)  # type: ignore[arg-type]
+
+        scanner._persist = explode  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError):
+            scanner.run()
+        after_crash = _counts(db_session)
+        assert after_crash[0] > 0, "the first instrument did commit"
+
+        report = SnapshotScanner(
+            db_session,
+            snapshot,
+            options=ScanOptions(scan_id="crashy", code_version="test", progress_every=0),
+        ).run()
+
+        # The completed instrument is resumed, the interrupted one is scanned.
+        assert len(report.resumed_instruments) == 1
+        assert [i.instrument_id for i in report.scanned] == [2]
+
+        run = db_session.scalars(select(t.ScanRun).where(t.ScanRun.scan_id == "crashy")).one()
+        assert run.status == "completed"
+        progress = db_session.scalars(
+            select(t.ScanProgress).where(t.ScanProgress.scan_run_id == run.id)
+        ).all()
+        assert sorted(row.instrument_id for row in progress) == [1, 2]
+        assert len(progress) == 2, "one row per instrument, never two"
+
+        # Nothing the first run committed was written a second time.
+        final = _counts(db_session)
+        assert final[0] > after_crash[0], "the second instrument added patterns"
+        first_instrument_patterns = db_session.scalar(
+            select(func.count()).select_from(t.Pattern).where(t.Pattern.instrument_id == 1)
+        )
+        assert first_instrument_patterns == after_crash[0]
+
+    def test_a_third_run_after_completion_changes_nothing(
+        self, db_session: Session, snapshot: str
+    ) -> None:
+        options = ScanOptions(scan_id="crashy", code_version="test", progress_every=0)
+        SnapshotScanner(db_session, snapshot, options=options).run()
+        before = _counts(db_session)
+        again = SnapshotScanner(db_session, snapshot, options=options).run()
+        assert again.scanned == []
+        assert _counts(db_session) == before

@@ -297,7 +297,6 @@ def upgrade() -> None:
     )
     op.create_index("ix_breakout_label_lookup", "breakout_labels", ["label", "as_of_session"])
 
-
     restore_references(op, references, "breakout_events")
 
 
