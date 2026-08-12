@@ -215,6 +215,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     options = ScanOptions(
         scan_id=args.scan_id or "",
         tickers=tuple(_split_symbols(args.symbols)),
+        instrument_ids=tuple(int(v) for v in (args.instrument_ids or ())),
         start=dt.date.fromisoformat(args.start) if args.start else None,
         end=dt.date.fromisoformat(args.end) if args.end else None,
         respect_capabilities=not args.ignore_capabilities,
@@ -710,6 +711,17 @@ def add_data_commands(sub: argparse._SubParsersAction) -> None:  # type: ignore[
         nargs="*",
         default=None,
         help="restrict to these tickers. Omit to scan every instrument in the snapshot",
+    )
+    scan.add_argument(
+        "--instrument-ids",
+        nargs="*",
+        type=int,
+        default=None,
+        help=(
+            "surrogate instrument ids to scan, unioned with --symbols. Lets a "
+            "diagnostic set name an instrument the validation report identified by "
+            "number before anyone knows its ticker"
+        ),
     )
     scan.add_argument("--start", default=None, help="ISO date; earliest session to evaluate")
     scan.add_argument("--end", default=None, help="ISO date; latest session to evaluate")

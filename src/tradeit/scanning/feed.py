@@ -262,12 +262,19 @@ class CausalFeed:
         *,
         mode: FeedMode,
         as_of: dt.datetime,
+        floor: dt.date | None = None,
     ) -> Iterator[SessionView]:
         """Yield one view per session, in chronological order.
 
         Chronological is not a convenience: the pattern tracker and the breakout
         monitor both carry state across sessions, and feeding them out of order
         would mint identities against a history that never happened.
+
+        ``floor`` is the analytical episode's first session. Bars before it are
+        removed from every view, so a rolling average, an ATR, a pivot search
+        and a pattern boundary all begin at the episode rather than reaching
+        back across a structural break into a different listing's prices. It is
+        a hard floor and not a hint: see :mod:`tradeit.scanning.episodes`.
         """
         if not session_dates:
             return
@@ -289,12 +296,17 @@ class CausalFeed:
                     # quality flag the repository excludes. Skipped rather than
                     # evaluated against a series that stops short of it.
                     continue
+                window = everything[: cut + 1]
+                if floor is not None:
+                    window = [bar for bar in window if bar.session_date >= floor]
+                if not window:
+                    continue
                 yield SessionView(
                     session_date=session_date,
                     knowledge_time=self.clock_for(
                         session_date, known.get(session_date, as_of)
                     ).as_of,
-                    bars=everything[: cut + 1],
+                    bars=window,
                 )
             return
 
@@ -314,7 +326,11 @@ class CausalFeed:
             # knowledge times are estimated rather than reported can stamp two
             # sessions identically, and a bar from the future must not reach a
             # detector because two rows happen to share a timestamp.
-            bars = [bar for bar in bars if bar.session_date <= session_date]
+            bars = [
+                bar
+                for bar in bars
+                if bar.session_date <= session_date and (floor is None or bar.session_date >= floor)
+            ]
             if not bars or bars[-1].session_date != session_date:
                 # The session's own bar is not visible at its own evaluation
                 # instant, so nothing causal can be said about that session. It

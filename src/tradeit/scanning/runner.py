@@ -57,6 +57,7 @@ from tradeit.patterns.persistence import PatternRepository
 from tradeit.patterns.scanner import PatternScanner
 from tradeit.patterns.tracking import PatternTracker
 from tradeit.reproducibility.versioning import content_hash
+from tradeit.scanning.episodes import AnalyticalEpisode, segment_sessions
 from tradeit.scanning.feed import CausalFeed, FeedMode
 from tradeit.storage import tables as t
 
@@ -93,6 +94,11 @@ class ScanOptions:
     timeframe: Bartimeframe = Bartimeframe.D1
     #: Restrict to these tickers. Empty means every instrument in the snapshot.
     tickers: tuple[str, ...] = ()
+    #: Restrict to these surrogate instrument ids. Unioned with ``tickers``, so
+    #: a diagnostic set can name an instrument the validation report identified
+    #: by number before anyone knows its symbol. Identity in this system is the
+    #: surrogate key; the ticker is a label on it.
+    instrument_ids: tuple[int, ...] = ()
     start: dt.date | None = None
     end: dt.date | None = None
     #: Skip instruments the snapshot's capability index does not mark as
@@ -113,6 +119,7 @@ class ScanOptions:
                 "snapshot": snapshot_id,
                 "timeframe": str(self.timeframe),
                 "tickers": sorted(self.tickers),
+                "instrument_ids": sorted(self.instrument_ids),
                 "start": self.start.isoformat() if self.start else None,
                 "end": self.end.isoformat() if self.end else None,
                 "profile": self.breakout_profile or "",
@@ -133,6 +140,9 @@ class InstrumentScan:
     last_session: dt.date | None = None
     feed_mode: FeedMode = FeedMode.PER_SESSION_READ
     feed_reason: str = ""
+    #: The analytical episodes this instrument's series was split into. More
+    #: than one means a structural break ended a history and started another.
+    episodes: tuple[AnalyticalEpisode, ...] = ()
     patterns_persisted: int = 0
     breakouts_persisted: int = 0
     detections: Counter[str] = field(default_factory=Counter)
@@ -156,6 +166,7 @@ class InstrumentScan:
             "last_session": self.last_session.isoformat() if self.last_session else None,
             "feed_mode": str(self.feed_mode),
             "feed_reason": self.feed_reason,
+            "episodes": [episode.to_payload() for episode in self.episodes],
             "patterns_persisted": self.patterns_persisted,
             "breakouts_persisted": self.breakouts_persisted,
             "detections": dict(sorted(self.detections.items())),
@@ -421,14 +432,21 @@ class SnapshotScanner:
             for row in self.session.scalars(select(t.SymbolMapping)).all()
         }
         wanted = {ticker.upper() for ticker in self.options.tickers}
+        wanted_ids = set(self.options.instrument_ids)
+        restricted = bool(wanted or wanted_ids)
         eligible = self._price_eligible()
 
         targets: list[tuple[int, str]] = []
         for instrument_id, _count in rows:
             ticker = tickers.get(instrument_id, "")
-            if wanted and ticker.upper() not in wanted:
+            named = ticker.upper() in wanted or instrument_id in wanted_ids
+            if restricted and not named:
                 continue
-            if eligible is not None and ticker and ticker not in eligible:
+            # An explicitly named instrument is scanned whatever the capability
+            # index says. Naming one is a deliberate diagnostic act, and the
+            # report records which instruments carry only scale-invariant
+            # eligibility, so the widening is visible rather than silent.
+            if not named and eligible is not None and ticker and ticker not in eligible:
                 continue
             targets.append((instrument_id, ticker))
         targets.sort(key=lambda pair: (pair[1] or "", pair[0]))
@@ -538,36 +556,60 @@ class SnapshotScanner:
         mode, reason = self.feed.mode_for(instrument_id, as_of)
         outcome.feed_mode, outcome.feed_reason = mode, reason
 
-        # One of each, alive for the whole walk. A fresh scanner per session
-        # would re-mint every pattern every day and reset attempt numbering.
-        scanner = PatternScanner(config=self.pattern_config, tracker=PatternTracker())
-        monitor = BreakoutMonitor(self.breakout_config, profile=self.options.breakout_profile)
-
-        for index, view in enumerate(
-            self.feed.walk(instrument_id, sessions, mode=mode, as_of=as_of), start=1
-        ):
-            result = scanner.scan_incremental(
-                instrument_id, self.options.timeframe, view.bars, view.session_date
+        # A long discontinuity is not a gap in one history; it is the end of
+        # one and the start of another. Each episode gets its own scanner,
+        # tracker and monitor, and its own bar floor, so no indicator, pivot,
+        # pattern identity or breakout boundary reaches back across the break.
+        # See `tradeit.scanning.episodes` for why a reset rather than a bridge.
+        episodes = segment_sessions(sessions)
+        outcome.episodes = tuple(episodes)
+        if len(episodes) > 1:
+            self.on_progress(
+                f"    {ticker or instrument_id}: {len(episodes)} analytical episodes; "
+                "structural break(s) of "
+                + ", ".join(str(e.break_sessions) for e in episodes[1:])
+                + " sessions"
             )
-            outcome.sessions_scanned += 1
-            outcome.bars_read += len(view.bars)
-            for instance in result.instances:
-                outcome.detections[instance.detector_name] += 1
-            for skipped in result.skipped:
-                outcome.skipped_detectors[skipped.name] += 1
 
-            monitor.observe(
+        evaluated = 0
+        for episode in episodes:
+            # One of each per episode. A fresh scanner per *session* would
+            # re-mint every pattern every day; one shared across a break would
+            # carry a dead company's structures into a live listing.
+            scanner = PatternScanner(config=self.pattern_config, tracker=PatternTracker())
+            monitor = BreakoutMonitor(self.breakout_config, profile=self.options.breakout_profile)
+            for view in self.feed.walk(
                 instrument_id,
-                self.options.timeframe,
-                scanner.open_patterns(),
-                view.bars,
-                view.session_date,
-                knowledge_time=view.knowledge_time,
-            )
-            if self.options.progress_every and index % self.options.progress_every == 0:
-                self.on_progress(f"    {ticker or instrument_id}: {index}/{len(sessions)} sessions")
+                episode.sessions,
+                mode=mode,
+                as_of=as_of,
+                floor=episode.start,
+            ):
+                result = scanner.scan_incremental(
+                    instrument_id, self.options.timeframe, view.bars, view.session_date
+                )
+                evaluated += 1
+                outcome.sessions_scanned += 1
+                outcome.bars_read += len(view.bars)
+                for instance in result.instances:
+                    outcome.detections[instance.detector_name] += 1
+                for skipped in result.skipped:
+                    outcome.skipped_detectors[skipped.name] += 1
 
-        self._persist(scanner, monitor, outcome)
+                monitor.observe(
+                    instrument_id,
+                    self.options.timeframe,
+                    scanner.open_patterns(),
+                    view.bars,
+                    view.session_date,
+                    knowledge_time=view.knowledge_time,
+                )
+                if self.options.progress_every and evaluated % self.options.progress_every == 0:
+                    self.on_progress(
+                        f"    {ticker or instrument_id}: {evaluated}/{len(sessions)} sessions"
+                    )
+            self._persist(scanner, monitor, outcome)
+
         outcome.elapsed = time.perf_counter() - started
         return outcome
 

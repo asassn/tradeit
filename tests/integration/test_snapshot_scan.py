@@ -27,6 +27,7 @@ from tradeit.data.packages.manifest import (
 from tradeit.data.packages.spec import AdjustmentPolicyDeclaration, DatasetKind
 from tradeit.errors import DataError
 from tradeit.scanning import CausalFeed, FeedMode, ScanOptions, SnapshotScanner
+from tradeit.scanning.episodes import segment_sessions
 from tradeit.scanning.runner import SCAN_DOES_NOT_PRODUCE
 from tradeit.storage import tables as t
 
@@ -53,12 +54,25 @@ BAR_COLUMNS = {
 }
 
 
-def write_package(root: Path) -> PackageManifest:
+#: Sessions omitted from instrument 2, wide enough to end its episode. Shaped
+#: like the real BBBY case: a long hole, and prices on the far side that belong
+#: to a different security.
+BREAK_FROM, BREAK_TO = 200, 340
+
+
+def write_package(root: Path, *, structural_break: bool = False) -> PackageManifest:
     rows = ["date,symbol,open,high,low,close,volume"]
     for index, _symbol in enumerate(SYMBOLS, start=1):
         price = 40.0 + index * 25
         for step, day in enumerate(SESSIONS):
             price *= 1.0 + (0.006 if step % 5 else -0.013)
+            if structural_break and index == 2:
+                if BREAK_FROM <= step < BREAK_TO:
+                    continue
+                if step == BREAK_TO:
+                    # A different listing entirely: nothing about the pre-break
+                    # levels means anything here.
+                    price = 7.5
             rows.append(
                 f"{day},{index},{price * 0.995:.2f},{price * 1.015:.2f},"
                 f"{price * 0.985:.2f},{price:.2f},{900_000 + step * 137}"
@@ -100,6 +114,17 @@ def write_package(root: Path) -> PackageManifest:
             ),
         ),
     )
+
+
+@pytest.fixture
+def broken_snapshot(db_session: Session, tmp_path: Path) -> str:
+    """A snapshot whose second instrument has a structural break in it."""
+    manifest = write_package(tmp_path, structural_break=True)
+    sink = DatabaseSink(session=db_session, manifest=manifest, source_path=tmp_path)
+    report = PackageImporter(manifest, tmp_path, options=ImportOptions(), sink=sink).run()
+    package = sink.finalise(report)
+    db_session.commit()
+    return str(package.snapshot_id)
 
 
 @pytest.fixture
@@ -310,3 +335,153 @@ def _counts(session: Session) -> tuple[int, int, int, int]:
             t.BreakoutObservation,
         )
     )
+
+
+class TestAStructuralBreakResetsEverything:
+    """A long discontinuity ends the analytical history; nothing crosses it.
+
+    The real case: 3,638 bars under the ticker BBBY from 2010 to 2026 with a
+    536-session hole, where the bars after the hole belong to whatever took the
+    symbol. Every property here is one that, if it failed, would let a dead
+    company's structures reach a live listing.
+    """
+
+    def test_the_feed_never_shows_a_pre_break_bar_after_the_break(
+        self, db_session: Session, broken_snapshot: str
+    ) -> None:
+        """The floor is a floor, not a hint.
+
+        This is the load-bearing one: it is what stops a 200-day average, an
+        ATR, a pivot search and a boundary from reaching back across the break.
+        """
+        feed = CausalFeed(db_session)
+        sessions = feed.sessions(2, as_of=AS_OF)
+        episodes = segment_sessions(sessions)
+        assert len(episodes) == 2, "fixture must contain a structural break"
+        second = episodes[1]
+
+        for view in feed.walk(
+            2, second.sessions, mode=feed.mode_for(2, AS_OF)[0], as_of=AS_OF, floor=second.start
+        ):
+            assert min(bar.session_date for bar in view.bars) >= second.start
+
+    def test_the_unbroken_instrument_is_one_episode(
+        self, db_session: Session, broken_snapshot: str
+    ) -> None:
+        feed = CausalFeed(db_session)
+        assert len(segment_sessions(feed.sessions(1, as_of=AS_OF))) == 1
+
+    def test_no_pattern_identity_survives_the_break(
+        self, db_session: Session, broken_snapshot: str
+    ) -> None:
+        """A pattern created before the break may not reappear after it.
+
+        Not "is unlikely to" — cannot. Each episode gets its own tracker, so a
+        pre-break identity has no object on the far side to be advanced onto.
+        """
+        SnapshotScanner(
+            db_session,
+            broken_snapshot,
+            options=ScanOptions(code_version="test", progress_every=0),
+        ).run()
+
+        episodes = segment_sessions(CausalFeed(db_session).sessions(2, as_of=AS_OF))
+        boundary = episodes[1].start
+        straddling = db_session.scalars(
+            select(t.Pattern).where(
+                t.Pattern.instrument_id == 2,
+                t.Pattern.structural_start_date < boundary,
+                t.Pattern.last_observed_session >= boundary,
+            )
+        ).all()
+        assert straddling == [], (
+            "a pattern whose structure began before the break was still being "
+            f"observed after it: {[p.identity_key for p in straddling]}"
+        )
+
+    def test_no_pattern_observation_straddles_the_break(
+        self, db_session: Session, broken_snapshot: str
+    ) -> None:
+        """Lifecycle state does not flow across the boundary either."""
+        SnapshotScanner(
+            db_session,
+            broken_snapshot,
+            options=ScanOptions(code_version="test", progress_every=0),
+        ).run()
+        episodes = segment_sessions(CausalFeed(db_session).sessions(2, as_of=AS_OF))
+        boundary = episodes[1].start
+
+        rows = db_session.execute(
+            select(
+                t.Pattern.identity_key,
+                func.min(t.PatternObservation.session_date),
+                func.max(t.PatternObservation.session_date),
+            )
+            .join(t.PatternObservation, t.PatternObservation.pattern_id == t.Pattern.id)
+            .where(t.Pattern.instrument_id == 2)
+            .group_by(t.Pattern.identity_key)
+        ).all()
+        offenders = [key for key, first, last in rows if first < boundary <= last]
+        assert offenders == [], f"observations straddle the break: {offenders}"
+
+    def test_no_breakout_event_watches_a_boundary_from_the_other_side(
+        self, db_session: Session, broken_snapshot: str
+    ) -> None:
+        """A monitor must not carry a dead listing's level into a live one."""
+        SnapshotScanner(
+            db_session,
+            broken_snapshot,
+            options=ScanOptions(code_version="test", progress_every=0),
+        ).run()
+        episodes = segment_sessions(CausalFeed(db_session).sessions(2, as_of=AS_OF))
+        boundary = episodes[1].start
+
+        rows = db_session.execute(
+            select(
+                t.BreakoutEvent.event_key,
+                t.BreakoutEvent.opened_session,
+                func.max(t.BreakoutObservation.session_date),
+            )
+            .join(
+                t.BreakoutObservation,
+                t.BreakoutObservation.event_id == t.BreakoutEvent.id,
+            )
+            .where(t.BreakoutEvent.instrument_id == 2)
+            .group_by(t.BreakoutEvent.event_key, t.BreakoutEvent.opened_session)
+        ).all()
+        offenders = [key for key, opened, last in rows if opened < boundary <= last]
+        assert offenders == [], f"breakout events straddle the break: {offenders}"
+
+    def test_the_scan_report_names_the_episodes(
+        self, db_session: Session, broken_snapshot: str
+    ) -> None:
+        report = SnapshotScanner(
+            db_session,
+            broken_snapshot,
+            options=ScanOptions(code_version="test", progress_every=0),
+        ).run()
+        broken = next(i for i in report.scanned if i.instrument_id == 2)
+        assert len(broken.episodes) == 2
+        assert broken.episodes[1].break_sessions >= 21
+        payload = broken.to_payload()["episodes"]
+        assert len(payload) == 2 and payload[1]["break_sessions_before"] >= 21
+
+    def test_no_bar_is_manufactured_to_fill_the_gap(
+        self, db_session: Session, broken_snapshot: str
+    ) -> None:
+        SnapshotScanner(
+            db_session,
+            broken_snapshot,
+            options=ScanOptions(code_version="test", progress_every=0),
+        ).run()
+        episodes = segment_sessions(CausalFeed(db_session).sessions(2, as_of=AS_OF))
+        inside = db_session.scalar(
+            select(func.count())
+            .select_from(t.OhlcvBar)
+            .where(
+                t.OhlcvBar.instrument_id == 2,
+                t.OhlcvBar.session_date > episodes[0].end,
+                t.OhlcvBar.session_date < episodes[1].start,
+            )
+        )
+        assert inside == 0, "the gap must stay a gap"

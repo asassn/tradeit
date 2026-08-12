@@ -39,6 +39,7 @@ from tradeit.data.validation_universe import ValidationInstrument, ValidationUni
 __all__ = [
     "MIN_CONTROL_SESSIONS",
     "TAIL_TOLERANCE_DAYS",
+    "TICKER_REUSE_TOLERANCE_DAYS",
     "AcquisitionOutcomeView",
     "AcquisitionRecordView",
     "ControlCoverage",
@@ -64,6 +65,20 @@ MIN_CONTROL_SESSIONS = 252
 #: a vendor's final print may legitimately be a few sessions earlier — a halt
 #: before the delisting, or a final day with no trade.
 TAIL_TOLERANCE_DAYS = 21
+
+#: How far past a control's last trade date its series may run before the
+#: symbol is judged to have been reused. A quarter: long enough to absorb a
+#: research date that is a few weeks off or a final week of pink-sheet prints,
+#: far short of the years that separate a delisting from a new listing under
+#: the same string.
+#:
+#: This bound exists because the first real snapshot silently passed one
+#: control on a *different company's* prices. BBBY was recorded as COVERED with
+#: 3,638 bars from 2010 to 2026 — Bed Bath & Beyond stopped trading in May
+#: 2023, and the bars after a 536-session hole belong to whatever took the
+#: ticker. Coverage measured only from "enough bars, recent enough" cannot see
+#: that, and the failure direction is the flattering one.
+TICKER_REUSE_TOLERANCE_DAYS = 92
 
 
 class SurvivorshipStatus(StrEnum):
@@ -574,6 +589,20 @@ def _usability_problems(
             problems.append(
                 f"series ends {series.last_session.isoformat()}, {shortfall} days before "
                 f"the recorded last trade {active_end.isoformat()}"
+            )
+        # The mirror case, and the dangerous one. A control that stopped
+        # trading in 2023 cannot have prices in 2026: the ticker was reused,
+        # and the vendor has spliced a *surviving* company's history onto a
+        # failed one under a single symbol string. Counting that as coverage
+        # is the exact substitution this module forbids — a delisted control
+        # marked present on the strength of a different company's prices —
+        # and it happens without anyone deciding to do it.
+        overrun = (series.last_session - active_end).days
+        if overrun > TICKER_REUSE_TOLERANCE_DAYS:
+            problems.append(
+                f"series runs to {series.last_session.isoformat()}, {overrun} days *after* "
+                f"the recorded last trade {active_end.isoformat()}: the symbol has been "
+                "reused and this history is not one security's"
             )
     return problems
 

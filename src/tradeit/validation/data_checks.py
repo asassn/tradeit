@@ -129,6 +129,14 @@ class QuarantineRate(_Check):
             )
         )
         by_stage = Counter(row.stage for row in quarantined)
+        # A rejected row names the instrument by the identifier the *file*
+        # used, which is a surrogate key. "instrument 60" cannot be acted on
+        # without a second query the reader has to think to run, so the ticker
+        # is resolved here.
+        tickers = {
+            str(row.instrument_id): row.ticker
+            for row in context.session.scalars(select(t.SymbolMapping))
+        }
         if rate > MAX_ACCEPTABLE_QUARANTINE_RATE:
             status = CheckStatus.FAIL
         elif package.rows_quarantined:
@@ -153,16 +161,19 @@ class QuarantineRate(_Check):
                 "rows_quarantined": package.rows_quarantined,
                 "rate": round(rate, 6),
                 "by_stage": dict(sorted(by_stage.items())),
-                "rows": [_quarantine_payload(row) for row in quarantined[:MAX_QUARANTINE_ROWS]],
+                "rows": [
+                    _quarantine_payload(row, tickers) for row in quarantined[:MAX_QUARANTINE_ROWS]
+                ],
             },
-            detail=tuple(_render_quarantine(quarantined)),
+            detail=tuple(_render_quarantine(quarantined, tickers)),
         )
 
 
-def _quarantine_payload(row: t.QuarantinedRow) -> dict[str, Any]:
+def _quarantine_payload(row: t.QuarantinedRow, tickers: dict[str, str]) -> dict[str, Any]:
     return {
         "dataset": row.dataset,
         "identifier": row.identifier,
+        "ticker": tickers.get(str(row.identifier), ""),
         "stage": row.stage,
         "source_file": row.source_file,
         "line_number": row.line_number,
@@ -171,7 +182,7 @@ def _quarantine_payload(row: t.QuarantinedRow) -> dict[str, Any]:
     }
 
 
-def _render_quarantine(rows: list[t.QuarantinedRow]) -> list[str]:
+def _render_quarantine(rows: list[t.QuarantinedRow], tickers: dict[str, str]) -> list[str]:
     """Name the rejected rows while there are few enough to read.
 
     A count answers "how bad?" and nothing else. Four quarantined bars in a
@@ -190,24 +201,32 @@ def _render_quarantine(rows: list[t.QuarantinedRow]) -> list[str]:
         return []
     lines = [
         "  quarantined rows (kept verbatim; they are absent from every downstream count)",
-        f"  {'dataset':<14} {'identifier':<12} {'stage':<13} {'source':<22} reason",
-        f"  {'-' * 14} {'-' * 12} {'-' * 13} {'-' * 22} {'-' * 24}",
+        f"  {'dataset':<14} {'ticker':<8} {'id':<6} {'stage':<12} {'source':<20} reason",
+        f"  {'-' * 14} {'-' * 8} {'-' * 6} {'-' * 12} {'-' * 20} {'-' * 24}",
     ]
     for row in rows[:MAX_QUARANTINE_ROWS]:
         where = f"{row.source_file or '?'}:{row.line_number if row.line_number else '?'}"
+        ticker = tickers.get(str(row.identifier), "?")
         lines.append(
-            f"  {row.dataset:<14} {(row.identifier or '?'):<12} {row.stage:<13} "
-            f"{where[:22]:<22} {row.reason[:70]}"
+            f"  {row.dataset:<14} {ticker:<8} {(row.identifier or '?'):<6} {row.stage:<12} "
+            f"{where[:20]:<20} {row.reason[:70]}"
         )
     if len(rows) > MAX_QUARANTINE_ROWS:
         lines.append(
             f"  ... and {len(rows) - MAX_QUARANTINE_ROWS:,} more; at this volume read the "
             "stage tally rather than the rows"
         )
+    affected = sorted(
+        {tickers.get(str(row.identifier), str(row.identifier)) for row in rows if row.identifier}
+    )
     lines += [
         "",
-        "  A quarantined bar is a session with no row, so these also appear as gaps in",
-        "  data.session_continuity. They are the same rows, not two separate findings.",
+        "  A quarantined bar is a session with no row, so each of these also removes one",
+        "  session from its own instrument's series. They are the same rows as the",
+        "  corresponding one-session gaps in data.session_continuity, not two findings.",
+        f"  Instruments affected: {', '.join(affected) or 'none'}.",
+        "  Any continuity finding for an instrument NOT in that list is unrelated to",
+        "  quarantining and has another cause.",
     ]
     return lines
 
