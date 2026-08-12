@@ -93,6 +93,7 @@ class PatternRepository:
                 last_observed_at=utcnow(),
                 structural_start_date=current.geometry.start_date,
                 structural_end_date=current.geometry.end_date,
+                structure_known_through=_known_through(tracked),
                 first_detected_session=tracked.first_seen,
                 last_observed_session=tracked.last_seen,
                 quality=current.quality,
@@ -123,6 +124,12 @@ class PatternRepository:
         a change in structural start is refused rather than persisted.
         """
         current = tracked.current
+        # Written once, at insert, and never here. That is the whole point of
+        # it: `structural_end_date` below is the latest re-measurement, and if
+        # both moved there would again be nothing recording what was knowable
+        # when the pattern was first detected.
+        if row.structure_known_through is None:
+            row.structure_known_through = _known_through(tracked)
         if row.structural_start_date != current.geometry.start_date:
             raise DataError(
                 f"pattern {tracked.identity_key} would move its structural start from "
@@ -179,6 +186,11 @@ class PatternRepository:
             from_state=str(transition.from_state) if transition.from_state else None,
             to_state=str(transition.to_state),
             reason=str(transition.reason),
+            # From the transition, never from `instance`. `instance` is the
+            # pattern's *latest* measurement and every row in this loop would
+            # otherwise be stamped with it — which is exactly the retrospective
+            # smearing this column exists to make visible.
+            structure_end_observed=transition.structure_end,
             quality=transition.quality,
             evidence_coverage=transition.evidence_coverage,
             confidence=instance.confidence,
@@ -337,6 +349,21 @@ def _one_per_session(history: Sequence[StateTransition]) -> list[StateTransition
             continue
         out.append(transition)
     return out
+
+
+def _known_through(tracked: TrackedPattern) -> dt.date:
+    """How far the structure was measured to run when it was first detected.
+
+    Taken from the history's first entry rather than from ``current``, because a
+    pattern is often first persisted after several sessions of tracking and
+    ``current`` is by then a later measurement. Falls back to the current
+    geometry only when there is no history to read, which is a pattern being
+    saved on its own birth session — where the two are the same value.
+    """
+    for transition in tracked.history:
+        if transition.structure_end is not None:
+            return transition.structure_end
+    return tracked.current.geometry.end_date
 
 
 def _as_decimal(value: float | None) -> Decimal | None:

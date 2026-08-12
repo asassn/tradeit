@@ -164,7 +164,22 @@ class BreakoutMonitor:
         skipped: list[SkippedPattern] = []
         for item in patterns:
             instance = item.current if isinstance(item, TrackedPattern) else item
-            key = instance.identity_key
+            # The *tracked* identity, not the instance's recomputed hash.
+            #
+            # `PatternInstance.identity_key` is a content hash of instrument,
+            # type, timeframe and structural start — deliberately stable as a
+            # structure evolves. The tracker mints something narrower when a
+            # structure is re-detected after its identity terminated, or when a
+            # detection would require an edge the lifecycle does not have: it
+            # appends the session, so one base hash can name many separate
+            # lives. Keying events by the instance's hash collapsed all of them
+            # onto the first life. On the seven-instrument diagnostic scan not
+            # one of 4,516 events carried a tracked key while 95.6% of patterns
+            # had one, so every event on a re-minted identity was attributed to
+            # a row that had already terminated — which is what made
+            # `phase5.monitor_floor` report thousands of events "watching"
+            # expired patterns that the monitor had in fact never been shown.
+            key = item.identity_key if isinstance(item, TrackedPattern) else instance.identity_key
 
             if str(instance.state) not in allowed:
                 skipped.append(

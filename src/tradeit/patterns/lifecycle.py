@@ -197,6 +197,13 @@ class StateTransition:
     matters historically for the same reason it matters currently: a pattern
     that matured at quality 88 on 40% coverage matured on very little evidence,
     and a history that records only the score cannot say so.
+
+    ``structure_end`` is here for the same reason and was missing for the same
+    kind of cost: the pattern row's structural end is re-measured on every
+    re-detection, so without a per-session record there is no way to ask how far
+    the structure was believed to run *on a given day*. That gap made
+    ``phase4.causality`` unanswerable — a perfectly causal detector looked
+    acausal because the only end date on file had moved on since.
     """
 
     session_date: dt.date
@@ -206,6 +213,9 @@ class StateTransition:
     quality: float
     evidence_coverage: float = 100.0
     note: str = ""
+    #: The geometry's end date as measured on ``session_date``. ``None`` only
+    #: for transitions built by code that predates the field.
+    structure_end: dt.date | None = None
 
     def __post_init__(self) -> None:
         if self.from_state is not None:

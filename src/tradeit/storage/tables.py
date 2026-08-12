@@ -763,7 +763,23 @@ class Pattern(Base):
     last_observed_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
     #: When the *structure* began, which precedes when anyone noticed it.
     structural_start_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    #: The structure's end as most recently **re-measured**. This one moves: a
+    #: consolidation that keeps consolidating is a longer consolidation, and
+    #: every re-detection extends it. It is therefore the *eventual* extent, not
+    #: what anyone knew at detection, and comparing it against
+    #: ``first_detected_session`` measures the tracker's memory rather than the
+    #: detector's causality. Use ``structure_known_through`` for that.
     structural_end_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    #: The structure's end **as measured on the session it was first detected**,
+    #: written once and never updated.
+    #:
+    #: The three dates answer three different questions and were previously
+    #: conflated into two, which made ``phase4.causality`` unanswerable: a
+    #: detector that only ever saw a prefix still looked acausal because the end
+    #: date it was compared against had moved on afterwards. NULL for any
+    #: pattern written before this column existed — the value cannot be
+    #: recovered, because only the current geometry was ever stored.
+    structure_known_through: Mapped[dt.date | None] = mapped_column(Date)
     first_detected_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
     last_observed_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
 
@@ -833,6 +849,13 @@ class PatternObservation(Base):
     from_state: Mapped[str | None] = mapped_column(String(32))
     to_state: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: How far the structure was measured to extend **on this session**, which
+    #: is what the detector could see at the time. The pattern row's
+    #: ``structural_end_date`` is the latest such measurement; this column keeps
+    #: the whole series, so "how far did we think this ran, on the day?" is
+    #: answerable rather than inferable. NULL for observations written before
+    #: this column existed.
+    structure_end_observed: Mapped[dt.date | None] = mapped_column(Date)
 
     quality: Mapped[float] = mapped_column(Float, nullable=False)
     evidence_coverage: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
@@ -2496,6 +2519,14 @@ class ScanRun(Base):
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     instruments_requested: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     instruments_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: The instrument ids this scan was **asked** to cover, or NULL for "the
+    #: whole snapshot". Stored as ids rather than only a count because the count
+    #: cannot answer the question the empirical gate actually asks: *over which
+    #: instruments were these rates computed?* A diagnostic scan of seven names
+    #: inside a seventy-eight name snapshot otherwise reports seventy-one
+    #: instruments as having produced no detections, which is true of the
+    #: database and false about the detectors.
+    requested_instrument_ids: Mapped[list[int] | None] = mapped_column(JSONB_OR_JSON)
     #: Counts and per-detector tallies. A mapping rather than columns because
     #: the detector roster changes and a schema migration per detector would be
     #: a tax on adding one.

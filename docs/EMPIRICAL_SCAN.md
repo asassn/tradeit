@@ -201,6 +201,60 @@ threshold against the validation set.
 **No check computes a forward return, a win rate, or anything from which one
 could be assembled**, and `assert_no_performance_claims` walks every result.
 
+### Three dates, three questions
+
+A pattern row carries three dates about *when*, and the first version of the
+gate read one of them for two purposes.
+
+| field | meaning | moves? |
+|---|---|---|
+| `first_detected_session` | the session the structure was first noticed | no |
+| `structure_known_through` | the structure's end **as measured on that session** | no |
+| `structural_end_date` | the structure's end **as most recently re-measured** | yes |
+
+`structural_end_date` moves for a good reason: a consolidation that keeps
+consolidating is a longer consolidation, and every re-detection extends it from
+bars that had printed by then. Comparing `first_detected_session` against it
+therefore measures the tracker's memory, not the detector's causality — which is
+why `phase4.causality` reported 5,849 of 156,433 patterns on the diagnostic
+scan. Re-running each detector over exactly the bar prefix available on the
+failing session reproduced the geometry with an end date on the detection
+session in every reconstructed case.
+
+The guarantee is stronger than a measurement, and it predates the finding:
+`PatternInstance.__post_init__` refuses to construct an instance whose geometry
+ends after its own `as_of_session` — *"the detector used a bar it was not allowed
+to see"*. Every detection is causal by construction, first detection included.
+
+`pattern_observations.structure_end_observed` keeps the same measurement per
+session, so "how far did we think this ran, on the day?" is answerable rather
+than inferable.
+
+**Rows written before these columns existed hold NULL and cannot be
+backfilled.** Only the current geometry was ever stored; what a pattern was
+measured as on a past session was never written down. `phase4.causality`
+reports those as *unassessable* and BLOCKS rather than passing them.
+
+### Scan scope: three universes, one denominator
+
+| universe | source | used for |
+|---|---|---|
+| snapshot | instruments with bars | the ceiling |
+| requested | `scan_runs.requested_instrument_ids` | what the scan set out to do |
+| completed | `scan_progress` | **every empirical rate** |
+
+`diag-01` covered seven instruments inside a seventy-eight instrument snapshot,
+and `phase4.concentration` reported seventy-one as having produced no
+detections. All seventy-one were simply never scanned — true of the database and
+false about the detectors. `ScanScope` keeps the three apart, and
+`instrument_years()` sums each scanned instrument over *its own* span rather
+than multiplying one snapshot-wide span by a count, which used to credit an
+instrument listed in 2020 with a decade of history because something else in the
+universe had one.
+
+A requested instrument that never completed is reported as an interrupted scan,
+never averaged in as a silent detector.
+
 ### The one field worth arguing about
 
 `phase5.lifecycle` reports `terminal_states` — how many breakout events ended

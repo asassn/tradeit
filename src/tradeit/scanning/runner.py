@@ -379,7 +379,15 @@ class SnapshotScanner:
                 "rescaled non-uniformly"
             )
 
+        # Resolved before the run row is written, so the row can record *which*
+        # instruments this scan set out to cover and not merely how many. A
+        # count cannot tell the empirical gate whether an instrument produced no
+        # detections or was never scanned, and those two must never be added
+        # together into one rate.
+        targets = self._targets()
         run_row = self._scan_run_row(report)
+        run_row.requested_instrument_ids = [instrument_id for instrument_id, _ in targets]
+        run_row.instruments_requested = len(targets)
         # The run row is committed before any instrument is scanned. Without
         # this a crash on the *first* instrument rolls back the row too, so the
         # scan leaves no trace at all — which is safe but tells an operator
@@ -387,7 +395,6 @@ class SnapshotScanner:
         self.session.commit()
 
         done = self._completed_instruments(run_row.id)
-        targets = self._targets()
         report.notes.append(f"{len(targets)} instrument(s) selected from the snapshot")
 
         try:

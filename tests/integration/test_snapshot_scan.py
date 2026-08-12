@@ -31,8 +31,19 @@ from tradeit.scanning.episodes import segment_sessions
 from tradeit.scanning.runner import SCAN_DOES_NOT_PRODUCE
 from tradeit.storage import tables as t
 from tradeit.validation.checks import CheckStatus, assert_no_performance_claims
-from tradeit.validation.context import load_context
-from tradeit.validation.scan_checks import BreakoutLifecycle, scan_checks
+from tradeit.validation.context import ValidationContext, load_context
+from tradeit.validation.phase_checks import (
+    BreakoutMonitorFloor,
+    PatternCausality,
+    PatternDetectionRate,
+)
+from tradeit.validation.scan_checks import (
+    BreakoutLifecycle,
+    PatternConcentration,
+    PatternIdentityChurn,
+    scan_checks,
+)
+from tradeit.validation.scope import resolve_scope
 
 # A scan walks every session of every fixture instrument through twelve
 # detectors and the breakout engine. That is the point — the properties under
@@ -539,6 +550,172 @@ class TestTheScanChecksSurviveTheirOwnGuard:
         assert "state_transitions" in result.evidence
         assert "illegal_transitions" in result.evidence
         assert result.evidence["illegal_transitions"] == 0
+
+
+class TestTheGateReadsWhatTheScanActuallyDid:
+    """The three Phase 4/5 findings from the `diag-01` gate, over a real scan.
+
+    Each of these reproduced as a FAIL before the fix and is a PASS after, and
+    none of them was a defect in the thing the check was pointing at.
+    """
+
+    @pytest.fixture
+    def scanned(self, db_session: Session, snapshot: str) -> ValidationContext:
+        SnapshotScanner(
+            db_session,
+            snapshot,
+            options=ScanOptions(scan_id="scoped", code_version="test", progress_every=0),
+        ).run()
+        db_session.commit()
+        return load_context(db_session, snapshot, universe=None)
+
+    def test_causality_compares_against_what_was_known_at_detection(
+        self, scanned: ValidationContext
+    ) -> None:
+        result = PatternCausality().run(scanned)
+        assert result.status is CheckStatus.PASS, result.summary
+        assert result.evidence["acausal"] == 0
+        assert result.evidence["unassessable"] == 0
+        # The retrospective movement is still measured, just no longer called a
+        # causality failure — it is the number that used to be reported as one.
+        assert result.evidence["structure_extended_after_detection"] > 0, (
+            "a walk in which no structure was ever re-measured as running further "
+            "cannot distinguish the two dates, so it proves nothing"
+        )
+
+    def test_every_pattern_records_how_far_the_structure_was_known_to_run(
+        self, db_session: Session, scanned: ValidationContext
+    ) -> None:
+        rows = db_session.execute(
+            select(t.Pattern.first_detected_session, t.Pattern.structure_known_through)
+        ).all()
+        assert rows
+        assert all(known is not None for _, known in rows)
+        assert all(known <= detected for detected, known in rows)
+
+    def test_the_observation_log_keeps_the_end_date_measured_on_each_session(
+        self, db_session: Session, scanned: ValidationContext
+    ) -> None:
+        """Not the latest measurement stamped onto every row."""
+        multi = db_session.scalars(
+            select(t.PatternObservation.pattern_id)
+            .group_by(t.PatternObservation.pattern_id)
+            .having(func.count() > 3)
+            .limit(1)
+        ).first()
+        assert multi is not None
+        observed = db_session.execute(
+            select(
+                t.PatternObservation.session_date,
+                t.PatternObservation.structure_end_observed,
+            )
+            .where(t.PatternObservation.pattern_id == multi)
+            .order_by(t.PatternObservation.session_date)
+        ).all()
+        assert all(end is not None for _, end in observed)
+        assert all(end <= day for day, end in observed), "a session may not measure past itself"
+
+    def test_the_monitor_keys_events_by_the_tracked_identity(
+        self, db_session: Session, scanned: ValidationContext
+    ) -> None:
+        """The Phase 5 half of the monitor-floor failure.
+
+        Keying by ``PatternInstance.identity_key`` attributed every event on a
+        re-minted identity to the structure's *first* life, which had by then
+        terminated. On the diagnostic scan not one of 4,516 events carried a
+        tracked key while 95.6% of patterns had one.
+        """
+        reminted = db_session.scalar(
+            select(func.count())
+            .select_from(t.Pattern)
+            .where(t.Pattern.identity_key.like("%:____-__-__"))
+        )
+        orphans = db_session.scalar(
+            select(func.count())
+            .select_from(t.BreakoutEvent)
+            .where(t.BreakoutEvent.pattern_key.not_in(select(t.Pattern.identity_key)))
+        )
+        assert orphans == 0, "every event must name a pattern row that exists"
+        if reminted:
+            on_reminted = db_session.scalar(
+                select(func.count())
+                .select_from(t.BreakoutEvent)
+                .where(t.BreakoutEvent.pattern_key.like("%:____-__-__"))
+            )
+            assert on_reminted, (
+                f"{reminted} identities were re-minted but no event names one; the "
+                "monitor is keying by the instance hash again"
+            )
+
+    def test_the_monitor_floor_asks_what_the_state_was_at_opening(
+        self, scanned: ValidationContext
+    ) -> None:
+        result = BreakoutMonitorFloor().run(scanned)
+        assert result.status is CheckStatus.PASS, result.summary
+        assert result.evidence["below_floor_when_opened"] == 0
+        assert result.evidence["no_observation_at_opening"] == 0
+        assert result.evidence["events_with_no_pattern_row"] == 0
+
+    def test_the_scope_is_the_completed_scan_not_the_snapshot(
+        self, db_session: Session, snapshot: str
+    ) -> None:
+        """`diag-01` covered 7 of 78 instruments; the other 71 were not silent."""
+        SnapshotScanner(
+            db_session,
+            snapshot,
+            options=ScanOptions(
+                scan_id="one-name", code_version="test", progress_every=0, instrument_ids=(1,)
+            ),
+        ).run()
+        db_session.commit()
+        scope = resolve_scope(db_session, snapshot)
+        assert scope.is_known
+        assert scope.snapshot == {1, 2}
+        assert scope.completed == {1}
+        assert scope.unscanned == {2}
+
+        context = load_context(db_session, snapshot, universe=None)
+        result = PatternConcentration().run(context)
+        assert result.evidence["instruments_scanned"] == 1, (
+            "the unscanned instrument must not be counted as one that produced nothing"
+        )
+        assert result.evidence["instruments_with_none"] == 0
+        assert result.evidence["never_requested"] == 1
+
+    def test_detection_rate_uses_only_scanned_instrument_years(
+        self, db_session: Session, snapshot: str
+    ) -> None:
+        SnapshotScanner(
+            db_session,
+            snapshot,
+            options=ScanOptions(
+                scan_id="one-name", code_version="test", progress_every=0, instrument_ids=(1,)
+            ),
+        ).run()
+        db_session.commit()
+        context = load_context(db_session, snapshot, universe=None)
+        result = PatternDetectionRate().run(context)
+        years = result.evidence["instrument_years"]
+        span = (END - START).days / 365.25
+        assert isinstance(years, float)
+        assert years == pytest.approx(span, abs=0.2), (
+            "one instrument scanned over one span is one instrument-span, not two"
+        )
+        assert result.evidence["completed_instruments"] == 1
+
+    def test_identity_churn_reports_the_cause_and_not_only_the_count(
+        self, scanned: ValidationContext
+    ) -> None:
+        result = PatternIdentityChurn().run(scanned)
+        assert result.status in (CheckStatus.PASS, CheckStatus.WARN)
+        assert result.evidence["identities"] > 0
+        assert result.detail, "the per-detector table is the point of this check"
+        # The two mechanisms are counted separately, because they call for
+        # different answers: one is a second life, the other is a lifecycle
+        # edge the detector keeps proposing.
+        assert "remints_after_termination" in result.evidence
+        assert "remints_on_an_illegal_transition" in result.evidence
+        assert "ended_from_state" in result.evidence
 
 
 class TestACrashLeavesAResumableScan:

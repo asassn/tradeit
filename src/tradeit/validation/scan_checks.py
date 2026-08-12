@@ -46,7 +46,9 @@ in this repository is set from it.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from collections import Counter
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import func, select
@@ -62,6 +64,7 @@ __all__ = [
     "BreakoutCausality",
     "BreakoutLifecycle",
     "PatternConcentration",
+    "PatternIdentityChurn",
     "PatternIdentityStability",
     "PatternScoreDistribution",
     "scan_checks",
@@ -333,10 +336,13 @@ class PatternConcentration(_Check):
             select(tbl.Pattern.instrument_id, func.count()).group_by(tbl.Pattern.instrument_id)
         ).all():
             by_instrument[int(instrument_id)] = int(count)
-        scanned = {
-            instrument_id
-            for (instrument_id,) in session.execute(select(tbl.OhlcvBar.instrument_id).distinct())
-        }
+        # The *completed* scan universe, never the snapshot. `diag-01` covered
+        # seven of seventy-eight instruments and this check duly reported
+        # seventy-one as having produced no detections — true of the database,
+        # false about the detectors, and the most expensive kind of wrong a
+        # validation report can be.
+        scope = context.scope
+        scanned = set(scope.completed)
         silent = sorted(tickers.get(i, str(i)) for i in scanned if by_instrument.get(i, 0) == 0)
 
         by_date: Counter[dt.date] = Counter()
@@ -366,6 +372,12 @@ class PatternConcentration(_Check):
             (
                 f"{total:,} detections over {len(by_instrument)} of {len(scanned)} scanned "
                 f"instruments; {len(silent)} produced none"
+                + (
+                    f" ({len(scope.unscanned)} further instruments in the snapshot were "
+                    "never scanned and are excluded)"
+                    if scope.unscanned
+                    else ""
+                )
                 + (f". {len(findings)} concentration finding(s)" if findings else "")
             ),
             evidence={
@@ -374,6 +386,7 @@ class PatternConcentration(_Check):
                 "instruments_with_detections": len(by_instrument),
                 "instruments_with_none": len(silent),
                 "silent_instruments": silent[:40],
+                **scope.describe(),
                 "top_instrument_share": (
                     round(by_instrument.most_common(1)[0][1] / total, 4) if by_instrument else 0.0
                 ),
@@ -383,6 +396,178 @@ class PatternConcentration(_Check):
             },
             examples=tuple(findings[:5]),
         )
+
+
+class PatternIdentityChurn(_Check):
+    """Why does one structure end up under many identities?
+
+    ``phase4.identity_stability`` says *how many* — 95.2% of the diagnostic
+    scan's 156,433 identities carried a re-mint suffix. It cannot say why, and
+    the two possible answers call for opposite responses:
+
+    *expected tracking semantics*
+        a structure genuinely ends and a genuinely new one begins on the same
+        instrument. Re-minting is then correct, and merging would be the bug.
+    *identity fragmentation*
+        one continuous structure is repeatedly torn into new identities by a
+        rule about state, not about structure. Every per-identity rate is then
+        computed over an inflated denominator.
+
+    This reports the evidence that separates them: the state an identity held
+    when it was superseded, what it was re-detected as, how long identities
+    live, and how many identities share one base hash. A structure that is
+    re-minted every session with consecutive dates is fragmentation; one
+    re-minted once a year is a second life.
+
+    Descriptive, and deliberately so. The remedy is a lifecycle decision, not a
+    threshold, and nothing here may be tuned against a real-data result.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            check_id="phase4.identity_churn",
+            title="Identity re-minting, by detector and by cause",
+            phase=Phase.PHASE_4,
+            requires=(DatasetKind.DAILY_BARS,),
+        )
+
+    def run(self, context: ValidationContext) -> CheckResult:
+        session = context.session
+        rows = session.execute(
+            select(
+                tbl.Pattern.id,
+                tbl.Pattern.detector_name,
+                tbl.Pattern.identity_key,
+                tbl.Pattern.first_detected_session,
+                tbl.Pattern.last_observed_session,
+            )
+        ).all()
+        if not rows:
+            return self.skipped(NO_PATTERNS)
+
+        observations: dict[int, int] = {
+            int(pattern_id): int(count)
+            for pattern_id, count in session.execute(
+                select(tbl.PatternObservation.pattern_id, func.count()).group_by(
+                    tbl.PatternObservation.pattern_id
+                )
+            )
+        }
+
+        per: dict[str, _ChurnRow] = {}
+        bases: Counter[tuple[str, str]] = Counter()
+        for pattern_id, detector, key, first, last in rows:
+            entry = per.setdefault(detector, _ChurnRow())
+            base = key.split(":")[0]
+            entry.add(
+                forked=":" in key,
+                observations=observations.get(int(pattern_id), 0),
+                lifespan=(last - first).days,
+            )
+            bases[(detector, base)] += 1
+
+        # Why an identity ended: the tracker writes the cause onto the
+        # superseding transition, so this is recorded fact rather than a guess.
+        superseded = Counter(
+            state
+            for (state,) in session.execute(
+                select(tbl.PatternObservation.from_state).where(
+                    tbl.PatternObservation.reason == "superseded"
+                )
+            )
+        )
+        redetected: Counter[str] = Counter()
+        for (note,) in session.execute(
+            select(tbl.PatternObservation.note).where(
+                tbl.PatternObservation.note.like("identity ended%")
+            )
+        ):
+            match = _REDETECTED_AS.search(note or "")
+            if match:
+                redetected[match.group(1)] += 1
+        new_life = (
+            session.scalar(
+                select(func.count())
+                .select_from(tbl.PatternObservation)
+                .where(tbl.PatternObservation.note.like("new life%"))
+            )
+            or 0
+        )
+
+        total = len(rows)
+        forked = sum(entry.forked for entry in per.values())
+        crowded = [(pair, count) for pair, count in bases.items() if count > 1]
+        worst = max((count for _, count in crowded), default=0)
+
+        header = (
+            f"  {'detector':<24}{'ids':>8}{'forked':>9}{'fork%':>8}"
+            f"{'obs med':>9}{'p90':>6}{'p99':>6}{'life med':>10}{'single%':>9}"
+        )
+        lines = [header, "  " + "-" * (len(header) - 2)]
+        for detector in sorted(per):
+            lines.append("  " + per[detector].render(detector))
+
+        return self.result(
+            CheckStatus.WARN if forked > total // 2 else CheckStatus.PASS,
+            (
+                f"{forked:,} of {total:,} identities ({forked / total:.1%}) carry a re-mint "
+                f"suffix; {len(crowded):,} base hashes name more than one identity, the "
+                f"most crowded naming {worst:,}"
+            ),
+            evidence={
+                "identities": total,
+                "reminted_identities": forked,
+                "reminted_share": round(forked / total, 4),
+                "bases_naming_more_than_one_identity": len(crowded),
+                "most_identities_on_one_base": worst,
+                "ended_from_state": dict(sorted(superseded.items())),
+                "redetected_as": dict(sorted(redetected.items())),
+                "remints_after_termination": new_life,
+                "remints_on_an_illegal_transition": sum(superseded.values()),
+            },
+            detail=tuple(lines),
+        )
+
+
+#: The tracker's own wording, parsed back out rather than re-derived.
+_REDETECTED_AS = re.compile(r"re-detected as (\w+)")
+
+
+@dataclass(slots=True)
+class _ChurnRow:
+    """One detector's churn tallies. A row of the table, not a finding."""
+
+    identities: int = 0
+    forked: int = 0
+    single: int = 0
+    observations: list[int] = field(default_factory=list)
+    lifespans: list[int] = field(default_factory=list)
+
+    def add(self, *, forked: bool, observations: int, lifespan: int) -> None:
+        self.identities += 1
+        self.forked += forked
+        self.single += observations <= 1
+        self.observations.append(observations)
+        self.lifespans.append(lifespan)
+
+    def render(self, detector: str) -> str:
+        return (
+            f"{detector:<24}{self.identities:>8,}{self.forked:>9,}"
+            f"{self.forked / self.identities:>8.1%}"
+            f"{_quantile(self.observations, 0.50):>9.1f}"
+            f"{_quantile(self.observations, 0.90):>6.0f}"
+            f"{_quantile(self.observations, 0.99):>6.0f}"
+            f"{_quantile(self.lifespans, 0.50):>10.0f}"
+            f"{self.single / self.identities:>9.1%}"
+        )
+
+
+def _quantile(values: list[int], q: float) -> float:
+    """Nearest-rank quantile. No interpolation: these are counts of sessions."""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return float(ordered[min(len(ordered) - 1, int(q * (len(ordered) - 1)))])
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +759,7 @@ def scan_checks() -> list[Any]:
     return [
         PatternScoreDistribution(),
         PatternIdentityStability(),
+        PatternIdentityChurn(),
         PatternConcentration(),
         BreakoutLifecycle(),
         BreakoutCausality(),

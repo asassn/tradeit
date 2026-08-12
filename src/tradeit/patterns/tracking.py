@@ -111,6 +111,7 @@ class TrackedPattern:
             quality=instance.quality,
             evidence_coverage=instance.evidence_coverage,
             note=note,
+            structure_end=instance.geometry.end_date,
         )
         return replace(
             self,
@@ -215,6 +216,7 @@ class PatternTracker:
                             reason=TransitionReason.DETECTED,
                             quality=instance.quality,
                             evidence_coverage=instance.evidence_coverage,
+                            structure_end=instance.geometry.end_date,
                             note=(
                                 ""
                                 if key == instance.identity_key
@@ -295,6 +297,7 @@ class PatternTracker:
                     reason=TransitionReason.DETECTED,
                     quality=instance.quality,
                     evidence_coverage=instance.evidence_coverage,
+                    structure_end=instance.geometry.end_date,
                     note=(
                         f"new identity: {existing.identity_key} was "
                         f"{existing.current.state} and cannot become {instance.state}"

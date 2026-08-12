@@ -26,11 +26,14 @@ evidence, a production breakout on an untagged boundary — is a FAIL.
 
 from __future__ import annotations
 
+import datetime as dt
+from bisect import bisect_right
 from collections import Counter
 from typing import Any
 
 import numpy as np
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from tradeit.analytics.indicators import IndicatorEngine
 from tradeit.breakouts.eligibility import PRODUCTION_PATTERN_STATES
@@ -430,7 +433,8 @@ class PatternDetectionRate(_Check):
                 ),
             )
         by_detector = Counter(row.detector_name for row in session.scalars(select(tbl.Pattern)))
-        instrument_years = _instrument_years(context)
+        scope = context.scope
+        instrument_years = scope.instrument_years()
         rates = {
             name: round(count / instrument_years, 4) if instrument_years else None
             for name, count in sorted(by_detector.items())
@@ -442,24 +446,52 @@ class PatternDetectionRate(_Check):
             status=CheckStatus.PASS,
             summary=(
                 f"{total:,} patterns across {len(by_detector)} detectors over "
-                f"{instrument_years:,.0f} instrument-years"
+                f"{instrument_years:,.0f} instrument-years of *scanned* history "
+                f"({len(scope.completed)} of {len(scope.snapshot)} instruments in the snapshot)"
             ),
             evidence={
                 "patterns": total,
                 "instrument_years": round(instrument_years, 2),
                 "per_instrument_year": rates,
                 "counts": dict(sorted(by_detector.items())),
+                **scope.describe(),
             },
         )
 
 
 class PatternCausality(_Check):
-    """Is any pattern confirmed before the geometry that confirms it?"""
+    """Is any pattern detected before the geometry that defines it had printed?
+
+    **Which end date this compares against is the whole check.** A pattern row
+    carries two, and the first version of this compared the wrong one:
+
+    ``structural_end_date``
+        The structure's end as most recently *re-measured*. It moves. A
+        consolidation that keeps consolidating is a longer consolidation, so
+        every re-detection extends it — legitimately, from bars that had printed
+        by then.
+    ``structure_known_through``
+        The structure's end as measured **on the session it was first
+        detected**. Frozen at insert.
+
+    Comparing ``first_detected_session`` against the moving one measured the
+    tracker's memory, not the detector's causality: it flagged 5,849 of 156,433
+    patterns on the diagnostic scan, and re-running the detectors over exactly
+    the bar prefix available on each failing session reproduced the geometry
+    with an end date on the detection session every time. Not one used a bar
+    that had not printed. The finding was real and the defect was in the
+    provenance, not in the detectors.
+
+    A pattern written before ``structure_known_through`` existed has NULL there
+    and **cannot be assessed** — the value was never recorded and cannot be
+    recovered, because only the current geometry was ever stored. Those rows
+    block the check rather than passing it.
+    """
 
     def __init__(self) -> None:
         super().__init__(
             check_id="phase4.causality",
-            title="No pattern is confirmed before its own evidence",
+            title="No pattern is detected before its own evidence had printed",
             phase=Phase.PHASE_4,
             requires=(DatasetKind.DAILY_BARS,),
         )
@@ -475,27 +507,72 @@ class PatternCausality(_Check):
                 status=CheckStatus.SKIPPED,
                 summary="no patterns have been persisted for this snapshot",
             )
-        # A pattern may not be detected before the geometry that defines it has
-        # finished forming. first_detected_session earlier than
-        # structural_end_date means the detector saw a shape whose last bar had
-        # not printed yet.
-        acausal = tbl.Pattern.first_detected_session < tbl.Pattern.structural_end_date
-        offenders = session.scalars(select(tbl.Pattern).where(acausal).limit(5)).all()
+
+        unassessable = (
+            session.scalar(
+                select(func.count())
+                .select_from(tbl.Pattern)
+                .where(tbl.Pattern.structure_known_through.is_(None))
+            )
+            or 0
+        )
+        acausal = tbl.Pattern.first_detected_session < tbl.Pattern.structure_known_through
         count = session.scalar(select(func.count()).select_from(tbl.Pattern).where(acausal)) or 0
+        offenders = session.scalars(select(tbl.Pattern).where(acausal).limit(5)).all()
+        # How far the *eventual* extent runs past detection, reported so the
+        # retrospective movement stays visible rather than becoming invisible
+        # now that it no longer fails anything.
+        retrospective = (
+            session.scalar(
+                select(func.count())
+                .select_from(tbl.Pattern)
+                .where(tbl.Pattern.first_detected_session < tbl.Pattern.structural_end_date)
+            )
+            or 0
+        )
+
+        evidence = {
+            "patterns": total,
+            "acausal": count,
+            "unassessable": unassessable,
+            "structure_extended_after_detection": retrospective,
+        }
+        if count:
+            status, summary = (
+                CheckStatus.FAIL,
+                f"{count:,} patterns were detected before their own structure had printed",
+            )
+        elif unassessable:
+            status, summary = (
+                CheckStatus.BLOCKED,
+                f"{unassessable:,} of {total:,} patterns predate the "
+                "structure_known_through column and cannot be assessed; the value was "
+                "never recorded and is not recoverable from what was stored",
+            )
+        else:
+            status, summary = (
+                CheckStatus.PASS,
+                f"all {total:,} patterns were first detected on or after the last bar of "
+                f"the structure they were measured from; {retrospective:,} were later "
+                "re-measured as running further, which is re-measurement rather than "
+                "foresight",
+            )
         return CheckResult(
             check_id=self.check_id,
             title=self.title,
             phase=self.phase,
-            status=CheckStatus.PASS if count == 0 else CheckStatus.FAIL,
-            summary=(
-                f"all {total:,} patterns are first detected on or after their structure completes"
-                if count == 0
-                else f"{count:,} patterns were detected before their own structure finished forming"
+            status=status,
+            summary=summary,
+            evidence=evidence,
+            needs=(
+                ("a scan run by a build that records structure_known_through",)
+                if status is CheckStatus.BLOCKED
+                else ()
             ),
-            evidence={"patterns": total, "acausal": count},
             examples=tuple(
                 f"pattern={row.identity_key} detected={row.first_detected_session} "
-                f"structure_ends={row.structural_end_date}"
+                f"known_through={row.structure_known_through} "
+                f"eventual_end={row.structural_end_date}"
                 for row in offenders
             ),
         )
@@ -666,7 +743,30 @@ class BreakoutQualityFrozen(_Check):
 
 
 class BreakoutMonitorFloor(_Check):
-    """Were only production-eligible pattern states monitored?"""
+    """Were only production-eligible pattern states monitored?
+
+    **As of the session the event opened, not as of now.** A pattern that was
+    MATURE when its boundary was watched and EXPIRED four months later was
+    monitored correctly; comparing against the pattern row's *current* state
+    convicts it of the future. The point-in-time answer is in
+    ``pattern_observations``, which exists precisely so a mutable current-state
+    row never has to be asked a historical question.
+
+    Reading the final state made this report 5,000 failures on the diagnostic
+    scan — and 5,000 was the ``LIMIT``, so the number was a sample size wearing
+    a finding's clothes. The limit is gone: a check that cannot afford to count
+    its own population should say so, not truncate it.
+
+    The failures were real, but they were not what they looked like. Two
+    separate defects produced them, and only one was in this check:
+
+    * the monitor keyed its events by ``PatternInstance.identity_key`` — the
+      base content hash — rather than by the tracked identity, so every event on
+      a re-minted identity was attributed to the *first* life of that structure,
+      which had by then terminated. Fixed in
+      :meth:`~tradeit.breakouts.monitor.BreakoutMonitor.monitorable`.
+    * this check then compared that mis-attributed row's final state.
+    """
 
     def __init__(self) -> None:
         super().__init__(
@@ -679,9 +779,13 @@ class BreakoutMonitorFloor(_Check):
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
         rows = session.execute(
-            select(tbl.BreakoutEvent.pattern_key, tbl.Pattern.state)
-            .join(tbl.Pattern, tbl.Pattern.identity_key == tbl.BreakoutEvent.pattern_key)
-            .limit(5000)
+            select(
+                tbl.BreakoutEvent.event_key,
+                tbl.BreakoutEvent.pattern_key,
+                tbl.BreakoutEvent.opened_session,
+                tbl.Pattern.id,
+                tbl.Pattern.state,
+            ).join(tbl.Pattern, tbl.Pattern.identity_key == tbl.BreakoutEvent.pattern_key)
         ).all()
         if not rows:
             return CheckResult(
@@ -691,40 +795,103 @@ class BreakoutMonitorFloor(_Check):
                 status=CheckStatus.SKIPPED,
                 summary="no breakout events joined to a pattern for this snapshot",
             )
+        orphans = (
+            session.scalar(
+                select(func.count())
+                .select_from(tbl.BreakoutEvent)
+                .where(tbl.BreakoutEvent.pattern_key.not_in(select(tbl.Pattern.identity_key)))
+            )
+            or 0
+        )
+
         allowed = {str(s) for s in PRODUCTION_PATTERN_STATES}
-        offenders = [(key, state) for key, state in rows if state not in allowed]
+        as_of_state = _states_as_of(session, {(pid, opened) for _, _, opened, pid, _ in rows})
+
+        offenders: list[str] = []
+        unobserved = 0
+        final_only: list[str] = []
+        for _event_key, pattern_key, opened, pattern_id, final_state in rows:
+            observed = as_of_state.get((pattern_id, opened))
+            if observed is None:
+                unobserved += 1
+                continue
+            if observed not in allowed:
+                offenders.append(f"pattern={pattern_key} opened={opened} state_then={observed}")
+            elif final_state not in allowed:
+                final_only.append(pattern_key)
+
+        problems = len(offenders) + unobserved
         return CheckResult(
             check_id=self.check_id,
             title=self.title,
             phase=self.phase,
-            status=CheckStatus.PASS if not offenders else CheckStatus.FAIL,
+            status=CheckStatus.PASS if problems == 0 else CheckStatus.FAIL,
             summary=(
-                f"all {len(rows):,} joined events come from {sorted(allowed)}"
-                if not offenders
+                f"all {len(rows):,} events were opened against a pattern that was in "
+                f"{sorted(allowed)} on the session the event opened"
+                if problems == 0
                 else (
-                    f"{len(offenders):,} events come from pattern states outside the "
-                    f"production floor {sorted(allowed)}; every rate computed from this "
-                    "dataset describes the monitor rather than the market"
+                    f"{len(offenders):,} events were opened against a pattern outside the "
+                    f"production floor {sorted(allowed)} on that session, and {unobserved:,} "
+                    "against a pattern with no observation on or before it; every rate "
+                    "computed from this dataset describes the monitor rather than the market"
                 )
             ),
-            evidence={"joined_events": len(rows), "allowed_states": sorted(allowed)},
-            examples=tuple(f"pattern={k} state={s}" for k, s in offenders[:5]),
+            evidence={
+                "joined_events": len(rows),
+                "allowed_states": sorted(allowed),
+                "below_floor_when_opened": len(offenders),
+                "no_observation_at_opening": unobserved,
+                # Reported, never failed: these are the ones a final-state join
+                # would have convicted. A non-zero count here is the check
+                # working, not the monitor misbehaving.
+                "eligible_then_terminal_now": len(final_only),
+                "events_with_no_pattern_row": orphans,
+            },
+            examples=tuple(offenders[:5]),
         )
 
 
-def _instrument_years(context: ValidationContext) -> float:
-    rows = context.session.execute(
+def _states_as_of(
+    session: Session, wanted: set[tuple[int, dt.date]]
+) -> dict[tuple[int, dt.date], str]:
+    """The state each pattern held on each named session.
+
+    One query for the whole set rather than one per event: the observation log
+    is the only point-in-time source, and asking it 15,000 times individually
+    turns a check into a coffee break.
+    """
+    if not wanted:
+        return {}
+    pattern_ids = {pattern_id for pattern_id, _ in wanted}
+    history: dict[int, list[tuple[dt.date, str]]] = {}
+    for pattern_id, day, state in session.execute(
         select(
-            func.min(tbl.OhlcvBar.session_date),
-            func.max(tbl.OhlcvBar.session_date),
-            func.count(func.distinct(tbl.OhlcvBar.instrument_id)),
-        ).where(tbl.OhlcvBar.timeframe == str(Bartimeframe.D1))
-    ).one()
-    first, last, instruments = rows
-    if not first or not last or not instruments:
-        return 0.0
-    span = (last - first).days / 365.25
-    return float(span * instruments)
+            tbl.PatternObservation.pattern_id,
+            tbl.PatternObservation.session_date,
+            tbl.PatternObservation.to_state,
+        )
+        .where(tbl.PatternObservation.pattern_id.in_(pattern_ids))
+        .order_by(tbl.PatternObservation.pattern_id, tbl.PatternObservation.session_date)
+    ):
+        history.setdefault(int(pattern_id), []).append((day, state))
+
+    out: dict[tuple[int, dt.date], str] = {}
+    for pattern_id, when in wanted:
+        entries = history.get(pattern_id, ())
+        index = bisect_right([day for day, _ in entries], when)
+        if index:
+            out[(pattern_id, when)] = entries[index - 1][1]
+    return out
+
+
+# `_instrument_years` used to live here and computed
+# `(latest - earliest) * instrument_count` over the whole snapshot. Both halves
+# were wrong for an empirical rate: the count includes instruments the scan
+# never touched, and the single span credits an instrument listed in 2020 with a
+# decade of history because something else in the universe had one. It now lives
+# on `ScanScope`, sums each scanned instrument's own span, and counts only
+# instruments with a completed `scan_progress` row.
 
 
 class IndicatorScaleInvariance(_Check):

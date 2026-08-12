@@ -29,6 +29,7 @@ from tradeit.errors import ConfigError
 from tradeit.reproducibility.versioning import content_hash
 from tradeit.storage import tables as t
 from tradeit.validation.checks import CheckClock
+from tradeit.validation.scope import ScanScope, resolve_scope
 from tradeit.validation.survivorship import AcquisitionRecordView
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -50,10 +51,24 @@ class ValidationContext:
     _datasets: frozenset[DatasetKind] | None = field(default=None, init=False)
     _capabilities: CapabilityIndex | None = field(default=None, init=False)
     _acquisition: AcquisitionRecordView | None = field(default=None, init=False)
+    _scope: ScanScope | None = field(default=None, init=False)
 
     @property
     def as_of(self) -> dt.datetime:
         return self.clock.as_of
+
+    @property
+    def scope(self) -> ScanScope:
+        """Which instruments the persisted Phase 4/5 rows actually cover.
+
+        Every empirical rate is computed over the *completed* scan universe, not
+        over the snapshot. Cached because four checks ask for it and the answer
+        cannot change within one validation run.
+        """
+        if self._scope is None:
+            object.__setattr__(self, "_scope", resolve_scope(self.session, self.snapshot_id))
+        assert self._scope is not None
+        return self._scope
 
     @property
     def snapshot_id(self) -> str:
