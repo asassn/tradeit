@@ -21,10 +21,18 @@ there.
 **What no check here may compute.** This gate is explicitly not a backtest.
 :data:`FORBIDDEN_MEASURES` names the quantities that must wait for a later
 phase — future returns, win rate, expectancy, CAGR, Sharpe, profit — and
-:func:`assert_no_performance_claims` walks a result's own text and evidence keys
-looking for them. The guard is crude on purpose: it cannot stop someone
-determined, but it will stop the gradual drift where "just a quick hit rate"
-becomes the number everybody quotes.
+:func:`assert_no_performance_claims` walks a result's identifiers, its evidence
+keys and every line of prose it will print, looking for them. The guard is
+crude on purpose: it cannot stop someone determined, but it will stop the
+gradual drift where "just a quick hit rate" becomes the number everybody
+quotes.
+
+Crude is not the same as careless. Two of those words are ordinary technical
+English — a *graph* has edges, and the universe contains a ticker spelled
+``EDGE`` — so the guard resolves the sense before it accuses, and refuses only
+the reading that would be a performance claim. It has cried wolf twice now:
+once on ``knowledge_time_ordering``, once on a lifecycle transition tally, and
+each time the fix was to make the guard sharper rather than quieter.
 """
 
 from __future__ import annotations
@@ -256,9 +264,115 @@ def errored(check: ValidationCheck, error: BaseException) -> CheckResult:
 #: point-in-time check — the single most important check in the harness. A
 #: guard that cries wolf gets deleted, so it has to be right. The trailing
 #: ``\w*`` still catches ``profits`` and ``win_rates``.
-_FORBIDDEN_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(rf"\b{re.escape(term)}\w*") for term in FORBIDDEN_MEASURES
-)
+#:
+#: A leading ``_`` is a word character, so ``transition_edge`` and
+#: ``state_transition_edge`` do not match ``\bedge`` — a compound field name is
+#: the sanctioned way to say "edge" about a graph. That is not an accident of
+#: the regex; it is the rule, and :class:`TestTheTransitionEdgeCollision` in
+#: ``tests/unit/test_gate_validation.py`` pins it.
+_FORBIDDEN_PATTERNS: dict[str, re.Pattern[str]] = {
+    term: re.compile(rf"\b{re.escape(term)}\w*", re.IGNORECASE) for term in FORBIDDEN_MEASURES
+}
+
+#: Forbidden measures whose ordinary spelling is upper case, and which are
+#: therefore never exempted as a ticker: ``CAGR`` and ``PNL`` in capitals are
+#: exactly the claim.
+_ACRONYM_MEASURES = frozenset({"cagr", "pnl"})
+
+#: Longest a US equity symbol runs. The ticker exemption below is capped at
+#: this, which confines it to ``edge`` and ``alpha`` — the two forbidden terms
+#: that are also real symbols. ``SHARPE`` and ``DRAWDOWN`` in block capitals are
+#: a column heading in somebody's report, not a listing, and stay refused.
+_MAX_SYMBOL_LENGTH = 5
+
+#: Senses in which an ambiguous term is *structure*, not performance.
+#:
+#: ``edge`` is the whole reason this mapping exists. A breakout lifecycle is a
+#: directed graph, its transitions are edges, and ``phase5.lifecycle`` said so
+#: in prose — which aborted a validation run over a check that computes nothing
+#: but a transition tally. The answer is neither to drop ``edge`` from the
+#: forbidden list (a trading edge is precisely what must not be computed here)
+#: nor to ban the word from graph vocabulary, but to require that the graph
+#: sense be *stated*. "edges of the lifecycle" is structure. A bare "edge" is
+#: not, and still fails.
+_STRUCTURAL_SENSES: dict[str, tuple[re.Pattern[str], ...]] = {
+    "edge": (
+        re.compile(
+            r"\b(?:transition|lifecycle|state[ _-]machine|graph|directed)[ _-]edges?\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bedges?\s+(?:of|in)\s+the\s+(?:transition\s+)?"
+            r"(?:lifecycle|graph|state[ _-]machine)\b",
+            re.IGNORECASE,
+        ),
+    ),
+}
+
+
+def _symbol_pattern(term: str) -> re.Pattern[str] | None:
+    """The ticker-shaped spelling of ``term``, or ``None`` if it has none.
+
+    An English word written in block capitals inside a report is a **ticker**:
+    the universe contains ``EDGE`` and ``ALPHA``, ``phase4.concentration``
+    interpolates symbol names into its examples, and a gate that aborted
+    because one of them was in the universe would be the same cry-wolf failure
+    as matching ``edge`` inside ``knowledge_time_ordering`` — on real data.
+    """
+    if term in _ACRONYM_MEASURES or "_" in term or len(term) > _MAX_SYMBOL_LENGTH:
+        return None
+    return re.compile(rf"(?<![A-Za-z]){re.escape(term.upper())}(?![a-z])")
+
+
+_SYMBOL_PATTERNS: dict[str, re.Pattern[str] | None] = {
+    term: _symbol_pattern(term) for term in FORBIDDEN_MEASURES
+}
+
+
+def _mentions(
+    term: str,
+    texts: Sequence[str],
+    *,
+    allow_symbol: bool,
+    allow_structural: bool,
+) -> bool:
+    """Whether ``term`` appears in ``texts`` in its *performance* sense.
+
+    Occurrences that are provably something else are removed before the term is
+    searched for, so an allowance only ever covers the occurrence it explains.
+    A text containing both "edges of the lifecycle" and "our edge" still fails
+    on the second.
+    """
+    for text in texts:
+        residue = text
+        if allow_structural:
+            for sense in _STRUCTURAL_SENSES.get(term, ()):
+                residue = sense.sub(" ", residue)
+        if allow_symbol and (symbol := _SYMBOL_PATTERNS[term]) is not None:
+            residue = symbol.sub(" ", residue)
+        if _FORBIDDEN_PATTERNS[term].search(residue):
+            return True
+    return False
+
+
+def _key_paths(evidence: object) -> list[str]:
+    """Every mapping key anywhere inside ``evidence``.
+
+    Nested, because ``phase4.score_distribution`` reports a dict per detector
+    and a forbidden name one level down is no less a forbidden name. Values are
+    deliberately *not* walked: they are tickers, states and reasons — data, not
+    assertions — and scanning them would make the guard fire on the universe's
+    contents rather than on the report's claims.
+    """
+    if isinstance(evidence, Mapping):
+        out: list[str] = []
+        for key, value in evidence.items():
+            out.append(str(key))
+            out.extend(_key_paths(value))
+        return out
+    if isinstance(evidence, Sequence) and not isinstance(evidence, str | bytes):
+        return [path for item in evidence for path in _key_paths(item)]
+    return []
 
 
 def assert_no_performance_claims(result: CheckResult) -> None:
@@ -268,23 +382,43 @@ def assert_no_performance_claims(result: CheckResult) -> None:
     already a number somebody can quote, and the point of the guard is that it
     never gets there.
 
-    Checks the identifiers — check id, title, evidence keys — and the summary
-    prose. Prose is included because a summary reading "12% of breakouts were
-    profitable" is exactly as damaging as an evidence key called ``win_rate``.
+    Three surfaces, with different rules, because they carry different things:
+
+    ``check_id`` and ``title``
+        Authored identifiers. Strict — no ticker lives here. The graph sense of
+        an ambiguous word is allowed, since a title may legitimately describe a
+        state machine.
+    evidence keys, nested
+        Field names. A ticker *can* be a key, so the symbol exemption applies;
+        the structural sense does not, because a field has room to be named
+        exactly (``transition_edge``, ``state_transition``) and prose does not.
+    ``summary``, ``examples``, ``detail``
+        Prose that reaches the report. All three are scanned: a summary reading
+        "12% of breakouts were profitable" is exactly as damaging as an
+        evidence key called ``win_rate``, and so is an *example* saying it.
     """
-    haystack = " ".join(
-        [
-            result.check_id,
-            result.title,
-            result.summary,
-            " ".join(str(k) for k in result.evidence),
-        ]
-    ).lower()
     hits = sorted(
         {
             term
-            for term, pattern in zip(FORBIDDEN_MEASURES, _FORBIDDEN_PATTERNS, strict=True)
-            if pattern.search(haystack)
+            for term in FORBIDDEN_MEASURES
+            if _mentions(
+                term,
+                (result.check_id, result.title),
+                allow_symbol=False,
+                allow_structural=True,
+            )
+            or _mentions(
+                term,
+                _key_paths(result.evidence),
+                allow_symbol=True,
+                allow_structural=False,
+            )
+            or _mentions(
+                term,
+                (result.summary, *result.examples, *result.detail),
+                allow_symbol=True,
+                allow_structural=True,
+            )
         }
     )
     if hits:
@@ -292,7 +426,9 @@ def assert_no_performance_claims(result: CheckResult) -> None:
             f"{result.check_id} reports {hits}, which this gate must not compute. "
             "Future returns, win rates, expectancy and every performance "
             "statistic wait for a later phase, run once, against data nobody "
-            "has been tuning on. If the term is innocent here, rename the field."
+            "has been tuning on. If the term is innocent here, rename the field "
+            "— a graph edge is a `transition_edge`, and prose may say `edges of "
+            "the lifecycle` where a bare `edge` is refused."
         )
 
 

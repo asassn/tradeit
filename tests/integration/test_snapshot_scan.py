@@ -30,6 +30,9 @@ from tradeit.scanning import CausalFeed, FeedMode, ScanOptions, SnapshotScanner
 from tradeit.scanning.episodes import segment_sessions
 from tradeit.scanning.runner import SCAN_DOES_NOT_PRODUCE
 from tradeit.storage import tables as t
+from tradeit.validation.checks import CheckStatus, assert_no_performance_claims
+from tradeit.validation.context import load_context
+from tradeit.validation.scan_checks import BreakoutLifecycle, scan_checks
 
 # A scan walks every session of every fixture instrument through twelve
 # detectors and the breakout engine. That is the point — the properties under
@@ -485,6 +488,57 @@ class TestAStructuralBreakResetsEverything:
             )
         )
         assert inside == 0, "the gap must stay a gap"
+
+
+class TestTheScanChecksSurviveTheirOwnGuard:
+    """The failure that aborted the post-scan validation of `diag-01`.
+
+    Every Phase 4/5 check is passed through
+    :func:`~tradeit.validation.checks.assert_no_performance_claims` by the
+    runner. Until the seven-instrument scan there had never been a database
+    with breakouts in it during a test, so `phase5.lifecycle` had only ever
+    SKIPped — and the summary it builds when it has something to report said
+    "all transitions are edges of the lifecycle", which the guard read as
+    *trading* edge and refused.
+
+    A guard is only tested by the strings a real run produces, so this scans,
+    runs the checks for real, and puts each result through the guard.
+
+    The fixture tickers are ALPHA and BETA. That is not a coincidence any more:
+    `alpha` is a forbidden measure, `phase4.concentration` interpolates ticker
+    names into its examples, and a symbol is data rather than a claim.
+    """
+
+    def test_every_scan_check_result_passes_the_performance_guard(
+        self, db_session: Session, snapshot: str
+    ) -> None:
+        SnapshotScanner(
+            db_session, snapshot, options=ScanOptions(code_version="test", progress_every=0)
+        ).run()
+        context = load_context(db_session, snapshot, universe=None)
+        conclusive = 0
+        for check in scan_checks():
+            result = check.run(context)
+            assert_no_performance_claims(result)
+            conclusive += result.status is not CheckStatus.SKIPPED
+        assert conclusive == len(scan_checks()), (
+            "every scan check must have had data to run on — a SKIP here means "
+            "this test proves nothing, which is exactly how the defect survived"
+        )
+
+    def test_the_lifecycle_check_reports_transitions_without_saying_edge(
+        self, db_session: Session, snapshot: str
+    ) -> None:
+        """The rename, asserted on the real summary rather than on a fixture."""
+        SnapshotScanner(
+            db_session, snapshot, options=ScanOptions(code_version="test", progress_every=0)
+        ).run()
+        result = BreakoutLifecycle().run(load_context(db_session, snapshot, universe=None))
+        assert result.status is CheckStatus.PASS
+        assert "transition" in result.summary
+        assert "state_transitions" in result.evidence
+        assert "illegal_transitions" in result.evidence
+        assert result.evidence["illegal_transitions"] == 0
 
 
 class TestACrashLeavesAResumableScan:

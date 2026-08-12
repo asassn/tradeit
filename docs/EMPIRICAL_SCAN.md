@@ -189,7 +189,7 @@ They SKIP until a scan has persisted something, and a SKIP is never a pass.
 | `phase4.concentration` | share held by the top ticker and top session; instruments with zero detections | WARN on concentration or silence |
 | `phase4.causality` | patterns detected before their own structure completed | **yes** |
 | `phase5.state_distribution` | terminal breakout states | no — descriptive |
-| `phase5.lifecycle` | every recorded transition against `LEGAL_TRANSITIONS`; transition and reason tallies | **yes** |
+| `phase5.lifecycle` | every recorded transition against `LEGAL_TRANSITIONS`; `state_transitions` and `transition_reasons` tallies | **yes** |
 | `phase5.causality` | observations predating their event; duplicated sessions | **yes** |
 | `phase5.boundary_provenance`, `phase5.quality_frozen`, `phase5.monitor_floor` | as before | yes |
 
@@ -200,3 +200,52 @@ threshold against the validation set.
 
 **No check computes a forward return, a win rate, or anything from which one
 could be assembled**, and `assert_no_performance_claims` walks every result.
+
+### The one field worth arguing about
+
+`phase5.lifecycle` reports `terminal_states` — how many breakout events ended
+CONFIRMED versus FAILED_BREAKOUT. That is conditioned on price action after the
+break, which makes it the closest thing here to an outcome, so it is worth
+saying why it stays.
+
+It is a statement about the state machine, not about trading. No position is
+opened, no entry or exit price exists, no magnitude is attached and no holding
+period is defined — so the tally cannot be turned into a return, a win rate or
+an expectancy without supplying all four, which is the work a later phase does
+once, against data nobody has been tuning on. What it *can* show is machinery:
+an engine that never reaches a terminal state is leaking events, and one that
+reaches only a single terminal state has a broken predicate. Removing it would
+hide that and prevent nothing, since the states are already in the database. It
+is reported and not judged, and no threshold in this repository is set from it.
+
+### The guard resolves a word's sense before it accuses
+
+`FORBIDDEN_MEASURES` contains `edge`, because a trading edge is precisely what
+must not be computed at this stage. It is also ordinary graph vocabulary — a
+state machine is a directed graph and its transitions are its edges — and the
+first post-scan validation of `diag-01` aborted because `phase5.lifecycle` said
+so in prose while computing nothing but a transition tally.
+
+Neither dropping the term nor banning the word was the answer. Two things
+changed:
+
+- **The check was renamed.** In a trading system "edge" is overwhelmingly read
+  as *trading* edge, so nothing here says it any more: the evidence keys are
+  `state_transitions`, `transition_reasons` and `illegal_transitions`, and the
+  prose says "transition the state machine allows".
+- **The guard learned to tell the senses apart**, in three surfaces with
+  different rules. `check_id` and `title` are strict. Evidence keys — walked
+  recursively now, so a forbidden name inside `per_detector` no longer hides —
+  must be named precisely, and `transition_edge` is the sanctioned spelling
+  where a bare `edge` is refused. Prose (`summary`, and now `examples` and
+  `detail`, which are printed and were never scanned) may use graph vocabulary
+  when it *states* the graph sense: "edges of the lifecycle" passes, a bare
+  "edge" does not, and a sentence containing both still fails on the second.
+
+One further exemption, for the same cry-wolf reason: an English forbidden word
+in block capitals inside a report is a **ticker**. `EDGE` and `ALPHA` are real
+symbols and `phase4.concentration` interpolates symbol names into its examples.
+The exemption is capped at ticker length, so it reaches exactly those two —
+`CAGR` and `PNL` are acronyms whose normal spelling is capitals, and `SHARPE`
+or `DRAWDOWN` in capitals is a column heading in somebody's report, not a
+listing. All stay refused.

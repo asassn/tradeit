@@ -200,8 +200,13 @@ Two honesty properties, both pinned by test:
   evidence, however many others passed. A summary reading "20 passed" over
   eighteen skips is a lie told with true numbers.
 - **No check may compute a performance statistic.** `FORBIDDEN_MEASURES` is
-  matched against every result the runner collects, and every report ends by
-  naming what it did not measure.
+  matched against every result the runner collects — its identifiers, its
+  evidence keys nested to any depth, and every line of prose it will print —
+  and every report ends by naming what it did not measure. The match resolves
+  a word's sense before accusing: `edge` is forbidden as a trading edge and
+  permitted as a stated graph edge, and an English forbidden word in block
+  capitals is read as a ticker. See `docs/EMPIRICAL_SCAN.md` for why, and
+  `TestTheTransitionEdgeCollision` for the cases that pin it.
 
 ### 4.6 Commands
 

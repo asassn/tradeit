@@ -267,6 +267,199 @@ class TestHonesty:
             assert term == term.lower()
             assert " " not in term
 
+    def test_a_forbidden_term_in_an_example_is_caught(self) -> None:
+        """Examples are printed in the report, so they are a claim surface too.
+
+        The original guard scanned only the id, title, summary and evidence
+        keys. A check could have put "AAPL: 62% profitable" in an example and
+        the gate would have printed it.
+        """
+        offender = CheckResult(
+            check_id="phase5.attempts",
+            title="Breakout attempts",
+            phase=Phase.PHASE_5,
+            status=CheckStatus.PASS,
+            summary="1,000 attempts recorded",
+            examples=("AAPL: 62% of confirmed breakouts were profitable",),
+        )
+        with pytest.raises(ConfigError, match="must not compute"):
+            assert_no_performance_claims(offender)
+
+    def test_a_forbidden_term_in_a_detail_line_is_caught(self) -> None:
+        offender = CheckResult(
+            check_id="phase5.attempts",
+            title="Breakout attempts",
+            phase=Phase.PHASE_5,
+            status=CheckStatus.PASS,
+            summary="1,000 attempts recorded",
+            detail=("  detector                 sharpe", "  bull_flag                  1.42"),
+        )
+        with pytest.raises(ConfigError, match="must not compute"):
+            assert_no_performance_claims(offender)
+
+    def test_a_forbidden_term_nested_inside_evidence_is_caught(self) -> None:
+        """``phase4.score_distribution`` reports a dict per detector.
+
+        A forbidden name one level down is no less a forbidden name, and the
+        flat ``for k in result.evidence`` scan never saw it.
+        """
+        offender = CheckResult(
+            check_id="phase4.score_distribution",
+            title="Quality per detector",
+            phase=Phase.PHASE_4,
+            status=CheckStatus.PASS,
+            summary="reported as a baseline",
+            evidence={"per_detector": {"bull_flag": {"count": 10, "win_rate": 0.62}}},
+        )
+        with pytest.raises(ConfigError, match="must not compute"):
+            assert_no_performance_claims(offender)
+
+
+class TestTheTransitionEdgeCollision:
+    """The exact failure that aborted the post-scan validation of `diag-01`.
+
+    ``phase5.lifecycle`` counts transitions of a state machine. A state machine
+    is a directed graph, so its transitions are edges, and the check said so in
+    prose — whereupon the guard read "edge" as *trading* edge and refused to
+    run the gate at all.
+
+    Both halves matter and neither may be sacrificed for the other: a real
+    trading edge must still fail, and a transition tally must not.
+    """
+
+    @staticmethod
+    def lifecycle(**over: object) -> CheckResult:
+        base: dict[str, object] = {
+            "check_id": "phase5.lifecycle",
+            "title": "Breakout transitions are legal and counted",
+            "phase": Phase.PHASE_5,
+            "status": CheckStatus.PASS,
+            "summary": (
+                "15,606 observations across 4,102 events; every recorded transition "
+                "is one the state machine allows"
+            ),
+            "evidence": {
+                "events": 4102,
+                "state_transitions": {"approaching -> testing_resistance": 900},
+                "transition_reasons": {"close_above_boundary": 120},
+                "illegal_transitions": 0,
+            },
+        }
+        base.update(over)
+        return CheckResult(**base)  # type: ignore[arg-type]
+
+    def test_the_shipped_lifecycle_result_passes(self) -> None:
+        assert_no_performance_claims(self.lifecycle())
+
+    def test_the_wording_that_aborted_the_run_now_passes(self) -> None:
+        """Kept even though the check no longer says it.
+
+        The rename removed the collision; this asserts the *guard* is right, so
+        that a future check describing a graph is not forced into a euphemism.
+        """
+        assert_no_performance_claims(
+            self.lifecycle(
+                summary="15,606 observations; all transitions are edges of the lifecycle"
+            )
+        )
+        assert_no_performance_claims(
+            self.lifecycle(
+                summary="4 recorded transitions are not edges of the lifecycle",
+                examples=("event=7 2026-02-10: confirmed -> approaching is not a lifecycle edge",),
+            )
+        )
+
+    def test_a_transition_edge_field_passes(self) -> None:
+        """The sanctioned spelling for a field, per the rename policy."""
+        for name in ("transition_edge", "state_transition", "lifecycle_edges", "graph_edge_count"):
+            assert_no_performance_claims(self.lifecycle(evidence={name: 12}))
+
+    def test_a_field_named_edge_still_fails(self) -> None:
+        """A field has room to be named precisely, so a bare `edge` is refused."""
+        with pytest.raises(ConfigError, match="must not compute"):
+            assert_no_performance_claims(self.lifecycle(evidence={"edge": 0.021}))
+
+    def test_a_real_trading_edge_still_fails_however_it_is_worded(self) -> None:
+        for summary in (
+            "confirmed breakouts show an edge of 2.1% over the benchmark",
+            "the detector's edge is 40bp per attempt",
+            "measured edge, net of costs",
+        ):
+            with pytest.raises(ConfigError, match="must not compute"):
+                assert_no_performance_claims(self.lifecycle(summary=summary))
+
+    def test_the_graph_sense_does_not_launder_a_claim_beside_it(self) -> None:
+        """An allowance covers the occurrence it explains, and no other.
+
+        This is the hole a blanket "contains graph vocabulary, therefore fine"
+        rule would leave.
+        """
+        with pytest.raises(ConfigError, match="must not compute"):
+            assert_no_performance_claims(
+                self.lifecycle(
+                    summary=(
+                        "all transitions are edges of the lifecycle, and the edge "
+                        "is 2.1% per attempt"
+                    )
+                )
+            )
+
+    def test_a_ticker_spelled_like_a_forbidden_word_does_not_abort_the_gate(self) -> None:
+        """`EDGE` and `ALPHA` are real symbols.
+
+        `phase4.concentration` interpolates ticker names into its examples, so
+        a universe containing one of these would have aborted the run — the
+        same cry-wolf failure as `knowledge_time_ordering`, on real data.
+        """
+        assert_no_performance_claims(
+            CheckResult(
+                check_id="phase4.concentration",
+                title="Detections are not concentrated in one name or one session",
+                phase=Phase.PHASE_4,
+                status=CheckStatus.WARN,
+                summary="131,027 detections over 7 instruments; 1 produced none",
+                evidence={"silent_instruments": ["EDGE"], "by_ticker": {"ALPHA": 3}},
+                examples=("EDGE supplies 31.2% of all detections (40,880)",),
+            )
+        )
+
+    def test_an_acronym_measure_in_capitals_is_still_a_claim(self) -> None:
+        """The symbol exemption stops at terms whose normal spelling is caps."""
+        for summary in ("CAGR of 12.4% across the corpus", "aggregate PNL 1.2M"):
+            with pytest.raises(ConfigError, match="must not compute"):
+                assert_no_performance_claims(self.lifecycle(summary=summary))
+
+    def test_a_word_too_long_to_be_a_symbol_is_still_a_claim_in_capitals(self) -> None:
+        """The exemption is capped at ticker length, so it reaches two terms.
+
+        A column heading reading ``SHARPE`` is somebody's report, not a
+        listing, and block capitals must not launder it.
+        """
+        for summary in ("detector SHARPE 1.42", "max DRAWDOWN 18%", "EXPECTANCY 0.3R"):
+            with pytest.raises(ConfigError, match="must not compute"):
+                assert_no_performance_claims(self.lifecycle(summary=summary))
+
+    def test_lowercase_edge_is_still_a_claim_even_beside_a_ticker(self) -> None:
+        with pytest.raises(ConfigError, match="must not compute"):
+            assert_no_performance_claims(
+                self.lifecycle(summary="EDGE and AAPL both show an edge of 2.1%")
+            )
+
+    def test_the_shipped_check_declares_the_id_and_title_this_pins(self) -> None:
+        """Keeps the fixture above honest about what it is standing in for.
+
+        The full regression — the real check, over a real scan, through the
+        guard — lives in ``tests/integration/test_snapshot_scan.py``, because
+        the summary that aborted the run only exists once breakouts do.
+        """
+        from tradeit.validation.scan_checks import BreakoutLifecycle
+
+        check = BreakoutLifecycle()
+        assert (check.check_id, check.title) == (
+            self.lifecycle().check_id,
+            self.lifecycle().title,
+        )
+
 
 # ---------------------------------------------------------------------------
 # The runner

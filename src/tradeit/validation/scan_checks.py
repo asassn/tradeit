@@ -25,6 +25,22 @@ how many cup-with-handles a decade of a large-cap contains, and inventing one
 would be tuning a threshold against the validation set. So a rate is reported
 as a baseline, and only the structural invariants — causality, identity,
 lifecycle legality — are allowed to fail.
+
+**The one field worth arguing about is** ``terminal_states``. A tally of how
+many breakout events ended in CONFIRMED versus FAILED_BREAKOUT is conditioned
+on price action after the break, which is the closest thing in this module to
+an outcome, and it is worth being explicit about why it stays.
+
+It is a statement about the state machine, not about trading. No position is
+opened, no entry or exit price exists, no magnitude is attached, and no
+holding period is defined — so the numbers cannot be turned into a return, a
+win rate or an expectancy without supplying all four, which is precisely the
+work a later phase does once, against data nobody has been tuning on. What the
+tally can show is machinery: an engine that never reaches a terminal state is
+leaking events, and one that reaches only one of them has a broken predicate.
+Removing it would hide that and prevent nothing, since the states themselves
+are already in the database. It is reported and not judged, and no threshold
+in this repository is set from it.
 """
 
 from __future__ import annotations
@@ -246,8 +262,9 @@ class PatternIdentityStability(_Check):
             or 0
         )
         # A forked identity carries the fork session appended to its key. High
-        # fork counts mean detections keep proposing illegal edges, which is a
-        # detector disagreeing with the lifecycle rather than a market event.
+        # fork counts mean detections keep proposing transitions the lifecycle
+        # does not have, which is a detector disagreeing with the state machine
+        # rather than a market event.
         forked = (
             session.scalar(
                 select(func.count())
@@ -377,12 +394,23 @@ class BreakoutLifecycle(_Check):
     """Do the recorded transitions obey the state machine that produced them?
 
     Every stored observation names the state it came from and the state it went
-    to. The lifecycle module knows which of those edges exist. An edge that does
-    not exist means the engine, the persistence layer, or a replay put an event
+    to. The lifecycle module knows which of those transitions exist. One that
+    does not means the engine, the persistence layer, or a replay put an event
     somewhere it cannot legally be, and everything measured downstream of that
     event is measured over a history that never happened.
 
     This one is allowed to fail, because it is not a matter of taste.
+
+    **On the word this check used to use.** A state machine is a directed
+    graph and its transitions are its edges, so the first version of this said
+    so — and ``assert_no_performance_claims`` aborted a real validation run,
+    because in a trading system "edge" is overwhelmingly read as *trading*
+    edge, the single most forbidden quantity in this gate. The guard was right
+    to be suspicious and the naming was wrong: nothing here is a graph-theory
+    result, and "transition" says the same thing with no second reading. The
+    vocabulary is now ``transition`` throughout, and
+    :data:`~tradeit.validation.checks._STRUCTURAL_SENSES` covers the case
+    where graph vocabulary is genuinely the clearest wording.
     """
 
     def __init__(self) -> None:
@@ -425,7 +453,7 @@ class BreakoutLifecycle(_Check):
             if origin is not target and not is_legal_breakout_transition(origin, target):
                 illegal.append(
                     f"event={row.event_id} {row.session_date}: {origin} -> {target} "
-                    "is not an edge of the lifecycle"
+                    "is not a legal transition of the lifecycle"
                 )
 
         events = session.scalar(select(func.count()).select_from(tbl.BreakoutEvent)) or 0
@@ -434,19 +462,19 @@ class BreakoutLifecycle(_Check):
         return self.result(
             status,
             (
-                f"{len(rows):,} observations across {events:,} events; all transitions "
-                "are edges of the lifecycle"
+                f"{len(rows):,} observations across {events:,} events; every recorded "
+                "transition is one the state machine allows"
                 if not illegal
                 else f"{len(illegal):,} of {len(rows):,} recorded transitions are not "
-                "edges of the lifecycle"
+                "ones the state machine allows"
             ),
             evidence={
                 "events": events,
                 "observations": len(rows),
                 "terminal_states": dict(sorted(terminal.items())),
-                "transitions": dict(sorted(transitions.items())),
-                "reasons": dict(sorted(reasons.items())),
-                "illegal": len(illegal),
+                "state_transitions": dict(sorted(transitions.items())),
+                "transition_reasons": dict(sorted(reasons.items())),
+                "illegal_transitions": len(illegal),
             },
             examples=tuple(illegal[:5]),
         )

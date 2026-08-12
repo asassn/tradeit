@@ -507,7 +507,16 @@ class PatternCausality(_Check):
 
 
 class BreakoutStateDistribution(_Check):
-    """Where do breakout attempts end up? Descriptive."""
+    """Where do breakout attempts end up? Descriptive.
+
+    This and ``phase5.lifecycle``'s ``terminal_states`` are the two fields in
+    the gate conditioned on price action *after* a break, so they are the two
+    worth arguing about. The argument, and why they are statements about the
+    state machine rather than about trading, is in
+    :mod:`tradeit.validation.scan_checks`. In short: no position, no entry or
+    exit price, no magnitude, no holding period — so nothing here can become a
+    return without supplying all four, which is a later phase's job.
+    """
 
     def __init__(self) -> None:
         super().__init__(
