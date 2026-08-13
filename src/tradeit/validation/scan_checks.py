@@ -51,7 +51,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from tradeit.breakouts.lifecycle import BreakoutState
 from tradeit.breakouts.lifecycle import is_legal as is_legal_breakout_transition
@@ -662,66 +662,113 @@ class BreakoutLifecycle(_Check):
         run = context.run
         if not run.is_resolved:
             return self.unresolved(run)
-        rows = session.execute(
+        # Grouped in SQL, then judged in Python.
+        #
+        # The legality question is `is_legal(origin, target)`, which only Python
+        # can answer — but it is a question about a *pair of states*, not about
+        # a row. The full-universe corpus holds 2,046,558 breakout observations
+        # and fewer than two hundred distinct pairs, so grouping first asks the
+        # same question the same number of times that matters and stops moving
+        # two million rows into the process to do it.
+        #
+        # The semantics are untouched: every recorded pair is still tested, and
+        # a pair the state machine forbids still fails the check.
+        pairs = session.execute(
             select(
-                tbl.BreakoutObservation.event_id,
-                tbl.BreakoutObservation.session_date,
                 tbl.BreakoutObservation.from_state,
                 tbl.BreakoutObservation.to_state,
-                tbl.BreakoutObservation.reason,
+                func.count().label("n"),
             )
             .where(run.breakout_observations())
-            .order_by(tbl.BreakoutObservation.event_id, tbl.BreakoutObservation.session_date)
+            .group_by(tbl.BreakoutObservation.from_state, tbl.BreakoutObservation.to_state)
         ).all()
-        if not rows:
+        observations = sum(int(pair.n) for pair in pairs)
+        if observations == 0:
             return self.skipped(NO_BREAKOUTS)
 
-        transitions = Counter(f"{r.from_state or 'new'} -> {r.to_state}" for r in rows)
-        reasons = Counter(r.reason for r in rows)
-        illegal: list[str] = []
-        for row in rows:
-            if row.from_state is None:
+        transitions = Counter(
+            {f"{pair.from_state or 'new'} -> {pair.to_state}": int(pair.n) for pair in pairs}
+        )
+        reasons: Counter[str] = Counter()
+        for reason, count in session.execute(
+            select(tbl.BreakoutObservation.reason, func.count())
+            .where(run.breakout_observations())
+            .group_by(tbl.BreakoutObservation.reason)
+        ):
+            reasons[str(reason)] = int(count)
+
+        illegal_pairs: list[tuple[str, str]] = []
+        illegal_count = 0
+        for pair in pairs:
+            if pair.from_state is None:
                 continue
             try:
-                origin = BreakoutState(row.from_state)
-                target = BreakoutState(row.to_state)
+                origin = BreakoutState(pair.from_state)
+                target = BreakoutState(pair.to_state)
             except ValueError:  # pragma: no cover - a state from a newer build
-                illegal.append(
-                    f"event={row.event_id} {row.session_date}: unrecognised state "
-                    f"{row.from_state} -> {row.to_state}"
-                )
+                illegal_pairs.append((pair.from_state, pair.to_state))
+                illegal_count += int(pair.n)
                 continue
             if origin is not target and not is_legal_breakout_transition(origin, target):
-                illegal.append(
-                    f"event={row.event_id} {row.session_date}: {origin} -> {target} "
-                    "is not a legal transition of the lifecycle"
+                illegal_pairs.append((pair.from_state, pair.to_state))
+                illegal_count += int(pair.n)
+
+        # Only the offending rows are fetched, and only a handful of them.
+        illegal: list[str] = []
+        if illegal_pairs:
+            offending = or_(
+                *(
+                    and_(
+                        tbl.BreakoutObservation.from_state == origin,
+                        tbl.BreakoutObservation.to_state == target,
+                    )
+                    for origin, target in illegal_pairs
                 )
+            )
+            illegal = [
+                f"event={row.event_id} {row.session_date}: {row.from_state} -> "
+                f"{row.to_state} is not a legal transition of the lifecycle"
+                for row in session.execute(
+                    select(
+                        tbl.BreakoutObservation.event_id,
+                        tbl.BreakoutObservation.session_date,
+                        tbl.BreakoutObservation.from_state,
+                        tbl.BreakoutObservation.to_state,
+                    )
+                    .where(run.breakout_observations(), offending)
+                    .order_by(tbl.BreakoutObservation.event_id)
+                    .limit(5)
+                )
+            ]
 
         events = (
             session.scalar(select(func.count()).select_from(tbl.BreakoutEvent).where(run.events()))
             or 0
         )
-        terminal = Counter(
-            state
-            for (state,) in session.execute(select(tbl.BreakoutEvent.state).where(run.events()))
-        )
-        status = CheckStatus.PASS if not illegal else CheckStatus.FAIL
+        terminal: Counter[str] = Counter()
+        for state, count in session.execute(
+            select(tbl.BreakoutEvent.state, func.count())
+            .where(run.events())
+            .group_by(tbl.BreakoutEvent.state)
+        ):
+            terminal[str(state)] = int(count)
+        status = CheckStatus.PASS if illegal_count == 0 else CheckStatus.FAIL
         return self.result(
             status,
             (
-                f"{len(rows):,} observations across {events:,} events; every recorded "
+                f"{observations:,} observations across {events:,} events; every recorded "
                 "transition is one the state machine allows"
-                if not illegal
-                else f"{len(illegal):,} of {len(rows):,} recorded transitions are not "
+                if illegal_count == 0
+                else f"{illegal_count:,} of {observations:,} recorded transitions are not "
                 "ones the state machine allows"
             ),
             evidence={
                 "events": events,
-                "observations": len(rows),
+                "observations": observations,
                 "terminal_states": dict(sorted(terminal.items())),
                 "state_transitions": dict(sorted(transitions.items())),
                 "transition_reasons": dict(sorted(reasons.items())),
-                "illegal_transitions": len(illegal),
+                "illegal_transitions": illegal_count,
             },
             examples=tuple(illegal[:5]),
         )

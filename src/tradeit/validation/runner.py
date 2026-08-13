@@ -24,7 +24,7 @@ from __future__ import annotations
 import datetime as dt
 import time
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from tradeit.errors import ConfigError
@@ -258,22 +258,28 @@ def run_validation(
             run.results.append(blocked(check, missing))
             continue
         started = time.perf_counter()
+        # Each check runs inside its own SAVEPOINT.
+        #
+        # Catching the exception was never enough. A failed statement leaves
+        # PostgreSQL's transaction in an aborted state, and every subsequent
+        # statement on it raises InFailedSqlTransaction — so one check's
+        # timeout turned into six checks' worth of errors, none of which had
+        # anything wrong with them. On the full-universe run that made four
+        # Phase 4 checks look like the failure when the only real fault was in
+        # Phase 5.
+        #
+        # ROLLBACK TO SAVEPOINT discards exactly the failed check's work and
+        # leaves the transaction usable, which is safe here because every check
+        # is read-only: there is nothing of value inside the savepoint to lose.
+        savepoint = context.session.begin_nested()
         try:
             result = check.run(context)
         except Exception as error:  # a check must never abort the run
-            result = errored(check, error)
+            savepoint.rollback()
+            result = replace(errored(check, error), duration_seconds=time.perf_counter() - started)
         else:
-            result = CheckResult(
-                check_id=result.check_id,
-                title=result.title,
-                phase=result.phase,
-                status=result.status,
-                summary=result.summary,
-                evidence=result.evidence,
-                needs=result.needs,
-                examples=result.examples,
-                duration_seconds=time.perf_counter() - started,
-            )
+            savepoint.commit()
+            result = replace(result, duration_seconds=time.perf_counter() - started)
         assert_no_performance_claims(result)
         run.results.append(result)
 
