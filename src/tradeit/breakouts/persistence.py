@@ -59,8 +59,20 @@ STORED_RELATIONSHIPS: frozenset[str] = frozenset(
 class BreakoutRepository:
     """Persists breakout events and reads them back."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, scan_run_id: int | None = None) -> None:
+        """``scan_run_id`` makes this repository a *run-scoped* view.
+
+        Every lookup filters on it, so one scan can never find, advance,
+        deduplicate against or otherwise mutate another scan's events. See
+        :class:`~tradeit.patterns.persistence.PatternRepository` for the full
+        reasoning; it applies identically here, and with an extra edge: an
+        event's identity hashes the pattern key, so two runs of the same
+        snapshot derive byte-identical event keys.
+
+        ``None`` is the unscoped legacy view. The scanner always passes an id.
+        """
         self.session = session
+        self.scan_run_id = scan_run_id
 
     # -- writes --------------------------------------------------------------
 
@@ -85,6 +97,7 @@ class BreakoutRepository:
                 pattern_key=event.boundary.pattern_key,
                 timeframe=str(event.timeframe),
                 attempt_number=event.attempt_number,
+                scan_run_id=self.scan_run_id,
                 pattern_detector_name=event.pattern_detector_name,
                 pattern_detector_version=event.pattern_detector_version,
                 pattern_config_digest=event.pattern_config_digest,
@@ -251,8 +264,14 @@ class BreakoutRepository:
     # -- reads ---------------------------------------------------------------
 
     def _find(self, event_key: str) -> tables.BreakoutEvent | None:
+        """The event this repository's run owns for that key, if any."""
         return self.session.execute(
-            select(tables.BreakoutEvent).where(tables.BreakoutEvent.event_key == event_key)
+            select(tables.BreakoutEvent).where(
+                tables.BreakoutEvent.event_key == event_key,
+                tables.BreakoutEvent.scan_run_id.is_(None)
+                if self.scan_run_id is None
+                else tables.BreakoutEvent.scan_run_id == self.scan_run_id,
+            )
         ).scalar_one_or_none()
 
     def active_for(self, instrument_id: int) -> list[tables.BreakoutEvent]:

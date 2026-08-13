@@ -833,3 +833,164 @@ class TestACrashLeavesAResumableScan:
         again = SnapshotScanner(db_session, snapshot, options=options).run()
         assert again.scanned == []
         assert _counts(db_session) == before
+
+
+class TestTwoRunsAreTwoCorpora:
+    """Run isolation, not run attribution.
+
+    `patterns.identity_key` and `breakout_events.event_key` are content hashes
+    of the instrument, timeframe and structure, so two scans of one snapshot
+    under one configuration derive **byte-identical keys**. Before the
+    constraints and the repository lookups were scoped, the second scan found
+    the first scan's rows and *advanced* them: no duplicate, no error, and one
+    row afterwards carrying both runs' values with nothing able to separate
+    them.
+
+    A `scan_run_id` recording who inserted the row would have been provenance
+    that reads as authoritative and is false. These prove it is not.
+    """
+
+    @staticmethod
+    def scan(session: Session, snapshot: str, scan_id: str) -> None:
+        SnapshotScanner(
+            session,
+            snapshot,
+            options=ScanOptions(
+                scan_id=scan_id, code_version="test", progress_every=0, instrument_ids=(1,)
+            ),
+        ).run()
+        session.commit()
+
+    @staticmethod
+    def corpus(session: Session, scan_id: str) -> dict[str, object]:
+        run_id = session.scalar(select(t.ScanRun.id).where(t.ScanRun.scan_id == scan_id))
+        patterns = session.execute(
+            select(t.Pattern.identity_key, t.Pattern.state, t.Pattern.last_observed_session)
+            .where(t.Pattern.scan_run_id == run_id)
+            .order_by(t.Pattern.identity_key)
+        ).all()
+        events = session.execute(
+            select(t.BreakoutEvent.event_key, t.BreakoutEvent.state)
+            .where(t.BreakoutEvent.scan_run_id == run_id)
+            .order_by(t.BreakoutEvent.event_key)
+        ).all()
+        return {"run_id": run_id, "patterns": patterns, "events": events}
+
+    @pytest.fixture
+    def two_runs(self, db_session: Session, snapshot: str) -> tuple[dict, dict]:
+        self.scan(db_session, snapshot, "run-a")
+        before = self.corpus(db_session, "run-a")
+        self.scan(db_session, snapshot, "run-b")
+        after = self.corpus(db_session, "run-a")
+        return before, after
+
+    def test_run_b_does_not_mutate_a_single_run_a_row(self, two_runs: tuple[dict, dict]) -> None:
+        before, after = two_runs
+        assert before["patterns"], "run A must have produced something to protect"
+        assert after == before, "run B altered run A's corpus"
+
+    def test_both_corpora_exist_and_are_independently_queryable(
+        self, db_session: Session, two_runs: tuple[dict, dict]
+    ) -> None:
+        a = self.corpus(db_session, "run-a")
+        b = self.corpus(db_session, "run-b")
+        assert a["run_id"] != b["run_id"]
+        assert a["patterns"] and b["patterns"]
+        # Same inputs, same code: the derived corpora agree in content while
+        # remaining separate rows. That is what isolation means here — not that
+        # the answers differ, but that neither run wrote into the other.
+        assert [key for key, _, _ in a["patterns"]] == [key for key, _, _ in b["patterns"]]
+        assert len({p.id for p in db_session.scalars(select(t.Pattern))}) == 2 * len(a["patterns"])
+
+    def test_no_pattern_row_is_shared_between_runs(
+        self, db_session: Session, two_runs: tuple[dict, dict]
+    ) -> None:
+        duplicated = db_session.execute(
+            select(t.Pattern.identity_key, func.count(func.distinct(t.Pattern.scan_run_id)))
+            .group_by(t.Pattern.identity_key, t.Pattern.detector_version)
+            .having(func.count(func.distinct(t.Pattern.scan_run_id)) > 1)
+        ).all()
+        assert duplicated, "the two runs must derive the same identities separately"
+        orphan = db_session.scalar(
+            select(func.count()).select_from(t.Pattern).where(t.Pattern.scan_run_id.is_(None))
+        )
+        assert orphan == 0, "every scanner-written row must name its run"
+
+    def test_events_are_scoped_too(self, db_session: Session, two_runs: tuple[dict, dict]) -> None:
+        orphan = db_session.scalar(
+            select(func.count())
+            .select_from(t.BreakoutEvent)
+            .where(t.BreakoutEvent.scan_run_id.is_(None))
+        )
+        assert orphan == 0
+        shared = db_session.execute(
+            select(t.BreakoutEvent.event_key)
+            .group_by(t.BreakoutEvent.event_key)
+            .having(func.count(func.distinct(t.BreakoutEvent.scan_run_id)) > 1)
+        ).all()
+        assert shared, "the same event key must be able to exist once per run"
+
+    def test_validation_scoped_to_each_run_sees_only_that_run(
+        self, db_session: Session, snapshot: str, two_runs: tuple[dict, dict]
+    ) -> None:
+        a = self.corpus(db_session, "run-a")
+        for scan_id in ("run-a", "run-b"):
+            context = load_context(db_session, snapshot, universe=None, scan_id=scan_id)
+            result = PatternIdentityChurn().run(context)
+            assert result.status is not CheckStatus.BLOCKED, result.summary
+            assert result.evidence["identities"] == len(a["patterns"]), (
+                f"{scan_id} must report its own corpus, not both"
+            )
+
+    def test_validation_refuses_to_aggregate_when_no_run_is_named(
+        self, db_session: Session, snapshot: str, two_runs: tuple[dict, dict]
+    ) -> None:
+        """Two completed runs and no name is a question, not a tie to break."""
+        context = load_context(db_session, snapshot, universe=None)
+        result = PatternIdentityChurn().run(context)
+        assert result.status is CheckStatus.BLOCKED
+        assert "2 completed scan runs" in result.summary
+        assert result.needs
+
+    def test_naming_a_run_that_does_not_exist_blocks_rather_than_guessing(
+        self, db_session: Session, snapshot: str, two_runs: tuple[dict, dict]
+    ) -> None:
+        context = load_context(db_session, snapshot, universe=None, scan_id="run-z")
+        result = PatternCausality().run(context)
+        assert result.status is CheckStatus.BLOCKED
+        assert "run-z" in result.summary
+
+    def test_resuming_run_b_duplicates_nothing_and_leaves_run_a_alone(
+        self, db_session: Session, snapshot: str, two_runs: tuple[dict, dict]
+    ) -> None:
+        before_a = self.corpus(db_session, "run-a")
+        before_b = self.corpus(db_session, "run-b")
+        self.scan(db_session, snapshot, "run-b")  # same scan id: a resume
+        assert self.corpus(db_session, "run-b") == before_b
+        assert self.corpus(db_session, "run-a") == before_a
+
+    def test_a_resumed_run_finds_its_own_rows_not_the_other_run_s(
+        self, db_session: Session, snapshot: str
+    ) -> None:
+        """Resume semantics survive the scoping.
+
+        The repository lookup is now filtered by run, so an interrupted scan
+        must still find the rows *it* wrote. If the filter were wrong in the
+        other direction this would insert a second copy and violate the
+        constraint.
+        """
+        self.scan(db_session, snapshot, "run-a")
+        first = self.corpus(db_session, "run-a")
+        SnapshotScanner(
+            db_session,
+            snapshot,
+            options=ScanOptions(
+                scan_id="run-a",
+                code_version="test",
+                progress_every=0,
+                instrument_ids=(1,),
+                force=True,  # rescan the completed instrument, in place
+            ),
+        ).run()
+        db_session.commit()
+        assert self.corpus(db_session, "run-a") == first

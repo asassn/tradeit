@@ -59,6 +59,7 @@ from tradeit.data.packages.spec import DatasetKind
 from tradeit.storage import tables as tbl
 from tradeit.validation.checks import CheckResult, CheckStatus, Phase
 from tradeit.validation.context import ValidationContext
+from tradeit.validation.scope import RunSelection
 
 __all__ = [
     "BreakoutCausality",
@@ -101,6 +102,23 @@ class _Check:
         self.title = title
         self.phase = phase
         self.requires = requires
+
+    def unresolved(self, run: RunSelection) -> CheckResult:
+        """BLOCKED, because these checks read exactly one scan run.
+
+        Never a silent aggregate: two completed scans over one snapshot are two
+        corpora, and reporting them together describes a population that never
+        existed.
+        """
+        return CheckResult(
+            check_id=self.check_id,
+            title=self.title,
+            phase=self.phase,
+            status=CheckStatus.BLOCKED,
+            summary=f"not run: {run.problem}",
+            needs=("a single named scan run (--scan-id)",),
+            examples=tuple(f"candidate: {name}" for name in run.candidates[:8]),
+        )
 
     def skipped(self, summary: str) -> CheckResult:
         return CheckResult(
@@ -165,6 +183,9 @@ class PatternScoreDistribution(_Check):
         )
 
     def run(self, context: ValidationContext) -> CheckResult:
+        run = context.run
+        if not run.is_resolved:
+            return self.unresolved(run)
         rows = context.session.execute(
             select(
                 tbl.Pattern.detector_name,
@@ -174,12 +195,17 @@ class PatternScoreDistribution(_Check):
                 func.max(tbl.Pattern.quality),
                 func.min(tbl.Pattern.evidence_coverage),
                 func.avg(tbl.Pattern.evidence_coverage),
-            ).group_by(tbl.Pattern.detector_name)
+            )
+            .where(run.patterns())
+            .group_by(tbl.Pattern.detector_name)
         ).all()
         if not rows:
             return self.skipped(NO_PATTERNS)
 
-        states = Counter(state for (state,) in context.session.execute(select(tbl.Pattern.state)))
+        states = Counter(
+            state
+            for (state,) in context.session.execute(select(tbl.Pattern.state).where(run.patterns()))
+        )
         degenerate: list[str] = []
         lines = [
             f"  {'detector':<24} {'n':>7}  {'quality min/avg/max':<26} coverage min/avg",
@@ -248,15 +274,28 @@ class PatternIdentityStability(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
-        total = session.scalar(select(func.count()).select_from(tbl.Pattern)) or 0
+        run = context.run
+        if not run.is_resolved:
+            return self.unresolved(run)
+        total = (
+            session.scalar(select(func.count()).select_from(tbl.Pattern).where(run.patterns())) or 0
+        )
         if total == 0:
             return self.skipped(NO_PATTERNS)
 
-        observations = session.scalar(select(func.count()).select_from(tbl.PatternObservation)) or 0
+        observations = (
+            session.scalar(
+                select(func.count())
+                .select_from(tbl.PatternObservation)
+                .where(run.pattern_observations())
+            )
+            or 0
+        )
         single = (
             session.scalar(
                 select(func.count()).select_from(
                     select(tbl.PatternObservation.pattern_id)
+                    .where(run.pattern_observations())
                     .group_by(tbl.PatternObservation.pattern_id)
                     .having(func.count() == 1)
                     .subquery()
@@ -272,7 +311,7 @@ class PatternIdentityStability(_Check):
             session.scalar(
                 select(func.count())
                 .select_from(tbl.Pattern)
-                .where(tbl.Pattern.identity_key.like("%:____-__-__"))
+                .where(run.patterns(), tbl.Pattern.identity_key.like("%:____-__-__"))
             )
             or 0
         )
@@ -324,7 +363,12 @@ class PatternConcentration(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
-        total = session.scalar(select(func.count()).select_from(tbl.Pattern)) or 0
+        run = context.run
+        if not run.is_resolved:
+            return self.unresolved(run)
+        total = (
+            session.scalar(select(func.count()).select_from(tbl.Pattern).where(run.patterns())) or 0
+        )
         if total == 0:
             return self.skipped(NO_PATTERNS)
 
@@ -333,7 +377,9 @@ class PatternConcentration(_Check):
         }
         by_instrument: Counter[int] = Counter()
         for instrument_id, count in session.execute(
-            select(tbl.Pattern.instrument_id, func.count()).group_by(tbl.Pattern.instrument_id)
+            select(tbl.Pattern.instrument_id, func.count())
+            .where(run.patterns())
+            .group_by(tbl.Pattern.instrument_id)
         ).all():
             by_instrument[int(instrument_id)] = int(count)
         # The *completed* scan universe, never the snapshot. `diag-01` covered
@@ -347,9 +393,9 @@ class PatternConcentration(_Check):
 
         by_date: Counter[dt.date] = Counter()
         for day, count in session.execute(
-            select(tbl.Pattern.first_detected_session, func.count()).group_by(
-                tbl.Pattern.first_detected_session
-            )
+            select(tbl.Pattern.first_detected_session, func.count())
+            .where(run.patterns())
+            .group_by(tbl.Pattern.first_detected_session)
         ).all():
             by_date[day] = int(count)
 
@@ -433,6 +479,9 @@ class PatternIdentityChurn(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
+        run = context.run
+        if not run.is_resolved:
+            return self.unresolved(run)
         rows = session.execute(
             select(
                 tbl.Pattern.id,
@@ -440,7 +489,7 @@ class PatternIdentityChurn(_Check):
                 tbl.Pattern.identity_key,
                 tbl.Pattern.first_detected_session,
                 tbl.Pattern.last_observed_session,
-            )
+            ).where(run.patterns())
         ).all()
         if not rows:
             return self.skipped(NO_PATTERNS)
@@ -448,9 +497,9 @@ class PatternIdentityChurn(_Check):
         observations: dict[int, int] = {
             int(pattern_id): int(count)
             for pattern_id, count in session.execute(
-                select(tbl.PatternObservation.pattern_id, func.count()).group_by(
-                    tbl.PatternObservation.pattern_id
-                )
+                select(tbl.PatternObservation.pattern_id, func.count())
+                .where(run.pattern_observations())
+                .group_by(tbl.PatternObservation.pattern_id)
             )
         }
 
@@ -472,14 +521,16 @@ class PatternIdentityChurn(_Check):
             state
             for (state,) in session.execute(
                 select(tbl.PatternObservation.from_state).where(
-                    tbl.PatternObservation.reason == "superseded"
+                    run.pattern_observations(),
+                    tbl.PatternObservation.reason == "superseded",
                 )
             )
         )
         redetected: Counter[str] = Counter()
         for (note,) in session.execute(
             select(tbl.PatternObservation.note).where(
-                tbl.PatternObservation.note.like("identity ended%")
+                run.pattern_observations(),
+                tbl.PatternObservation.note.like("identity ended%"),
             )
         ):
             match = _REDETECTED_AS.search(note or "")
@@ -489,7 +540,7 @@ class PatternIdentityChurn(_Check):
             session.scalar(
                 select(func.count())
                 .select_from(tbl.PatternObservation)
-                .where(tbl.PatternObservation.note.like("new life%"))
+                .where(run.pattern_observations(), tbl.PatternObservation.note.like("new life%"))
             )
             or 0
         )
@@ -608,6 +659,9 @@ class BreakoutLifecycle(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
+        run = context.run
+        if not run.is_resolved:
+            return self.unresolved(run)
         rows = session.execute(
             select(
                 tbl.BreakoutObservation.event_id,
@@ -615,7 +669,9 @@ class BreakoutLifecycle(_Check):
                 tbl.BreakoutObservation.from_state,
                 tbl.BreakoutObservation.to_state,
                 tbl.BreakoutObservation.reason,
-            ).order_by(tbl.BreakoutObservation.event_id, tbl.BreakoutObservation.session_date)
+            )
+            .where(run.breakout_observations())
+            .order_by(tbl.BreakoutObservation.event_id, tbl.BreakoutObservation.session_date)
         ).all()
         if not rows:
             return self.skipped(NO_BREAKOUTS)
@@ -641,8 +697,14 @@ class BreakoutLifecycle(_Check):
                     "is not a legal transition of the lifecycle"
                 )
 
-        events = session.scalar(select(func.count()).select_from(tbl.BreakoutEvent)) or 0
-        terminal = Counter(state for (state,) in session.execute(select(tbl.BreakoutEvent.state)))
+        events = (
+            session.scalar(select(func.count()).select_from(tbl.BreakoutEvent).where(run.events()))
+            or 0
+        )
+        terminal = Counter(
+            state
+            for (state,) in session.execute(select(tbl.BreakoutEvent.state).where(run.events()))
+        )
         status = CheckStatus.PASS if not illegal else CheckStatus.FAIL
         return self.result(
             status,
@@ -685,7 +747,17 @@ class BreakoutCausality(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
-        total = session.scalar(select(func.count()).select_from(tbl.BreakoutObservation)) or 0
+        run = context.run
+        if not run.is_resolved:
+            return self.unresolved(run)
+        total = (
+            session.scalar(
+                select(func.count())
+                .select_from(tbl.BreakoutObservation)
+                .where(run.breakout_observations())
+            )
+            or 0
+        )
         if total == 0:
             return self.skipped(NO_BREAKOUTS)
 
@@ -699,7 +771,10 @@ class BreakoutCausality(_Check):
                 tbl.BreakoutObservation,
                 tbl.BreakoutObservation.event_id == tbl.BreakoutEvent.id,
             )
-            .where(tbl.BreakoutObservation.session_date < tbl.BreakoutEvent.opened_session)
+            .where(
+                run.events(),
+                tbl.BreakoutObservation.session_date < tbl.BreakoutEvent.opened_session,
+            )
             .limit(5)
         ).all()
         early_count = (
@@ -710,7 +785,10 @@ class BreakoutCausality(_Check):
                     tbl.BreakoutEvent,
                     tbl.BreakoutObservation.event_id == tbl.BreakoutEvent.id,
                 )
-                .where(tbl.BreakoutObservation.session_date < tbl.BreakoutEvent.opened_session)
+                .where(
+                    run.events(),
+                    tbl.BreakoutObservation.session_date < tbl.BreakoutEvent.opened_session,
+                )
             )
             or 0
         )
@@ -722,6 +800,7 @@ class BreakoutCausality(_Check):
             session.scalar(
                 select(func.count()).select_from(
                     select(tbl.BreakoutObservation.event_id)
+                    .where(run.breakout_observations())
                     .group_by(
                         tbl.BreakoutObservation.event_id,
                         tbl.BreakoutObservation.session_date,

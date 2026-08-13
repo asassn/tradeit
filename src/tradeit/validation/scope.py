@@ -32,11 +32,120 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from tradeit.core.enums import Bartimeframe
 from tradeit.storage import tables as tbl
 
-__all__ = ["ScanScope", "resolve_scope"]
+__all__ = ["RunSelection", "ScanScope", "resolve_run", "resolve_scope"]
+
+
+@dataclass(frozen=True, slots=True)
+class RunSelection:
+    """Which scan run's derived rows a validation may read.
+
+    A snapshot can carry several completed scans — a diagnostic subset, a full
+    universe, a re-run under a changed detector. They are separate corpora, and
+    a check that read all of them at once would report one population that never
+    existed. So the selection is explicit, and when it cannot be made
+    unambiguously the checks BLOCK rather than aggregating.
+    """
+
+    scan_run_id: int | None
+    scan_id: str
+    #: Whether a corpus could be named at all. ``scan_run_id`` alone cannot say:
+    #: ``None`` is a legitimate selection — the *unscoped* corpus of rows that
+    #: no scan produced — and is different from "could not choose".
+    resolved: bool = True
+    #: Why no corpus could be chosen; empty when one was.
+    problem: str = ""
+    #: Every completed run over this snapshot, for the message.
+    candidates: tuple[str, ...] = ()
+
+    @property
+    def is_resolved(self) -> bool:
+        return self.resolved
+
+    def patterns(self) -> ColumnElement[bool]:
+        if self.scan_run_id is None:
+            return tbl.Pattern.scan_run_id.is_(None)
+        return tbl.Pattern.scan_run_id == self.scan_run_id
+
+    def events(self) -> ColumnElement[bool]:
+        if self.scan_run_id is None:
+            return tbl.BreakoutEvent.scan_run_id.is_(None)
+        return tbl.BreakoutEvent.scan_run_id == self.scan_run_id
+
+    def pattern_observations(self) -> ColumnElement[bool]:
+        """Reached through the immutable FK to ``patterns``.
+
+        Observations carry no run column of their own and do not need one: the
+        parent is run-scoped and the foreign key is ``ON DELETE CASCADE``, so an
+        observation's run is a property of a chain that cannot be re-pointed.
+        Duplicating it on the child would create a second source of truth able
+        to disagree with the first.
+        """
+        return tbl.PatternObservation.pattern_id.in_(select(tbl.Pattern.id).where(self.patterns()))
+
+    def breakout_observations(self) -> ColumnElement[bool]:
+        return tbl.BreakoutObservation.event_id.in_(
+            select(tbl.BreakoutEvent.id).where(self.events())
+        )
+
+
+def resolve_run(session: Session, snapshot_id: str, *, scan_id: str | None = None) -> RunSelection:
+    """Pick the scan run a validation should read.
+
+    Named explicitly, or inferred when exactly one completed run exists. Two
+    completed runs and no name is not a tie to be broken by recency — it is a
+    question only the operator can answer, so it is returned unresolved.
+    """
+    rows = session.execute(
+        select(tbl.ScanRun.id, tbl.ScanRun.scan_id, tbl.ScanRun.status)
+        .where(tbl.ScanRun.snapshot_id == snapshot_id)
+        .order_by(tbl.ScanRun.started_at)
+    ).all()
+    if scan_id:
+        for run_id, name, _status in rows:
+            if name == scan_id:
+                return RunSelection(scan_run_id=int(run_id), scan_id=name)
+        return RunSelection(
+            scan_run_id=None,
+            scan_id=scan_id,
+            resolved=False,
+            problem=f"no scan run named {scan_id!r} against this snapshot",
+            candidates=tuple(name for _, name, _ in rows),
+        )
+
+    completed = [(run_id, name) for run_id, name, status in rows if status == "completed"]
+    if len(completed) == 1:
+        run_id, name = completed[0]
+        return RunSelection(scan_run_id=int(run_id), scan_id=name)
+    if not completed:
+        if rows:
+            return RunSelection(
+                scan_run_id=None,
+                scan_id="",
+                resolved=False,
+                problem="no completed scan run against this snapshot",
+                candidates=tuple(f"{name} ({status})" for _, name, status in rows),
+            )
+        # No ledger at all. The unscoped corpus — rows written by a label
+        # import, a fixture, or a build predating scan runs — is a real corpus
+        # and a coherent selection, so the checks read it rather than blocking
+        # on a ledger nobody was ever going to write.
+        return RunSelection(scan_run_id=None, scan_id="(unscoped)")
+    return RunSelection(
+        scan_run_id=None,
+        scan_id="",
+        resolved=False,
+        problem=(
+            f"{len(completed)} completed scan runs against this snapshot; name one "
+            "with --scan-id. Reading them together would report a population that "
+            "never existed"
+        ),
+        candidates=tuple(name for _, name in completed),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,8 +209,14 @@ def resolve_scope(
     snapshot_id: str,
     *,
     timeframe: Bartimeframe = Bartimeframe.D1,
+    scan_run_id: int | None = None,
 ) -> ScanScope:
     """Read the three populations for one snapshot.
+
+    ``scan_run_id`` narrows the *requested* and *completed* universes to a
+    single run. Without it the ledger is read across every run over the
+    snapshot, which is right for "what has this snapshot ever had done to it"
+    and wrong for "what is this corpus" — so the checks always pass one.
 
     Falls back to "the snapshot is the scope" only when no scan ledger exists,
     and :attr:`ScanScope.is_known` reports which of the two happened so a check
@@ -123,7 +238,10 @@ def resolve_scope(
             tbl.ScanRun.status,
             tbl.ScanRun.requested_instrument_ids,
         )
-        .where(tbl.ScanRun.snapshot_id == snapshot_id)
+        .where(
+            tbl.ScanRun.snapshot_id == snapshot_id,
+            *([] if scan_run_id is None else [tbl.ScanRun.id == scan_run_id]),
+        )
         .order_by(tbl.ScanRun.started_at)
     ).all()
     if not runs:

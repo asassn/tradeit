@@ -45,6 +45,7 @@ from tradeit.strategy.config import IndicatorConfig
 from tradeit.validation.checks import CheckResult, CheckStatus, Phase, blocked
 from tradeit.validation.context import ValidationContext
 from tradeit.validation.scale import DEFAULT_SCALE_FACTORS, scale_invariance_report
+from tradeit.validation.scope import RunSelection
 
 #: Instruments sampled for the expensive recompute checks. The whole universe
 #: would be more thorough and would also make a validation run take long enough
@@ -150,6 +151,25 @@ def _first_difference(left: Any, right: Any) -> int | None:
     differs = ~(both_nan | (left == right))
     hits = np.flatnonzero(differs)
     return int(hits[0]) if hits.size else None
+
+
+def _unresolved(check: _Check, run: RunSelection) -> CheckResult:
+    """BLOCKED, because the checks read one scan run and could not pick one.
+
+    Never a silent aggregate. Two completed scans over one snapshot are two
+    corpora, and a check that read both would describe a population that never
+    existed — which is exactly the class of quiet wrongness this gate is built
+    to refuse.
+    """
+    return CheckResult(
+        check_id=check.check_id,
+        title=check.title,
+        phase=check.phase,
+        status=CheckStatus.BLOCKED,
+        summary=f"not run: {run.problem}",
+        needs=("a single named scan run (--scan-id)",),
+        examples=tuple(f"candidate: {name}" for name in run.candidates[:8]),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +440,12 @@ class PatternDetectionRate(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
-        total = session.scalar(select(func.count()).select_from(tbl.Pattern)) or 0
+        run = context.run
+        if not run.is_resolved:
+            return _unresolved(self, run)
+        total = (
+            session.scalar(select(func.count()).select_from(tbl.Pattern).where(run.patterns())) or 0
+        )
         if total == 0:
             return CheckResult(
                 check_id=self.check_id,
@@ -428,11 +453,13 @@ class PatternDetectionRate(_Check):
                 phase=self.phase,
                 status=CheckStatus.SKIPPED,
                 summary=(
-                    "no patterns have been persisted for this snapshot; run the scanner "
+                    "no patterns have been persisted for this scan run; run the scanner "
                     "before the Phase 4 checks"
                 ),
             )
-        by_detector = Counter(row.detector_name for row in session.scalars(select(tbl.Pattern)))
+        by_detector = Counter(
+            row.detector_name for row in session.scalars(select(tbl.Pattern).where(run.patterns()))
+        )
         scope = context.scope
         instrument_years = scope.instrument_years()
         rates = {
@@ -498,27 +525,39 @@ class PatternCausality(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
-        total = session.scalar(select(func.count()).select_from(tbl.Pattern)) or 0
+        run = context.run
+        if not run.is_resolved:
+            return _unresolved(self, run)
+        total = (
+            session.scalar(select(func.count()).select_from(tbl.Pattern).where(run.patterns())) or 0
+        )
         if total == 0:
             return CheckResult(
                 check_id=self.check_id,
                 title=self.title,
                 phase=self.phase,
                 status=CheckStatus.SKIPPED,
-                summary="no patterns have been persisted for this snapshot",
+                summary="no patterns have been persisted for this scan run",
             )
 
         unassessable = (
             session.scalar(
                 select(func.count())
                 .select_from(tbl.Pattern)
-                .where(tbl.Pattern.structure_known_through.is_(None))
+                .where(run.patterns(), tbl.Pattern.structure_known_through.is_(None))
             )
             or 0
         )
         acausal = tbl.Pattern.first_detected_session < tbl.Pattern.structure_known_through
-        count = session.scalar(select(func.count()).select_from(tbl.Pattern).where(acausal)) or 0
-        offenders = session.scalars(select(tbl.Pattern).where(acausal).limit(5)).all()
+        count = (
+            session.scalar(
+                select(func.count()).select_from(tbl.Pattern).where(run.patterns(), acausal)
+            )
+            or 0
+        )
+        offenders = session.scalars(
+            select(tbl.Pattern).where(run.patterns(), acausal).limit(5)
+        ).all()
         # How far the *eventual* extent runs past detection, reported so the
         # retrospective movement stays visible rather than becoming invisible
         # now that it no longer fails anything.
@@ -526,7 +565,10 @@ class PatternCausality(_Check):
             session.scalar(
                 select(func.count())
                 .select_from(tbl.Pattern)
-                .where(tbl.Pattern.first_detected_session < tbl.Pattern.structural_end_date)
+                .where(
+                    run.patterns(),
+                    tbl.Pattern.first_detected_session < tbl.Pattern.structural_end_date,
+                )
             )
             or 0
         )
@@ -605,16 +647,22 @@ class BreakoutStateDistribution(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
-        total = session.scalar(select(func.count()).select_from(tbl.BreakoutEvent)) or 0
+        run = context.run
+        if not run.is_resolved:
+            return _unresolved(self, run)
+        total = (
+            session.scalar(select(func.count()).select_from(tbl.BreakoutEvent).where(run.events()))
+            or 0
+        )
         if total == 0:
             return CheckResult(
                 check_id=self.check_id,
                 title=self.title,
                 phase=self.phase,
                 status=CheckStatus.SKIPPED,
-                summary="no breakout events have been persisted for this snapshot",
+                summary="no breakout events have been persisted for this scan run",
             )
-        events = list(session.scalars(select(tbl.BreakoutEvent)))
+        events = list(session.scalars(select(tbl.BreakoutEvent).where(run.events())))
         states = Counter(e.state for e in events)
         paths = Counter(e.confirmed_path for e in events if e.confirmed_path)
         return CheckResult(
@@ -653,16 +701,24 @@ class BreakoutBoundaryProvenance(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
-        total = session.scalar(select(func.count()).select_from(tbl.BreakoutEvent)) or 0
+        run = context.run
+        if not run.is_resolved:
+            return _unresolved(self, run)
+        total = (
+            session.scalar(select(func.count()).select_from(tbl.BreakoutEvent).where(run.events()))
+            or 0
+        )
         if total == 0:
             return CheckResult(
                 check_id=self.check_id,
                 title=self.title,
                 phase=self.phase,
                 status=CheckStatus.SKIPPED,
-                summary="no breakout events have been persisted for this snapshot",
+                summary="no breakout events have been persisted for this scan run",
             )
-        kinds = Counter(e.boundary_kind for e in session.scalars(select(tbl.BreakoutEvent)))
+        kinds = Counter(
+            e.boundary_kind for e in session.scalars(select(tbl.BreakoutEvent).where(run.events()))
+        )
         non_structural = total - kinds.get("structural_pattern_boundary", 0)
         return CheckResult(
             check_id=self.check_id,
@@ -708,14 +764,17 @@ class BreakoutQualityFrozen(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
-        events = list(session.scalars(select(tbl.BreakoutEvent)))
+        run = context.run
+        if not run.is_resolved:
+            return _unresolved(self, run)
+        events = list(session.scalars(select(tbl.BreakoutEvent).where(run.events())))
         if not events:
             return CheckResult(
                 check_id=self.check_id,
                 title=self.title,
                 phase=self.phase,
                 status=CheckStatus.SKIPPED,
-                summary="no breakout events have been persisted for this snapshot",
+                summary="no breakout events have been persisted for this scan run",
             )
         offenders = [
             e for e in events if e.breakout_quality > 0 and e.first_qualifying_close_session is None
@@ -778,6 +837,9 @@ class BreakoutMonitorFloor(_Check):
 
     def run(self, context: ValidationContext) -> CheckResult:
         session = context.session
+        run = context.run
+        if not run.is_resolved:
+            return _unresolved(self, run)
         rows = session.execute(
             select(
                 tbl.BreakoutEvent.event_key,
@@ -785,7 +847,18 @@ class BreakoutMonitorFloor(_Check):
                 tbl.BreakoutEvent.opened_session,
                 tbl.Pattern.id,
                 tbl.Pattern.state,
-            ).join(tbl.Pattern, tbl.Pattern.identity_key == tbl.BreakoutEvent.pattern_key)
+            )
+            .join(
+                tbl.Pattern,
+                # The run belongs in the join condition, not only in a filter.
+                # Identity keys are content hashes, so two runs of one snapshot
+                # derive the same ones — joining on the key alone would let a
+                # Run B event match a Run A pattern and report a state that
+                # belongs to a different corpus.
+                (tbl.Pattern.identity_key == tbl.BreakoutEvent.pattern_key)
+                & (tbl.Pattern.scan_run_id == tbl.BreakoutEvent.scan_run_id),
+            )
+            .where(run.events())
         ).all()
         if not rows:
             return CheckResult(
@@ -799,7 +872,12 @@ class BreakoutMonitorFloor(_Check):
             session.scalar(
                 select(func.count())
                 .select_from(tbl.BreakoutEvent)
-                .where(tbl.BreakoutEvent.pattern_key.not_in(select(tbl.Pattern.identity_key)))
+                .where(
+                    run.events(),
+                    tbl.BreakoutEvent.pattern_key.not_in(
+                        select(tbl.Pattern.identity_key).where(run.patterns())
+                    ),
+                )
             )
             or 0
         )

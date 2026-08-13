@@ -29,7 +29,7 @@ from tradeit.errors import ConfigError
 from tradeit.reproducibility.versioning import content_hash
 from tradeit.storage import tables as t
 from tradeit.validation.checks import CheckClock
-from tradeit.validation.scope import ScanScope, resolve_scope
+from tradeit.validation.scope import RunSelection, ScanScope, resolve_run, resolve_scope
 from tradeit.validation.survivorship import AcquisitionRecordView
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -48,25 +48,50 @@ class ValidationContext:
     #: Configuration digests for the layers under test, so a later run that
     #: differs can say whether the data changed or the settings did.
     config_digests: dict[str, str] = field(default_factory=dict)
+    #: Which scan run's derived rows the Phase 4/5 checks may read. Empty means
+    #: "infer, if exactly one completed run exists" — never "read them all".
+    scan_id: str = ""
     _datasets: frozenset[DatasetKind] | None = field(default=None, init=False)
     _capabilities: CapabilityIndex | None = field(default=None, init=False)
     _acquisition: AcquisitionRecordView | None = field(default=None, init=False)
     _scope: ScanScope | None = field(default=None, init=False)
+    _run: RunSelection | None = field(default=None, init=False)
 
     @property
     def as_of(self) -> dt.datetime:
         return self.clock.as_of
 
     @property
-    def scope(self) -> ScanScope:
-        """Which instruments the persisted Phase 4/5 rows actually cover.
+    def run(self) -> RunSelection:
+        """The single scan run the Phase 4/5 checks read.
 
-        Every empirical rate is computed over the *completed* scan universe, not
-        over the snapshot. Cached because four checks ask for it and the answer
+        A snapshot can carry several completed scans, and they are separate
+        corpora. When the selection is ambiguous this returns unresolved and the
+        checks BLOCK, because a population assembled from two runs is one that
+        never existed.
+        """
+        if self._run is None:
+            object.__setattr__(
+                self, "_run", resolve_run(self.session, self.snapshot_id, scan_id=self.scan_id)
+            )
+        assert self._run is not None
+        return self._run
+
+    @property
+    def scope(self) -> ScanScope:
+        """Which instruments the selected run's rows actually cover.
+
+        Every empirical rate is computed over that run's *completed* instrument
+        universe, not over the snapshot and not over every run that ever
+        touched it. Cached because several checks ask for it and the answer
         cannot change within one validation run.
         """
         if self._scope is None:
-            object.__setattr__(self, "_scope", resolve_scope(self.session, self.snapshot_id))
+            object.__setattr__(
+                self,
+                "_scope",
+                resolve_scope(self.session, self.snapshot_id, scan_run_id=self.run.scan_run_id),
+            )
         assert self._scope is not None
         return self._scope
 
@@ -228,6 +253,7 @@ def load_context(
     universe: ValidationUniverse | None = None,
     code_version: str = "unknown",
     config_digests: dict[str, str] | None = None,
+    scan_id: str = "",
 ) -> ValidationContext:
     """Resolve a snapshot id into a context, or say why it cannot be.
 
@@ -252,6 +278,7 @@ def load_context(
         universe=universe or default_universe(),
         code_version=code_version,
         config_digests=dict(config_digests or {}),
+        scan_id=scan_id,
     )
 
 

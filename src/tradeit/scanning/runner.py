@@ -403,7 +403,9 @@ class SnapshotScanner:
                     report.resumed_instruments.append(ticker or str(instrument_id))
                     continue
                 self.on_progress(f"[{position}/{len(targets)}] {ticker or instrument_id}")
-                outcome = self._scan_instrument(instrument_id, ticker, as_of=as_of)
+                outcome = self._scan_instrument(
+                    instrument_id, ticker, as_of=as_of, scan_run_id=run_row.id
+                )
                 report.instruments.append(outcome)
                 if outcome.was_scanned:
                     self._record_progress(run_row.id, outcome)
@@ -570,7 +572,7 @@ class SnapshotScanner:
     # -- the per-instrument walk --------------------------------------------
 
     def _scan_instrument(
-        self, instrument_id: int, ticker: str, *, as_of: dt.datetime
+        self, instrument_id: int, ticker: str, *, as_of: dt.datetime, scan_run_id: int
     ) -> InstrumentScan:
         started = time.perf_counter()
         outcome = InstrumentScan(instrument_id=instrument_id, ticker=ticker)
@@ -638,13 +640,18 @@ class SnapshotScanner:
                     self.on_progress(
                         f"    {ticker or instrument_id}: {evaluated}/{len(sessions)} sessions"
                     )
-            self._persist(scanner, monitor, outcome)
+            self._persist(scanner, monitor, outcome, scan_run_id=scan_run_id)
 
         outcome.elapsed = time.perf_counter() - started
         return outcome
 
     def _persist(
-        self, scanner: PatternScanner, monitor: BreakoutMonitor, outcome: InstrumentScan
+        self,
+        scanner: PatternScanner,
+        monitor: BreakoutMonitor,
+        outcome: InstrumentScan,
+        *,
+        scan_run_id: int,
     ) -> None:
         """Write one instrument's patterns and events, then link them.
 
@@ -653,7 +660,9 @@ class SnapshotScanner:
         afterwards is a link that will be missing for the rows written before
         somebody noticed.
         """
-        patterns = PatternRepository(self.session)
+        # Both repositories are scoped to this run, which is what keeps two
+        # scans of one snapshot from deriving into each other's rows.
+        patterns = PatternRepository(self.session, scan_run_id=scan_run_id)
         pattern_ids: dict[str, int] = {}
         for tracked in [*scanner.open_patterns(), *scanner.closed_patterns()]:
             row = patterns.save(tracked)
@@ -661,7 +670,7 @@ class SnapshotScanner:
             outcome.patterns_persisted += 1
             outcome.pattern_states[str(tracked.current.state)] += 1
 
-        breakouts = BreakoutRepository(self.session)
+        breakouts = BreakoutRepository(self.session, scan_run_id=scan_run_id)
         for event in monitor.events.values():
             if not event.observations:
                 # An event the monitor opened and never evaluated has no

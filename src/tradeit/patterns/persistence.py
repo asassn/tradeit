@@ -45,8 +45,21 @@ class PatternRepository:
     design exists to avoid storing.
     """
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, scan_run_id: int | None = None) -> None:
+        """``scan_run_id`` makes this repository a *run-scoped* view.
+
+        Not decoration, and not merely attribution. Every lookup below filters
+        on it, so a second scan of the same snapshot cannot find — and therefore
+        cannot advance — a row the first scan created. Without that, adding the
+        column would have recorded which run *inserted* a row while leaving any
+        later run free to mutate it, which is a worse state than no column at
+        all: provenance that reads as authoritative and is not.
+
+        ``None`` is the unscoped legacy view, for label imports, fixtures and
+        anything predating scan runs. The scanner always passes an id.
+        """
         self.session = session
+        self.scan_run_id = scan_run_id
 
     # -- writes --------------------------------------------------------------
 
@@ -78,6 +91,7 @@ class PatternRepository:
             )
             row = tables.Pattern(
                 identity_key=tracked.identity_key,
+                scan_run_id=self.scan_run_id,
                 instrument_id=tracked.instrument_id,
                 pattern_type=str(tracked.pattern_type),
                 timeframe=str(current.timeframe),
@@ -250,10 +264,19 @@ class PatternRepository:
     # -- reads ---------------------------------------------------------------
 
     def _find(self, identity_key: str, detector_version: int) -> tables.Pattern | None:
+        """The row this repository's run owns for that identity, if any.
+
+        The ``scan_run_id`` predicate is what makes runs isolated rather than
+        merely labelled. ``is_(None)`` rather than ``== None`` so the unscoped
+        view matches legacy rows instead of matching nothing.
+        """
         return self.session.scalars(
             select(tables.Pattern).where(
                 tables.Pattern.identity_key == identity_key,
                 tables.Pattern.detector_version == detector_version,
+                tables.Pattern.scan_run_id.is_(None)
+                if self.scan_run_id is None
+                else tables.Pattern.scan_run_id == self.scan_run_id,
             )
         ).one_or_none()
 

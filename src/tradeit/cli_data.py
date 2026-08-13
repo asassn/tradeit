@@ -188,6 +188,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
             as_of=as_of,
             universe=default_universe(),
             code_version=args.code_version,
+            scan_id=getattr(args, "scan_id", "") or "",
         )
         run = run_validation(context)
 
@@ -749,6 +750,16 @@ def add_data_commands(sub: argparse._SubParsersAction) -> None:  # type: ignore[
     validate.add_argument("--as-of", default=None, help="ISO date; defaults to the export date")
     validate.add_argument("--json", default=None, help="also write the report payload here")
     validate.add_argument("--code-version", default="unknown")
+    validate.add_argument(
+        "--scan-id",
+        default=None,
+        help=(
+            "which scan run the Phase 4/5 checks read. Optional when the snapshot "
+            "has exactly one completed run; required when it has more, because two "
+            "runs are two corpora and reading them together describes a population "
+            "that never existed"
+        ),
+    )
     validate.set_defaults(func=cmd_validate)
 
 

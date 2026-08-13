@@ -780,6 +780,16 @@ class Pattern(Base):
     #: pattern written before this column existed — the value cannot be
     #: recovered, because only the current geometry was ever stored.
     structure_known_through: Mapped[dt.date | None] = mapped_column(Date)
+    #: The scan that derived this row. Immutable: set on insert, never on
+    #: advance, because a row belongs to the run that produced it.
+    #:
+    #: Nullable, and deliberately so — see :class:`ScanRun` for why a scan
+    #: cannot use ``run_manifest_id``. Rows written by a label import, a test
+    #: fixture or any build predating this column have no scan and must remain
+    #: representable. What the schema cannot enforce, the repository does:
+    #: :class:`~tradeit.patterns.persistence.PatternRepository` takes the scan
+    #: run as a constructor argument and the scanner always supplies one.
+    scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id", ondelete="CASCADE"))
     first_detected_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
     last_observed_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
 
@@ -806,8 +816,25 @@ class Pattern(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("identity_key", "detector_version", name="uq_pattern_identity"),
+        # Run-scoped, because a scan is an experiment boundary. Two scans of the
+        # same snapshot under the same configuration derive the same identity
+        # keys, so a global constraint made the second scan *find and advance*
+        # the first one's rows — one corpus wearing two runs' provenance, with
+        # nothing in the schema able to separate them afterwards.
+        #
+        # NULLS NOT DISTINCT keeps the old global uniqueness for rows that have
+        # no scan: without it PostgreSQL treats every NULL as distinct, so
+        # unscoped rows would lose the protection they had before this column
+        # existed. See the migration for the backfill policy.
+        UniqueConstraint(
+            "scan_run_id",
+            "identity_key",
+            "detector_version",
+            name="uq_pattern_identity",
+            postgresql_nulls_not_distinct=True,
+        ),
         Index("ix_pattern_active", "state", "last_observed_session"),
+        Index("ix_pattern_scan_run", "scan_run_id"),
         Index("ix_pattern_instrument", "instrument_id", "pattern_type", "state"),
         CheckConstraint("structural_end_date >= structural_start_date", name="ck_pattern_dates"),
         CheckConstraint("quality >= 0 AND quality <= 100", name="ck_pattern_quality"),
@@ -1025,6 +1052,9 @@ class BreakoutEvent(Base):
         ForeignKey("instruments.instrument_id", ondelete="CASCADE"), nullable=False
     )
     pattern_id: Mapped[int | None] = mapped_column(ForeignKey("patterns.id", ondelete="SET NULL"))
+    #: The scan that derived this row. Immutable, nullable, and enforced by the
+    #: repository rather than the column — see ``Pattern.scan_run_id``.
+    scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id", ondelete="CASCADE"))
     #: The pattern's own identity key, kept alongside the foreign key so an
     #: event survives the pattern row being pruned without losing what it was
     #: attached to.
@@ -1121,15 +1151,29 @@ class BreakoutEvent(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("event_key", name="uq_breakout_event_identity"),
+        # Both are run-scoped, and the second one is the reason the first is not
+        # enough on its own: `event_key` hashes the pattern key, so two runs
+        # collide there — but so does a *second attempt* on the same boundary,
+        # which `uq_breakout_attempt` keys directly. Leaving that one global
+        # would let Run B's attempt 2 collide with Run A's attempt 2 even after
+        # the event keys were separated.
         UniqueConstraint(
+            "scan_run_id",
+            "event_key",
+            name="uq_breakout_event_identity",
+            postgresql_nulls_not_distinct=True,
+        ),
+        UniqueConstraint(
+            "scan_run_id",
             "instrument_id",
             "timeframe",
             "pattern_key",
             "attempt_number",
             name="uq_breakout_attempt",
+            postgresql_nulls_not_distinct=True,
         ),
         Index("ix_breakout_active", "state", "last_observed_session"),
+        Index("ix_breakout_scan_run", "scan_run_id"),
         Index("ix_breakout_instrument", "instrument_id", "timeframe", "state"),
         Index("ix_breakout_boundary_kind", "boundary_kind", "state"),
         Index("ix_breakout_pattern", "pattern_id", "opened_session"),
