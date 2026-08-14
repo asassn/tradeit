@@ -101,6 +101,21 @@ for exactly that defect.
 `research-01` embeds either source permanently.** Status: **UNVERIFIED**.
 Recorded as Blocker 3 in `PHASE_06_IMPROVEMENT_PLAN.md` §1.
 
+**Attempted in this session and blocked.** `twelvedata.com` and
+`site.financialmodelingprep.com` both returned `EGRESS_BLOCKED` from the egress
+proxy, as did `sec.gov` and every other vendor domain. Per the proxy README these
+are organisation policy denials and were not routed around. **No retention
+determination for either vendor is claimed, and none is inferred from the fact
+that our API access currently works** — access and retention are different
+grants.
+
+The exact written questions to send are in
+[`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §3.1, and the register of
+determinations for every source lives there rather than here.
+
+**Classification for both: `UNCLEAR — WRITTEN CONFIRMATION REQUIRED`, which is
+treated as prohibited** for the permanent corpus until answered.
+
 ---
 
 ## 2. Vendor matrix

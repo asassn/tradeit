@@ -90,6 +90,23 @@ Consequences that follow, and are binding:
    survivorship-safe by construction — it records what existed on each day it
    ran. The purchased window is a head start; the forward archive is the asset.
 
+### Survivorship bias limits what the corpus may *prove* — it is not a licence
+
+**A known survivor-biased intraday corpus may validate machinery and explore
+hypotheses. It may not, by itself, justify live capital.** Declaring the bias
+makes results interpretable; it does not make them sufficient.
+
+Capital graduation for the Day mandate must rest on some combination of:
+
+- **survivorship-safe forward intraday collection** — TradeIt's own archive,
+  accumulated live, with enough elapsed time to cover more than one regime;
+- **independent paper trading**, on the live code path;
+- **appropriately unbiased historical evidence**, where any exists.
+
+Whichever combination is used must be stated explicitly at graduation. "The
+backtest was good" over a corpus whose failures are missing is precisely the
+claim this entry exists to block.
+
 ## Retired
 
 | corpus | fate |

@@ -402,6 +402,16 @@ survivorship-safe by construction, because it records what existed on each day i
 ran. The historical intraday window is a head start; the forward archive is the
 asset.
 
+**And the limit on what the declaration buys.** Declaring the bias makes results
+*interpretable*; it does not make them *sufficient*. A known survivor-biased
+corpus may validate machinery and explore hypotheses; **it may not, by itself,
+justify live capital.** Day-mandate capital graduation must rest on some
+combination of survivorship-safe forward intraday collection, independent paper
+trading on the live code path, and appropriately unbiased historical evidence
+where any exists — stated explicitly at graduation. "The backtest was good" over
+a corpus whose failures are missing is exactly the claim this section exists to
+block.
+
 ---
 
 ## 7. Intraday depth, storage and API implications

@@ -12,7 +12,10 @@ and untouched.
 > probed separately (`KIBOT_DATA_PROBE.md` §H). **It does not gate anything
 > below.**
 
-Companion documents: [`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) ·
+Companion documents: [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md) ·
+[`EDGAR_DELISTING_DENOMINATOR.md`](EDGAR_DELISTING_DENOMINATOR.md) ·
+[`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) ·
+[`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) ·
 [`KIBOT_DATA_PROBE.md`](KIBOT_DATA_PROBE.md) ·
 [`MULTI_TIMEFRAME_MANDATES.md`](MULTI_TIMEFRAME_MANDATES.md) ·
 [`RESEARCH_01_DATA_CONTRACT.md`](RESEARCH_01_DATA_CONTRACT.md) ·
@@ -290,10 +293,11 @@ otherwise be invisible.
 
 | # | milestone | gate | cost |
 |---|---|---|---|
-| **0a** | **EDGAR full-index ingestion** + the Form 25/15 survivorship denominator | control filings reconciled; per-year delisting counts produced | **free** |
-| **0b** | **Written pre-sales questions to Kibot** (probe A1/A3, D1/D5/D6, E4/E7) | replies kept on file | **free** |
-| **0c** | **Verify Twelve Data and FMP retention terms** in writing (§1 blocker 3) | written answers | **free** |
-| 1 | Kibot probe on a trial or single month, **sample only** | **your approval of the probe result** — a failed item G is not overridden by a passed item A | ~$14 |
+| **0a** | **EDGAR full-index ingestion + the delisting denominator** — design complete in [`EDGAR_DELISTING_DENOMINATOR.md`](EDGAR_DELISTING_DENOMINATOR.md) | per-year termination counts by evidence strength; EDGAR-only cohort survival curves | **free** |
+| **0b** | **Confirm the 30 control securities against EDGAR** to `MANUAL_VERIFIED` — names, CIKs, dates ([`DOTCOM_CONTROL_UNIVERSE.md`](DOTCOM_CONTROL_UNIVERSE.md) §2c) | 30/30 confirmed or replaced **before** any vendor data is seen | **free** |
+| **0c** | **Send Kibot pre-sales questions Q1–Q26** ([`KIBOT_DATA_PROBE.md`](KIBOT_DATA_PROBE.md) §Q) | replies filed and graded VERIFIED / CORROBORATED / UNVERIFIED | **free** |
+| **0d** | **Verify Twelve Data and FMP retention terms** in writing ([`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §3.1) | a classification per source, `UNCLEAR` treated as prohibited | **free** |
+| 1 | Kibot probe on a trial or single month, **sample only** | **your approval of the probe result** — measured against [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md). A failed item G is not overridden by a passed item A | ~$14 |
 | 2 | Schema: securities, symbol_aliases, security_relationships, price_facts, corporate_action_facts, filings, fundamental_facts + migration | migration/ORM drift green | none |
 | 3 | Importer + point-in-time policy for the new datasets | round-trip tests | none |
 | 4 | Bulk price backfill → `research-01` | control universe reconstructed; §G acceptance rules evaluated and *reported*, pass or fail | within the same billing month |
@@ -307,10 +311,11 @@ Milestone **I** is deliberately unnumbered and off the critical path. Its writte
 questions are free and can ride along with 0b to save a round trip, but no EOD
 decision waits on its answers.
 
-**Milestones 0a–0c can start now and cost nothing.** 0a in particular is not
-merely preparation: it builds the independent denominator that *measures* whether
-Kibot's delisted roster is complete, so it must precede the probe rather than
-follow it.
+**Milestones 0a–0d can start now and cost nothing.** 0a and 0b are not merely
+preparation: they build the instrument that *measures* the vendor, so they must
+precede the probe rather than follow it.
+
+> **Do not pay for access before the instrument that measures it exists.**
 
 ## 9. Recommendation
 
@@ -320,13 +325,19 @@ follow it.
 2. **Sharadar and EODHD are eliminated** for `research-01` on licence grounds,
    independent of data quality. Reconsider only under a different written licence
    that explicitly grants post-termination retention.
-3. **Start Milestones 0a–0c now.** All free, all useful under every outcome, and
-   0a is the instrument that verifies the vendor.
-4. **Then run the Kibot probe** and bring the numbers back for a decision. If it
-   passes, one month at ~$14 buys a permanently retainable 1998–present price
-   corpus, which is a materially better position than the previous revision's.
+3. **Start Milestones 0a–0d now.** All free, all useful under every outcome, and
+   0a/0b are the instruments that verify the vendor.
+4. **Then run the Kibot probe** and bring the numbers back against
+   [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md). If it passes, one
+   month at ~$14 buys a permanently retainable 1998–present price corpus, which
+   is a materially better position than the previous revision's.
 5. **Defer pre-2009 fundamental values.** Do not accept a subscription source for
    them if cancellation would force us to delete `research-01`.
+6. **Plan for CONDITIONAL.** The realistic outcome is a corpus that is
+   *materially* or *partially* survivorship-corrected rather than
+   survivorship-safe. That is not a failure; the discipline is that the
+   limitation is measured, classified and published beside the corpus, with the
+   prohibited-conclusion list attached (`RESEARCH_01_DATA_CONTRACT.md` §10).
 
 **1998-01-01: held, and no longer conditional on a fundamentals vendor.** XBRL's
 start is a fact about machine-readable values, not about dates or prices, and

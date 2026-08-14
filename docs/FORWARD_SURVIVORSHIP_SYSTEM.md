@@ -100,6 +100,57 @@ EDGAR alone covers delistings (25/15), bankruptcies (8-K 1.03) and mergers (8-K
 2.01 / S-4) for every filer, and Twelve Data covers the disappearance signal.
 FMP shortens the detection latency; it is not load-bearing.
 
+## 6b. The permanence rules, stated as rules
+
+Six behaviours the design exists to guarantee. Each is checkable, and each is a
+thing a naive "refresh today's symbol list" system gets wrong.
+
+1. **A ticker is never the permanent identity.** `instrument_id` is, and it is a
+   platform-owned surrogate. Tickers live in `symbol_aliases` with intervals, and
+   the exclusion constraint makes two securities holding one ticker on one
+   exchange at one instant unrepresentable.
+2. **A security is never deleted.** Not on delisting, bankruptcy, merger,
+   acquisition, ticker change, or ticker disappearance. The row persists, stays
+   queryable, and gains an end date and a reason. **Deleting a security because it
+   vanished from today's vendor universe is the exact error the whole system
+   exists to prevent.**
+3. **Disappearance is never itself a delisting.** A symbol absent from the feed
+   with no corroborating filing enters `pending_investigation` and stays there
+   until evidence arrives. `NOT_FOUND` and `PROVIDER_HISTORY_UNAVAILABLE` are
+   already distinguished in `SurvivorshipStatus`, and this is the same distinction
+   applied to the registry.
+4. **Every state change is an appended event with a `knowledge_time`**, never an
+   in-place update. `securities.delisting_date` is set once, from an event; the
+   evidence lives in the log, and "what did we believe on 14 March?" stays
+   answerable.
+5. **Ticker reuse mints a new identity**, always. Never an extension of the
+   previous holder's series.
+6. **Reverse mergers mint a new identity** even though the CIK survives. CIK
+   continuity is *legal* continuity, not economic continuity — the same principle
+   as the structural-break handling already proven in Phase 4/5.
+
+### Reconciliation cycle, in detail
+
+| step | input | rule |
+|---|---|---|
+| **new listing** | symbol appears in TD active list | corroborate with a first price bar and an EDGAR 8-A / S-1 / 424 before minting; a symbol appearing for one day and vanishing is not a listing |
+| **symbol change** | symbol disappears **and** another appears for the same CIK or vendor id | close the old alias interval, open the new, **same `instrument_id`**; requires FMP symbol-change or 8-K item 5.03 corroboration |
+| **Form 25 / 25-NSE** | EDGAR daily index | exchange delisting; set `delisting_date`, close the alias interval |
+| **Form 15 family** | EDGAR daily index | deregistration; often follows a Form 25 — the *earlier* of the two is the lifecycle date, the later is corroboration |
+| **bankruptcy** | 8-K item 1.03; often a `Q` ticker suffix | `bankrupt_liquidated` or `bankrupt_reorganised`, distinguished by the subsequent filings, not by the 8-K alone |
+| **merger / acquisition** | S-4, 8-K item 2.01, DEFM14A | `security_relationships` + `acquired_by`; the target's series **ends** |
+| **reverse merger** | 8-K item 5.06 | **new `instrument_id`**, linked by `reverse_merged_into` |
+| **reused ticker** | a ticker reappears whose prior interval is closed and whose CIK or vendor id differs | **new `instrument_id`**; never an extension |
+| **exchange change** | venue field changes with no other event | new alias interval on the new exchange, same `instrument_id`; recorded because pre-2009 venue history is poorly covered everywhere and the forward record is the only reliable one we will have |
+| **unexplained disappearance** | gone from TD, nothing in EDGAR or FMP | `pending_investigation`. **Never** a delisting |
+
+**The pre-2004 asymmetry is worth naming:** forward detection is *easier* than
+historical reconstruction, because 8-K item numbering, electronic Form 25 filing
+and structured symbol feeds all exist now and did not exist in 2001
+(`EDGAR_DELISTING_DENOMINATOR.md` §2). The forward registry is therefore expected
+to be materially more complete than any historical backfill — which is the whole
+argument for building it and never re-purchasing.
+
 ## 7. Operator queue
 
 Automation must not resolve ambiguity by guessing, so it doesn't:

@@ -183,6 +183,85 @@ Bristol-Myers Squibb (2001), Edwards Lifesciences from Baxter (2000).
 **Whatever the vendor does with a spinoff, it must be documented and reproducible
 — not correct by our definition, but *declared*.**
 
+## 2c. The probe fixture — 30 named securities
+
+The classes above are the *shape*; §2b is the *density*; **this is the actual
+fixture the probe runs against.** Thirty securities, sized so every control can be
+checked by hand if necessary.
+
+**Every ticker, name and date below is UNVERIFIED and must reach
+`MANUAL_VERIFIED` state against EDGAR before the probe relies on it**
+(`EDGAR_DELISTING_DENOMINATOR.md` §4). A candidate that cannot be confirmed is
+**replaced, not guessed at** — and replacement happens *before* vendor data is
+seen, never after.
+
+| # | ticker | security | class | what its failure would prove |
+|---|---|---|---|---|
+| 1 | `AAPL` | Apple | survivor + large splits | baseline; 4 splits incl. 7:1 (2014), 4:1 (2020) |
+| 2 | `MSFT` | Microsoft | survivor | splits 1998, 1999, 2003 |
+| 3 | `CSCO` | Cisco | survivor through collapse | splits 1998–2000; −85% drawdown that is *not* a delisting |
+| 4 | `AMZN` | Amazon | survivor through collapse | 1997 IPO, −90% drawdown, 20:1 split 2022 |
+| 5 | `SPY` | SPDR S&P 500 ETF | long-lived ETF | non-equity control; dividends, no splits |
+| 6 | `QQQ` | Nasdaq-100 ETF | ETF inside the window | Mar 1999 inception, 2:1 split Mar 2000 — an ETF *born* in the bubble |
+| 7 | `IPET` | Pets.com | **short-lived failure** | Feb 2000 IPO → wound up Nov 2000. **~9 months. The single sharpest test in the fixture** |
+| 8 | `ETYS` | eToys | short-lived failure | May 1999 IPO → Ch. 11 Mar 2001 |
+| 9 | `WBVN` | Webvan | short-lived failure | Nov 1999 IPO → Ch. 11 Jul 2001 |
+| 10 | `TGLO` | theglobe.com | collapse, survived as shell | Nov 1998 IPO; distinguishes `bankrupt` from shell survival |
+| 11 | `KOOP` | drkoop.com | small failure | going-concern → absorption; a name no vendor markets |
+| 12 | `MPPP` | MP3.com | small acquisition | acquired by Vivendi 2001 — acquisition of a *failing* company |
+| 13 | `ENE` | Enron | large-cap collapse | Ch. 11 Dec 2001 |
+| 14 | `WCOM` | WorldCom | large-cap collapse → reorg | Ch. 11 Jul 2002, emerges as MCI — new identity |
+| 15 | `EXDS` | Exodus Communications | infrastructure failure | Ch. 11 Sep 2001 |
+| 16 | `PSIX` | PSINet | infrastructure failure | Ch. 11 May 2001 |
+| 17 | `GCTY` | GeoCities | peak acquisition | Yahoo 1999 — **series must end, not continue into YHOO** |
+| 18 | `BCST` | Broadcast.com | peak acquisition | Yahoo 1999 — same |
+| 19 | `CPQ` | Compaq | merger, identity change | → HPQ 2002 |
+| 20 | `BEL`→`VZ` | Bell Atlantic → Verizon | rename with continuity | 2000; ticker change, **one** economic security |
+| 21 | `BBBY` | Bed Bath & Beyond | **ticker reuse — proven** | the exact case `full-01` failed on. Non-negotiable |
+| 22 | `GM` | GM Corp → Motors Liquidation; GM Company | **ticker reuse, ~1yr gap** | 2009 bankruptcy, 2010 IPO reuses `GM`. The strictest reuse case — short enough that a splice looks plausible |
+| 23 | `AOL` | America Online; AOL Inc. | **ticker reuse, ~8yr gap** | two legally distinct issuers, same ticker |
+| 24 | `JDSU` | JDS Uniphase | reverse split | 1:8 reverse split 2006 — the largest factor in the fixture |
+| 25 | `PCLN` | Priceline | **reverse split, survivor** | 1:6 in 2003. Unadjusted chart looks like a catastrophe; adjusted does not. **The most valuable single control** |
+| 26 | `QCOM` | Qualcomm | large forward split | 4:1 Dec 1999, at the peak |
+| 27 | `LEH` | Lehman Brothers | financial-crisis failure | Sep 2008 |
+| 28 | `CC` | Circuit City | financial-crisis liquidation | 2009; non-financial crisis failure |
+| 29 | `FRC` | First Republic Bank | **recent delisting** | May 2023 — proves the recent end is maintained, not just the archive |
+| 30 | `RDDT` | Reddit | **recent IPO** | Mar 2024 — the young end of the universe |
+
+### Composition, deliberately
+
+| stress | count | entries |
+|---|---|---|
+| survivors / long-lived | 6 | 1–6 |
+| **short-lived failures** (< 3 years listed) | 4 | 7, 8, 9, 11 |
+| other dot-com failures | 5 | 10, 12, 15, 16, 13 |
+| large-cap collapse | 2 | 13, 14 |
+| acquisitions ending a series | 3 | 12, 17, 18 |
+| identity-changing mergers | 2 | 19, 20 |
+| **ticker reuse** | 3 | 21, 22, 23 |
+| reverse splits | 2 | 24, 25 |
+| large forward splits | 4 | 1, 6, 26, 4 |
+| financial-crisis failures | 2 | 27, 28 |
+| recent delisting / recent IPO | 2 | 29, 30 |
+
+*(Entries appear under more than one stress; that is intentional — a control that
+tests one thing tests it in isolation, and a control that tests three at once is
+the more realistic case.)*
+
+### The six failure modes these were chosen to stress
+
+Each is a failure TradeIt has **already encountered or already guarded against**,
+not a hypothetical:
+
+| failure mode | controls | precedent |
+|---|---|---|
+| **ticker reuse** | 21, 22, 23 | `full-01`'s BBBY survivorship control passed on another company's prices |
+| **structural breaks** | 14, 20, 22, 24, 25 | the BBBY 536-session gap that ends an analytical episode |
+| **missing histories** | 7–12, 15, 16 | the survivorship FAIL that produced this whole programme |
+| **adjustment errors** | 1, 6, 24, 25, 26 | scale-invariance work exists because adjusted-only series are lossy |
+| **delisted securities absent from vendor** | 7–18, 27, 28 | the reason a denominator is being built at all |
+| **impossible OHLC bars** | all 30 | the existing quarantine machinery, exercised on real data |
+
 ## 3. What each control must yield
 
 For a control to count as reconstructed, `research-01` must supply **all** of:

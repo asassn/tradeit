@@ -31,6 +31,119 @@ Every probe item below reports one of: `obtained` / `not_offered` / `refused` /
 
 ---
 
+## Q. The pre-sales questions — send verbatim, before paying anything
+
+Twenty-six questions. **Free to ask, and they resolve most of the schema and the
+whole purchase decision.** Marketing copy is not an answer to any of them; if a
+reply restates a product page rather than answering, the item stays `UNVERIFIED`.
+
+Record each answer as `VERIFIED` (stated by the vendor in writing, specific),
+`CORROBORATED` (implied by documentation but not directly answered) or
+`UNVERIFIED` (unanswered, evasive, or marketing language).
+
+### Product access
+
+> **1.** Does your inexpensive EOD subscription provide access to historical
+> **daily** data for **delisted** US stocks, or only for currently active
+> securities?
+>
+> **2.** If delisted history is available, how is it accessed — bulk download,
+> API, individual-symbol download, or a separate product or package?
+>
+> **3.** Is the complete active **and** delisted US equity universe downloadable
+> during a standard monthly subscription?
+>
+> **4.** Are there throughput, bandwidth or daily download limits that would make
+> acquiring a full historical archive impossible within one billing month?
+>
+> **5.** What is the minimum subscription or product combination necessary to
+> obtain that archive, and what does it cost in total?
+
+### Historical depth
+
+> **6.** Does your US stock coverage reliably include data from **1998-01-01**
+> onward?
+>
+> **7.** Are **small and short-lived** securities from the 1998–2002 period
+> represented — companies that listed and failed within a few years — or is the
+> historical universe primarily major surviving names?
+>
+> **8.** Are bankrupt and delisted securities retained in your historical
+> archive indefinitely, or removed once they stop trading?
+
+### Identity and lifecycle
+
+> **9.** Do you provide any permanent identifier for a security that is
+> independent of its ticker — for example CIK, CUSIP, FIGI, or a vendor-internal
+> permanent ID?
+>
+> **10.** How are **ticker changes** represented? Does one file span the change,
+> or are there two files, or is history available only under the current ticker?
+>
+> **11.** How is **ticker reuse** handled — when a later, unrelated company
+> receives a ticker previously used by a delisted company? Are the two histories
+> separated?
+>
+> **12.** Are listing and delisting **dates** supplied per security?
+>
+> **13.** Are delisting **reasons** supplied — bankruptcy, acquisition, going
+> private, exchange rule?
+>
+> **14.** Are mergers, acquisitions and security replacements represented in any
+> form?
+
+### Corporate actions and price semantics
+
+> **15.** Are raw / **unadjusted** OHLCV bars available?
+>
+> **16.** Are **split-adjusted** series available?
+>
+> **17.** Are **dividend-adjusted / fully adjusted** series available?
+>
+> **18.** Are **split events** available separately, as a corporate-action file
+> or feed?
+>
+> **19.** Are **dividends** available separately?
+>
+> **20.** How are **reverse splits** represented?
+>
+> **21.** Are **spin-offs** handled, and if so how are they reflected in the
+> adjusted series?
+>
+> **22.** Are historical **volumes** adjusted under any of the adjusted products,
+> or do volumes remain as printed?
+
+### Licensing
+
+Questions 23–26 are held in `DATA_RETENTION_RIGHTS.md` §3.2 alongside the
+equivalent Twelve Data and FMP questions, so all retention determinations live in
+one register. In summary they ask for written confirmation that data already
+delivered may be retained indefinitely after cancellation; that the right extends
+to raw files, normalised database rows, **derived bars**, security-master
+mappings and **frozen internal research corpora**; that continued private
+internal analysis after cancellation is permitted; and whether a future
+commercial version of TradeIt would require a different licence.
+
+**24(c) and 24(e) are the decisive ones.** Sharadar's licence permits keeping
+nothing *and* requires deleting derived datasets — a licence that permits keeping
+the files while staying silent on derived data would leave `research-01` itself
+in an undetermined state, which is treated as prohibited.
+
+### Answer register
+
+| Q | topic | answer | grade | date |
+|---|---|---|---|---|
+| 1–5 | product access | — | `UNVERIFIED` | — |
+| 6–8 | historical depth | — | `UNVERIFIED` | — |
+| 9–14 | identity & lifecycle | — | `UNVERIFIED` | — |
+| 15–22 | corporate actions | — | `UNVERIFIED` | — |
+| 23–26 | licensing | licence text permits permanent retention (**USER-VERIFIED**); **scope unconfirmed** | `CORROBORATED` | — |
+
+**Do not infer any of these from marketing language.** Every row above is
+`UNVERIFIED` until a written reply fills it in.
+
+---
+
 ## A. Does the ~$14 EOD tier actually expose the full historical universe?
 
 **The question is not "does Kibot have the data" — it is "does the product we
@@ -88,8 +201,16 @@ rather than accepted as a full universe.
 
 ## C. Named historical controls
 
-Every control from `DOTCOM_CONTROL_UNIVERSE.md`, and specifically its expanded
-1998–2002 section, is fetched by ticker-and-era and checked for:
+**The fixture is the 30 named securities in
+[`DOTCOM_CONTROL_UNIVERSE.md`](DOTCOM_CONTROL_UNIVERSE.md) §2c** — sized so every
+control can be checked by hand, and composed so that six specific failure modes
+TradeIt has already encountered are each stressed by at least two entries.
+
+**Every control must reach `MANUAL_VERIFIED` identity state against EDGAR before
+the probe runs.** A candidate that cannot be confirmed is replaced *before* vendor
+data is seen, never after.
+
+Each is fetched by ticker-and-era and checked for:
 
 1. the series exists at all;
 2. it **starts** when the security listed (not truncated to some vendor floor);
@@ -195,22 +316,44 @@ Sample: 10–20 securities all three cover — large caps with long histories, a
 least two with major splits, at least two mid-caps, at least one recent IPO.
 Delisted names cannot be compared this way and are handled by items C and G.
 
-| # | comparison | acceptance |
+| # | comparison | measured as | acceptance |
+|---|---|---|---|
+| F1 | **session coverage** | count of sessions per instrument-year, per vendor | within 1% of the market calendar's session count |
+| F2 | **exact missing sessions** | the *set difference* against a US market calendar, listed by date | reported per vendor; a vendor missing sessions the others have is a coverage defect, not noise |
+| F3 | **raw OHLC disagreement** | median and 95th-percentile absolute relative difference, per field | median < 0.1% on close; every session > 1% investigated individually |
+| F4 | **adjusted OHLC disagreement** | same, after aligning adjustment bases | systematic *drift* indicates a split disagreement, not noise — trace it to a date |
+| F5 | **volume disagreement** | median absolute relative difference | expect materially worse than price: consolidated tape vs primary-exchange prints differ legitimately. **Record it; do not "fix" it** |
+| F6 | **split schedule** | ratio and ex-date per event, per vendor | identical, or a recorded disagreement |
+| F7 | **dividend schedule** | cash amount and ex-date per event | identical, or a recorded disagreement |
+| F8 | **impossible OHLC rows** | `high < low`; `open`/`close` outside `[low, high]`; non-positive prices | **zero tolerated** — every instance quarantined and counted |
+| F9 | **stale repeats** | runs of ≥ 3 consecutive sessions with identical OHLC **and** identical volume | flagged; legitimate in a halted or near-dead security, suspicious in a liquid one — the distinction is the instrument, not the pattern |
+| F10 | **price spikes** | single-session moves > 50% with no corporate action and no corroboration from another vendor | flagged for individual review |
+| F11 | **listing / delisting boundaries** | first and last session per instrument, per vendor | boundaries agree within a few sessions, or the disagreement is attributed |
+
+### Discrepancy classification — the rule that keeps this honest
+
+> **Two vendors disagreeing does not make a third vendor correct, and a majority
+> is not evidence.** Three vendors sharing one upstream tape agree for reasons
+> that have nothing to do with truth.
+
+Every discrepancy is classified and **stored**, never silently resolved:
+
+| class | meaning | resolution |
 |---|---|---|
-| F1 | **raw OHLC agreement** | median absolute relative difference < 0.1% on close; investigate any session > 1% |
-| F2 | **split-adjusted agreement** | same, after aligning adjustment bases; systematic drift indicates a split disagreement, not noise |
-| F3 | **volume agreement** | expect worse than price — consolidated vs primary-exchange tape differ legitimately. Record the discrepancy; do not "fix" it |
-| F4 | **split events** | identical ratios and ex-dates, or a recorded disagreement |
-| F5 | **missing sessions** | compare session sets against a US market calendar. Report gaps per vendor. A vendor missing sessions the others have is a coverage defect |
-| F6 | **impossible bars** | `high < low`, `close` outside `[low, high]`, non-positive prices, zero-volume sessions with a price range, > 50% single-session moves without a corresponding action |
+| `ADJUSTMENT_BASIS` | the two series are on different bases | not a discrepancy — a labelling error on our side |
+| `CORPORATE_ACTION` | traceable to a split/dividend one vendor applied and the other did not | record both; the action itself becomes the disputed fact |
+| `VENUE_SCOPE` | consolidated vs primary-exchange (typically volume, sometimes the close) | expected; recorded as a known systematic difference |
+| `SESSION_COVERAGE` | one vendor has a session the other lacks | a coverage fact about the vendor, per instrument-year |
+| `IMPOSSIBLE` | violates OHLC arithmetic on one side | that side is quarantined; the other is *not* thereby blessed |
+| `UNEXPLAINED` | none of the above | **stays `UNEXPLAINED`**, counted and reported. This bucket's size is itself a quality metric |
 
-**F6 feeds the existing quarantine machinery rather than a new one.** Impossible
-bars are quarantined, counted, and reported — never silently dropped, never
-repaired.
-
-**Disagreement is recorded as two rows, not resolved.** That is already the
+**Disagreement is stored as two rows, not resolved.** That is already the
 `price_facts` contract (`RESEARCH_01_DATA_CONTRACT.md` §4): two sources, two
-rows, both with `source` and `source_version`.
+rows, each with `source` and `source_version`. Resolution, if it ever happens,
+belongs to the versioned normalisation layer where it is reversible.
+
+**F8–F10 feed the existing quarantine machinery rather than a new one.**
+Quarantined, counted, reported — never silently dropped, never repaired.
 
 ---
 
@@ -225,35 +368,40 @@ systematic and invisible: a roster built from well-known, well-traded, long-live
 names that happens to omit the thin, short-lived, small-cap failures — which are
 exactly the population survivorship bias is *made of*.
 
-### G1. Build an independent denominator from EDGAR — free, authoritative
+### G1. The independent denominator
 
-This is the core of the item, and it needs no purchase and no vendor cooperation:
+Fully designed in **[`EDGAR_DELISTING_DENOMINATOR.md`](EDGAR_DELISTING_DENOMINATOR.md)**
+— free, public domain, no vendor cooperation, buildable today, and **built before
+purchase** because it is the instrument that measures the vendor.
 
-- **Form 25 / 25-NSE** filings enumerate exchange delistings.
-- **Form 15** filings enumerate deregistrations.
-- **Form 8-A** filings enumerate registrations of a class of securities.
-- All are in EDGAR's quarterly full-index from **1994 Q3**, with filing dates,
-  free, in bulk.
+Two things from that design matter here:
 
-Counting them per year yields an **independent, primary-source estimate of how
-many US securities stopped being listed in each year 1998–2026.** That is the
-denominator Kibot's B2/B5/B6 counts are measured against. Caveats recorded up
-front: Form 25 pre-dates 2005 in a different regime (Rule 12d2-2 was amended in
-2005), not every delisting produces a Form 25, and form counts include non-common
-securities. It is an estimate with known bias, which is infinitely better than no
-denominator at all.
+1. **It reports two coverage bounds, never one.** `matched_coverage` (over
+   identity-`RESOLVED` denominator entries) is the optimistic bound;
+   `bounded_coverage` (over `RESOLVED + AMBIGUOUS + UNRESOLVED`) is the
+   pessimistic one. Reporting only the first is the standard way this measurement
+   is made to look better than it is.
+2. **Form 25 is weakest exactly in the dot-com window** — electronic Form 25
+   filing largely postdates the 2005 Rule 12d2-2 amendments, so 1998–2002 leans on
+   Form 15 and on *filing cessation*, which is weaker but uniform across the whole
+   span. A denominator built on Form 25 alone would report that almost nothing
+   delisted in 2001.
 
-### G2. Cohort survival
+### G2. Cohort survival — the measurement most robust to identity failure
 
-For each listing cohort (securities whose history begins in year *Y*), compute
-the fraction still trading 3, 5 and 10 years later. Compare the 1999–2000 cohorts
-against the 2015–2016 cohorts.
+For each listing cohort (securities first appearing in year *Y*), the fraction
+still present 3, 5 and 10 years later — computed **twice**, once over the EDGAR
+denominator and once over the vendor's roster, then compared.
 
-**Expected in an honest corpus:** the 1999–2000 cohorts should show markedly worse
-survival. **If every cohort survives at a similar high rate, the corpus is
-survivorship-biased**, and no amount of famous-bankruptcy controls disproves it.
-This test needs no external data at all — it is internal consistency, and it is
-the single most informative number the probe can produce.
+**Expected in an honest corpus:** the 1999–2000 cohorts show markedly worse
+survival than the 2015–2016 cohorts, and the vendor's curve tracks EDGAR's shape.
+**A vendor curve that is systematically flatter than EDGAR's — cohorts surviving
+better than reality — is survivorship bias, quantified**, with no need to
+enumerate a single missing name.
+
+This is the strongest single measurement available, because it compares *shapes*
+rather than *memberships*: a 30% unresolved identity rate degrades it far less
+than it degrades `matched_coverage`.
 
 ### G3. Thin-failure representation
 
@@ -272,29 +420,63 @@ it must be *declared* out of scope in the corpus registry, not silently absent.
 A security that delisted from an exchange and continued trading OTC has, for our
 purposes, ended; that is a recorded modelling decision, not a data gap.
 
-### G5. Acceptance rule — fixed now, before any data is seen
+### G5. The metrics this item must produce
 
-`research-01` may be called **survivorship-safe** only if **all** hold:
+Numbers, each with the query that produced it. No adjectives.
 
-1. every control in `DOTCOM_CONTROL_UNIVERSE.md` is either reconstructed or
-   FAILs with a recorded, non-`unknown` reason;
-2. delisted securities are **> 45%** of the total roster for 1998–2026;
-3. the 1999–2000 listing cohorts show materially worse 5-year survival than the
-   2015–2016 cohorts (G2);
-4. terminations by year show visible 2000–2002 and 2008–2009 bulges (B6);
-5. Kibot's per-year termination counts are **within a stated factor of** the
-   EDGAR Form 25/15 denominator (G1), with the gap *quantified and explained*
-   rather than waved past;
-6. securities with < 500 sessions terminating in 1999–2002 are present in
-   non-trivial numbers (G3);
-7. exchange coverage includes AMEX and Nasdaq SmallCap-tier names (G4), or their
-   absence is declared as a scope limit in `CORPUS_REGISTRY.md`.
+| metric | definition |
+|---|---|
+| expected delisted controls | 30, from `DOTCOM_CONTROL_UNIVERSE.md` §2c |
+| covered | controls fully reconstructed per §3 of that document |
+| missing | controls absent, with the recorded reason |
+| unresolved identity mapping | controls or denominator entries stuck at `AMBIGUOUS`/`UNRESOLVED` |
+| `matched_coverage` | vendor ∩ `RESOLVED` denominator ÷ `RESOLVED` denominator |
+| `bounded_coverage` | same numerator ÷ (`RESOLVED` + `AMBIGUOUS` + `UNRESOLVED`) |
+| coverage by calendar period | both bounds, per termination year 1994–2026 |
+| coverage by exchange | where a filing names one (NYSE / AMEX / Nasdaq tiers) |
+| coverage by security lifespan | buckets < 1y, 1–3y, 3–10y, > 10y |
+| **coverage of short-lived securities** | the < 1y and 1–3y buckets specifically |
+| **coverage of 1998–2002 failures** | terminations in that window, both bounds |
+| cohort survival ratios | vendor curve vs EDGAR curve, 3/5/10-year, per listing cohort |
 
-**Any of these failing means the corpus is labelled with its measured limitation
-and may not be cited for cross-sectional or economic claims** — the same
-treatment `full-01` already receives. It does not necessarily mean Kibot is
-useless; it means the honest label is "US large- and mid-cap listed equities,
-1998–, partially survivorship-corrected" rather than "the US equity universe".
+### G6. The specific hypothesis to test, not merely to report
+
+> **Are failed and short-lived dot-com companies disproportionately absent?**
+
+This is a *comparison*, not a count. Coverage of the < 1y and 1–3y lifespan
+buckets is compared against coverage of the > 10y bucket. If long-lived
+securities are 85% covered and sub-3-year securities are 30% covered, the corpus
+is biased toward survivors **even though its headline delisted count looks
+healthy** — and that is the outcome most likely to be mistaken for success.
+
+**Do not call `research-01` survivorship-safe because the famous bankruptcies are
+present.** Enron and WorldCom are in every vendor's archive. Pets.com is the test.
+
+### G7. Acceptance criteria — predefined, before any vendor data is examined
+
+`research-01` is assigned one of four classifications *from the measurement*. It
+is not chosen, argued for, or negotiated after the fact.
+
+| class | `bounded_coverage` | controls (of 30) | cohort survival vs EDGAR | short-lived bucket |
+|---|---|---|---|---|
+| **survivorship-safe** | ≥ 0.75 | 30 | tracks EDGAR's shape | ≥ 0.60 of the > 10y bucket's rate |
+| **materially survivorship-corrected** | 0.45 – 0.75 | ≥ 26 | differential present | ≥ 0.40 |
+| **partially survivorship-corrected** | 0.25 – 0.45 | ≥ 20 | weak or partial | ≥ 0.20 |
+| **survivor-biased** | < 0.25 | < 20 | absent — cohorts survive like survivors | < 0.20 |
+
+Additional conditions, applying to every class above `survivor-biased`:
+
+1. every control is either reconstructed **or** FAILs with a recorded,
+   non-`unknown` reason — a silent omission fails the whole assessment;
+2. terminations by year show visible 2000–2002 and 2008–2009 bulges (B6);
+3. exchange coverage includes AMEX and Nasdaq SmallCap-tier names (G4), **or**
+   their absence is declared as a scope limit in `CORPUS_REGISTRY.md`;
+4. both coverage bounds are published together, always.
+
+**A classification below `survivorship-safe` is not a failure and does not
+necessarily reject Kibot.** It changes what the corpus may be used to conclude —
+the prohibited-conclusion table in `RESEARCH_01_DATA_CONTRACT.md` §10 — and it
+must be published in `CORPUS_REGISTRY.md` beside the corpus, permanently.
 
 **Nothing is called survivorship-safe until the control universe passes.**
 

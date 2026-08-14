@@ -328,3 +328,60 @@ and that distinction is the whole of survivorship honesty:
 not offered / refused / empty. A gate check then fails the corpus if any control
 security in `docs/DOTCOM_CONTROL_UNIVERSE.md` is absent without a recorded
 reason.
+
+## 10. Corpus classification and prohibited conclusions
+
+**`research-01` is assigned one of four classifications by measurement, not by
+intention.** The thresholds are fixed in advance (`KIBOT_DATA_PROBE.md` §G7) and
+the assignment is published in `CORPUS_REGISTRY.md` beside the corpus,
+permanently.
+
+The point of naming the class is not honesty for its own sake. It is that **each
+class prohibits a specific list of conclusions**, and without the list the caveat
+degrades into a disclaimer nobody acts on.
+
+| class | what it means |
+|---|---|
+| **survivorship-safe** | the disappeared population is substantially present and measured |
+| **materially survivorship-corrected** | most of it is present; the deficit is quantified and its direction known |
+| **partially survivorship-corrected** | a real but incomplete correction; the deficit is large enough to change conclusions |
+| **survivor-biased** | the corpus is what survived. `full-01` holds this class today |
+
+### What each class prohibits
+
+| conclusion type | survivorship-safe | materially corrected | partially corrected | survivor-biased |
+|---|---|---|---|---|
+| machinery validation, causality, provenance, reproducibility | ✅ | ✅ | ✅ | ✅ |
+| descriptive geometry of detected structures | ✅ | ✅ | ✅ | ✅ |
+| **unconditional base rates** ("how often does X occur") | ✅ | ✅ *with the stated deficit* | ❌ | ❌ |
+| **cross-sectional frequency** across the universe | ✅ | ✅ *with the deficit* | ❌ | ❌ |
+| **cross-era / regime comparison** (1998–2002 vs 2015–2026) | ✅ | ⚠️ only if per-era coverage is comparable | ❌ | ❌ |
+| **cohort or lifespan claims** (newly listed, speculative names) | ✅ | ❌ *if the short-lived bucket is thin* | ❌ | ❌ |
+| **failure-tail claims** ("what fraction end in delisting") | ✅ | ❌ | ❌ | ❌ |
+| **small-cap / exchange-tier claims** | ✅ | ❌ *if exchange skew is present* | ❌ | ❌ |
+| anything conditioned on **why** a security ended | only where `delisting_reason` is known and its prevalence published | same | same | ❌ |
+
+Two rules apply at every class:
+
+1. **A quantified deficit must accompany the claim, not a footnote about it.** "Base
+   rate 12%, over a corpus with measured `bounded_coverage` 0.58 and a short-lived
+   deficit of 0.41" is a usable statement. "Base rate 12% (corpus has some
+   survivorship bias)" is not.
+2. **Both coverage bounds are published together**, always. `matched_coverage`
+   alone is the standard way this measurement is made to look better than it is.
+
+### Independent of survivorship class
+
+These limits hold whatever the classification turns out to be, and are declared
+rather than discovered:
+
+- **`pre_2009_fundamental_coverage = limited`** — filing dates, accessions and
+  form types are present from 1994 Q3; statement *values* only from 2009 (§7.2).
+  **TradeIt must never silently substitute a restated or hindsight value for a
+  missing as-reported one**, and `knowledge_time` is never manufactured — an
+  absent filing timestamp quarantines the fact, as the existing importer already
+  does.
+- **OTC / pink-sheet trading is out of scope.** A security that delisted from an
+  exchange and continued OTC is treated as ended: a recorded modelling decision.
+- **Delisting reasons are frequently absent.** `delisting_reason = unknown` is a
+  first-class value and its prevalence is published.
