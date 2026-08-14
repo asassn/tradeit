@@ -10,9 +10,11 @@ authorisation.
 | 1 | Causal / point-in-time data foundation | ✅ Complete |
 | 2 | System architecture & data design | ✅ Complete |
 | 3 | Market analytics foundation | ✅ Complete |
-| 4 | Pattern recognition | Not started |
-| 5 | Breakout detection & confirmation | Not started |
-| 6 | Fundamentals & earnings quality | Not started |
+| 4 | Pattern recognition | ✅ Complete |
+| 5 | Breakout detection & confirmation | ✅ Complete |
+| — | Empirical data access & validation gate | ✅ Complete (Outcome B) |
+| 6 | Fundamentals & earnings quality | In progress — data architecture |
+| — | **Multi-Timeframe & Portfolio Mandate Architecture** | **Not started.** May overlap Phase 6; **must complete before Phase 7** |
 | 7 | Opportunity scoring | Not started |
 | 8 | Portfolio construction, risk & compounding | Not started |
 | 9 | Portfolio backtesting & Monte Carlo analysis | Not started |
@@ -137,6 +139,42 @@ revision history.
 
 *Blocked by:* the data vendor decision. See
 [`VENDOR_EVALUATION.md`](VENDOR_EVALUATION.md).
+
+## Multi-Timeframe & Portfolio Mandate Architecture
+
+**Not a numbered phase**, following the precedent of the empirical gate above.
+The canonical numbering is untouched and Phases 3, 4 and 5 are not renumbered.
+
+TradeIt is not one strategy on one timeframe. It will manage **three portfolio
+mandates at materially different horizons** — Day, Swing and Retirement — each
+with its own timeframe hierarchy, holding horizon, risk model, backtest, KPIs and
+capital-graduation criteria.
+
+The core principle: **a security has no global state.** There is no
+`breakout = true`. State is scoped by `instrument × timeframe × analytical
+episode`, and a security that is in a Monthly uptrend, a Weekly breakout, a Daily
+retest and a 5-minute pullback is exhibiting four independent causal
+observations, not four contradictions.
+
+*Placement:* **may overlap Phase 6**, and in the data dimension it must — the
+corpora being specified now have to serve every mandate, not only the swing one.
+**Must complete and validate before Phase 7**, because opportunity scoring is the
+first stage that would blend timeframes into a ranking, and blending them before
+the populations are separated is the error the whole design exists to prevent.
+
+*Data consequence:* two corpora, not one. `research-01` stays daily, 1998+,
+survivorship-safe, serving Swing and Retirement. A separate `intraday-01` —
+1-minute base, a shorter high-quality window, expected to be survivorship-biased
+and labelled as such — serves the Day mandate and the Swing mandate's triggers.
+
+*Does not include:* the multi-timeframe coordinator's logic, any claim that
+timeframe alignment is profitable, or any combined cross-timeframe score.
+
+`full-01` remains the validated **Daily** machinery baseline. Future timeframe
+expansion gets separate derivation runs and corpora, and must independently pass
+the same causality and provenance gates Daily passed.
+
+See [`MULTI_TIMEFRAME_MANDATES.md`](MULTI_TIMEFRAME_MANDATES.md).
 
 ## Phase 7 — Opportunity scoring
 

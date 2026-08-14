@@ -58,6 +58,38 @@ universe passes** (`DOTCOM_CONTROL_UNIVERSE.md`). If it does not, the corpus is
 still usable — under its measured label, with the same discipline `full-01`
 already receives.
 
+## `intraday-01` — NOT YET BUILT
+
+The 1-minute corpus serving the **Day** mandate and the **Swing** mandate's
+trigger layer. Separate from `research-01` in base timeframe, depth, vendor and
+survivorship posture; the two are never merged into one statistical population.
+See [`MULTI_TIMEFRAME_MANDATES.md`](MULTI_TIMEFRAME_MANDATES.md) §6.3 and
+`KIBOT_DATA_PROBE.md` §H.
+
+| | |
+|---|---|
+| base timeframe | 1-minute, **regular trading hours**; extended hours stored separately, never merged |
+| derives | 5m / 15m / 30m / 1h. **Not 4h** — semantics unresolved, see MULTI_TIMEFRAME_MANDATES §3.2 |
+| target depth | 2015-01-01 → present; **2018-01-01 minimum** (below which the COVID dislocation is lost) |
+| universe | liquidity-scoped, declared. ~1,500 names ≈ 22 GB columnar for 10 years |
+| **survivorship** | **expected BIASED.** Intraday history for long-delisted securities is rarely available at any price |
+
+### Declared in advance, before it is built
+
+**`intraday-01` is expected to fail a survivorship test, and that is acceptable
+only because it is declared, measured and never hidden.** When built, this entry
+must carry the *measured* delisted fraction, not an estimate.
+
+Consequences that follow, and are binding:
+
+1. **Day-mandate KPIs carry a permanent survivorship caveat** that Swing and
+   Retirement KPIs do not.
+2. **No Day-mandate result may be compared with a Swing-mandate result** as
+   though the two came from the same population.
+3. The **forward** 1-minute archive TradeIt accumulates itself *is*
+   survivorship-safe by construction — it records what existed on each day it
+   ran. The purchased window is a head start; the forward archive is the asset.
+
 ## Retired
 
 | corpus | fate |

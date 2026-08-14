@@ -300,6 +300,58 @@ useless; it means the honest label is "US large- and mid-cap listed equities,
 
 ---
 
+---
+
+## H. Intraday — a separate, later, non-blocking probe
+
+**This item does not gate items A–G and must not delay them.** The EOD corpus
+serves the Swing and Retirement mandates and remains the priority; the intraday
+question exists because a *second* corpus is now specified
+(`MULTI_TIMEFRAME_MANDATES.md` §6.3) and it would be wasteful to ask the same
+vendor twice.
+
+Target: **`intraday-01`** — 1-minute base, regular trading hours, ~2015–present
+(2018 minimum), from which `5m/15m/30m/1h` are derived by existing machinery.
+`4h` is not adopted (`MULTI_TIMEFRAME_MANDATES.md` §3.2).
+
+| # | to establish | why it decides something |
+|---|---|---|
+| H1 | does historical intraday data exist at all, and at which granularities? | if the minimum granularity is 5m, the derivation chain loses its base and `1m` execution research is impossible |
+| H2 | **are raw 1-minute bars available**, or only pre-aggregated products? | 1m is the canonical base; buying 5m and deriving 15m is acceptable, buying 5m and *calling* it 1m is not |
+| H3 | earliest intraday history, per instrument and overall | 2015 target, 2018 floor |
+| H4 | **are delisted securities included in intraday history?** | expected **no**. This is the answer that determines whether `intraday-01` is labelled survivorship-biased — see §G's philosophy applied to a corpus that will probably fail it |
+| H5 | **bulk file delivery, or per-symbol API only?** | ~295,000 REST requests for 1,500 names × 10 years. **Per-symbol REST backfill is not a viable acquisition strategy at any useful universe size** — bulk delivery is a hard requirement, not a preference |
+| H6 | download/API limits, and time to acquire the target universe | must complete inside a retention-safe window |
+| H7 | **retention rights after cancellation** | the same absolute filter as §1. Permanent retention or the source is ineligible, whatever the data quality |
+| H8 | regular-hours vs extended-hours semantics — are they separable? | if the vendor silently merges pre/post-market minutes into the session, every session-anchored bucket boundary is wrong and the data cannot be used as a base |
+| H9 | timestamp and time-zone convention — UTC or local? bar stamped at **open** or **close**? | a bar stamped at its open versus its close differs by the bar width. Getting this wrong shifts every signal by one bar and is invisible in aggregate |
+| H10 | corporate-action treatment intraday — adjusted, unadjusted, or both? | a split applied to a 1-minute archive retroactively rewrites millions of rows; we need the unadjusted base and our own derivation, as with EOD |
+| H11 | expected storage footprint of the actual delivery format | 1,500 × 10y ≈ 1.47 B bars ≈ 22 GB columnar / 133 GB narrow Postgres. Sanity-check against what the vendor actually ships |
+| H12 | liquidity/universe scoping options | universe size is the strongest cost lever: 1,500 names is 22 GB, 6,000 is 89 GB, and the Day mandate will not trade illiquid microcaps anyway |
+
+### H's own acceptance posture
+
+**`intraday-01` is expected to fail a survivorship test and that is acceptable,
+provided it is measured and declared.** Intraday history for companies that
+stopped trading in 2003 is rare at any price. The consequences are recorded in
+advance:
+
+1. the delisted fraction of `intraday-01` is **measured and published** in
+   `CORPUS_REGISTRY.md`, not estimated;
+2. the **Day mandate's** KPIs carry a permanent survivorship caveat that the
+   Swing and Retirement mandates' do not;
+3. no Day-mandate result may be compared with a Swing-mandate result as though
+   they came from the same population;
+4. the **forward** 1-minute archive TradeIt accumulates itself *is*
+   survivorship-safe by construction, because it records what existed on each day
+   it ran. The purchased window is a head start; the forward archive is the
+   asset, and it is cheap — ~9 MB/day, ~2 GB/year for 1,500 names.
+
+**Do not purchase intraday data.** Answer H1–H12 in writing first, then decide
+whether an economically useful window can be backfilled at all.
+
+---
+
 ## 8. How to run this without buying anything first
 
 In order, cheapest first:
@@ -316,6 +368,10 @@ In order, cheapest first:
    items B, C, F and G2 need only the rosters plus a few hundred symbol files.
 4. **Bulk download only after the probe passes**, inside the same billing month
    (A6), with the retention licence text saved alongside the data.
+5. **Item H (intraday) only after step 4 is settled.** It is a separate corpus, a
+   separate purchase decision, and it must not delay the EOD one. Its written
+   questions (H1–H12) are free and may be asked alongside step 2 to save a round
+   trip — but its *answers* change nothing about the EOD decision.
 
 **Decision gate: the probe result comes back for approval before any bulk
 download. A failed item G is not overridden by a passed item A.**

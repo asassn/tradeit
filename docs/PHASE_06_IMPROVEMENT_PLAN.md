@@ -4,8 +4,17 @@
 implemented, no thresholds touched, no performance computed. `full-01` frozen
 and untouched.
 
+> **Scope note.** TradeIt will run three portfolio mandates at different
+> horizons, so **Daily is not the only timeframe the data plan must serve**. This
+> document covers the **EOD corpus** (`research-01`), which serves the Swing and
+> Retirement mandates. A second corpus — `intraday-01`, 1-minute base — is
+> specified in [`MULTI_TIMEFRAME_MANDATES.md`](MULTI_TIMEFRAME_MANDATES.md) and
+> probed separately (`KIBOT_DATA_PROBE.md` §H). **It does not gate anything
+> below.**
+
 Companion documents: [`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) ·
 [`KIBOT_DATA_PROBE.md`](KIBOT_DATA_PROBE.md) ·
+[`MULTI_TIMEFRAME_MANDATES.md`](MULTI_TIMEFRAME_MANDATES.md) ·
 [`RESEARCH_01_DATA_CONTRACT.md`](RESEARCH_01_DATA_CONTRACT.md) ·
 [`FORWARD_SURVIVORSHIP_SYSTEM.md`](FORWARD_SURVIVORSHIP_SYSTEM.md) ·
 [`DOTCOM_CONTROL_UNIVERSE.md`](DOTCOM_CONTROL_UNIVERSE.md)
@@ -292,6 +301,11 @@ otherwise be invisible.
 | 6 | Narrow EDGAR text parsing for the control universe only | headline metrics hand-checked | free |
 | 7 | Forward survivorship daemon | detects a real event end-to-end | existing |
 | 8 | Re-run the gate against `research-01` | survivorship result **reported with its measured limitations**, not asserted | none |
+| **I** | **Intraday probe (H1–H12), written questions only** — runs in parallel, gates nothing | answers on file | **free** |
+
+Milestone **I** is deliberately unnumbered and off the critical path. Its written
+questions are free and can ride along with 0b to save a round trip, but no EOD
+decision waits on its answers.
 
 **Milestones 0a–0c can start now and cost nothing.** 0a in particular is not
 merely preparation: it builds the independent denominator that *measures* whether

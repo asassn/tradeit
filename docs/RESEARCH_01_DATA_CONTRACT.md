@@ -6,6 +6,19 @@ remains machinery-validation only (`docs/CORPUS_REGISTRY.md`).
 
 **Not implemented.** This is the contract for approval.
 
+> **`research-01` is the EOD corpus.** It is daily-based and serves the **Swing**
+> and **Retirement** mandates, plus the context and setup layers of everything
+> else. It causally derives Weekly and Monthly and nothing below Daily.
+>
+> A second corpus, **`intraday-01`** — 1-minute base, a shorter recent window,
+> expected to be survivorship-biased — is specified separately in
+> [`MULTI_TIMEFRAME_MANDATES.md`](MULTI_TIMEFRAME_MANDATES.md) §6.3 and probed
+> separately (`KIBOT_DATA_PROBE.md` §H). **Nothing in this contract waits for
+> it**, and the two are never merged: they have different base timeframes,
+> different depths, different vendors and different survivorship postures, and
+> mixing their observations into one statistical population is exactly the error
+> the mandate separation exists to prevent.
+
 ---
 
 ## 1. Scope

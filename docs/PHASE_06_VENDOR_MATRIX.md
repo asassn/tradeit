@@ -125,6 +125,34 @@ answers and different candidate sets.
 | 16 | API vs bulk | **UNTESTED — probe item A** | both — UNVERIFIED | both — CORROBORATED | REST + S3 — CORROBORATED | REST |
 | 18 | price | **~$14/month EOD subscription — USER-VERIFIED (vendor page); exact tier for the full historical universe UNTESTED — probe item A** | UNVERIFIED (~$69/mo cited) | UNVERIFIED (~€59.99/mo cited) | UNVERIFIED (~$29/mo cited) | existing subscription |
 
+### 2a-i. Intraday history — a separate corpus, a separate decision
+
+Added because `research-01` is no longer the only corpus: the Day mandate and the
+Swing mandate's trigger layer need true 1-minute history, which cannot be derived
+from daily bars at any price (`MULTI_TIMEFRAME_MANDATES.md` §6.2). **This does
+not gate the EOD decision and must not delay it.**
+
+Every cell is **UNTESTED**. Probe items H1–H12 in `KIBOT_DATA_PROBE.md`.
+
+| # | criterion | **Kibot** | **Twelve Data** | **Polygon / Massive** |
+|---|---|---|---|---|
+| I-L | **post-termination retention** | permanent retention permitted per the licence — USER-VERIFIED, **assumed to cover intraday products; confirm** | UNVERIFIED — §1.4 | not established |
+| I-1 | historical intraday exists | advertises intraday products — untested | intraday API, depth not established | flat files include trades/aggregates — CORROBORATED |
+| I-2 | **raw 1-minute bars** | untested — H2 | untested | untested |
+| I-3 | earliest intraday history | untested — H3 | untested | untested |
+| I-4 | **delisted securities intraday** | **expected no** — H4 | expected no | expected no |
+| I-5 | **bulk file delivery** | untested — H5. **Hard requirement**: ~295k REST requests otherwise | REST only, as used today | S3 flat files — CORROBORATED, its strongest feature |
+| I-6 | regular vs extended hours separable | untested — H8 | untested | untested |
+| I-7 | timestamp convention (UTC? open- or close-stamped?) | untested — H9 | untested | untested |
+| I-8 | corporate-action treatment intraday | untested — H10 | untested | untested |
+
+**Note the reversal:** Polygon is ruled out for the EOD corpus because delisted
+coverage is its weakest area, but bulk flat-file delivery is its *strongest* —
+and bulk delivery is the hard requirement for intraday, where delisted coverage
+is expected to be unavailable from everyone. **Polygon is therefore not ruled out
+for `intraday-01`** and should be evaluated on item H alongside Kibot. Its
+retention terms are unestablished and decide whether it is a candidate at all.
+
 ### 2b. Fundamentals and filing metadata
 
 | # | criterion | **SEC EDGAR** | **Sharadar** | **EODHD** | **Twelve Data** | **FMP** |
