@@ -47,6 +47,7 @@ from tradeit.edgar.index import (
     EDGAR_FIRST_QUARTER,
     IndexLayout,
     IndexQuarter,
+    SkipReason,
     accession_from_path,
     parse_full_index,
     parse_index,
@@ -83,25 +84,35 @@ garbage line with no pipes
 #: Authentic 1994 Q3 ``form.idx`` shape: FIXED-WIDTH, form type first. The
 #: column order differs from master.idx, which is the defect this fixture
 #: exists to keep fixed. Rows are real-format samples.
+#
+# The header labels are NOT where the data columns are: "CIK" starts at 62 in
+# the header while the CIK values sit at 58, and "Date Filed" starts at 74 while
+# the dates sit at 68. That is the authentic shape, and it is why header-offset
+# slicing failed on ~93% of the real 1994 Q3 rows. Reproduced deliberately so
+# the regression cannot come back.
 _FORM_IDX_LINES = [
     "Description:           Quarterly Index of EDGAR Dissemination Feed by Form Type",
     "Last Data Received:    September 30, 1994",
     "Comments:              webmaster@sec.gov",
     "Anonymous FTP:         ftp://ftp.sec.gov/edgar/",
     "",
-    "Form Type   Company Name                                      CIK       "
-    "Date Filed   File Name",
-    "-" * 96,
-    "10-C        3COM CORP                                         738076    "
-    "1994-08-24   edgar/data/738076/0000738076-94-000018.txt",
-    "10-K        AMERICAN TELEPHONE & TELEGRAPH CO                 5907      "
-    "1994-09-15   edgar/data/5907/0000005907-94-000012.txt",
-    "SC 13D      GENERAL MOTORS CORP                               40730     "
-    "1994-07-05   edgar/data/40730/0000040730-94-000003.txt",
-    "DEF 14A     SMALL CO INC                                      7         "
-    "1994-08-01   edgar/data/7/0000000007-94-000001.txt",
+    "Form Type   Company Name                                      "
+    "CIK       Date Filed   File Name",
+    "-" * 100,
+    # Authentic rows reported from the real file, with the data columns offset
+    # from the header labels exactly as SEC ships them.
+    "10-C        3COM CORP                                     738076    "
+    "1994-08-24  edgar/data/738076/0000738076-94-000018.txt",
+    "10-C        ARDEN GROUP INC                               225051    "
+    "1994-09-28  edgar/data/225051/0000912057-94-003253.txt",
+    "10-K        AMERICAN TELEPHONE & TELEGRAPH CO             5907      "
+    "1994-09-15  edgar/data/5907/0000005907-94-000012.txt",
+    "SC 13D      GENERAL MOTORS CORP                           40730     "
+    "1994-07-05  edgar/data/40730/0000040730-94-000003.txt",
+    "DEF 14A     SMALL CO INC                                  7         "
+    "1994-08-01  edgar/data/7/0000000007-94-000001.txt",
     "8-A12B      A VERY LONG COMPANY NAME THAT OVERFLOWS ITS COLUMN WIDTH  "
-    "1234567   1994-09-30   edgar/data/1234567/0001234567-94-000009.txt",
+    "1234567   1994-09-30  edgar/data/1234567/0001234567-94-000009.txt",
     "this row is not a filing at all",
 ]
 FORM_IDX_BODY = "\n".join(_FORM_IDX_LINES) + "\n"
@@ -172,29 +183,171 @@ def test_form_idx_preserves_spaces_in_company_names_and_form_types() -> None:
     assert rows[7].form_type == "DEF 14A"
 
 
+def test_form_idx_arden_group_row() -> None:
+    """The second real skipped sample from the 1994 Q3 file."""
+    rows = {r.cik: r for r in parse_index(FORM_IDX_BODY, quarter_label="1994Q3").rows}
+    arden = rows[225051]
+    assert arden.form_type == "10-C"
+    assert arden.company_name == "ARDEN GROUP INC"
+    assert arden.filed_at == dt.date(1994, 9, 28)
+    assert arden.path == "edgar/data/225051/0000912057-94-003253.txt"
+    # The accession's prefix differs from the CIK -- a filing agent submitted it.
+    assert arden.accession == "0000912057-94-003253"
+
+
 def test_form_idx_handles_varying_cik_lengths() -> None:
     ciks = {r.cik for r in parse_index(FORM_IDX_BODY, quarter_label="1994Q3").rows}
-    assert {7, 5907, 40730, 738076, 1234567} <= ciks
+    assert {7, 5907, 40730, 225051, 738076, 1234567} <= ciks
+
+
+def test_data_columns_offset_from_header_labels_still_parse() -> None:
+    """The exact 93%-failure condition, pinned.
+
+    In the authentic file the CIK values sit several characters left of where the
+    'CIK' header label starts. Header-offset slicing therefore produced a CIK
+    field that was sometimes digits and a date field that was garbage -- and the
+    row was dropped. Right-anchored parsing is immune to it.
+    """
+    parsed = parse_index(FORM_IDX_BODY, quarter_label="1994Q3")
+    header = parsed.header
+    assert header is not None
+    bounds = dict(zip(header.fields, header.offsets, strict=True))
+    line = next(line for line in _FORM_IDX_LINES if line.startswith("10-C        3COM"))
+
+    # Slicing at the header's labels recovers neither field: the CIK slice picks
+    # up a fragment of the CIK plus part of the date, and the date slice is
+    # garbage. Sometimes such a fragment is all digits, which is what made the
+    # old code so hard to catch -- the CIK check passed, the misaligned date then
+    # failed, and the row was dropped without the fallback ever being consulted.
+    assert line[bounds["cik"] : bounds["filed_at"]].strip() != "738076"
+    assert line[bounds["filed_at"] : bounds["path"]].strip() != "1994-08-24"
+
+    # Right-anchored parsing is immune to all of it.
+    assert any(r.cik == 738076 for r in parsed.rows)
 
 
 def test_form_idx_recovers_rows_that_overflow_their_columns() -> None:
-    """A long company name pushes CIK past its column start; the fallback peels
-    the rigid right-hand end (path, date, CIK) and splits the free text on the
-    padding run, so the row is recovered rather than dropped."""
+    """A company name long enough to run past every column boundary."""
     parsed = parse_index(FORM_IDX_BODY, quarter_label="1994Q3")
     overflow = next(r for r in parsed.rows if r.cik == 1234567)
     assert overflow.form_type == "8-A12B"
     assert overflow.company_name == "A VERY LONG COMPANY NAME THAT OVERFLOWS ITS COLUMN WIDTH"
     assert overflow.filed_at == dt.date(1994, 9, 30)
-    assert parsed.fallback_rows >= 1
 
 
 def test_form_idx_malformed_row_is_skipped_with_accounting() -> None:
     parsed = parse_index(FORM_IDX_BODY, quarter_label="1994Q3")
-    assert len(parsed.rows) == 5
+    assert len(parsed.rows) == 6
     assert parsed.skipped == 1
-    assert parsed.data_lines_seen == 6
-    assert parsed.skipped_samples  # kept for diagnosis, not discarded
+    assert parsed.data_lines_seen == 7
+    assert parsed.skip_ratio < 0.20
+    # Skips carry a reason and a sample, not just a count.
+    assert sum(parsed.skip_reasons.values()) == 1
+    assert parsed.skip_samples
+
+
+def test_authentic_form_idx_parses_essentially_everything() -> None:
+    """The acceptance condition the real file failed: a near-total parse rate."""
+    parsed = parse_index(FORM_IDX_BODY, quarter_label="1994Q3", strict=False)
+    filings = parsed.data_lines_seen - 1  # one deliberate junk line
+    assert len(parsed.rows) == filings
+    assert parsed.skip_ratio <= 1 / parsed.data_lines_seen + 1e-9
+
+
+# ---------------------------------------------------------------------------
+# skip-reason diagnostics
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        (
+            "10-K        ACME CORP                     NOTADIGIT  "
+            "1994-08-24  edgar/data/1/0000000001-94-000001.txt",
+            SkipReason.INVALID_CIK,
+        ),
+        (
+            "10-K        ACME CORP                     123        "
+            "not-a-date  edgar/data/1/0000000001-94-000001.txt",
+            SkipReason.INVALID_DATE,
+        ),
+        (
+            "10-K        ACME CORP                     123        1994-08-24  nopathhere",
+            SkipReason.MISSING_PATH,
+        ),
+        ("tooshort", SkipReason.FIXED_WIDTH_SLICE_FAILURE),
+        (
+            "SOLOTOKEN 123 1994-08-24 edgar/data/1/0000000001-94-000001.txt",
+            SkipReason.FREE_TEXT_SPLIT_FAILURE,
+        ),
+    ],
+)
+def test_skip_reasons_are_attributed_specifically(row: str, expected: SkipReason) -> None:
+    header = (
+        "Form Type   Company Name                                      "
+        "CIK       Date Filed   File Name\n" + "-" * 100 + "\n"
+    )
+    parsed = parse_index(header + row + "\n", quarter_label="1994Q3", strict=False)
+    assert parsed.rows == []
+    assert parsed.skip_reasons == {str(expected): 1}
+    assert parsed.skip_samples[str(expected)]
+
+
+def test_company_name_colliding_with_cik_is_recovered_from_the_path() -> None:
+    """A name wide enough to eat its padding leaves one token: '...L P5011'.
+
+    The CIK is recoverable from ``edgar/data/<cik>/``, so the boundary is found
+    on evidence rather than by guessing where a name ends -- a guess that a
+    company called "ACME 2000" would defeat.
+    """
+    header = (
+        "Form Type   Company Name                                      "
+        "CIK       Date Filed   File Name\n" + "-" * 100 + "\n"
+    )
+    row = (
+        "10-K405     HOLDINGS MACHINES MOTORS & TELEGRAPH GENERAL L P5011      "
+        "1994-09-17  edgar/data/5011/0000005011-94-000123.txt\n"
+    )
+    parsed = parse_index(header + row, quarter_label="1994Q3")
+    assert len(parsed.rows) == 1
+    recovered = parsed.rows[0]
+    assert recovered.cik == 5011
+    assert recovered.form_type == "10-K405"
+    assert recovered.company_name == "HOLDINGS MACHINES MOTORS & TELEGRAPH GENERAL L P"
+
+
+def test_collision_recovery_refuses_when_the_path_disagrees() -> None:
+    """Without corroboration it stays a skip -- no boundary is invented."""
+    header = (
+        "Form Type   Company Name                                      "
+        "CIK       Date Filed   File Name\n" + "-" * 100 + "\n"
+    )
+    row = "10-K        ACME 2000 INC9999    1994-09-17  edgar/data/12345/0000012345-94-000001.txt\n"
+    parsed = parse_index(header + row, quarter_label="1994Q3", strict=False)
+    assert parsed.rows == []
+    assert parsed.skip_reasons == {str(SkipReason.INVALID_CIK): 1}
+
+
+def test_path_cik_differs_from_the_accession_prefix() -> None:
+    """ARDEN's filing agent submitted it; the path CIK is the filer's, not the agent's."""
+    rows = {r.cik: r for r in parse_index(FORM_IDX_BODY, quarter_label="1994Q3").rows}
+    arden = rows[225051]
+    assert arden.accession.startswith("0000912057")
+    assert "edgar/data/225051/" in arden.path
+
+
+def test_summary_reports_the_diagnostic_fields() -> None:
+    summary = parse_index(FORM_IDX_BODY, quarter_label="1994Q3").summary()
+    for key in (
+        "candidate_rows",
+        "parsed_rows",
+        "skipped_rows",
+        "skip_rate",
+        "skip_reason_counts",
+        "split_rules",
+    ):
+        assert key in summary
 
 
 def test_later_era_form_idx_layout_also_parses() -> None:

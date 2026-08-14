@@ -58,6 +58,7 @@ __all__ = [
     "IndexQuarter",
     "LocalFullIndexSource",
     "ParsedIndex",
+    "SkipReason",
     "accession_from_path",
     "full_index_url",
     "parse_full_index",
@@ -133,6 +134,18 @@ def full_index_url(quarter: IndexQuarter, kind: str = "form") -> str:
 
 
 _ACCESSION = re.compile(r"(\d{10}-\d{2}-\d{6})")
+_PATH_CIK = re.compile(r"edgar/data/(\d+)/", re.IGNORECASE)
+
+
+def _cik_from_path(path: str) -> str | None:
+    """The CIK embedded in ``edgar/data/<cik>/<accession>.txt``.
+
+    Note this is the *filer's* CIK, not the accession's prefix -- those differ
+    whenever a filing agent submitted the document, as in
+    ``edgar/data/225051/0000912057-94-003253.txt``.
+    """
+    match = _PATH_CIK.search(path)
+    return match.group(1) if match else None
 
 
 def accession_from_path(path: str) -> str:
@@ -249,46 +262,152 @@ def _coerce_date(text: str) -> dt.date | None:
     return None
 
 
-def _split_fixed(line: str, header: IndexHeader) -> list[str] | None:
-    """Slice a fixed-width row at the header's column starts."""
-    if len(line.rstrip()) <= header.offsets[-1]:
-        return None
-    bounds = [*header.offsets, len(line)]
-    return [line[bounds[i] : bounds[i + 1]].strip() for i in range(len(header.offsets))]
+class SkipReason(StrEnum):
+    """Why a candidate line produced no row. Format drift must be diagnosable."""
+
+    INVALID_CIK = "invalid_cik"
+    INVALID_DATE = "invalid_date"
+    MISSING_PATH = "missing_path"
+    FIXED_WIDTH_SLICE_FAILURE = "fixed_width_slice_failure"
+    FREE_TEXT_SPLIT_FAILURE = "free_text_split_failure"
+    UNRECOGNIZED_LAYOUT = "unrecognized_layout"
+    OTHER = "other"
 
 
-def _split_fixed_fallback(line: str, header: IndexHeader) -> list[str] | None:
-    """Recover a row whose long fields pushed past their column boundaries.
+class FreeTextSplit(StrEnum):
+    """Which rule separated form type from company name, counted per file."""
 
-    The right-hand end of a row is rigidly structured -- path, then date, then
-    CIK -- so it is peeled off by token. What remains is the two free-text
-    fields, separated by the padding run of two or more spaces that the
-    fixed-width layout guarantees. **This is not whitespace splitting**: form
-    types like ``SC 13D`` and company names contain single spaces and survive
-    intact, because only runs of two or more spaces are treated as a boundary.
+    HEADER_OFFSET = "header_offset"
+    PADDING_RUN = "padding_run"
+
+
+def _split_free_text(
+    prefix: str, header: IndexHeader
+) -> tuple[tuple[str, str], FreeTextSplit] | None:
+    """Separate the two free-text fields without whitespace-splitting them.
+
+    Two rules, tried in order, both of which preserve internal single spaces so
+    that ``SC 13D``, ``DEF 14A`` and ``ARDEN GROUP INC`` survive intact:
+
+    1. **The header's own column start.** Accepted only when it lands exactly on
+       a token boundary -- whitespace immediately before, non-whitespace at the
+       offset. That self-check is what stops a header whose labels do not line
+       up with the data from cutting a company name in half.
+    2. **The padding run.** Fixed-width columns are separated by two or more
+       spaces, so the first such run in the prefix is the boundary. Splitting on
+       runs of 2+ spaces is not the same as splitting on whitespace.
     """
-    # rsplit rather than searching for the CIK: a CIK also appears inside its
-    # own path, so any index-of search finds the wrong occurrence. rsplit peels
-    # exactly three tokens from the right and leaves the free text intact,
-    # internal spacing and all.
-    tail = line.rstrip().rsplit(maxsplit=3)
-    if len(tail) < 4:
-        return None
-    prefix, cik_text, date_text, path = tail
-    if not cik_text.isdigit() or _coerce_date(date_text) is None:
-        return None
+    if len(header.offsets) > 1:
+        boundary = header.offsets[1]
+        if (
+            0 < boundary < len(prefix)
+            and prefix[boundary - 1].isspace()
+            and not prefix[boundary].isspace()
+        ):
+            left, right = prefix[:boundary].strip(), prefix[boundary:].strip()
+            if left and right:
+                return (left, right), FreeTextSplit.HEADER_OFFSET
 
     parts = re.split(r"\s{2,}", prefix.strip(), maxsplit=1)
-    if len(parts) != 2:
-        return None
-    first, second = parts[0].strip(), parts[1].strip()
+    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+        return (parts[0].strip(), parts[1].strip()), FreeTextSplit.PADDING_RUN
+    return None
 
-    values: dict[str, str] = {"cik": cik_text, "filed_at": date_text, "path": path}
+
+def _parse_fixed_row(
+    line: str, header: IndexHeader, quarter_label: str
+) -> tuple[FullIndexRow | None, SkipReason | None, FreeTextSplit | None]:
+    """Parse a fixed-width row **right-anchored**, which is the robust direction.
+
+    The right-hand end of an EDGAR index row is rigidly structured -- path, then
+    date, then CIK -- and each of those three is self-identifying: a path
+    contains a slash, a date parses, a CIK is all digits. The left-hand end is
+    free text of unpredictable width. So the row is peeled from the right, where
+    the structure is, rather than sliced from the left at header offsets, where
+    it is not.
+
+    That is the correction. Header-offset slicing was the primary strategy and
+    it failed on ~93% of authentic 1994 rows, because the *data* columns do not
+    sit at the *header label* positions. rsplit is used rather than searching for
+    the CIK, because a CIK also appears inside its own path.
+    """
+    tail = line.rstrip().rsplit(maxsplit=3)
+    if len(tail) < 4:
+        return None, SkipReason.FIXED_WIDTH_SLICE_FAILURE, None
+    prefix, cik_text, date_text, path = tail
+
+    if "/" not in path:
+        return None, SkipReason.MISSING_PATH, None
+    if not cik_text.isdigit():
+        # A company name wide enough to consume its column's padding runs
+        # straight into the CIK, leaving one token like "...GENERAL L P5011".
+        # The path is `edgar/data/<cik>/<accession>.txt`, so the CIK is
+        # recoverable from it -- this splits on evidence rather than guessing
+        # where a name ends, which a company called "ACME 2000" would defeat.
+        path_cik = _cik_from_path(path)
+        if path_cik is None or not cik_text.endswith(path_cik):
+            return None, SkipReason.INVALID_CIK, None
+        prefix = f"{prefix} {cik_text[: -len(path_cik)]}"
+        cik_text = path_cik
+    filed_at = _coerce_date(date_text)
+    if filed_at is None:
+        return None, SkipReason.INVALID_DATE, None
+
+    split = _split_free_text(prefix, header)
+    if split is None:
+        return None, SkipReason.FREE_TEXT_SPLIT_FAILURE, None
+    (first, second), rule = split
+
     text_fields = [f for f in header.fields if f in {"form_type", "company_name"}]
     if len(text_fields) != 2:
-        return None
-    values[text_fields[0]], values[text_fields[1]] = first, second
-    return [values[name] for name in header.fields]
+        return None, SkipReason.UNRECOGNIZED_LAYOUT, None
+    values = {text_fields[0]: first, text_fields[1]: second}
+
+    return (
+        FullIndexRow(
+            cik=int(cik_text),
+            company_name=values["company_name"],
+            form_type=values["form_type"].upper(),
+            filed_at=filed_at,
+            path=path,
+            accession=accession_from_path(path),
+            index_quarter=quarter_label,
+        ),
+        None,
+        rule,
+    )
+
+
+def _parse_pipe_row(
+    line: str, header: IndexHeader, quarter_label: str
+) -> tuple[FullIndexRow | None, SkipReason | None]:
+    parts = [p.strip() for p in line.split("|")]
+    if len(parts) < len(header.fields):
+        return None, SkipReason.UNRECOGNIZED_LAYOUT
+    values = dict(zip(header.fields, parts, strict=False))
+
+    cik_text = values.get("cik", "")
+    if not cik_text.isdigit():
+        return None, SkipReason.INVALID_CIK
+    filed_at = _coerce_date(values.get("filed_at", ""))
+    if filed_at is None:
+        return None, SkipReason.INVALID_DATE
+    path = values.get("path", "")
+    if "/" not in path:
+        return None, SkipReason.MISSING_PATH
+
+    return (
+        FullIndexRow(
+            cik=int(cik_text),
+            company_name=values.get("company_name", ""),
+            form_type=values.get("form_type", "").upper(),
+            filed_at=filed_at,
+            path=path,
+            accession=accession_from_path(path),
+            index_quarter=quarter_label,
+        ),
+        None,
+    )
 
 
 @dataclass(slots=True)
@@ -300,26 +419,43 @@ class ParsedIndex:
     header: IndexHeader | None
     #: Non-empty lines below the separator that were candidates for parsing.
     data_lines_seen: int = 0
-    #: Candidates that did not yield a row, with a sample retained for diagnosis.
+    #: Candidates that did not yield a row.
     skipped: int = 0
-    skipped_samples: tuple[str, ...] = ()
-    #: Rows recovered by the fallback because column slicing failed.
-    fallback_rows: int = 0
+    #: Why each was skipped, so format drift is diagnosable rather than opaque.
+    skip_reasons: dict[str, int] = field(default_factory=dict)
+    #: Up to three representative lines per reason.
+    skip_samples: dict[str, list[str]] = field(default_factory=dict)
+    #: Which rule separated the two free-text fields, per successful row.
+    split_rules: dict[str, int] = field(default_factory=dict)
 
     @property
     def skip_ratio(self) -> float:
         return self.skipped / self.data_lines_seen if self.data_lines_seen else 0.0
+
+    @property
+    def skipped_samples(self) -> tuple[str, ...]:
+        """A flat sample across all reasons, for error messages."""
+        return tuple(line for lines in self.skip_samples.values() for line in lines)
+
+    def record_skip(self, reason: SkipReason, line: str) -> None:
+        key = str(reason)
+        self.skipped += 1
+        self.skip_reasons[key] = self.skip_reasons.get(key, 0) + 1
+        samples = self.skip_samples.setdefault(key, [])
+        if len(samples) < 3:
+            samples.append(line[:200])
 
     def summary(self) -> dict[str, object]:
         return {
             "quarter": self.quarter_label,
             "layout": str(self.header.layout) if self.header else None,
             "fields": list(self.header.fields) if self.header else None,
-            "rows": len(self.rows),
-            "data_lines_seen": self.data_lines_seen,
-            "skipped": self.skipped,
-            "skip_ratio": round(self.skip_ratio, 4),
-            "fallback_rows": self.fallback_rows,
+            "candidate_rows": self.data_lines_seen,
+            "parsed_rows": len(self.rows),
+            "skipped_rows": self.skipped,
+            "skip_rate": round(self.skip_ratio, 4),
+            "skip_reason_counts": dict(sorted(self.skip_reasons.items())),
+            "split_rules": dict(sorted(self.split_rules.items())),
         }
 
 
@@ -335,11 +471,7 @@ def parse_index(text: str, *, quarter_label: str, strict: bool = True) -> Parsed
     """
     header: IndexHeader | None = None
     seen_separator = False
-    rows: list[FullIndexRow] = []
-    data_lines = 0
-    skipped = 0
-    samples: list[str] = []
-    fallbacks = 0
+    parsed = ParsedIndex(rows=[], quarter_label=quarter_label, header=None)
 
     for raw in text.splitlines():
         line = raw.rstrip("\r\n")
@@ -350,6 +482,7 @@ def parse_index(text: str, *, quarter_label: str, strict: bool = True) -> Parsed
             continue
         if header is None and _looks_like_header(line):
             header = parse_index_header(line)
+            parsed.header = header
             continue
         if not seen_separator:
             # Preamble. Nothing above the dashed rule is a filing.
@@ -358,69 +491,28 @@ def parse_index(text: str, *, quarter_label: str, strict: bool = True) -> Parsed
         # Below the separator, every non-empty line is a filing candidate --
         # counted even when the header was unreadable, so that a file full of
         # data cannot be reported as an empty quarter.
-        data_lines += 1
+        parsed.data_lines_seen += 1
         if header is None:
-            skipped += 1
-            if len(samples) < 5:
-                samples.append(line[:160])
+            parsed.record_skip(SkipReason.UNRECOGNIZED_LAYOUT, line)
             continue
 
         if header.layout is IndexLayout.PIPE:
-            parts = [p.strip() for p in line.split("|")]
-            values = parts if len(parts) >= len(header.fields) else None
+            row, reason = _parse_pipe_row(line, header, quarter_label)
+            rule = None
         else:
-            values = _split_fixed(line, header)
-            if values is not None and not values[header.fields.index("cik")].isdigit():
-                values = None
-            if values is None:
-                values = _split_fixed_fallback(line, header)
-                if values is not None:
-                    fallbacks += 1
+            row, reason, rule = _parse_fixed_row(line, header, quarter_label)
 
-        row = _row_from_values(values, header, quarter_label) if values else None
         if row is None:
-            skipped += 1
-            if len(samples) < 5:
-                samples.append(line[:160])
+            parsed.record_skip(reason or SkipReason.OTHER, line)
             continue
-        rows.append(row)
+        parsed.rows.append(row)
+        if rule is not None:
+            key = str(rule)
+            parsed.split_rules[key] = parsed.split_rules.get(key, 0) + 1
 
-    parsed = ParsedIndex(
-        rows=rows,
-        quarter_label=quarter_label,
-        header=header,
-        data_lines_seen=data_lines,
-        skipped=skipped,
-        skipped_samples=tuple(samples),
-        fallback_rows=fallbacks,
-    )
     if strict:
         _assert_parse_plausible(parsed)
     return parsed
-
-
-def _row_from_values(
-    values: list[str] | None, header: IndexHeader, quarter_label: str
-) -> FullIndexRow | None:
-    if values is None:
-        return None
-    field_values = dict(zip(header.fields, values, strict=False))
-    cik_text = field_values.get("cik", "")
-    if not cik_text.isdigit():
-        return None
-    filed_at = _coerce_date(field_values.get("filed_at", ""))
-    if filed_at is None:
-        return None
-    path = field_values.get("path", "")
-    return FullIndexRow(
-        cik=int(cik_text),
-        company_name=field_values.get("company_name", "").strip(),
-        form_type=field_values.get("form_type", "").strip().upper(),
-        filed_at=filed_at,
-        path=path,
-        accession=accession_from_path(path),
-        index_quarter=quarter_label,
-    )
 
 
 def _assert_parse_plausible(parsed: ParsedIndex) -> None:
@@ -443,8 +535,9 @@ def _assert_parse_plausible(parsed: ParsedIndex) -> None:
         raise DataError(
             f"{parsed.quarter_label}: {parsed.data_lines_seen} data lines and 0 parsed rows "
             f"(layout={parsed.header.layout}, fields={list(parsed.header.fields)}). "
-            f"This is a format mismatch, not an empty quarter. First lines: "
-            f"{list(parsed.skipped_samples[:2])}"
+            f"This is a format mismatch, not an empty quarter. "
+            f"Reasons: {dict(sorted(parsed.skip_reasons.items()))}. "
+            f"Samples: {list(parsed.skipped_samples[:2])}"
         )
     if (
         parsed.data_lines_seen >= _SKIP_GUARD_MIN_LINES
@@ -453,7 +546,9 @@ def _assert_parse_plausible(parsed: ParsedIndex) -> None:
         raise DataError(
             f"{parsed.quarter_label}: skipped {parsed.skipped} of {parsed.data_lines_seen} "
             f"lines ({parsed.skip_ratio:.1%}), above the {_SKIP_GUARD_MAX_RATIO:.0%} tolerance. "
-            f"Samples: {list(parsed.skipped_samples[:2])}"
+            f"Reasons: {dict(sorted(parsed.skip_reasons.items()))}. "
+            f"Samples: {list(parsed.skipped_samples[:2])}. "
+            f"Run `tradeit edgar inspect-index <file>` for the full breakdown."
         )
 
 

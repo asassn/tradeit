@@ -3,6 +3,7 @@
 Three commands, in the order an operator uses them::
 
     tradeit edgar fetch-recipe                 # how to populate the index dir
+    tradeit edgar inspect-index FILE.idx        # diagnose one file's parse rate
     tradeit edgar denominator --index-root DIR # build and report
     tradeit edgar controls                     # the 30-control verification table
 
@@ -21,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from tradeit.edgar.controls import CONTROL_UNIVERSE, unverified, verification_table
-from tradeit.edgar.index import FETCH_RECIPE, IndexQuarter
+from tradeit.edgar.index import FETCH_RECIPE, IndexQuarter, parse_index
 from tradeit.edgar.pipeline import BuildOptions, build_denominator
 
 __all__ = ["add_edgar_commands"]
@@ -76,6 +77,56 @@ def cmd_denominator(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_inspect_index(args: argparse.Namespace) -> int:
+    """Diagnose one index file without raising, so format drift is legible.
+
+    Runs with ``strict=False`` deliberately: the point is to *see* the failure
+    breakdown, and a guard that raised first would hide the thing being
+    diagnosed.
+    """
+    path = Path(args.file)
+    text = path.read_text(encoding="latin-1")
+    parsed = parse_index(text, quarter_label=args.label or path.stem, strict=False)
+    report = parsed.summary()
+
+    if args.json:
+        report["skip_samples"] = parsed.skip_samples
+        print(json.dumps(report, indent=2, default=str))
+        return 0
+
+    print(f"file            : {path}")
+    print(f"bytes           : {path.stat().st_size:,}")
+    print(f"layout          : {report['layout']}")
+    print(f"fields          : {report['fields']}")
+    if parsed.header:
+        print(f"header offsets  : {list(parsed.header.offsets)}")
+        print(f"header raw      : {parsed.header.raw!r}")
+    print()
+    print(f"candidate_rows  : {report['candidate_rows']:,}")
+    print(f"parsed_rows     : {report['parsed_rows']:,}")
+    print(f"skipped_rows    : {report['skipped_rows']:,}")
+    print(f"skip_rate       : {parsed.skip_ratio:.2%}")
+    if parsed.split_rules:
+        print(f"split_rules     : {report['split_rules']}")
+    if parsed.skip_reasons:
+        print("\nskip_reason_counts")
+        for reason, count in sorted(parsed.skip_reasons.items(), key=lambda kv: -kv[1]):
+            print(f"  {reason:30s} {count:>9,}")
+        print("\nrepresentative samples per reason")
+        for reason, samples in parsed.skip_samples.items():
+            print(f"  [{reason}]")
+            for sample in samples:
+                print(f"    {sample}")
+    if parsed.rows:
+        print("\nfirst three parsed rows")
+        for row in parsed.rows[:3]:
+            print(
+                f"  {row.form_type:12s} {row.company_name[:40]:40s} {row.cik:>10d} "
+                f"{row.filed_at} {row.accession}"
+            )
+    return 0
+
+
 def cmd_controls(args: argparse.Namespace) -> int:
     rows = verification_table()
     if args.json:
@@ -118,6 +169,14 @@ def add_edgar_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     denom.add_argument("--quiet-quarters", type=int, default=8)
     denom.add_argument("--json", action="store_true")
     denom.set_defaults(func=cmd_denominator)
+
+    inspect = edgar_sub.add_parser(
+        "inspect-index", help="diagnose one .idx file: parse rates and skip reasons"
+    )
+    inspect.add_argument("file", help="path to a form.idx / master.idx / company.idx")
+    inspect.add_argument("--label", default=None, help="quarter label for the report")
+    inspect.add_argument("--json", action="store_true")
+    inspect.set_defaults(func=cmd_inspect_index)
 
     controls = edgar_sub.add_parser("controls", help="the 30-control verification table")
     controls.add_argument("--json", action="store_true")
