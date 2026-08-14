@@ -45,9 +45,11 @@ from tradeit.edgar.identity import (
 )
 from tradeit.edgar.index import (
     EDGAR_FIRST_QUARTER,
+    IndexLayout,
     IndexQuarter,
     accession_from_path,
     parse_full_index,
+    parse_index,
     quarters,
 )
 from tradeit.edgar.lifecycle import (
@@ -63,9 +65,13 @@ from tradeit.errors import ConfigError, DataError
 # index
 # ---------------------------------------------------------------------------
 
+#: Authentic ``master.idx`` shape: pipe-delimited, CIK first.
 INDEX_BODY = """\
-Description:           Master Index of EDGAR Dissemination Feed by Form Type
-Form Type|Company Name|CIK|Date Filed|File Name
+Description:           Master Index of EDGAR Dissemination Feed by CIK
+Last Data Received:    December 31, 1998
+Comments:              webmaster@sec.gov
+
+CIK|Company Name|Form Type|Date Filed|Filename
 --------------------------------------------------------------------------------
 320193|APPLE INC|10-K|1998-12-23|edgar/data/320193/0000320193-98-000110.txt
 1000045|PETS COM INC|S-1|2000-01-20|edgar/data/1000045/0001000045-00-000001.txt
@@ -73,6 +79,32 @@ Form Type|Company Name|CIK|Date Filed|File Name
 garbage line with no pipes
 55|SHORT|ROW
 """
+
+#: Authentic 1994 Q3 ``form.idx`` shape: FIXED-WIDTH, form type first. The
+#: column order differs from master.idx, which is the defect this fixture
+#: exists to keep fixed. Rows are real-format samples.
+_FORM_IDX_LINES = [
+    "Description:           Quarterly Index of EDGAR Dissemination Feed by Form Type",
+    "Last Data Received:    September 30, 1994",
+    "Comments:              webmaster@sec.gov",
+    "Anonymous FTP:         ftp://ftp.sec.gov/edgar/",
+    "",
+    "Form Type   Company Name                                      CIK       "
+    "Date Filed   File Name",
+    "-" * 96,
+    "10-C        3COM CORP                                         738076    "
+    "1994-08-24   edgar/data/738076/0000738076-94-000018.txt",
+    "10-K        AMERICAN TELEPHONE & TELEGRAPH CO                 5907      "
+    "1994-09-15   edgar/data/5907/0000005907-94-000012.txt",
+    "SC 13D      GENERAL MOTORS CORP                               40730     "
+    "1994-07-05   edgar/data/40730/0000040730-94-000003.txt",
+    "DEF 14A     SMALL CO INC                                      7         "
+    "1994-08-01   edgar/data/7/0000000007-94-000001.txt",
+    "8-A12B      A VERY LONG COMPANY NAME THAT OVERFLOWS ITS COLUMN WIDTH  "
+    "1234567   1994-09-30   edgar/data/1234567/0001234567-94-000009.txt",
+    "this row is not a filing at all",
+]
+FORM_IDX_BODY = "\n".join(_FORM_IDX_LINES) + "\n"
 
 
 def test_index_spine_starts_at_1994q3() -> None:
@@ -91,14 +123,159 @@ def test_quarters_enumerates_inclusive_and_rejects_reversed() -> None:
         list(quarters(IndexQuarter(1996, 1), IndexQuarter(1995, 1)))
 
 
-def test_parse_skips_preamble_and_malformed_lines() -> None:
-    rows = list(parse_full_index(INDEX_BODY, quarter_label="1998-QTR4"))
-    assert len(rows) == 3
-    assert rows[0].cik == 320193
+def test_master_idx_pipe_layout_parses() -> None:
+    """master.idx: pipe-delimited, CIK first."""
+    parsed = parse_index(INDEX_BODY, quarter_label="1998-QTR4")
+    assert parsed.header is not None
+    assert parsed.header.layout is IndexLayout.PIPE
+    assert parsed.header.fields == ("cik", "company_name", "form_type", "filed_at", "path")
+    assert len(parsed.rows) == 3
+    assert parsed.rows[0].cik == 320193
+    assert parsed.rows[0].form_type == "10-K"
+    assert parsed.rows[0].filed_at == dt.date(1998, 12, 23)
+    assert parsed.rows[0].accession == "0000320193-98-000110"
+    assert parsed.rows[0].index_quarter == "1998-QTR4"
+    # The two junk lines are skipped, with accounting rather than silently.
+    assert parsed.skipped == 2
+    assert parsed.data_lines_seen == 5
+
+
+# ---------------------------------------------------------------------------
+# form.idx is FIXED-WIDTH with a different column order. Regression fixture for
+# the 1994 Q3 defect: the parser assumed master.idx's pipe layout, so every
+# authentic row was skipped and the file reported zero filings.
+# ---------------------------------------------------------------------------
+
+
+def test_authentic_1994q3_form_idx_first_row() -> None:
+    parsed = parse_index(FORM_IDX_BODY, quarter_label="1994Q3")
+    assert parsed.header is not None
+    assert parsed.header.layout is IndexLayout.FIXED
+    assert parsed.header.fields == ("form_type", "company_name", "cik", "filed_at", "path")
+
+    first = parsed.rows[0]
+    assert first.form_type == "10-C"
+    assert first.company_name == "3COM CORP"
+    assert first.cik == 738076
+    assert first.filed_at == dt.date(1994, 8, 24)
+    assert first.path == "edgar/data/738076/0000738076-94-000018.txt"
+    assert first.accession == "0000738076-94-000018"
+    assert first.index_quarter == "1994Q3"
+
+
+def test_form_idx_preserves_spaces_in_company_names_and_form_types() -> None:
+    """Whitespace splitting would destroy 'SC 13D' and 'GENERAL MOTORS CORP'."""
+    rows = {r.cik: r for r in parse_index(FORM_IDX_BODY, quarter_label="1994Q3").rows}
+    assert rows[5907].company_name == "AMERICAN TELEPHONE & TELEGRAPH CO"
+    assert rows[40730].form_type == "SC 13D"
+    assert rows[40730].company_name == "GENERAL MOTORS CORP"
+    assert rows[7].form_type == "DEF 14A"
+
+
+def test_form_idx_handles_varying_cik_lengths() -> None:
+    ciks = {r.cik for r in parse_index(FORM_IDX_BODY, quarter_label="1994Q3").rows}
+    assert {7, 5907, 40730, 738076, 1234567} <= ciks
+
+
+def test_form_idx_recovers_rows_that_overflow_their_columns() -> None:
+    """A long company name pushes CIK past its column start; the fallback peels
+    the rigid right-hand end (path, date, CIK) and splits the free text on the
+    padding run, so the row is recovered rather than dropped."""
+    parsed = parse_index(FORM_IDX_BODY, quarter_label="1994Q3")
+    overflow = next(r for r in parsed.rows if r.cik == 1234567)
+    assert overflow.form_type == "8-A12B"
+    assert overflow.company_name == "A VERY LONG COMPANY NAME THAT OVERFLOWS ITS COLUMN WIDTH"
+    assert overflow.filed_at == dt.date(1994, 9, 30)
+    assert parsed.fallback_rows >= 1
+
+
+def test_form_idx_malformed_row_is_skipped_with_accounting() -> None:
+    parsed = parse_index(FORM_IDX_BODY, quarter_label="1994Q3")
+    assert len(parsed.rows) == 5
+    assert parsed.skipped == 1
+    assert parsed.data_lines_seen == 6
+    assert parsed.skipped_samples  # kept for diagnosis, not discarded
+
+
+def test_later_era_form_idx_layout_also_parses() -> None:
+    """Modern form.idx uses wider padding. The header drives the offsets, so
+    nothing is hard-coded to the 1994 column positions."""
+    body = (
+        "Description:           Quarterly Index\n"
+        "\n"
+        "Form Type    Company Name                                             "
+        "     CIK        Date Filed  File Name\n" + "-" * 120 + "\n"
+        "10-K         APPLE INC                                                "
+        "     320193     2023-11-03  edgar/data/320193/0000320193-23-000106.txt\n"
+    )
+    rows = parse_full_index(body, quarter_label="2023-QTR4")
+    assert len(rows) == 1
     assert rows[0].form_type == "10-K"
-    assert rows[0].filed_at == dt.date(1998, 12, 23)
-    assert rows[0].accession == "0000320193-98-000110"
-    assert rows[0].index_quarter == "1998-QTR4"
+    assert rows[0].company_name == "APPLE INC"
+    assert rows[0].cik == 320193
+    assert rows[0].filed_at == dt.date(2023, 11, 3)
+
+
+# ---------------------------------------------------------------------------
+# The guard: a format mismatch must never look like an empty quarter
+# ---------------------------------------------------------------------------
+
+
+def test_format_mismatch_raises_instead_of_reporting_zero_filings() -> None:
+    """The exact 1994 Q3 failure. Data lines present, none parseable -> loud."""
+    body = (
+        "Form Type   Company Name        CIK       Date Filed   File Name\n" + "-" * 70 + "\n"
+        "these lines are data but match no known layout at all\n"
+        "neither does this one, nor the one after it\n"
+        "and this third one keeps the count above zero\n"
+    )
+    with pytest.raises(DataError, match="format mismatch, not an empty quarter"):
+        parse_index(body, quarter_label="1994Q3")
+
+
+def test_unrecognised_header_raises_rather_than_returning_nothing() -> None:
+    body = "COL A|COL B|COL C\n" + "-" * 40 + "\nx|y|z\n"
+    with pytest.raises(DataError, match="no recognisable EDGAR index header"):
+        parse_index(body, quarter_label="1994Q3")
+
+
+def test_a_genuinely_empty_file_is_not_an_error() -> None:
+    """No header and no data is an empty file -- a coverage fact, not a defect."""
+    parsed = parse_index("", quarter_label="1994Q3")
+    assert parsed.rows == []
+    assert parsed.data_lines_seen == 0
+
+
+def test_high_skip_rate_over_a_large_file_raises() -> None:
+    """A few corrupt rows are tolerated; a drifted layout is not."""
+    header = "CIK|Company Name|Form Type|Date Filed|Filename\n" + "-" * 60 + "\n"
+    good = "".join(
+        f"{i}|CO {i}|10-K|2001-03-01|edgar/data/{i}/{i:010d}-01-000001.txt\n" for i in range(1, 101)
+    )
+    bad = "".join(f"junk row {i}\n" for i in range(40))
+    with pytest.raises(DataError, match="above the 10% tolerance"):
+        parse_index(header + good + bad, quarter_label="2001-QTR1")
+
+
+def test_strict_can_be_disabled_for_diagnosis() -> None:
+    body = (
+        "Form Type   Company Name        CIK       Date Filed   File Name\n" + "-" * 70 + "\n"
+        "unparseable line\n"
+    )
+    parsed = parse_index(body, quarter_label="1994Q3", strict=False)
+    assert parsed.rows == []
+    assert parsed.skipped == 1
+
+
+def test_parse_full_index_is_eager_so_the_guard_actually_fires() -> None:
+    """A generator would defer the format check to iteration -- i.e. to nobody."""
+    body = (
+        "Form Type   Company Name        CIK       Date Filed   File Name\n" + "-" * 70 + "\n"
+        "unparseable line one\n"
+        "unparseable line two\n"
+    )
+    with pytest.raises(DataError):
+        parse_full_index(body, quarter_label="1994Q3")
 
 
 def test_accession_absent_is_empty_not_invented() -> None:
