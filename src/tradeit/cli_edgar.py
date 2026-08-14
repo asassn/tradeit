@@ -5,7 +5,8 @@ Three commands, in the order an operator uses them::
     tradeit edgar fetch-recipe                 # how to populate the index dir
     tradeit edgar inspect-index FILE.idx        # diagnose one file's parse rate
     tradeit edgar denominator --index-root DIR # build and report
-    tradeit edgar controls                     # the 30-control verification table
+    tradeit edgar controls --diagnose          # control identity + citations
+    tradeit edgar verify-control AAPL ...      # gather CIK candidates for one control
 
 ``fetch-recipe`` prints shell rather than running it. Downloading ~130 quarterly
 index files is a long, rate-limited, network-dependent operation that belongs in
@@ -18,10 +19,13 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 from pathlib import Path
 from typing import Any
 
-from tradeit.edgar.controls import CONTROL_UNIVERSE, unverified, verification_table
+from tradeit.edgar.control_evidence import load_control_evidence, resolve_controls
+from tradeit.edgar.controls import CONTROL_UNIVERSE
+from tradeit.edgar.identity import MappingStatus
 from tradeit.edgar.index import FETCH_RECIPE, IndexQuarter, parse_index
 from tradeit.edgar.pipeline import BuildOptions, build_denominator
 
@@ -128,27 +132,138 @@ def cmd_inspect_index(args: argparse.Namespace) -> int:
 
 
 def cmd_controls(args: argparse.Namespace) -> int:
-    rows = verification_table()
+    evidence = load_control_evidence(args.evidence)
+    resolved = resolve_controls(evidence)
+
     if args.json:
-        print(json.dumps(rows, indent=2))
+        print(json.dumps([r.summary() for r in resolved], indent=2))
         return 0
-    pending = unverified()
-    print(
-        f"controls: {len(CONTROL_UNIVERSE)}   manual-verified: "
-        f"{len(CONTROL_UNIVERSE) - len(pending)}   pending: {len(pending)}"
-    )
+
+    counts: dict[str, int] = {}
+    for r in resolved:
+        counts[str(r.status)] = counts.get(str(r.status), 0) + 1
+    verified = counts.get(str(MappingStatus.MANUAL_VERIFIED), 0)
+    source = evidence.source_path
+    print(f"evidence file : {source}{'' if source and source.exists() else '  (absent)'}")
+    print(f"controls      : {len(resolved)}   manual-verified: {verified}")
+    print(f"by status     : {dict(sorted(counts.items()))}")
     print()
-    print(f"{'ticker':8s} {'status':16s} {'cik':>10s}  class")
-    for row in rows:
-        cik = row["cik"]
-        print(
-            f"{row['ticker']!s:8s} {row['mapping_status']!s:16s} "
-            f"{('-' if cik is None else str(cik)):>10s}  {row['control_class']}"
-        )
+
+    if not args.diagnose:
+        print(f"{'control':8s} {'status':16s} {'cik':>10s} {'ticker':8s}  class")
+        for r in resolved:
+            first = r.mappings[0]
+            cik = "-" if first.cik is None else str(first.cik)
+            extra = f"  (+{len(r.mappings) - 1} more issuer)" if len(r.mappings) > 1 else ""
+            print(
+                f"{r.control.ticker:8s} {r.status!s:16s} {cik:>10s} "
+                f"{first.ticker or '-':8s}  {r.control.control_class}{extra}"
+            )
+    else:
+        for r in resolved:
+            print(f"── {r.control.ticker}  [{r.status}]  {r.control.control_class}")
+            print(f"   expected : {r.control.name}")
+            if r.identity_break:
+                print("   IDENTITY BREAK: several issuers shared this ticker; never merged")
+            for m in r.mappings:
+                print(f"   · issuer   : {m.issuer_label}")
+                print(f"     cik      : {m.cik if m.cik is not None else '-'}")
+                print(f"     ticker   : {m.ticker or '-'}")
+                print(f"     evidence : {m.evidence or '-'}")
+                print(f"     citation : {m.citation or '-'}")
+                if m.valid_from or m.valid_to:
+                    print(f"     valid    : {m.valid_from or '?'} .. {m.valid_to or '?'}")
+                if m.scope_notes:
+                    print(f"     scope    : {m.scope_notes}")
+                if m.unresolved_reason:
+                    print(f"     UNRESOLVED REASON: {m.unresolved_reason}")
+            print()
+
+    pending = [r for r in resolved if r.status is not MappingStatus.MANUAL_VERIFIED]
     if pending:
         print(
-            f"\n{len(pending)} controls are not MANUAL_VERIFIED. "
+            f"\n{len(pending)} of {len(resolved)} controls are not MANUAL_VERIFIED. "
             "Milestone 0b is not complete. No CIK is guessed."
+        )
+    return 0
+
+
+def cmd_verify_control(args: argparse.Namespace) -> int:
+    """Gather CIK candidates for one control from local primary sources.
+
+    **This proposes; it never promotes.** Output is candidate evidence for a
+    human to check and record. Name matches are reported as name matches, which
+    can never on their own reach RESOLVED -- so a candidate printed here is a
+    lead, not a mapping.
+    """
+    control = next((c for c in CONTROL_UNIVERSE if c.ticker.upper() == args.control.upper()), None)
+    if control is None:
+        print(f"unknown control {args.control!r}; not in the 30-control universe")
+        return 2
+
+    print(f"control        : {control.ticker}  ({control.control_class})")
+    print(f"expected name  : {control.name}")
+    print(f"expected event : {control.expected_event}")
+    print(f"route          : {control.verification_route}")
+    print()
+
+    terms = [t for t in re.split(r"[^A-Z0-9&]+", control.name.upper()) if len(t) > 2][:2]
+    if not terms:
+        print("no usable search terms from the control name")
+        return 2
+
+    root = Path(args.index_root)
+    hits: dict[int, dict[str, Any]] = {}
+    scanned = 0
+    for path in sorted(root.glob("*/QTR*/form.idx")):
+        scanned += 1
+        parsed = parse_index(
+            path.read_text(encoding="latin-1"),
+            quarter_label=f"{path.parent.parent.name}-{path.parent.name}",
+            strict=False,
+        )
+        for row in parsed.rows:
+            upper = row.company_name.upper()
+            if not all(term in upper for term in terms):
+                continue
+            entry = hits.setdefault(
+                row.cik,
+                {
+                    "names": set(),
+                    "first": row.filed_at,
+                    "last": row.filed_at,
+                    "n": 0,
+                    "forms": set(),
+                },
+            )
+            entry["names"].add(row.company_name)
+            entry["first"] = min(entry["first"], row.filed_at)
+            entry["last"] = max(entry["last"], row.filed_at)
+            entry["forms"].add(row.form_type)
+            entry["n"] += 1
+
+    print(f"searched {scanned} quarterly index files for terms {terms}")
+    if not hits:
+        print("\nNO CANDIDATES. Record the control as UNRESOLVED with this as the reason.")
+        return 0
+
+    print(f"\n{len(hits)} candidate CIK(s):\n")
+    for cik, entry in sorted(hits.items(), key=lambda kv: -kv[1]["n"]):
+        print(f"  CIK {cik}   filings={entry['n']}   {entry['first']} .. {entry['last']}")
+        for name in sorted(entry["names"]):
+            print(f"    name : {name}")
+        print(f"    forms: {sorted(entry['forms'])[:12]}")
+    print(
+        "\nThese are NAME MATCHES over primary SEC index data. Name matching can never\n"
+        "on its own reach RESOLVED -- it establishes a CIK candidate, not a ticker.\n"
+        "To record a mapping you still need a ticker source: company_tickers.json for a\n"
+        "currently listed issuer (sec_company_tickers), or a filing that states the symbol\n"
+        "(filing_document_text, citation = accession)."
+    )
+    if len(hits) > 1:
+        print(
+            "\nSeveral candidates: unless a filing distinguishes them, the honest status\n"
+            "is AMBIGUOUS."
         )
     return 0
 
@@ -179,5 +294,18 @@ def add_edgar_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     inspect.set_defaults(func=cmd_inspect_index)
 
     controls = edgar_sub.add_parser("controls", help="the 30-control verification table")
+    controls.add_argument("--evidence", default=None, help="path to control_identity_evidence.json")
+    controls.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="per-issuer detail: cik, ticker, evidence, citation, unresolved reason",
+    )
     controls.add_argument("--json", action="store_true")
     controls.set_defaults(func=cmd_controls)
+
+    verify = edgar_sub.add_parser(
+        "verify-control", help="gather CIK candidates for one control from the local index"
+    )
+    verify.add_argument("control", help="control id, e.g. AAPL")
+    verify.add_argument("--index-root", required=True, help="directory of <year>/QTR<n>/form.idx")
+    verify.set_defaults(func=cmd_verify_control)

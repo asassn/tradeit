@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "notes": "Curated CIK/ticker identity evidence for the 30-control universe. Every record must cite a checkable primary source. No CIK in this file may be written from recollection: sec.gov is unreachable from the build environment where the schema was authored, so all three pilot records ship UNRESOLVED with their verification route recorded. Absence of evidence is recorded as absence. Run `tradeit edgar verify-control <ID> --index-root <DIR>` on a machine with the EDGAR archive to gather candidates, then fill in a record here.",
+  "controls": [
+    {
+      "control_id": "AAPL",
+      "expected_company": "Apple Inc. (formerly Apple Computer, Inc.)",
+      "identity_break": false,
+      "notes": "The easy case, deliberately chosen as the pilot's baseline. One issuer, continuously listed, currently trading, so the SEC's own company_tickers.json is an authoritative CIK-to-ticker source and this should reach RESOLVED or MANUAL_VERIFIED. Note the registrant renamed from Apple Computer, Inc. to Apple Inc. in 2007 without any identity break: the CIK is continuous and this is a rename, not a new issuer.",
+      "mappings": [
+        {
+          "issuer_label": "primary",
+          "cik": null,
+          "ticker": null,
+          "status": "unresolved",
+          "evidence": null,
+          "citation": "",
+          "verified_on": null,
+          "valid_from": null,
+          "valid_to": null,
+          "scope_notes": "issuer + security_class + exchange_listing, all continuous",
+          "unresolved_reason": "sec.gov unreachable from the authoring environment; CIK not written from recollection. Verification route: SEC company_tickers.json gives an authoritative current CIK-to-ticker pair (evidence sec_company_tickers), corroborated by the registrant name in the local EDGAR full-index."
+        }
+      ]
+    },
+    {
+      "control_id": "IPET",
+      "expected_company": "Pets.com, Inc.",
+      "identity_break": false,
+      "notes": "The hard case. Pets.com listed in February 2000 and wound up in November 2000, so it appears in no current SEC ticker file and EDGAR full-text search does not reach back to 2000. EDGAR can establish that a registrant of this name existed and filed, and can supply its CIK; what it cannot easily supply is the TICKER, because EDGAR is CIK-centric and 2000-era filings do not carry an authoritative ticker field. This control is expected to end at AMBIGUOUS or UNRESOLVED, and that is the honest outcome rather than a failure. A ticker read off a prospectus cover page would be FILING_DOCUMENT_TEXT evidence and could support RESOLVED; a ticker recalled from memory is not evidence at all.",
+      "mappings": [
+        {
+          "issuer_label": "primary",
+          "cik": null,
+          "ticker": null,
+          "status": "unresolved",
+          "evidence": null,
+          "citation": "",
+          "verified_on": null,
+          "valid_from": null,
+          "valid_to": null,
+          "scope_notes": "issuer lifecycle establishable from EDGAR; exchange_listing lifecycle is the hard part",
+          "unresolved_reason": "sec.gov unreachable from the authoring environment. Verification route: locate the registrant in the local EDGAR full-index for 1999-2001 to obtain the CIK, then read the S-1/424B cover page for the proposed Nasdaq symbol (evidence filing_document_text, citation = accession). If no filing states the symbol, this control stays UNRESOLVED and is reported as such."
+        }
+      ]
+    },
+    {
+      "control_id": "GM",
+      "expected_company": "General Motors Corporation (pre-2009) and General Motors Company (2010-)",
+      "identity_break": true,
+      "notes": "Two distinct registrants that shared the ticker GM across a bankruptcy roughly a year apart. They must never be merged: doing so produces exactly the spliced series that full-01 already failed on with BBBY, and a one-CIK-per-control model cannot express the break at all. Each issuer therefore carries its own CIK, ticker validity window and evidence, and identity_break is true so the merge cannot happen by accident. The old registrant continued to exist as Motors Liquidation Company after the sale, under a different ticker, which is a further reason the two records must stay apart.",
+      "mappings": [
+        {
+          "issuer_label": "old_gm",
+          "cik": null,
+          "ticker": null,
+          "status": "unresolved",
+          "evidence": null,
+          "citation": "",
+          "verified_on": null,
+          "valid_from": null,
+          "valid_to": null,
+          "scope_notes": "General Motors Corporation; later renamed Motors Liquidation Company. Its issuer lifecycle continues past the point at which it stopped being the holder of the GM ticker, so exchange_listing and issuer scopes end at different times.",
+          "unresolved_reason": "sec.gov unreachable from the authoring environment. Verification route: EDGAR company search for the registrant, confirm the CIK, and use the Form 25 or 8-K covering the 2009 NYSE delisting as the citation for the end of the ticker validity window."
+        },
+        {
+          "issuer_label": "new_gm",
+          "cik": null,
+          "ticker": null,
+          "status": "unresolved",
+          "evidence": null,
+          "citation": "",
+          "verified_on": null,
+          "valid_from": null,
+          "valid_to": null,
+          "scope_notes": "General Motors Company; a separate registrant with its own CIK, which acquired the ticker at its 2010 IPO.",
+          "unresolved_reason": "sec.gov unreachable from the authoring environment. Verification route: company_tickers.json gives the current CIK for GM authoritatively (evidence sec_company_tickers); the 2010 Form 8-A12B establishes when the listing began."
+        }
+      ]
+    }
+  ]
+}
