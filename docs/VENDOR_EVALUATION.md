@@ -2,6 +2,13 @@
 
 Prepared at the end of Phase 3, before Phase 4 begins, as the brief requires.
 
+> **Superseded for `research-01` by `docs/PHASE_06_VENDOR_MATRIX.md`.** Two
+> vendors named favourably below — Sharadar and EODHD — are now eliminated for
+> the permanent research corpus because their licences require deleting stored
+> data *and datasets derived from it* on termination. Nothing below is wrong
+> about their *capabilities*; the licence is what disqualifies them. Retained as
+> the Phase 3 record.
+
 > ## Read this first
 >
 > **Pricing and feature details below are indicative and must be verified before

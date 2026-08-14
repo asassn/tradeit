@@ -7,8 +7,8 @@
 This session's egress policy **blocks every primary vendor source**. Confirmed
 `EGRESS_BLOCKED` on: `data.nasdaq.com`, `help.data.nasdaq.com`, `sharadar.com`,
 `quantrocket.com`, `resources.quandl.com`, `sec.gov`, `polygon.io`, `eodhd.com`,
-`flounderteam.github.io`. The proxy README states these are organisation policy
-denials and are not to be routed around, so they were not.
+`kibot.com`, `flounderteam.github.io`. The proxy README states these are
+organisation policy denials and are not to be routed around, so they were not.
 
 What *was* reachable: web search (result extracts only) and
 `raw.githubusercontent.com`.
@@ -18,185 +18,250 @@ to VERIFIED.**
 
 | grade | meaning |
 |---|---|
-| **VERIFIED** | read directly from a primary or open-source integration source in this session |
+| **VERIFIED** | read directly from a primary or open-source integration source *in this session* |
+| **USER-VERIFIED** | read from the primary source **by the project owner, outside this session**, and reported here. Treated as authoritative for licence text; still subject to the data probe for capability claims |
 | **CORROBORATED** | consistent across ≥2 independent search extracts, primary page not reachable |
 | **UNVERIFIED** | single second-hand extract, or not established at all |
 
-Consequently **all pricing in this document is UNVERIFIED**, and the licensing
-question — the one that decides the whole plan — is **UNRESOLVED**.
+Consequently **all pricing in this document except where marked USER-VERIFIED is
+UNVERIFIED**.
 
-## 1. The licensing question, answered first
+---
+
+## 1. The licensing question — now answered, and it eliminates two vendors
 
 > subscribe one month → download → cancel → retain and use indefinitely
 
-### Verdict: **UNCLEAR / REQUIRES VENDOR CONFIRMATION**, with a negative signal.
+This is not a preference. It is **load-bearing**: `research-01` is a permanent
+research corpus, and every derived artefact in the platform — adjusted series,
+features, backtests, `scan_runs` — is a *dataset derived from* whatever the
+corpus was built on. A licence that requires deleting derived datasets on
+termination requires deleting `research-01` itself.
 
-The only Nasdaq-family data licence text reachable in this session says the
-opposite of what the plan needs. From the Nasdaq Private Market **Data License
-Terms and Conditions** (a *different* product, but the same licensor family):
+### 1.1 Sharadar — **PROHIBITED**
 
-> upon expiration or termination, [customers must] immediately cease accessing
-> and using the data, and at Nasdaq's election, return or permanently delete the
-> data and all copies in their possession … customers may retain copies solely
-> to the extent required by applicable law or bona fide internal archival,
-> audit, or compliance policies.
->
-> — [Nasdaq Private Market, Data License Terms](https://www.nasdaqprivatemarket.com/data-terms/) · CORROBORATED, **not the governing document for Sharadar**
+The current **Sharadar Personal Use License** requires, upon termination:
 
-A "cease use and delete on termination" clause of that shape would make the
-one-month-and-keep model **prohibited**. Whether the Sharadar-via-Nasdaq-Data-Link
-subscriber agreement contains the same clause **could not be established**: the
-Data Link help centre article on cancellation and the Data Link terms pages are
-both blocked here. Search returned no quotable Data Link clause on
-post-termination retention.
+- discontinuing use of Services Data;
+- deleting all copies of Services Data within 30 days;
+- **deleting datasets *derived from* Services Data within 30 days.**
 
-**Per your own rule — "Do not recommend purchase if retention rights are
-unresolved" — I do not recommend purchase.** See §6 for how to resolve it in
-writing before spending anything.
+— *USER-VERIFIED from the current licence text.*
 
-This is not a formality. The entire cost-minimisation strategy in
-`PHASE_06_IMPROVEMENT_PLAN.md` §8 rests on perpetual retention of a one-time
-download. If retention is prohibited, the architecture is unchanged but the
-funding model becomes a recurring subscription, and that should be known before
-a card is entered rather than after.
+The third clause is decisive and disqualifying. Under it, a one-month download
+followed by cancellation would oblige us to delete not only the price and
+fundamental files but `research-01`, every scan run derived from it, and every
+result ever published from it.
+
+**Verdict: Sharadar is not recommended for the one-month permanent-backfill
+model.** It may only be reconsidered under a *different written commercial or
+custom licence that explicitly grants post-termination retention* — a
+possibility, not a plan, and not something to assume.
+
+This supersedes the previous "UNRESOLVED / provisional preference" verdict in
+this document. The earlier negative signal (the Nasdaq Private Market data terms)
+pointed the right way; the governing licence confirms it.
+
+### 1.2 EODHD — **PROHIBITED**
+
+EODHD's terms likewise require deletion of stored provider data within one month
+after termination — *USER-VERIFIED*. EODHD therefore fails the same requirement
+for the same reason, and is eliminated as a permanent-archive source.
+
+EODHD's data *capabilities* were never the problem. The licence is.
+
+### 1.3 Kibot — **PERMITTED, per licence text**
+
+Kibot's licence explicitly states that delivered data may be kept permanently
+and that cancellation does not require deletion — *USER-VERIFIED*.
+
+This is the only candidate so far whose licence, on its own terms, supports the
+architecture. **It does not yet establish that the data is fit for purpose**;
+that is what `docs/KIBOT_DATA_PROBE.md` exists to determine, and every capability
+claim below is explicitly untested.
+
+### 1.4 The blocker nobody had checked: Twelve Data and FMP
+
+An implication of §1.1 worth stating plainly, because it was previously
+invisible: **we have never verified our own existing subscriptions' retention
+terms.** `full-01` was built from Twelve Data prices. If Twelve Data's terms
+require deletion of stored data on termination, then:
+
+- `full-01` and any successor corpus containing Twelve Data prices are
+  retention-encumbered;
+- the *forward accumulation* model in `FORWARD_SURVIVORSHIP_SYSTEM.md` — which
+  assumes today's Twelve Data bars become permanent history — does not hold.
+
+`full-01` is frozen, machinery-validation-only, and never cited for economic
+claims, so nothing published is at risk today. But **the forward model must not
+be built on an unverified retention right**, having just eliminated two vendors
+for exactly that defect.
+
+**Action: verify Twelve Data and FMP post-termination retention terms before
+`research-01` embeds either source permanently.** Status: **UNVERIFIED**.
+Recorded as Blocker 3 in `PHASE_06_IMPROVEMENT_PLAN.md` §1.
+
+---
 
 ## 2. Vendor matrix
 
-Criteria numbered as in the milestone brief.
+Split into two tables, because the licence findings split the problem: the
+**price/lifecycle spine** and the **fundamentals spine** now have different
+answers and different candidate sets.
 
-| # | criterion | **Sharadar** (Core US Equities Bundle) | **EODHD** | **Polygon / Massive** | **Twelve Data** | **FMP** | **SEC EDGAR** |
-|---|---|---|---|---|---|---|---|
-| 1 | price history start | "deep history to 1998" — CORROBORATED; one extract says fundamentals to 1990 — UNVERIFIED | US tickers "from January 2000"; "30+ years" for major tickers — CORROBORATED, **internally inconsistent** | not established | "back to the first trading date" — CORROBORATED | in use; not re-verified | n/a (no prices) |
-| 2 | active **and** delisted | yes, SF1 + SEP — CORROBORATED | yes, dedicated delisted product — CORROBORATED | **"spotty at best"; a reviewer explicitly advises against Polygon for delisted** — CORROBORATED | not established | not established | n/a |
-| 3 | delisted history truly downloadable | claimed via SEP/SF1 — CORROBORATED | claimed: EOD prices, fundamentals, dividends, splits for delisted symbols — CORROBORATED | doubtful | unknown | unknown | n/a |
-| 4 | permanent identifier | `permaticker` — UNVERIFIED | not established | not established | not established | not established | **CIK — VERIFIED** |
-| 5 | raw / unadjusted prices | **yes** — SEP publishes unadjusted, split-adjusted, and split+dividend+spinoff-adjusted — CORROBORATED | not established | flat files available — CORROBORATED | already used for `full-01` | n/a | n/a |
-| 6 | adjusted prices | yes (two methods) — CORROBORATED | yes — CORROBORATED | yes | yes | yes | n/a |
-| 7 | splits | `ACTIONS` — CORROBORATED | yes — CORROBORATED | yes | yes | yes | 8-K text only |
-| 8 | dividends | `ACTIONS` — CORROBORATED | yes — CORROBORATED | yes | yes | yes | 8-K text only |
-| 9 | M&A / delisting metadata | `ACTIONS` incl. spinoffs, ticker changes — CORROBORATED | delisted product — CORROBORATED | weak | not established | not established | **form types 25, 15, 8-K, S-4 — VERIFIED as *filings*, not as parsed events** |
-| 10 | fundamentals | SF1, ~150 indicators — CORROBORATED | Extended Fundamentals plan — CORROBORATED | no | **5 years only — CORROBORATED, disqualifying** | **excluded by project rule** | XBRL 2009+ |
-| 11 | **as originally reported** | **`ARQ`/`ARY`/`ART` = As Reported — VERIFIED** | not established | n/a | no | excluded | **yes — "as filed", uncorrected — CORROBORATED** |
-| 12 | restated | **`MRQ`/`MRY`/`MRT` = Most Recent Reported — VERIFIED** | not established | n/a | no | excluded | amendments are separate filings |
-| 13 | **actual filing date** | **`DATEKEY` is the filing date — VERIFIED** | not established | n/a | no | excluded | **`filed` in full-index 1993+; `filed` in FSDS 2009+ — CORROBORATED** |
-| 14 | accession / filing id | not established | not established | n/a | no | excluded | **`adsh` accession, primary key — CORROBORATED** |
-| 15 | **genuinely PIT before 2009** | **UNVERIFIED — the single highest-risk assumption. See §4.** | UNVERIFIED | n/a | n/a | n/a | **filing *dates* yes from 1993; machine-readable *values* no before 2009** |
-| 16 | API vs bulk | both — UNVERIFIED | both, bulk fundamentals CSV — CORROBORATED | REST + S3 flat files — CORROBORATED | REST | REST | **bulk HTTP, free — CORROBORATED** |
-| 17 | rate limits | not established | not established | tier-dependent | tier-dependent | tier-dependent | SEC fair-access guidance |
-| 18 | **current price** | **UNVERIFIED** ($69/mo cited from a Jan-2024 source; a competitor advertises against it at $49/mo — neither is a current primary quote) | **UNVERIFIED** (€59.99/mo cited for fundamentals) | **UNVERIFIED** ($29/mo entry cited) | existing subscription | existing subscription | **free** |
-| 19 | exact tier required | Core US Equities Bundle (SF1+SEP+TICKERS+ACTIONS) — inferred, UNVERIFIED | "Extended Fundamentals" for bulk — CORROBORATED | n/a | n/a | n/a | none |
-| 20 | licensing | **UNRESOLVED — §1** | not established | not established | existing | existing | **public domain, no licence** |
+### 2a. Price and security-lifecycle history
 
-### What the matrix decides on its own
+| # | criterion | **Kibot** | **Sharadar** | **EODHD** | **Polygon / Massive** | **Twelve Data** |
+|---|---|---|---|---|---|---|
+| L | **post-termination retention** | **permanent retention permitted; cancellation does not require deletion — USER-VERIFIED** | **PROHIBITED** — 30-day deletion incl. *derived* datasets — USER-VERIFIED | **PROHIBITED** — one-month deletion — USER-VERIFIED | not established | **UNVERIFIED — §1.4** |
+| 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | "from January 2000" vs "30+ years" — CORROBORATED, internally inconsistent | not established | "back to the first trading date" — CORROBORATED |
+| 2 | active **and** delisted | **active + delisted rosters, and a delisted-only roster — USER-VERIFIED (vendor claim); completeness UNTESTED** | yes — CORROBORATED | yes — CORROBORATED | **"spotty at best" — CORROBORATED** | not established |
+| 3 | delisted history truly downloadable | **UNTESTED — probe item A** | claimed — CORROBORATED | claimed — CORROBORATED | doubtful | unknown |
+| 4 | permanent identifier | **UNTESTED — probe item D. Expect none; expect ticker-keyed files** | `permaticker` — UNVERIFIED | not established | not established | not established |
+| 5 | raw / unadjusted prices | **unadjusted, split-adjusted and fully-adjusted equity data — USER-VERIFIED (vendor claim); methodology UNTESTED — probe item E** | yes, three bases — CORROBORATED | not established | flat files — CORROBORATED | in use for `full-01` |
+| 7 | splits | **UNTESTED — probe item E** | `ACTIONS` — CORROBORATED | yes — CORROBORATED | yes | yes |
+| 8 | dividends | **UNTESTED — probe item E** | `ACTIONS` — CORROBORATED | yes — CORROBORATED | yes | yes |
+| 9 | delisting **reason** | **expect none — a price vendor. Reasons come from EDGAR** | `ACTIONS` — CORROBORATED | delisted product — CORROBORATED | weak | not established |
+| 16 | API vs bulk | **UNTESTED — probe item A** | both — UNVERIFIED | both — CORROBORATED | REST + S3 — CORROBORATED | REST |
+| 18 | price | **~$14/month EOD subscription — USER-VERIFIED (vendor page); exact tier for the full historical universe UNTESTED — probe item A** | UNVERIFIED (~$69/mo cited) | UNVERIFIED (~€59.99/mo cited) | UNVERIFIED (~$29/mo cited) | existing subscription |
 
-- **Polygon/Massive: ruled out** for this purpose. Delisted coverage is the
-  entire problem being solved and is reportedly its weakest area.
-- **Twelve Data: ruled out as a historical fundamentals source** (5 years), and
-  retained for what it already does well — forward daily prices.
+### 2b. Fundamentals and filing metadata
+
+| # | criterion | **SEC EDGAR** | **Sharadar** | **EODHD** | **Twelve Data** | **FMP** |
+|---|---|---|---|---|---|---|
+| L | **post-termination retention** | **public domain — no licence, no termination — VERIFIED** | **PROHIBITED — §1.1** | **PROHIBITED — §1.2** | UNVERIFIED — §1.4 | UNVERIFIED — §1.4 |
+| 10 | fundamentals | **XBRL values 2009+ — CORROBORATED** | SF1, ~150 indicators — CORROBORATED | Extended Fundamentals — CORROBORATED | **5 years only — CORROBORATED, disqualifying** | **excluded by project rule** |
+| 11 | as originally reported | **yes — "as filed", uncorrected — CORROBORATED** | `ARQ`/`ARY`/`ART` — VERIFIED | not established | no | excluded |
+| 12 | restated | amendments are separate filings | `MRQ`/`MRY`/`MRT` — VERIFIED | not established | no | excluded |
+| 13 | **actual filing date** | **`filed` in full-index 1994 Q3+; `filed` in FSDS 2009+ — VERIFIED** | `DATEKEY` — VERIFIED | not established | no | excluded |
+| 14 | accession / filing id | **`adsh`, primary key — CORROBORATED** | not established | not established | no | excluded |
+| 15 | genuinely PIT before 2009 | **filing *dates* yes from 1994 Q3; machine-readable *values* no before 2009** | moot — licence PROHIBITED | moot — licence PROHIBITED | n/a | n/a |
+| 4 | permanent identifier | **CIK — VERIFIED** (but CIK↔ticker for 1998–2008 is the hard part; see improvement plan §5) | — | — | — | — |
+
+### What the matrix now decides on its own
+
+- **Sharadar and EODHD: eliminated on licence, not on capability.** No probe of
+  either is worth running for the permanent-archive role. Both remain
+  theoretically available as *recurring subscriptions*, which is a different
+  funding model and a different decision.
+- **Polygon/Massive: still ruled out** on delisted coverage — the entire problem
+  being solved.
+- **Twelve Data: retained for forward daily prices**, ruled out for historical
+  fundamentals (5 years), and now carrying an **open retention question** (§1.4).
 - **FMP: excluded by standing project rule** for fundamentals, ratios, earnings,
-  estimates, statements, OHLCV, insider and institutional data. Its permitted
-  role is narrow; see the improvement plan §5.
-- **EODHD: a genuine second candidate**, not a fallback. It has an explicit
-  delisted-companies product and bulk fundamentals. Its weakness is that its own
-  marketing gives two different history depths ("from January 2000" vs "30+
-  years"), and the point-in-time question — does it carry a real filing date? —
-  is entirely unestablished. That single question decides whether it is a
-  contender at all.
-- **SEC EDGAR: adopt regardless.** Free, authoritative, and the only source that
-  can *verify* another vendor's filing dates.
+  estimates, statements, OHLCV, insider and institutional data. Permitted role is
+  corporate-action and symbol-change corroboration only.
+- **SEC EDGAR: adopt regardless, immediately.** Free, public domain, no
+  termination clause to fail, and the only source that can independently *verify*
+  or *enumerate* what a price vendor claims.
+- **Kibot: the only live candidate for the price spine** — and entirely
+  unverified as data. See §3.
 
-## 3. What was VERIFIED, and from where
+---
 
-Read directly from
-[`quantrocket-client/quantrocket/fundamental.py`](https://raw.githubusercontent.com/quantrocket-llc/quantrocket-client/master/quantrocket/fundamental.py)
-— a production integration against Sharadar SF1, authoritative about the
-contract it consumes:
+## 3. Kibot — what is claimed, and what must be proven
 
-- `DATEKEY` **is the filing date**, and is the field to index on for
-  point-in-time work.
-- The client **shifts `DATEKEY` forward one day to avoid lookahead bias** — an
-  independent practitioner reaching the same conclusion this project reached
-  from first principles.
-- `CALENDARDATE`, `REPORTPERIOD` (fiscal period end) and `LASTUPDATED` are
-  distinct fields.
-- Dimensions: `ARQ`/`ARY`/`ART` = **As Reported**; `MRQ`/`MRY`/`MRT` = **Most
-  Recent Reported**; Q/Y/T = quarterly/annual/trailing-twelve-month.
+Everything in this section is a **vendor claim relayed via USER-VERIFIED reading
+of Kibot's own pages**, not a measurement. The distinction matters more here than
+anywhere else in this document, because the claim being made — a complete
+survivorship-safe US equity history for ~$14/month — is one that no other vendor
+in the matrix makes at that price.
 
-The as-reported/most-recent split is exactly the raw-versus-derived distinction
-the Phase 6 architecture requires, supplied by the vendor rather than
-reconstructed. That is the strongest single argument for Sharadar.
+| claimed | status |
+|---|---|
+| delivered data may be kept permanently; cancellation does not require deletion | **USER-VERIFIED licence text.** The only capability-independent fact here, and the reason Kibot is a candidate at all |
+| ~$14/month EOD subscription | USER-VERIFIED page price. **Which tier actually exposes the full historical delisted universe is untested** |
+| up to 64 years of daily EOD history, stocks/ETFs/futures/forex | vendor claim, **untested** |
+| unadjusted / split-adjusted / fully-adjusted equity data | vendor claim, **untested** |
+| active+delisted and delisted-only rosters, 1998 coverage | vendor claim, **untested** |
 
-## 4. The pre-2009 point-in-time risk
+**A cheap price for a claim nobody else makes is a reason for more scrutiny, not
+less.** The specific failure mode to look for is a delisted roster that exists
+but is thin: heavy on large, well-known failures and light on exactly the
+short-lived, small, thinly-traded 1999–2002 listings whose absence *is*
+survivorship bias. That is probe item G, and it is the one that can fail while
+every other item passes.
+
+**Kibot is not recommended for purchase in this document.** It is recommended as
+the sole subject of a data probe — see `docs/KIBOT_DATA_PROBE.md` §8 for the
+minimum-cost way to run that probe and the decision gate that follows it.
+
+---
+
+## 4. The pre-2009 point-in-time question, restated
 
 **XBRL does not exist before 2009.** Any vendor's pre-2009 fundamentals were
-derived by parsing filing documents. The *values* are one question; the
-**`DATEKEY` is the more important one.**
+derived by parsing filing documents, and a `filed_at` that was *reconstructed*
+from a period-end rather than taken from the filing record would make the
+pre-2009 segment **silently non-point-in-time** — worse than not having the data,
+because the defect is invisible in aggregate and contaminates precisely the
+dot-com results the corpus exists to produce.
 
-A `DATEKEY` that was reconstructed — set to a period-end, or to a fixed offset
-from one — rather than taken from the filing record would make the pre-2009
-segment **silently non-point-in-time**. That is worse than not having the data,
-because the defect is invisible in aggregate and would quietly contaminate every
-dot-com-era result the corpus was built to produce.
-
-**This is testable before purchase and must be tested.** EDGAR's quarterly
-full-index runs from **1993 Q1** and carries the filing date for every filing,
-free. The probe in `PHASE_06_IMPROVEMENT_PLAN.md` §7 compares vendor `DATEKEY`
-against EDGAR's `filed` date, by year, across 1998–2008.
+The licence findings change who this test applies to. Both vendors that could
+have supplied pre-2009 fundamental *values* are eliminated, so **there is
+currently no candidate to run this test against.** The test itself is retained
+verbatim, to be applied to any future pre-2009 fundamentals source:
 
 **Acceptance rule, fixed in advance:** a vendor date field whose distribution
 clusters on fiscal quarter-ends rather than on plausible filing dates is **not**
-point-in-time and must not be treated as such, whatever the vendor calls it.
+point-in-time, whatever the vendor calls it. Compare against EDGAR's `filed` for
+the same accession, by year, across 1998–2008.
+
+Meanwhile, EDGAR supplies the *dates* authoritatively from **1994 Q3** for free,
+which is what makes deferring pre-2009 *values* survivable — see
+`RESEARCH_01_DATA_CONTRACT.md` §7.
+
+---
 
 ## 5. Recommendation
 
-**Do not purchase yet.** Two blockers, in order:
+1. **Do not purchase Sharadar or EODHD** for the permanent archive. Eliminated on
+   licence. Reconsider only under a written retention-granting licence.
+2. **Do not purchase Kibot yet.** Run the probe in `docs/KIBOT_DATA_PROBE.md`
+   first. The licence is right; the data is unproven.
+3. **Adopt SEC EDGAR now.** Free, permanent, and — via Form 25/15 enumeration —
+   the instrument that *measures* whether any price vendor's delisted roster is
+   complete. This work is useful under every outcome and depends on no purchase.
+4. **Verify Twelve Data and FMP retention terms** before either becomes part of a
+   permanent corpus (§1.4).
+5. **Do not accept a subscription source for pre-2009 fundamentals** if
+   cancellation would force deletion of `research-01`. On current findings, that
+   rules out every candidate examined, and the recommended answer is to defer
+   pre-2009 fundamental *values* rather than to accept an encumbered source.
 
-1. **Retention rights unresolved (§1).** Your rule, and the right one.
-2. **Pre-2009 point-in-time fidelity unverified (§4).** Decides whether
-   1998-01-01 is achievable at all.
+---
 
-**Provisional preference, subject to both:** Sharadar Core US Equities Bundle,
-with EODHD as a serious alternative to be evaluated on the same probe rather
-than dismissed, and SEC EDGAR adopted permanently and immediately as a free
-verification and forward-fundamentals source.
+## 6. How to resolve a retention question before spending anything
 
-Sharadar leads on one specific, verified ground: it is the only candidate where
-the as-reported/restated distinction and a filing-date field are *confirmed to
-exist in the contract*. EODHD may match it; that is unestablished, not refuted.
+Retained from the previous revision because it worked — the question below is
+what produced the findings in §1. Ask in writing, keep the reply, and treat
+silence as prohibition.
 
-## 6. How to resolve §1 before spending anything
+> Does our subscription permit us to download the full historical dataset during
+> the subscription period, cancel, and then **retain and continue to use that
+> downloaded data internally, indefinitely, after cancellation** — including
+> datasets and research results *derived* from it — with no redistribution and no
+> external publication? If yes, which clause of which agreement grants it?
 
-Ask the vendor, in writing, and keep the reply. Suggested wording:
+Three outcomes: **ALLOWED in writing** → proceed to the probe. **PROHIBITED** →
+eliminated for the archive role. **No clear answer** → treat as prohibited.
 
-> Does our subscription permit us to download the full historical dataset
-> during the subscription period, cancel, and then **retain and continue to use
-> that downloaded data internally, indefinitely, after cancellation** — with no
-> redistribution and no external publication? If yes, which clause of which
-> agreement grants it? If our use is internal research and development for a
-> non-public software product, which licence tier applies?
-
-Three outcomes:
-
-- **ALLOWED, in writing** → proceed to the probe, then purchase one month.
-- **PROHIBITED** → the architecture is unaffected; the funding model becomes a
-  recurring subscription, and the choice is between paying it and starting
-  `research-01` at 2009 from EDGAR alone. Bring that back for a decision.
-- **No clear answer** → treat as prohibited. An unresolved retention right that
-  is discovered later, after the data is embedded in a research corpus, is a
-  much worse problem than one discovered now.
+---
 
 ## Sources
 
-- [quantrocket-client `fundamental.py`](https://raw.githubusercontent.com/quantrocket-llc/quantrocket-client/master/quantrocket/fundamental.py) — **read directly; the only VERIFIED vendor-contract source in this report**
-- [Nasdaq Private Market — Data License Terms](https://www.nasdaqprivatemarket.com/data-terms/) — the delete-on-termination signal; *not* the Sharadar governing document
-- [Nasdaq Data Link help — cancelling premium subscriptions](https://help.data.nasdaq.com/article/473-can-i-cancel-my-premium-data-subscriptions-at-any-time-how-do-i-cancel-my-subscription) — **blocked**
-- [Sharadar Core US Equities Bundle](https://data.nasdaq.com/databases/SFA) — **blocked**
-- [Sharadar — Fundamentals documentation](https://sharadar.com/docs/fundamentals) — **blocked**
-- [Sharadar — Subscribe](https://sharadar.com/subscribe) — **blocked; the authoritative pricing page**
-- [EODHD — Delisted stock companies data](https://eodhd.com/financial-apis/delisted-stock-companies-data-2) — **blocked**
-- [EODHD — Bulk fundamentals API](https://eodhd.com/financial-apis/bulk-stock-fundamentals-api) — **blocked**
-- [Polygon — Flat Files](https://polygon.io/flat-files) — **blocked**
-- [Twelve Data — Fundamentals](https://twelvedata.com/fundamentals) — **blocked**
-- [SEC — Financial Statement Data Sets](https://www.sec.gov/data-research/sec-markets-data/financial-statement-data-sets) — **blocked**
-- [python-edgar — quarterly index files since 1993](https://github.com/edgarminers/python-edgar)
+- **Sharadar Personal Use License** — 30-day deletion of Services Data *and
+  derived datasets* on termination — **USER-VERIFIED, primary source, blocked in
+  this session**
+- **EODHD terms** — one-month deletion of stored provider data after termination
+  — **USER-VERIFIED, primary source, blocked in this session**
+- **Kibot licence and EOD subscription pages** — permanent retention permitted;
+  ~$14/month; 64-year daily history; adjustment bases; delisted rosters —
+  **USER-VERIFIED, primary source, blocked in this session** (`kibot.com`
+  returned `EGRESS_BLOCKED` here)
+- [quantrocket-client `fundamental.py`](https://raw.githubusercontent.com/quantrocket-llc/quantrocket-client/master/quantrocket/fundamental.py) — read directly; the only VERIFIED vendor-contract source read *in this session*
+- [Nasdaq Private Market — Data License Terms](https://www.nasdaqprivatemarket.com/data-terms/) — the original delete-on-termination signal; *not* the Sharadar governing document
+- [python-edgar — quarterly index files](https://github.com/edgarminers/python-edgar)
 - [Notre Dame SRAF — SEC/EDGAR master index data](https://sraf.nd.edu/sec-edgar-data/master-index-data/)
+- Blocked in this session: `data.nasdaq.com`, `sharadar.com`, `eodhd.com`,
+  `kibot.com`, `polygon.io`, `twelvedata.com`, `sec.gov`, `quantrocket.com`

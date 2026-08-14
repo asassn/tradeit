@@ -12,10 +12,16 @@ remains machinery-validation only (`docs/CORPUS_REGISTRY.md`).
 
 | | |
 |---|---|
-| preferred start | **1998-01-01** — conditional, see §7 |
+| preferred start | **1998-01-01** — held. Deliberately chosen so future research spans the late dot-com build-up, the 2000–2002 collapse, the financial crisis, COVID, the 2022 tightening cycle, and the modern AI/speculative period |
 | end | rolling; the corpus is maintained forward, not re-purchased |
 | universe | US-listed equities, **active and delisted**, no survivorship filter of any kind |
 | timeframe | daily bars; higher timeframes derived |
+| price spine | 1998-01-01 → present, **subject to the Kibot probe** (`KIBOT_DATA_PROBE.md`) |
+| filing spine | 1994 Q3 → present, SEC EDGAR, free |
+| fundamental **values** | 2009 → present, SEC XBRL/FSDS, free. **1998–2008 deferred** — see §7 |
+
+The start date is no longer conditional on a fundamentals vendor. §7 explains why
+that separation is legitimate rather than a quiet retreat.
 
 ## 2. The one rule everything else serves
 
@@ -106,9 +112,13 @@ price_facts                      immutable, append-only
 
 Rules:
 
-1. **Prefer `raw_unadjusted`.** Sharadar's SEP publishes it; the existing
-   scale-invariance work exists precisely because adjusted-only series are
-   lossy. Where a vendor offers several bases, ingest the raw one and derive.
+1. **Prefer `raw_unadjusted`.** The existing scale-invariance work exists
+   precisely because adjusted-only series are lossy. Where a vendor offers
+   several bases — Kibot claims unadjusted, split-adjusted and fully-adjusted —
+   ingest **all** of them as separate vendor facts and derive our own adjusted
+   series from the raw one. The extra bases are kept because the *relationship
+   between them recovers the corporate actions* (`KIBOT_DATA_PROBE.md` §E), not
+   because we read from them.
 2. **`adjustment_basis` is what the vendor said it sent, not what we wish it
    was.** The existing `AdjustmentPolicyDeclaration` already refuses to guess.
 3. **Never splice.** A bar is attached to an `instrument_id`, resolved through
@@ -190,31 +200,110 @@ which yields *what the platform believed then*. A restatement filed afterwards
 does not exist at that as-of, which is the correct answer rather than a special
 case.
 
-## 7. Is 1998-01-01 achievable?
+## 7. Is 1998-01-01 achievable? — the answer is now tiered
 
-**Conditionally yes, and the condition is testable before purchase.**
+**The single most useful move available is to stop treating "prices" and
+"fundamentals" as one problem.** They have different sources, different licences
+and different start dates, and conflating them is what previously made the whole
+corpus hostage to a fundamentals vendor.
 
-| requirement | 1998–2008 | 2009– |
-|---|---|---|
-| filing dates | **yes** — EDGAR full-index from 1993 Q1 | yes |
-| accession numbers | **yes** — same source | yes |
-| machine-readable statement values | **no** — pre-XBRL; vendor-parsed only | yes — XBRL |
-| as-reported vs restated | vendor-supplied only | vendor + amendment chain |
-| prices, active + delisted | vendor-dependent | vendor-dependent |
-| corporate actions | vendor-dependent | vendor + 8-K |
+| requirement | 1998–2008 | 2009– | source | licence |
+|---|---|---|---|---|
+| daily prices, active **and** delisted | **candidate: Kibot** — UNTESTED | same | commercial, one-time | **permanent retention permitted** — USER-VERIFIED |
+| corporate actions | derivable from Kibot's three adjustment bases — UNTESTED | same + 8-K | commercial + EDGAR | as above |
+| filing dates, accessions, form types | **yes** — EDGAR full-index | yes | SEC EDGAR | public domain |
+| machine-readable statement **values** | **no** — pre-XBRL | **yes** — XBRL/FSDS | SEC EDGAR | public domain |
+| as-reported vs restated | n/a while values are absent | yes — amendment chain | SEC EDGAR | public domain |
+| delisting **reasons** | Forms 25 / 15 / 8-K 1.03 | same | SEC EDGAR | public domain |
 
-**The deciding question is not whether values exist for 1998 — it is whether the
-vendor's filing date for those values is real.** §4 of the vendor matrix states
-the test and the acceptance rule.
+### 7.1 The price corpus reaches 1998 without any encumbered vendor
 
-**I do not recommend falling back to 2009 by default.** XBRL's start date is a
-fact about machine-readable *values*, not about *dates*, and EDGAR supplies
-authoritative dates from 1993. If the vendor's pre-2009 `DATEKEY` matches EDGAR,
-1998 is sound. If it does not, the honest floor is **2003-01-01** — after the
-questionable segment rather than straddling it — and the dot-com objective is
-then unmet by that vendor and should be re-sourced rather than quietly dropped.
+If the Kibot probe passes, `research-01`'s price spine runs from 1998-01-01 under
+a licence that permits keeping it forever. **No retention-prohibited source
+enters the corpus.** That is the whole reason the start date is no longer
+conditional.
 
-## 8. Coverage and capability reporting
+If the probe fails, we are back to sourcing prices — not to moving the date.
+
+### 7.2 Pre-2009 fundamental *values* — three options, evaluated
+
+The constraint is absolute: **no subscription source whose cancellation would
+force deletion of `research-01`.** That eliminates Sharadar and EODHD outright
+(`PHASE_06_VENDOR_MATRIX.md` §1), and it is the filter every future candidate
+must pass *before* its data is examined.
+
+**Option 1 — parse SEC filing HTML/text ourselves.**
+Free, public domain, permanent, no licence risk of any kind, and the values are
+literally as-filed. Against it: roughly 11 years × several thousand issuers ×
+~4 filings a year is on the order of 300,000+ documents, largely unstructured
+ASCII and early HTML with no consistent table markup, no tagging, and inconsistent
+line-item naming. Realistic accuracy on headline items (revenue, net income,
+total assets, shares outstanding) is good; anything deeper degrades fast.
+**Verdict: viable but a project in itself**, and not a fallback that can be
+casually invoked.
+
+**Option 2 — a one-time or perpetually licensed historical fundamentals dataset.**
+The right shape, but **no qualifying candidate has been found.** Every source
+examined so far requires deletion on termination. Academic sources (Compustat via
+WRDS and similar) carry stricter redistribution and retention terms, not looser.
+**Verdict: keep looking, retention-first — filter on the licence before
+evaluating the data**, which is the inverse of how vendors are normally assessed
+and the lesson of this milestone.
+
+**Option 3 — defer pre-2009 fundamental values entirely.**
+`research-01` v1 ships as: **prices 1998+**, **filing metadata and knowledge-time
+1994 Q3+**, **fundamental values 2009+**. Pre-2009, the corpus knows *that* a
+company filed, *when* it filed, and *what form* — the full causal spine — but not
+the numbers inside.
+
+**Recommended: Option 3 now, Option 1 narrowly, Option 2 only if a
+retention-permitting source appears.**
+
+The justification is specific rather than convenient: this platform detects and
+validates **price and volume structure**. Every detector in Phase 4/5 is
+geometric. The dot-com objective is to expose that machinery to a full
+speculative build-up and collapse *with the failures still in the data* — which
+is a price-and-survivorship problem, not a fundamentals problem. Pre-2009
+statement values would enrich later cross-sectional work; their absence does not
+block the objective, and it must be recorded as a declared corpus limitation in
+`CORPUS_REGISTRY.md` rather than left implicit.
+
+Option 1 is worth doing **narrowly and immediately** for the control universe
+only: a few hundred filings, headline metrics, hand-checkable. That both proves
+the parsing approach and gives the controls their required "at least one filing
+with `accession`, `filed_at` and `period_end`".
+
+### 7.3 What is explicitly *not* being conceded
+
+Falling back to a 2009 start is still rejected. XBRL's start is a fact about
+machine-readable **values**, not about **dates** or **prices**, and EDGAR
+supplies authoritative dates from 1994 Q3 — four years before the research-01
+start. Moving the corpus to 2009 would discard the dot-com window to solve a
+problem the dot-com window does not have.
+
+## 8. Retention is a contract condition, not a procurement detail
+
+**No dataset may enter `research-01` unless its licence permits retaining it —
+and datasets derived from it — indefinitely after any subscription ends.**
+
+This is now a rule of the data contract, at the same level as the three-date rule
+and the no-splicing rule, because it has the same failure mode: violate it and
+the corpus must be destroyed rather than corrected.
+
+Consequences already in force:
+
+1. Sharadar and EODHD are **excluded from `research-01`** on licence grounds
+   alone, regardless of data quality.
+2. Every source in `price_facts.source`, `fundamental_facts.source` and
+   `corporate_action_facts.source` must have a recorded retention determination
+   before its first row is written.
+3. **Twelve Data and FMP retention terms are UNVERIFIED** and must be established
+   before either becomes part of the permanent corpus — this affects the forward
+   accumulation model in `FORWARD_SURVIVORSHIP_SYSTEM.md`, not just the
+   historical backfill.
+4. SEC EDGAR is public domain: no licence, no termination, nothing to fail.
+
+## 9. Coverage and capability reporting
 
 Reuses the existing mechanism unchanged. `CapabilityIndex` already distinguishes
 "no rows because nothing happened" from "no rows because the vendor refused",

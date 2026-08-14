@@ -123,5 +123,21 @@ built from the 1998 archive plus every daily observation since — never
 re-purchased.
 
 That is the entire argument for the one-time-download model, and it is exactly
-why the retention-rights question in `PHASE_06_VENDOR_MATRIX.md` §1 must be
-answered in writing first.
+why the retention-rights question in `PHASE_06_VENDOR_MATRIX.md` §1 had to be
+answered in writing first. It has been, for the historical vendors: Sharadar and
+EODHD are eliminated because their licences require deleting derived datasets on
+termination, and Kibot is the only candidate whose licence permits permanent
+retention.
+
+**The same question now applies to this document's own forward sources, and has
+not been answered.** Twelve Data and FMP retention terms are **UNVERIFIED**
+(`PHASE_06_VENDOR_MATRIX.md` §1.4). If either requires deletion on termination,
+then §8's claim — that today's bars accumulate into permanent history — does not
+hold for that source, and the registry would have to treat its prices as
+operational data to be re-acquired rather than as archive. The *event log* and
+the *security master* are TradeIt's own and are unaffected either way; it is the
+price series that is at risk.
+
+**Verify both before `research-01` embeds either source permanently.** Having
+just eliminated two vendors for exactly this defect, adopting a third one blind
+would be the same mistake with a better mood.

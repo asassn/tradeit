@@ -36,7 +36,27 @@ say so.
 
 The survivorship-safe corpus. **The only corpus a cross-sectional or economic
 statistic may cite.** Blocked on the Phase 6 Milestone 1 vendor decision; see
-`docs/PHASE_06_VENDOR_MATRIX.md`.
+`docs/PHASE_06_VENDOR_MATRIX.md` and `docs/KIBOT_DATA_PROBE.md`.
+
+### Limitations to be declared here when it is built
+
+Recorded now, before construction, so they are not discovered as omissions later.
+Each must be stated in this entry with its measured value at build time:
+
+| limitation | status |
+|---|---|
+| **pre-2009 fundamental *values* absent** — filing dates, accessions and form types are present from 1994 Q3, but the numbers inside pre-XBRL filings are not | deliberate deferral, not a gap (`RESEARCH_01_DATA_CONTRACT.md` §7.2) |
+| **OTC / pink-sheet trading out of scope** — a security that delisted from an exchange and continued OTC is treated as ended | declared modelling decision |
+| **measured delisted-roster completeness** against the EDGAR Form 25/15 denominator | to be filled in from the probe (`KIBOT_DATA_PROBE.md` §G) |
+| **cohort-survival differential**, 1999–2000 vs 2015–2016 listings | to be filled in — the strongest internal survivorship evidence |
+| **exchange coverage** (NYSE / AMEX / Nasdaq NMS / Nasdaq SmallCap) | to be filled in |
+| **CIK unmapped fraction, 1998–2008** | to be filled in; unmapped stays `NULL`, never guessed |
+| **retention determination per source** | required before the first row from any source is written |
+
+**`research-01` may not be described as survivorship-safe until the control
+universe passes** (`DOTCOM_CONTROL_UNIVERSE.md`). If it does not, the corpus is
+still usable — under its measured label, with the same discipline `full-01`
+already receives.
 
 ## Retired
 

@@ -137,20 +137,36 @@ Prices come from the existing Tiingo path.
 | **Compustat Point-in-Time** (S&P) | yes, the reference implementation | complete | Institutional pricing and licensing; almost certainly out of proportion here. |
 | **Tiingo fundamentals** | partial — statement data with as-of dates | weaker on delisted | Already an authenticated provider, so the cheapest integration; coverage needs verification before relying on it. |
 
-> **Superseded in part by `docs/PHASE_06_VENDOR_MATRIX.md` (Milestone 1).**
-> The cross-check design below assumed the SEC *Financial Statement Data Sets*
-> could verify filing dates. They start in 2009 Q1 and cannot. The EDGAR
-> *full-index* runs from 1993 and carries the filing date, so it is the
-> cross-check across the whole span; the Financial Statement Data Sets remain a
-> value-level check from 2009. The start-date recommendation is also now
-> conditional — see the vendor matrix §4.
+> **Superseded by `docs/PHASE_06_VENDOR_MATRIX.md` (Milestone 1 / 1C).** Two
+> corrections, in order of importance:
+>
+> 1. **Sharadar is eliminated, on licence rather than capability.** The current
+>    Sharadar Personal Use License requires, on termination, deleting all copies
+>    of Services Data *and datasets derived from it* within 30 days. `research-01`
+>    and every scan run over it are derived datasets, so the one-time-download
+>    model is prohibited. **EODHD is eliminated for the same reason** (one-month
+>    deletion). The table below is retained as a record of the capability
+>    assessment; the recommendation it led to no longer stands.
+> 2. The cross-check design below assumed the SEC *Financial Statement Data Sets*
+>    could verify filing dates. They start in 2009 Q1 and cannot. The EDGAR
+>    *full-index* runs from 1994 Q3 and carries the filing date, so it is the
+>    cross-check across the whole span; the Financial Statement Data Sets remain a
+>    value-level check from 2009.
 
-**Recommendation: Sharadar SF1 as the curated source, EDGAR as the free
-verification cross-check.** Sharadar gives point-in-time semantics and delisted
-coverage together, which is the only option that closes the fundamentals BLOCK
-and the survivorship FAIL with one acquisition. EDGAR then serves as an
-independent check on a sample — if two independently-sourced `filed_at` values
-disagree, that is a finding, and having no second source means never learning it.
+**Current recommendation, replacing the one below:** prices 1998+ from **Kibot**
+(the only candidate whose licence permits permanent retention — *pending the data
+probe in `KIBOT_DATA_PROBE.md`*), filing metadata from **EDGAR full-index 1994
+Q3+**, fundamental values from **EDGAR XBRL/FSDS 2009+**, and pre-2009
+fundamental *values* deferred rather than sourced from a retention-encumbered
+vendor.
+
+The reasoning that pointed at Sharadar remains sound and is worth keeping: an
+as-reported/restated split with a real filing date, alongside delisted coverage,
+would have closed the fundamentals BLOCK and the survivorship FAIL in one
+acquisition. The licence is what makes it unavailable, and EDGAR — free, public
+domain, and with no termination clause to fail — now serves both as the
+fundamentals source from 2009 and as the independent instrument that measures a
+price vendor's delisted coverage.
 
 **On cost and coverage I am explicitly uncertain.** I have not verified current
 pricing, licensing terms or coverage start dates, and I will not guess at them

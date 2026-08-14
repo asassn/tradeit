@@ -42,6 +42,147 @@ Class 12 is not hypothetical. It is the exact failure that made `full-01`'s
 survivorship control pass on another company's prices, and it is the single most
 important control in the list.
 
+## 2b. The expanded 1998–2002 control set
+
+The twelve classes above are the *shape* of the test. This section is the
+*density*: because 1998–2002 is the window `research-01` exists to cover, and
+because it is the window where a vendor's roster is most likely to be thin, the
+controls there are enumerated far more finely than elsewhere.
+
+**All names, tickers and dates below are from general knowledge and are
+UNVERIFIED.** The first job is to confirm each against EDGAR — company name, CIK,
+form 25/15 filing, and dates — before any of it is relied on as a fixture. A
+candidate that cannot be confirmed against EDGAR is dropped from the fixture, not
+guessed at.
+
+### 2b.1 Short-lived listings — the hardest case, and the most diagnostic
+
+Listed **and** terminated inside 1998–2002. These are the population that
+survivorship bias is made of, and the ones a thin roster loses first.
+
+| candidate | listed | ended | why it is the sharpest test |
+|---|---|---|---|
+| Pets.com (`IPET`) | Feb 2000 | wound up Nov 2000 | ~9 months of sessions. If a corpus has any short-lived control, it should be this one |
+| eToys (`ETYS`) | May 1999 | Ch. 11 Mar 2001 | IPO-to-bankruptcy inside the window |
+| Webvan (`WBVN`) | Nov 1999 | Ch. 11 Jul 2001 | large raise, total loss |
+| theglobe.com (`TGLO`) | Nov 1998 | collapsed 2001 | the record first-day pop; survived as a shell — tests class 3 vs class 2 |
+| drkoop.com (`KOOP`) | Jun 1999 | 2001–02 | going-concern warning then absorption |
+| Garden.com, MotherNature.com, Value America | 1998–99 | 2000–01 | small, thin, forgettable — exactly the omission risk |
+| NetZero (`NZRO`) | Sep 1999 | merged into United Online 2001 | short life ending in a *merger*, not a failure |
+| Buy.com (`BUYX`) | Feb 2000 | taken private 2001 | `taken_private` as a distinct delisting reason |
+
+**Acceptance:** at least the first four must be reconstructible. A corpus
+returning `NOT_FOUND` for all of the last four while returning WorldCom and Enron
+cleanly has kept the headlines and lost the population — that is
+`KIBOT_DATA_PROBE.md` §G3.
+
+### 2b.2 Infrastructure and telecom failures, 2001–2002
+
+The larger, longer-lived half of the collapse. Their absence would be
+unmissable; their *presence* proves very little on its own, which is why they are
+listed separately from 2b.1.
+
+| candidate | ended | reason to expect |
+|---|---|---|
+| Enron (`ENE`) | Ch. 11 Dec 2001 | `bankrupt_liquidated` at large-cap size |
+| WorldCom (`WCOM`) | Ch. 11 Jul 2002 | emerged as MCI — `bankrupt_reorganised`, then a *new* identity |
+| Global Crossing (`GX`) | Ch. 11 Jan 2002 | reorganised under new ownership |
+| Adelphia (`ADLAC`) | Ch. 11 Jun 2002 | accounting failure, Nasdaq delisting |
+| Excite@Home (`ATHM`) | Ch. 11 Sep 2001 | ticker later reused — feeds class 8 |
+| PSINet (`PSIX`) | Ch. 11 May 2001 | infrastructure failure |
+| Exodus Communications (`EXDS`) | Ch. 11 Sep 2001 | same |
+| Winstar (`WCII`), Teligent (`TGNT`), Rhythms NetConnections (`RTHM`), NorthPoint (`NPNT`), Metricom (`MCOM`), 360networks | 2001 | the CLEC/broadband cohort — a *cluster* test, not individual names |
+| Kmart (`KM`) | Ch. 11 Jan 2002 | non-tech failure inside the same window; guards against a tech-only roster |
+
+**The CLEC cluster is deliberately listed as a group.** The test is not "is
+Winstar present" but "how many of these six are present" — a count, reported as a
+count.
+
+### 2b.3 Acquisitions at or near the peak
+
+The series must **end**. A corpus that continues an acquired company's prices
+into the acquirer is the second-worst failure after splicing, and it is silent.
+
+| candidate | acquirer | date |
+|---|---|---|
+| Broadcast.com (`BCST`) | Yahoo | 1999 |
+| GeoCities (`GCTY`) | Yahoo | 1999 |
+| Netscape (`NSCP`) | AOL | 1999 |
+| Infoseek (`SEEK`) | Disney | 1999 |
+| Lycos (`LCOS`) | Terra Networks | 2000 |
+| MP3.com (`MPPP`) | Vivendi | 2001 |
+| Ask Jeeves (`ASKJ`) | IAC | 2005 — just outside the window, retained as a late-collapse control |
+
+### 2b.4 Identity-changing mergers, 1998–2002
+
+Ticker changes and lineage. History must be preserved under **one**
+`instrument_id` where the economic entity continued, and split into two where it
+did not.
+
+| event | date | what it tests |
+|---|---|---|
+| AOL + Time Warner (`AOL` / `TWX`) | 2001 | the canonical identity change of the era — **and** `AOL` is later reused (2b.6) |
+| Compaq → HP (`CPQ` → `HPQ`) | 2002 | large-cap absorption |
+| Bell Atlantic + GTE → Verizon (`BEL` → `VZ`) | 2000 | rename with continuity |
+| SBC + Ameritech | 1999 | precursor to the `T` reuse case |
+| Exxon + Mobil (`XON` → `XOM`) | 1999 | non-tech, same mechanism |
+| Travelers + Citicorp → Citigroup (`CCI` → `C`) | 1998 | ticker `C` reassignment |
+| JDS + Uniphase (`JDSU`) | 1999 | merger *then* an extreme reverse split (2b.5) |
+| Daimler + Chrysler | 1998 | cross-border, US listing ends |
+
+### 2b.5 Splits and reverse splits in the window
+
+| candidate | action | why |
+|---|---|---|
+| Qualcomm | 4:1, Dec 1999 | large forward split at the peak |
+| Cisco | 2:1 in 1998, 1999, 2000 | three splits inside the window |
+| Microsoft | 2:1 in 1998, 1999 | same |
+| Sun Microsystems, EMC, Nortel, Yahoo | 2:1 splits 1999–2000 | the cohort |
+| JDS Uniphase | **1:8 reverse split, 2006** | the reverse-split control with the largest factor |
+| Priceline | **1:6 reverse split, 2003** | survived the collapse *through* a reverse split — the exact case that reads as a collapse if mishandled |
+| any 2b.1/2b.2 name that reverse-split before delisting | — | enumerate from the data |
+
+**Priceline is the most valuable entry in this table.** It is a survivor whose
+unadjusted chart looks like a catastrophe and whose adjusted chart does not.
+
+### 2b.6 Ticker reuse — enumerate from data, but start from these
+
+Class 8 says "enumerate from the data, do not assume", and that stands. These are
+seed candidates to confirm, not a closed list:
+
+| ticker | first holder | later holder | note |
+|---|---|---|---|
+| `BBBY` | Bed Bath & Beyond | reissued after delisting | **the proven case** — `full-01` failed on it |
+| `AOL` | America Online (to 2001) | AOL Inc. (2009–2015) | two legally distinct issuers, same ticker, ~8-year gap |
+| `T` | AT&T Corp | AT&T Inc. (formerly SBC, from 2005) | ticker *transferred* between issuers — tests whether transfer is distinguished from continuity |
+| `GM` | General Motors Corp (→ Motors Liquidation 2009) | General Motors Company (IPO 2010) | bankruptcy, new entity, same ticker, ~1 year apart — **inside `TICKER_REUSE_TOLERANCE_DAYS`-adjacent territory** |
+| `WM` | Washington Mutual (to 2008) | Waste Management | reuse across an unrelated sector |
+| `ATHM` | Excite@Home (to 2001) | Autohome (from 2013) | dot-com failure, ticker reused by a foreign issuer |
+
+**The `GM` case is the strictest.** A ~1-year gap between two issuers of the same
+ticker is short enough that a naive splice looks plausible, which is exactly what
+`TICKER_REUSE_TOLERANCE_DAYS = 92` and the `symbol_aliases` exclusion constraint
+exist to make impossible.
+
+### 2b.7 Financial-crisis controls, retained
+
+Kept from class 7 and named so the 2008–2009 termination bulge can be checked as
+well as the 2000–2002 one: Lehman Brothers (`LEH`), Washington Mutual (`WM` →
+`WAMUQ`), Bear Stearns (`BSC`, acquired), Merrill Lynch (`MER`, acquired),
+Wachovia (`WB`, acquired), Countrywide (`CFC`, acquired), IndyMac (`IMB`, failed),
+Circuit City (`CC`, liquidated 2009), Fannie Mae / Freddie Mac (`FNM` / `FRE`,
+NYSE delisting 2010), General Motors (`GM` → `GMGMQ`).
+
+### 2b.8 Spinoffs, 1999–2002
+
+Adjustment methodology under a spinoff is vendor-specific and frequently wrong.
+Controls: Agilent from HP (1999), Delphi from GM (1999), Avaya from Lucent
+(2000), Palm from 3Com (2000), Agere from Lucent (2001), Zimmer from
+Bristol-Myers Squibb (2001), Edwards Lifesciences from Baxter (2000).
+
+**Whatever the vendor does with a spinoff, it must be documented and reproducible
+— not correct by our definition, but *declared*.**
+
 ## 3. What each control must yield
 
 For a control to count as reconstructed, `research-01` must supply **all** of:
