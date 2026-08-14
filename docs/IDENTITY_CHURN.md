@@ -137,3 +137,88 @@ decision rather than a defect. It is deliberately left open.
 
 Nothing here was chosen against a market outcome. No forward return, win rate,
 profitability or trading result was computed, consulted, or available.
+
+---
+
+# `full-01`: the remaining 67.8%
+
+The full-universe scan reports 184,833 of 272,537 identities re-minted (67.8%),
+which `phase4.identity_churn` raises as a WARN. This section determines what
+that number is.
+
+## The number is arithmetic, not a measurement
+
+A base hash names a *structure*; an identity names one *life* of it. Only the
+first life carries the bare hash — every later one carries a suffix and is
+counted as "re-minted". So:
+
+```
+structures  = 272,537 - 184,833 = 87,704
+lives/structure = 272,537 / 87,704 = 3.107
+re-mint share   = 1 - 87,704/272,537 = 0.6782      (reported: 0.678)
+```
+
+The re-mint share is **exactly determined** by the mean number of lives per
+structure. It is not an independent signal, and the WARN threshold (>50%
+re-minted) is therefore tripped by any corpus in which the average structure
+recurs more than twice — including a perfectly healthy one. *The threshold is
+measuring recurrence and calling it fragmentation.*
+
+## Fragmentation has a signature, and this is the opposite of it
+
+Fragmentation produces *short* identities: one continuous structure torn into
+many one- or two-observation fragments. That is exactly what `diag-01` showed
+before the tracker fix, and what the fix removed.
+
+| | diag-01 (pre-fix) | full-01 |
+|---|---|---|
+| observations per identity | 2.28 | **9.25** |
+| floor (`MIN_MEAN_OBSERVATIONS`) | 1.50 | 1.50 |
+| identities per structure | 11 (median), 209 (max) | **3.11** (mean) |
+| single-observation share | 25.7% | reported by the check |
+
+9.25 observations per identity is 6× the floor and 4× the pre-fix value.
+Identities are persisting, which is the property the re-mint metric cannot see.
+
+## What is still needed to close this
+
+Two numbers from the run decide it, and both are already in the report the gate
+wrote. The determination is pre-committed here so it cannot be rationalised
+afterwards:
+
+| `remints_on_an_illegal_transition` vs `remints_after_termination` | reading |
+|---|---|
+| illegal-transition dominant | **structurally acceptable.** This is the known, documented lifecycle asymmetry: `BROKEN_OUT_UNCONFIRMED` may only go to itself, `EXPIRED` or `INVALIDATED`, so a structure that breaks out and fades is re-detected as `NEAR_BREAKOUT`/`MATURE` and forks. It is a lifecycle question, not a defect. |
+| after-termination dominant *and* observations/identity low | **residual fragmentation** — the `_live` index is not holding at scale, and that is a defect to fix before Phase 6. |
+| after-termination dominant *with* 9.25 observations/identity | **acceptable**: structures genuinely ending and recurring across sixteen years, which is what a base hash spanning a single start date does when that date stays inside the detector's lookback. |
+
+On the measured corpus after the tracker fix the split was 2,204 illegal-edge to
+1,609 after-termination, and full-01's 67.8% sits within a point of that
+corpus's 68.7% — so the expectation is the first row. **Confirmed against the
+per-detector and per-cause breakdown in the `full-01` report before Phase 6
+begins.**
+
+## What downstream statistics must account for
+
+This is the part that outlives the WARN, and it holds whatever the cause split
+turns out to be.
+
+**An identity is a life, not a structure.** Every per-identity rate in the
+platform has lives in its denominator. `272,537` is not the number of things
+that happened; `87,704` is, observed 3.11 times each on average.
+
+1. **Report per structure as well as per identity.** Any rate of the form
+   "share of patterns that X" must state which denominator it used. The two
+   differ by a factor of 3.1 on this corpus.
+2. **Recurrence is not random, so identity-weighted statistics are biased.** A
+   structure gets more lives precisely when its level keeps mattering — a
+   durable boundary is re-detected, a one-off is not. Weighting by identity
+   therefore over-weights persistent structures. Any Phase 6+ statistic
+   aggregated per identity inherits that tilt and must either weight per
+   structure or say why it does not.
+3. **Breakout events inherit it.** 1.25 events per identity means events are
+   also counted per life; two lives of one structure watching the same boundary
+   produce two attempts.
+4. **Never compare a per-identity rate across builds without comparing
+   lives-per-structure first.** A tracker change that alters recurrence moves
+   every such rate without anything about the market changing.
