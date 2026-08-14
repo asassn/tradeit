@@ -222,3 +222,46 @@ that happened; `87,704` is, observed 3.11 times each on average.
 4. **Never compare a per-identity rate across builds without comparing
    lives-per-structure first.** A tracker change that alters recurrence moves
    every such rate without anything about the market changing.
+
+## Closed: the `full-01` determination
+
+**Verdict: a documented, non-blocking lifecycle characteristic.** Not a defect,
+and nothing was changed in response to it — no detector threshold, no grace
+period, no tracker semantics, no lifecycle rule.
+
+The reported breakdown, against the readings pre-committed above:
+
+| | `full-01` |
+|---|---|
+| identities | 272,537 |
+| re-minted | 184,833 (67.8%) |
+| **on an illegal transition** | **123,057 (66.6% of re-mints)** |
+| after termination | 61,776 (33.4%) |
+| structures naming >1 identity | 57,104 |
+| **max identities on one structure** | **75** |
+
+Illegal-transition re-mints dominate ordinary post-termination recurrence by
+2:1, which is the first row of the table above: the known, documented lifecycle
+asymmetry. `BROKEN_OUT_UNCONFIRMED` may only go to itself, `EXPIRED` or
+`INVALIDATED`, so a structure that breaks out and fades is re-detected as
+`NEAR_BREAKOUT` or `MATURE`, the tracker refuses to force an edge the state
+machine does not have, and it forks. That is the lifecycle behaving as
+specified, not failing.
+
+Two further corroborations:
+
+* **The per-detector medians and single-observation shares no longer show the
+  one-session fragmentation signature.** That pathology — identities living a
+  single session, 25.7% of them, at 2.28 observations each — is what the
+  tracker fix removed, and it has not returned at seventy-eight-instrument
+  scale.
+* **The worst case fell from 209 to 75** identities on one structure, over a
+  corpus 3× larger than the one that produced the 209.
+
+The architectural caveat stands and is not softened by this closure: **an
+identity is a pattern *life*, not an independent structure.** Phase 6+ economic
+statistics default to **structure-level weighting or deduplication**;
+identity-level weighting requires an explicit, written justification in the
+place it is used, because recurrence is not random — a structure earns more
+lives precisely when its level keeps mattering, so identity weighting tilts
+toward persistent structures.

@@ -137,6 +137,14 @@ Prices come from the existing Tiingo path.
 | **Compustat Point-in-Time** (S&P) | yes, the reference implementation | complete | Institutional pricing and licensing; almost certainly out of proportion here. |
 | **Tiingo fundamentals** | partial — statement data with as-of dates | weaker on delisted | Already an authenticated provider, so the cheapest integration; coverage needs verification before relying on it. |
 
+> **Superseded in part by `docs/PHASE_06_VENDOR_MATRIX.md` (Milestone 1).**
+> The cross-check design below assumed the SEC *Financial Statement Data Sets*
+> could verify filing dates. They start in 2009 Q1 and cannot. The EDGAR
+> *full-index* runs from 1993 and carries the filing date, so it is the
+> cross-check across the whole span; the Financial Statement Data Sets remain a
+> value-level check from 2009. The start-date recommendation is also now
+> conditional — see the vendor matrix §4.
+
 **Recommendation: Sharadar SF1 as the curated source, EDGAR as the free
 verification cross-check.** Sharadar gives point-in-time semantics and delisted
 coverage together, which is the only option that closes the fundamentals BLOCK
