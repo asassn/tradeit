@@ -86,16 +86,24 @@ absorbed silently — the same treatment `full-01` already receives.
 ## 5. The four corpus classifications
 
 Assigned from the measurement, not chosen. Defined in
-`RESEARCH_01_DATA_CONTRACT.md` §10 with the full prohibited-conclusion table.
+`RESEARCH_01_DATA_CONTRACT.md` §10 with the full prohibited-conclusion table, and
+implemented in `tradeit.edgar.denominator.classify_corpus`.
 
 | class | `bounded_coverage` | controls | cohort-survival differential |
 |---|---|---|---|
-| **survivorship-safe** | ≥ 0.75 | 30/30 | present and matching EDGAR shape |
-| **materially survivorship-corrected** | 0.45 – 0.75 | ≥ 26/30 | present |
-| **partially survivorship-corrected** | 0.25 – 0.45 | ≥ 20/30 | weak or partial |
-| **survivor-biased** | < 0.25 | < 20/30 | absent — cohorts survive like survivors |
+| **`SURVIVORSHIP_SAFE_RESEARCH_GRADE`** | **unset — see below** | 30/30 necessary, not sufficient | present and matching EDGAR shape |
+| **`MATERIALLY_SURVIVORSHIP_CORRECTED`** | ≥ 0.45 | ≥ 26/30 | present |
+| **`PARTIALLY_SURVIVORSHIP_CORRECTED`** | 0.25 – 0.45 | ≥ 20/30 | weak or partial |
+| **`SURVIVOR_BIASED`** | < 0.25 | < 20/30 | absent — cohorts survive like survivors |
 
-`survivor-biased` is the classification `full-01` holds today, and its treatment
+**The research-grade threshold is deliberately unassigned.** It is set *after*
+the denominator is built and its distribution examined, and *before* any Kibot
+result is used for economic testing — never in the same step as evaluating the
+vendor. `classify_corpus()` returns `MATERIALLY_SURVIVORSHIP_CORRECTED` with an
+explicit reason instead of the top grade until a threshold is passed
+deliberately, and a test asserts it.
+
+`SURVIVOR_BIASED` is the classification `full-01` holds today, and its treatment
 is already established: **machinery validation only, never cited for a
 cross-sectional or economic statistic.**
 

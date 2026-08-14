@@ -459,10 +459,28 @@ is not chosen, argued for, or negotiated after the fact.
 
 | class | `bounded_coverage` | controls (of 30) | cohort survival vs EDGAR | short-lived bucket |
 |---|---|---|---|---|
-| **survivorship-safe** | ≥ 0.75 | 30 | tracks EDGAR's shape | ≥ 0.60 of the > 10y bucket's rate |
-| **materially survivorship-corrected** | 0.45 – 0.75 | ≥ 26 | differential present | ≥ 0.40 |
-| **partially survivorship-corrected** | 0.25 – 0.45 | ≥ 20 | weak or partial | ≥ 0.20 |
-| **survivor-biased** | < 0.25 | < 20 | absent — cohorts survive like survivors | < 0.20 |
+| **`SURVIVORSHIP_SAFE_RESEARCH_GRADE`** | **threshold deliberately unset — see below** | 30 (necessary, **not sufficient**) | tracks EDGAR's shape | to be set with the threshold |
+| **`MATERIALLY_SURVIVORSHIP_CORRECTED`** | ≥ 0.45 | ≥ 26 | differential present | ≥ 0.40 |
+| **`PARTIALLY_SURVIVORSHIP_CORRECTED`** | 0.25 – 0.45 | ≥ 20 | weak or partial | ≥ 0.20 |
+| **`SURVIVOR_BIASED`** | < 0.25 | < 20 | absent — cohorts survive like survivors | < 0.20 |
+
+### The top grade is not yet reachable, on purpose
+
+**No threshold is assigned for `SURVIVORSHIP_SAFE_RESEARCH_GRADE`, and none may
+be assigned until the denominator has been built and its distribution examined.**
+Picking a number first would be choosing the answer before the measurement.
+
+`RESEARCH_GRADE_THRESHOLD` is `None` in `tradeit.edgar.denominator`, and
+`classify_corpus()` returns `MATERIALLY_SURVIVORSHIP_CORRECTED` with an explicit
+reason rather than the top grade, however good the inputs look. A test asserts
+this. Raising the grade requires deliberately passing a threshold, which is a
+decision with a name on it rather than a default that drifted.
+
+**Passing all 30 controls is necessary for the top grade and explicitly not
+sufficient.** Thirty securities are a stress test against known failure modes,
+not evidence about the other fifteen thousand. The recommendation for a
+quantitative research-grade threshold comes **after** the denominator exists and
+**before** any Kibot result is used for economic testing.
 
 Additional conditions, applying to every class above `survivor-biased`:
 

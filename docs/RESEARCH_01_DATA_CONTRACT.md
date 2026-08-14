@@ -1,6 +1,6 @@
 # `research-01` — data contract
 
-The survivorship-safe historical research corpus. **The only corpus a
+The survivorship-aware historical research corpus. **The only corpus a
 cross-sectional or economic statistic may ever cite.** `full-01` is frozen and
 remains machinery-validation only (`docs/CORPUS_REGISTRY.md`).
 
@@ -342,14 +342,14 @@ degrades into a disclaimer nobody acts on.
 
 | class | what it means |
 |---|---|
-| **survivorship-safe** | the disappeared population is substantially present and measured |
-| **materially survivorship-corrected** | most of it is present; the deficit is quantified and its direction known |
-| **partially survivorship-corrected** | a real but incomplete correction; the deficit is large enough to change conclusions |
-| **survivor-biased** | the corpus is what survived. `full-01` holds this class today |
+| **`SURVIVORSHIP_SAFE_RESEARCH_GRADE`** | the disappeared population is substantially present and measured. **Its quantitative threshold is deliberately unset** until the denominator has been built and its distribution examined; passing all 30 controls is necessary and not sufficient |
+| **`MATERIALLY_SURVIVORSHIP_CORRECTED`** | most of it is present; the deficit is quantified and its direction known |
+| **`PARTIALLY_SURVIVORSHIP_CORRECTED`** | a real but incomplete correction; the deficit is large enough to change conclusions |
+| **`SURVIVOR_BIASED`** | the corpus is what survived. `full-01` holds this class today |
 
 ### What each class prohibits
 
-| conclusion type | survivorship-safe | materially corrected | partially corrected | survivor-biased |
+| conclusion type | research-grade | materially corrected | partially corrected | survivor-biased |
 |---|---|---|---|---|
 | machinery validation, causality, provenance, reproducibility | ✅ | ✅ | ✅ | ✅ |
 | descriptive geometry of detected structures | ✅ | ✅ | ✅ | ✅ |

@@ -78,63 +78,107 @@ overhaul. Pre-2004 8-Ks used a different, coarser scheme (bankruptcy under Item
 3, acquisition/disposition of assets under Item 2). Any parser must branch on
 filing date, and the pre-2004 branch is coarser and needs text confirmation.
 
-### 2.3 Filing cessation — the pre-2004 workhorse
+### 2.3 Filing cessation — a candidate signal, **never** a confirmed death
 
-Given §2.1 and §2.2, the robust pre-2004 signal is not a form at all:
+Given §2.1 and §2.2, cessation is the only signal that behaves the same across
+the whole span — and it is also the weakest, so the design turns on refusing to
+let it do more work than it can bear.
 
-> **A CIK that filed 10-K and 10-Q regularly, whose last periodic filing is in
-> period *P*, and which never files again, stopped being a reporting company at
-> approximately *P*.**
+> **A CIK that filed periodically and then stopped has stopped *reporting*. That
+> is all it has done.**
 
-This is derivable entirely from the free quarterly full-index, needs no form
-parsing, is exchange-agnostic, and covers 1994 Q3 → present uniformly. It is the
-only signal that behaves the same across the whole span.
-
-**Its ambiguities, stated up front, because they are the reason it is an estimate
-and not a census:**
+Whether the security was delisted, the class extinguished, or the issuer
+liquidated is a separate question the absence of filings cannot answer:
 
 | looks like cessation | actually is |
 |---|---|
 | acquired — the target stops filing | a real disappearance ✓ |
-| went private (Form 15 usually accompanies) | a real disappearance ✓ |
+| went private | a real disappearance ✓ |
 | delisted and deregistered | a real disappearance ✓ |
 | became a wholly-owned subsidiary still filing debt covenants | *not* a disappearance ✗ |
 | fell delinquent, then resumed 18 months later | *not* a disappearance ✗ |
 | CIK changed after a reorganisation | *not* a disappearance — double-counts ✗ |
 
-**Mitigations:** require a quiet period of **≥ 8 quarters** before declaring
-cessation; cross-check against Form 15 where present; treat a resumption as
-retroactively cancelling the cessation; and report cessation counts with a stated
-false-positive band rather than as a hard number.
+**The rules, enforced in code rather than remembered:**
+
+1. Cessation resolves to **`POSSIBLE_EXIT_FILING_CESSATION`**, an evidence type
+   of its own, never to any `CONFIRMED_*` type.
+2. **It carries no lifecycle date.** Not an `evidence_date`, not an
+   `effective_date`. The last periodic filing is recorded as *context*, labelled
+   as context, and is not a death date. `assert_cessation_undated()` raises if
+   one is ever attached, and `Denominator` runs it at construction, so a
+   denominator that dated a cessation cannot be built at all.
+3. A quiet period of **≥ 8 quarters** is required before it is even a candidate,
+   and **a resumption retroactively cancels it**.
+4. It stays unresolved until corroborating evidence says what happened. Only
+   corroboration promotes it.
+5. Cessation-only cases are **excluded from every per-year count** — they have no
+   year — and are reported separately as `undated_exits`, so a reader can see how
+   much of the population could not be placed in time.
+
+### 2.4 Four lifecycles, deliberately not merged
+
+EDGAR observes the **SEC reporting** lifecycle directly. Survivorship research
+needs the **exchange listing** and **security class** lifecycles. They are
+related and they are not the same:
+
+| scope | what it asks | ends via |
+|---|---|---|
+| `ISSUER` | does the company exist and operate? | bankruptcy, dissolution |
+| `SECURITY_CLASS` | does this security still exist? | merger consideration, extinguishment |
+| `EXCHANGE_LISTING` | is it still listed and traded there? | Form 25 / 25-NSE |
+| `SEC_REPORTING` | is the registrant still filing? | Form 15 family |
+
+Each is observable through different forms and each ends at a different time. An
+issuer can deregister while its shares keep trading over the counter; a class can
+be extinguished while the issuer keeps filing; an issuer can be delisted and
+continue to file. **A Form 15 is therefore never read as a delisting**, and
+`CONFIRMED_SECURITY_EXTINGUISHED` is never read off a single form — it is derived
+only from a delisting *and* a registration termination together, and is marked
+`FORM_INFERRED` so it can never be mistaken for something a filing asserted.
+
+**TradeIt ultimately needs the security/listing lifecycle, not the issuer's
+filing lifecycle.** The reporting lifecycle is what EDGAR gives cheaply; the
+listing lifecycle is what survivorship research is about; and the gap between
+them is exactly what the evidence types are for.
 
 ---
 
-## 3. Construction
+## 3. Construction — implemented in `src/tradeit/edgar/`
 
 ```
-1  ingest        quarterly full-index 1994 Q3 → present
-                 (CIK, company name, form type, filed date, accession path)
-2  birth         per CIK: first 8-A12B / 8-A12G, else first periodic filing
-3  death         per CIK, the earliest of:
-                   Form 25 / 25-NSE          (2005+, strong)
-                   Form 15 family            (whole span, strong)
-                   8-K bankruptcy item       (branch on 2004)
-                   8-K completion-of-merger  (branch on 2004)
-                   filing cessation + 8q     (whole span, weak but uniform)
-4  classify      terminal_reason ∈ {delisted, deregistered, bankrupt, acquired,
-                                    merged, went_private, ceased_reporting,
-                                    unknown}
-                 evidence_strength ∈ {form_direct, form_inferred, cessation_only}
-5  cohort        listing year, termination year, lifespan, exchange (where the
-                 filing names one), security class
-6  identity      attempt CIK → ticker; record the mapping STATE (§4), never a guess
-7  publish       counts by year × cohort × exchange × evidence_strength
+1  index.py       quarterly full-index 1994 Q3 → present
+                  (CIK, company name, form type, filed date, path → accession)
+2  evidence.py    per filing: role, lifecycle scope, evidence type, strength.
+                  Provenance preserved: CIK, form, filing date, accession,
+                  source path, originating index quarter.
+3  lifecycle.py   per CIK: timeline → ExitResolution.
+                  direct forms win; delisting + deregistration derives
+                  extinguishment; cessation is a dated-nothing candidate.
+4  identity.py    CIK → ticker in four states. Name matching can never RESOLVE.
+5  denominator.py counts by evidence type / strength / scope / year / lifespan;
+                  cohort survival; two coverage bounds, never one.
+6  pipeline.py    wiring; missing index quarters recorded, not silently zero.
+```
+
+Run it:
+
+```
+tradeit edgar fetch-recipe                    # shell to populate the index dir
+tradeit edgar denominator --index-root DIR --as-of 2026-01-01
+tradeit edgar controls                        # the 30-control verification table
 ```
 
 **Every count is published with its evidence strength attached.** A 2001
 termination count of *N* where 80% is `cessation_only` is a different claim from
 one where 80% is `form_direct`, and collapsing them into one number is the
 mistake this design exists to avoid.
+
+**No HTTP client ships with this.** `sec.gov` is unreachable from the build
+environment, and a network fetcher that cannot be exercised is one that is wrong
+in ways nobody has found yet. `fetch-recipe` prints the shell an operator runs in
+their own environment, which also keeps the raw index files on disk — the right
+shape for a corpus that has to be reproducible.
 
 ---
 
@@ -254,6 +298,40 @@ overwhelmingly better than the alternative, which is having nothing to compare
 the vendor against.
 
 ---
+
+## 7b. Limitations discovered while implementing it
+
+Four that were not obvious from the design, and that change what the denominator
+can claim.
+
+**1. The full-index carries no 8-K item numbers.** Its five columns are CIK,
+company name, form type, filing date and path. An 8-K in the index is just "an
+8-K" — bankruptcy (1.03), completed acquisition (2.01), delisting notice (3.01)
+and a change of auditor are indistinguishable without fetching and parsing the
+document. Consequently **`CONFIRMED_BANKRUPTCY` and `CONFIRMED_ACQUISITION`
+cannot be produced from the index at all.** They are implemented, they are
+reachable, and they require a document-parsing pass that does not exist yet.
+Every such signal is flagged `requires_document_text` and contributes nothing
+until then.
+
+**2. The index names no security class, so the counts are per *registrant*, not
+per *security*.** A Form 25 removes a class from listing; the index does not say
+which class. `security_class_known` is therefore `False` on every index-derived
+row. A registrant with common stock, preferred and warrants produces one row
+where the truth is three, and the direction of that bias is toward
+under-counting securities.
+
+**3. Filing dates are not effective dates.** A Form 25's effective date is set by
+rule some days after filing. The index does not carry it, so `effective_date` is
+`None` on every index-derived row and per-year counts are keyed on
+`evidence_date` — the filing date — and say so. Borrowing the filing date would
+have invented precision that nobody could later distinguish from measurement.
+
+**4. A missing index quarter is a coverage gap, not a zero.** The pipeline
+records missing quarters and the report prints them first. A denominator built
+over a directory that quietly lacked 2001 QTR3 would report a real dip in
+terminations, which is exactly the kind of artefact that survives into a
+conclusion.
 
 ## 8. Build order
 

@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tradeit.cli_data import add_data_commands
+from tradeit.cli_edgar import add_edgar_commands
 from tradeit.config import get_settings
 from tradeit.core.calendar import get_calendar
 from tradeit.core.clock import AsOfClock
@@ -169,6 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
     demo.set_defaults(func=cmd_demo_ingest)
 
     add_data_commands(sub)
+    add_edgar_commands(sub)
     return parser
 
 

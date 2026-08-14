@@ -315,6 +315,15 @@ decision waits on its answers.
 preparation: they build the instrument that *measures* the vendor, so they must
 precede the probe rather than follow it.
 
+### Status
+
+| milestone | state |
+|---|---|
+| **0a** — denominator | **implemented** in `src/tradeit/edgar/` with 41 tests, CLI (`tradeit edgar denominator`), ruff and mypy clean. **Not yet run against real EDGAR data**: `sec.gov` returns `EGRESS_BLOCKED` here. Requires an operator to run `tradeit edgar fetch-recipe` in an unrestricted environment |
+| **0b** — 30 controls to `MANUAL_VERIFIED` | **blocked on the same egress denial.** 0/30 verified. **No CIK has been guessed** — every control sits at `UNRESOLVED` with its verification route recorded (`tradeit edgar controls`) |
+| **0c** — Kibot Q1–Q26 | **ready to send**, verbatim, in [`VENDOR_QUESTIONS_READY_TO_SEND.md`](VENDOR_QUESTIONS_READY_TO_SEND.md) §1 |
+| **0d** — Twelve Data and FMP retention | **ready to send** (§2, §3). Both vendor sites returned `EGRESS_BLOCKED`; classification stays `UNCLEAR`, treated as prohibited |
+
 > **Do not pay for access before the instrument that measures it exists.**
 
 ## 9. Recommendation
