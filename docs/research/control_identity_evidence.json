@@ -6,20 +6,20 @@
       "control_id": "AAPL",
       "expected_company": "Apple Inc. (formerly Apple Computer, Inc.)",
       "identity_break": false,
-      "notes": "The easy case, deliberately chosen as the pilot's baseline. One issuer, continuously listed, currently trading, so the SEC's own company_tickers.json is an authoritative CIK-to-ticker source and this should reach RESOLVED or MANUAL_VERIFIED. Note the registrant renamed from Apple Computer, Inc. to Apple Inc. in 2007 without any identity break: the CIK is continuous and this is a rename, not a new issuer.",
+      "notes": "The easy case, and the pilot's baseline. One issuer, continuously listed, currently trading, so the SEC's own company_tickers.json is authoritative for the CURRENT CIK-to-ticker relationship. Recorded as RESOLVED rather than MANUAL_VERIFIED: sec_company_tickers is sufficient primary SEC evidence under the approved ranking, while MANUAL_VERIFIED stays reserved for a human-checked filing citation. valid_from and valid_to are deliberately null — the ticker file proves the mapping as of its retrieval date and says nothing about which historical dates AAPL was valid, and the filing spine corroborates issuer continuity without dating the ticker.",
       "mappings": [
         {
           "issuer_label": "primary",
-          "cik": null,
-          "ticker": null,
-          "status": "unresolved",
-          "evidence": null,
-          "citation": "",
-          "verified_on": null,
+          "cik": 320193,
+          "ticker": "AAPL",
+          "status": "resolved",
+          "evidence": "sec_company_tickers",
+          "citation": "SEC company_tickers.json, https://www.sec.gov/files/company_tickers.json, retrieved 2026-08-14; exactly one AAPL match: {\"cik_str\": 320193, \"ticker\": \"AAPL\", \"title\": \"Apple Inc.\"}",
+          "verified_on": "2026-08-14",
           "valid_from": null,
           "valid_to": null,
-          "scope_notes": "issuer + security_class + exchange_listing, all continuous",
-          "unresolved_reason": "sec.gov unreachable from the authoring environment; CIK not written from recollection. Verification route: SEC company_tickers.json gives an authoritative current CIK-to-ticker pair (evidence sec_company_tickers), corroborated by the registrant name in the local EDGAR full-index."
+          "scope_notes": "issuer + security_class + exchange_listing all continuous; no identity break observed. Independently corroborated by the local SEC full-index: CIK 320193 carries 2,232 filings spanning 1994-08-12 to 2026-08-13 under the registrant names APPLE COMPUTER INC, APPLE COMPUTER INC/ FA, APPLE INC and Apple Inc., which is a rename of one registrant rather than a succession of issuers. Many weaker name-match candidates containing APPLE exist in the index; CIK 320193 is the one the SEC ticker reference corroborates directly, so the mapping rests on sec_company_tickers and the index serves only as corroboration.",
+          "unresolved_reason": ""
         }
       ]
     },

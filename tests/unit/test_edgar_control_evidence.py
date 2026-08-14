@@ -14,6 +14,7 @@ no silent merging of two issuers that shared a ticker.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,7 @@ from tradeit.edgar.control_evidence import (
     resolve_controls,
 )
 from tradeit.edgar.controls import CONTROL_UNIVERSE
-from tradeit.edgar.identity import MappingStatus
+from tradeit.edgar.identity import MappingEvidence, MappingStatus
 from tradeit.errors import ConfigError
 
 
@@ -398,13 +399,61 @@ def test_the_shipped_evidence_file_is_valid() -> None:
     assert set(loaded.controls) == {"AAPL", "IPET", "GM"}
 
 
-def test_the_shipped_file_contains_no_cik_at_all() -> None:
-    """sec.gov is unreachable here, so not one CIK may have been written."""
+def test_every_shipped_cik_carries_a_citation() -> None:
+    """A CIK without a citation is a CIK someone remembered.
+
+    This replaces an earlier blanket "no CIK anywhere" assertion, which was true
+    only until the first control was verified. The durable rule is not that CIKs
+    are absent -- it is that no CIK exists without primary-source provenance.
+    """
     loaded = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     for control in loaded.controls.values():
         for mapping in control.mappings:
-            assert mapping.cik is None, f"{control.control_id} carries a CIK that was not verified"
+            if mapping.cik is None:
+                assert mapping.status is MappingStatus.UNRESOLVED
+                assert mapping.unresolved_reason
+            else:
+                assert mapping.counts_in_numerator
+                assert mapping.citation
+                assert mapping.verified_on is not None
+
+
+def test_shipped_aapl_is_resolved_from_the_sec_ticker_file() -> None:
+    """RESOLVED, not MANUAL_VERIFIED: the SEC ticker file is primary evidence,
+    but MANUAL_VERIFIED stays reserved for a human-checked filing citation."""
+    aapl = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["AAPL"]
+    assert aapl.identity_break is False
+    assert len(aapl.mappings) == 1
+    mapping = aapl.mappings[0]
+    assert mapping.cik == 320193
+    assert mapping.ticker == "AAPL"
+    assert mapping.status is MappingStatus.RESOLVED
+    assert mapping.status is not MappingStatus.MANUAL_VERIFIED
+    assert mapping.evidence is MappingEvidence.SEC_COMPANY_TICKERS
+    assert "company_tickers.json" in mapping.citation
+    assert mapping.verified_on == dt.date(2026, 8, 14)
+
+
+def test_shipped_aapl_invents_no_ticker_validity_dates() -> None:
+    """company_tickers.json proves the current mapping and dates nothing.
+
+    The filing spine corroborates that one registrant persisted across the
+    Apple Computer -> Apple Inc. rename; it does not establish the dates on
+    which the ticker AAPL was valid, so both ends stay null.
+    """
+    mapping = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["AAPL"].mappings[0]
+    assert mapping.valid_from is None
+    assert mapping.valid_to is None
+
+
+def test_shipped_gm_and_ipet_remain_untouched() -> None:
+    """The AAPL pilot must not have moved the other two."""
+    loaded = load_control_evidence(DEFAULT_EVIDENCE_PATH)
+    for control_id in ("GM", "IPET"):
+        for mapping in loaded.controls[control_id].mappings:
+            assert mapping.cik is None
             assert mapping.status is MappingStatus.UNRESOLVED
+            assert mapping.unresolved_reason
 
 
 def test_the_shipped_gm_record_models_the_identity_break() -> None:
