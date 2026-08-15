@@ -6,7 +6,7 @@
       "control_id": "AAPL",
       "expected_company": "Apple Inc. (formerly Apple Computer, Inc.)",
       "identity_break": false,
-      "notes": "The easy case, and the pilot's baseline. One issuer, continuously listed, currently trading, so the SEC's own company_tickers.json is authoritative for the CURRENT CIK-to-ticker relationship. Recorded as RESOLVED rather than MANUAL_VERIFIED: sec_company_tickers is sufficient primary SEC evidence under the approved ranking, while MANUAL_VERIFIED stays reserved for a human-checked filing citation. valid_from and valid_to are deliberately null \u2014 the ticker file proves the mapping as of its retrieval date and says nothing about which historical dates AAPL was valid, and the filing spine corroborates issuer continuity without dating the ticker.",
+      "notes": "The easy case, and the pilot's baseline. One issuer, continuously listed, currently trading, so the SEC's own company_tickers.json is authoritative for the CURRENT CIK-to-ticker relationship. Recorded as RESOLVED rather than MANUAL_VERIFIED: sec_company_tickers is sufficient primary SEC evidence under the approved ranking, while MANUAL_VERIFIED stays reserved for a human-checked filing citation. valid_from and valid_to are deliberately null — the ticker file proves the mapping as of its retrieval date and says nothing about which historical dates AAPL was valid, and the filing spine corroborates issuer continuity without dating the ticker.",
       "mappings": [
         {
           "issuer_label": "primary",
@@ -27,7 +27,7 @@
       "control_id": "IPET",
       "expected_company": "Pets.com, Inc.",
       "identity_break": false,
-      "notes": "The hard case, and it resolved. Pets.com listed in February 2000 and wound up operations in November 2000, so it appears in no current SEC ticker file and EDGAR full-text search does not reach back to 2000 \u2014 which is why the anticipated outcome was AMBIGUOUS or UNRESOLVED. The prospectus settled it: a 424B4 states the trading symbol outright, which is exactly the filing_document_text route the record was waiting on, inspected by hand and therefore MANUAL_VERIFIED. The lesson worth keeping: for a pre-2001 delisted issuer the ticker is recoverable from the offering document even though no ticker reference file will ever contain it.",
+      "notes": "The hard case, and it resolved without an identity break. Pets.com, Inc. became IPET Holdings, Inc. by charter amendment on 2001-01-16 -- one issuer, one CIK, one continuous registrant. The rename is a lifecycle fact rather than a second issuer mapping, and the model already refuses the wrong representation: two mappings sharing a CIK is a ConfigError, and a second mapping would force identity_break true. The 2000 prospectus gave the symbol; the 2002 10-K gave what it could not -- the dates the security actually traded under IPET, and that it continued afterwards under IPETZ, which is preserved in scope_notes because no date for it is established. The 2005 Form 15-12G names a different company in its signature block; every competing primary field identifies IPET Holdings, so the anomaly is recorded on the fact it affects rather than allowed to alter identity. The lesson worth keeping: for a pre-2001 delisted issuer the ticker is recoverable from the offering document, but the dates it was valid come from a later periodic report.",
       "mappings": [
         {
           "issuer_label": "primary",
@@ -35,11 +35,11 @@
           "ticker": "IPET",
           "status": "manual_verified",
           "evidence": "manual_filing_citation",
-          "citation": "SEC Form 424B4 filed 2000-02-11, Pets.com, Inc., CIK 1100683, accession 0000891618-00-000749 (local copy petscom-2000-424b4.txt), manually inspected: \"The shares have been approved for quotation on the Nasdaq National Market under the symbol 'IPET.'\", and on the cover summary \"Proposed Nasdaq National Market symbol ........ 'IPET'\"",
-          "verified_on": "2026-08-14",
-          "valid_from": null,
-          "valid_to": null,
-          "scope_notes": "Pets.com, Inc. The CIK-to-ticker relationship rests on the offering document stating the symbol, not on the registrant name resembling the control name. valid_from is null: the prospectus proves the symbol was approved for quotation as of that filing, which is not the same claim as the date ticker validity began \u2014 approval for quotation and first trade are different events and the filing dates only the former. valid_to is null: nothing consulted establishes a delisting date, and none may be inferred from the wind-down.",
+          "citation": "SEC Form 424B4 filed 2000-02-11, Pets.com, Inc., CIK 1100683, accession 0000891618-00-000749, manually inspected: \"The shares have been approved for quotation on the Nasdaq National Market under the symbol 'IPET.'\" -- CORROBORATED for the trading period by SEC Form 10-K filed 2002-03-29, IPET Holdings, Inc., CIK 1100683, accession 0000891618-02-001559, Item 5: \"From February 11, 2000, the date of our initial public offering, to January 18, 2001, the date of our Nasdaq Stock Market delisting, our common stock was traded on the Nasdaq Stock Market under the symbol IPET.\"",
+          "verified_on": "2026-08-15",
+          "valid_from": "2000-02-11",
+          "valid_to": "2001-01-18",
+          "scope_notes": "One issuer across a rename: Pets.com, Inc. and IPET Holdings, Inc. are the same registrant, CIK 1100683, Commission File No. 000-29387.\n\nvalid_from and valid_to describe THE LIFE OF THE TICKER 'IPET' ONLY.\n\nvalid_from = 2000-02-11 and valid_to = 2001-01-18 rest on symbol-specific filing-body evidence, not on the delisting event: SEC Form 10-K filed 2002-03-29, IPET Holdings, Inc., CIK 1100683, accession 0000891618-02-001559, Item 5 states \"From February 11, 2000, the date of our initial public offering, to January 18, 2001, the date of our Nasdaq Stock Market delisting, our common stock was traded on the Nasdaq Stock Market under the symbol IPET.\" The 2000-02-11 prospectus proved only that the symbol was approved for quotation, which is a different claim; the 10-K is what establishes the dates the security actually traded under this symbol.\n\nThese dates are NOT issuer existence: the issuer continued after 2001-01-18 to wind up, liquidate, settle liabilities and distribute, and kept filing with the SEC until 2005. They are NOT security-class extinction: the same class continued to be quoted over the counter under a different symbol.\n\nTICKER TRANSITION, UNDATED. The same 10-K, Item 5, states \"The closing price of our common stock on January 18, 2001 was $0.125. Our stock has subsequently continued to trade under the symbol IPETZ through over-the-counter quotation services, such as Pink Sheets...\" The exact start and end dates of that OTC quotation are NOT established by any document consulted, and none is derived from the delisting date -- 2001-01-18 is when Nasdaq quotation ended, not when OTC quotation began. IPETZ is therefore recorded here in prose rather than as a dated lifecycle fact, is deliberately NOT written into this mapping's ticker field, and is NOT represented as a second issuer mapping: a successor quotation symbol for the same class of the same issuer is not a second identity. It is also NOT scoped exchange_listing anywhere in this record, because OTC quotation services quote rather than list and there is no listing agreement, listing standard or delisting process to cite.",
           "unresolved_reason": "",
           "lifecycle_facts": [
             {
@@ -49,6 +49,54 @@
               "date_source": "body_text",
               "citation": "SEC Form 8-K filed 2000-11-07, Pets.com, Inc., CIK 1100683, accession 0001095811-00-004383 (local copy petscom-2000-11-07-8k.txt); the attached press release is headed \"Pets.com (Nasdaq: IPET)\"",
               "note": "This is an OPERATIONAL fact about the issuer and nothing more. It is NOT a legal dissolution date, NOT a bankruptcy date, NOT an exchange delisting date, NOT a security extinguishment date, and NOT a ticker valid_to. A company that begins winding down operations continues to exist legally, may keep filing, and its securities may keep trading for some period afterwards. Each of those would need its own filing to establish, and none has been consulted."
+            },
+            {
+              "scope": "issuer",
+              "fact": "Stockholders approved the Plan of Complete Liquidation and Dissolution of the Company on 2001-01-16.",
+              "date": "2001-01-16",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2001-01-17, Pets.com, Inc., CIK 1100683, accession 0000891618-01-000054: \"On January 16, 2001, the stockholders of the Company approved the Plan of Complete Liquidation and Dissolution of the Company and the change of corporate name from Pets.com, Inc. to IPET Holdings, Inc.\" The meeting was called by the DEFS14A filed 2000-12-28, accession 0001095811-00-005560.",
+              "note": "Shareholder approval of a plan of liquidation is an AUTHORISATION, not an outcome. It is not the dissolution date, not the date liquidation completed, and not a security extinguishment date."
+            },
+            {
+              "scope": "issuer",
+              "fact": "Corporate name change from Pets.com, Inc. to IPET Holdings, Inc., approved by stockholders on 2001-01-16 and effected by an amendment to the Certificate of Incorporation filed on 2001-01-16. The same legal entity continues under CIK 1100683 and Commission File No. 000-29387; no merger, reorganization or successor issuer is involved.",
+              "date": "2001-01-16",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2001-01-17, Pets.com, Inc., CIK 1100683, accession 0000891618-01-000054: \"On January 16, 2001, the stockholders of the Company approved the Plan of Complete Liquidation and Dissolution of the Company and the change of corporate name from Pets.com, Inc. to IPET Holdings, Inc.\" The same filing states that an amendment to the Certificate of Incorporation effecting the name change was filed on January 16, 2001.",
+              "note": "A RENAME IS NOT AN IDENTITY BREAK. This control therefore carries one issuer mapping, not two. METADATA DISCREPANCY PRESERVED: the SGML header carries DATE OF NAME CHANGE 19991208, which conflicts with the filing-body chronology establishing the Pets.com, Inc. -> IPET Holdings, Inc. name change in January 2001. The discrepancy is preserved as unexplained metadata and the 19991208 value is not used as the legal rename date."
+            },
+            {
+              "scope": "issuer",
+              "fact": "A Certificate of Dissolution was filed on 2001-01-16 and took effect on 2001-01-18.",
+              "date": "2001-01-18",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2001-01-17, Pets.com, Inc., CIK 1100683, accession 0000891618-01-000054, which states the Certificate of Dissolution was filed on January 16, 2001 and that \"The Certificate of Dissolution will take effect on Thursday, January 18, 2001.\" Retrospectively corroborated by SEC Form 10-K filed 2002-03-29, IPET Holdings, Inc., CIK 1100683, accession 0000891618-02-001559.",
+              "note": "THIS IS NOT CORPORATE EXTINCTION. Under Delaware law a dissolved corporation continues to exist for the purpose of winding up. The issuer continued after this date to wind up its affairs, liquidate assets, settle liabilities and make distributions to stockholders, and continued to file with the SEC until 2005. Nothing in the record establishes a date on which the entity ceased to exist, and none may be inferred from this fact. The 8-K states the effective date prospectively; the 10-K is later evidence that it occurred, and the two are recorded as one fact with two citations rather than as two events."
+            },
+            {
+              "scope": "exchange_listing",
+              "fact": "The Common Stock was delisted from the Nasdaq Stock Market on 2001-01-18.",
+              "date": "2001-01-18",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2001-01-17, Pets.com, Inc., CIK 1100683, accession 0000891618-01-000054, which states that at the close of business on January 18, 2001 the Common Stock would be delisted from the Nasdaq Stock Market. Retrospectively corroborated by SEC Form 10-K filed 2002-03-29, IPET Holdings, Inc., CIK 1100683, accession 0000891618-02-001559, Item 5: \"From February 11, 2000, the date of our initial public offering, to January 18, 2001, the date of our Nasdaq Stock Market delisting, our common stock was traded on the Nasdaq Stock Market under the symbol IPET.\"",
+              "note": "No Form 25 exists for this event and none should be looked for. Nasdaq was not a registered national securities exchange until 2006; this issuer registered under Section 12(g) (Form 8-A12G), and Rule 12d2-2 / Form 25 applies to exchange-listed securities. The 8-K and 10-K are the primary evidence, not a fallback. Removal from listing ends a listing and nothing else: the same 10-K states the security continued to be quoted over the counter afterwards."
+            },
+            {
+              "scope": "security_class",
+              "fact": "At the close of business on 2001-01-18 the Company closed its stock transfer books and discontinued recording transfers of Common Stock.",
+              "date": "2001-01-18",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2001-01-17, Pets.com, Inc., CIK 1100683, accession 0000891618-01-000054, which states that at the close of business on January 18, 2001 the Company would close its stock transfer books and discontinue recording transfers of Common Stock. Retrospectively corroborated by SEC Form 10-K filed 2002-03-29, IPET Holdings, Inc., CIK 1100683, accession 0000891618-02-001559.",
+              "note": "This constrains transfer ON THE COMPANY'S BOOKS. It is NOT extinguishment of the class -- the same 10-K states the stock continued to trade over the counter under the symbol IPETZ after this date -- and it is not a delisting, though it shares a date with one."
+            },
+            {
+              "scope": "sec_reporting",
+              "fact": "Form 15-12G filed 2005-06-03 certifying termination of registration of the Common class under Section 12(g), Commission File No. 000-29387, with approximately 251 holders of record. The form relies expressly on Rule 12g-4(a)(1)(i), the fewer-than-300-holders route.",
+              "date": "2005-06-03",
+              "date_source": "header_field",
+              "citation": "SEC Form 15-12G, IPET HOLDINGS INC, CIK 1100683, accession 0000950134-05-011306; EDGAR header FILED AS OF DATE 20050603",
+              "note": "The relied-upon rule is established from the raw HTML, not inferred from context: the Rule 12g-4(a)(1)(i) box is Wingdings &#253; (checked ballot box) while every visible alternative is Wingdings &#168; (empty box). This is primary evidence of the Section 12(g) registration-termination route applicable to fewer than 300 holders of record.\n\nDATES ARE KEPT SEPARATE AND NONE IS TREATED AS THE LEGAL TERMINATION DATE. Filing date = 2005-06-03 (EDGAR header FILED AS OF DATE 20050603). The EDGAR submission metadata also carries EFFECTIVENESS DATE 20050603; that is EDGAR's own header field and is NOT equated with the legal effective date of Section 12(g) termination. Rule 12g-4 provides that termination takes effect 90 days after certification, or such shorter period as the Commission may determine, so the arithmetic date 2005-09-01 is derivable but conditional and is deliberately NOT recorded anywhere in this record. Duty to file is suspended immediately on filing; termination of registration is the later, separate event. The exact legal termination date remains unestablished from the issuer evidence consulted.\n\nSOURCE-DOCUMENT ANOMALY, RECORDED AND NOT RESOLVED: the signature block of this document reads \"Beyond.com Corporation has caused this certification/notice to be signed...\". Every other primary field identifies this registrant -- EDGAR submission metadata gives IPET HOLDINGS INC and CIK 1100683, the accession belongs to CIK 1100683, the Commission File No. is 000-29387, the class is Common, and the signatory Richard G. Couch is independently documented as IPET Holdings' sole director and CEO during liquidation. No explanation for the discrepancy is offered or invented, no Beyond.com issuer is mapped to this control, and the anomaly does not alter issuer identity."
             }
           ]
         }

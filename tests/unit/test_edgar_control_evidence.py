@@ -463,7 +463,7 @@ def test_shipped_ipet_identity() -> None:
     assert ipet.cik == 1100683
     assert ipet.ticker == "IPET"
     assert ipet.status is MappingStatus.MANUAL_VERIFIED
-    assert ipet.verified_on == dt.date(2026, 8, 14)
+    assert ipet.verified_on == dt.date(2026, 8, 15)
 
 
 def test_shipped_ipet_promotion_is_not_a_name_match() -> None:
@@ -487,29 +487,47 @@ def test_shipped_ipet_wind_down_is_not_corporate_death_or_delisting() -> None:
     """The single most important negative assertion in this record.
 
     An operational wind-down is not dissolution, not bankruptcy, not delisting
-    and not the end of ticker validity. Each would need its own filing.
+    and not the end of ticker validity. Each needs its own filing -- and each now
+    has one, filed later and dated differently, which is the point: the delisting
+    is 2001-01-18, not 2000-11-07, and nothing back-dated it.
     """
     ipet = _shipped_ipet()
-    # No exchange-listing fact was recorded, because none was evidenced.
-    assert all(f.scope is not LifecycleScope.EXCHANGE_LISTING for f in ipet.lifecycle_facts)
-    # And the wind-down date did not leak into generic ticker validity.
-    assert ipet.valid_to is None
     wind_down = next(f for f in ipet.lifecycle_facts if f.date == dt.date(2000, 11, 7))
     note = wind_down.note.lower()
     for excluded in ("dissolution", "bankruptcy", "delisting", "extinguishment", "valid_to"):
         assert excluded in note
+    # The wind-down date leaked into nothing: not ticker validity, not the
+    # delisting fact, not the dissolution fact.
+    assert ipet.valid_from != dt.date(2000, 11, 7)
+    assert ipet.valid_to != dt.date(2000, 11, 7)
+    assert all(
+        f.date != dt.date(2000, 11, 7)
+        for f in ipet.lifecycle_facts
+        if f.scope is not LifecycleScope.ISSUER
+    )
 
 
-def test_shipped_ipet_invents_no_validity_dates() -> None:
-    """Approval for quotation is not the date ticker validity began."""
+def test_shipped_ipet_validity_dates_rest_on_symbol_evidence_not_the_delisting() -> None:
+    """Both ends were null until a filing named the symbol and its dates.
+
+    The prospectus proved the symbol was *approved for quotation*, which is not
+    the date trading began, so valid_from stayed null through the first pass. The
+    10-K states the trading period outright. valid_to coincides with the delisting
+    but does not rest on it -- the same sentence names IPET through that date and
+    IPETZ after it, which is a claim about the symbol.
+    """
     ipet = _shipped_ipet()
-    assert ipet.valid_from is None
-    assert ipet.valid_to is None
+    assert ipet.valid_from == dt.date(2000, 2, 11)
+    assert ipet.valid_to == dt.date(2001, 1, 18)
+    assert "0000891618-02-001559" in ipet.citation
+    assert "under the symbol IPET" in ipet.citation
 
 
-def test_shipped_ipet_records_exactly_one_lifecycle_fact() -> None:
-    """Only what was evidenced. No delisting date was consulted, so none exists."""
-    assert len(_shipped_ipet().lifecycle_facts) == 1
+def test_shipped_ipet_records_seven_lifecycle_facts() -> None:
+    """One per evidenced event, and no event without a filing behind it."""
+    facts = _shipped_ipet().lifecycle_facts
+    assert len(facts) == 7
+    assert [f.date for f in facts] == sorted(f.date for f in facts)
 
 
 # ---------------------------------------------------------------------------
@@ -654,3 +672,145 @@ def test_the_shipped_gm_record_models_the_identity_break() -> None:
     gm = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["GM"]
     assert gm.identity_break is True
     assert {m.issuer_label for m in gm.mappings} == {"old_gm", "new_gm"}
+
+
+# ---------------------------------------------------------------------------
+# the finalized IPET pilot -- the seven things that must not silently change
+#
+# Each of these encodes a distinction that was argued for and could be lost by a
+# plausible-looking future edit. A rename quietly becoming an identity break, a
+# ticker window quietly becoming an issuer lifespan, a second quotation symbol
+# quietly merging into the first, a header date quietly becoming a legal date --
+# every one of those reads as tidying up.
+# ---------------------------------------------------------------------------
+
+
+def test_ipet_rename_does_not_create_an_identity_break() -> None:
+    """Pets.com -> IPET Holdings is one registrant, so one mapping."""
+    control = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["IPET"]
+    assert control.identity_break is False
+    assert len(control.mappings) == 1
+    assert control.mappings[0].cik == 1100683
+
+    rename = next(f for f in control.mappings[0].lifecycle_facts if "name change" in f.fact.lower())
+    assert rename.scope is LifecycleScope.ISSUER
+    assert rename.date == dt.date(2001, 1, 16)
+    assert "no merger, reorganization or successor issuer" in rename.fact.lower()
+
+
+def test_a_second_ipet_mapping_on_the_same_cik_is_refused(tmp_path: Path) -> None:
+    """The model blocks the wrong representation rather than trusting judgement.
+
+    Representing the IPETZ quotation symbol as a second issuer is the mistake
+    this record exists to avoid, and it is unavailable: two mappings sharing a
+    CIK is a load error, so it cannot be done by accident or by conviction.
+    """
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": "IPET",
+                "expected_company": "Pets.com, Inc.",
+                "identity_break": True,
+                "mappings": [
+                    _verified_mapping(issuer_label="primary", cik=1100683, ticker="IPET"),
+                    _verified_mapping(issuer_label="otc", cik=1100683, ticker="IPETZ"),
+                ],
+            }
+        ],
+    )
+    with pytest.raises(ConfigError, match="the same cik appears on two issuers"):
+        load_control_evidence(path)
+
+
+def test_ipet_ticker_window_is_not_issuer_existence() -> None:
+    """valid_to is 2001-01-18 and the issuer demonstrably outlived it."""
+    ipet = _shipped_ipet()
+    assert ipet.valid_to == dt.date(2001, 1, 18)
+
+    later = [f for f in ipet.lifecycle_facts if f.date > ipet.valid_to]
+    assert later, "the record must show the issuer alive after the ticker window closed"
+    assert any(f.scope is LifecycleScope.SEC_REPORTING for f in later)
+
+    dissolution = next(
+        f for f in ipet.lifecycle_facts if "certificate of dissolution" in f.fact.lower()
+    )
+    assert "NOT CORPORATE EXTINCTION" in dissolution.note
+    notes = ipet.scope_notes.lower()
+    assert "not issuer existence" in notes
+    assert "not security-class extinction" in notes
+
+
+def test_ipet_and_ipetz_are_never_merged_into_one_ticker() -> None:
+    """A successor quotation symbol is not a second identity, and not a listing."""
+    ipet = _shipped_ipet()
+    assert ipet.ticker == "IPET"
+    assert "IPETZ" in ipet.scope_notes
+    # IPETZ appears nowhere as a dated fact, because no date for it is evidenced.
+    assert all("IPETZ" not in f.fact for f in ipet.lifecycle_facts)
+    # And is never scoped as an exchange listing: OTC services quote, not list.
+    listings = [f for f in ipet.lifecycle_facts if f.scope is LifecycleScope.EXCHANGE_LISTING]
+    assert all("IPETZ" not in f.fact and "IPETZ" not in f.note for f in listings)
+    assert "not scoped exchange_listing" in ipet.scope_notes.lower()
+
+
+def test_ipet_form_15_identifies_only_rule_12g_4_a_1_i() -> None:
+    """The checked box is decoded from the raw Wingdings, not inferred."""
+    form15 = next(
+        f for f in _shipped_ipet().lifecycle_facts if f.scope is LifecycleScope.SEC_REPORTING
+    )
+    assert form15.date == dt.date(2005, 6, 3)
+    assert "0000950134-05-011306" in form15.citation
+    assert "12g-4(a)(1)(i)" in form15.fact
+    assert "&#253;" in form15.note and "checked" in form15.note
+    assert "&#168;" in form15.note and "empty" in form15.note
+    assert "251 holders of record" in form15.fact
+    assert "000-29387" in form15.fact
+    # No other deregistration rule is claimed to be relied upon.
+    for other in ("12h-3", "12g-4(a)(1)(ii)", "15d-6"):
+        assert other not in form15.fact
+
+
+def test_ipet_beyond_com_anomaly_is_retained_and_changes_no_identity() -> None:
+    """An unexplained sentence is recorded as unexplained, not resolved away."""
+    control = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["IPET"]
+    form15 = next(
+        f for f in control.mappings[0].lifecycle_facts if f.scope is LifecycleScope.SEC_REPORTING
+    )
+    assert "Beyond.com Corporation has caused this certification/notice to be signed" in form15.note
+    assert "RECORDED AND NOT RESOLVED" in form15.note
+    assert "No explanation for the discrepancy is offered or invented" in form15.note
+    # The competing primary fields are cited, so a reader can weigh it.
+    for corroborant in ("IPET HOLDINGS INC", "1100683", "000-29387", "Richard G. Couch"):
+        assert corroborant in form15.note
+    # And identity is untouched.
+    assert len(control.mappings) == 1
+    assert control.identity_break is False
+    assert control.mappings[0].cik == 1100683
+
+
+def test_ipet_sgml_name_change_date_never_overrides_the_filing_body() -> None:
+    """19991208 predates the IPO. It is preserved, and it is not used."""
+    ipet = _shipped_ipet()
+    rename = next(f for f in ipet.lifecycle_facts if "name change" in f.fact.lower())
+    assert rename.date == dt.date(2001, 1, 16)
+    assert "19991208" in rename.note
+    assert "preserved as unexplained metadata" in rename.note
+    # The bad value is nowhere a date, and no cause was invented for it.
+    assert all(f.date != dt.date(1999, 12, 8) for f in ipet.lifecycle_facts)
+    assert ipet.valid_from != dt.date(1999, 12, 8)
+
+
+def test_ipet_form_15_dates_never_become_a_legal_termination_date() -> None:
+    """Filing date, header field and the 90-day rule stay three separate things."""
+    form15 = next(
+        f for f in _shipped_ipet().lifecycle_facts if f.scope is LifecycleScope.SEC_REPORTING
+    )
+    assert form15.date_source is FactDateSource.HEADER_FIELD
+    assert "EFFECTIVENESS DATE 20050603" in form15.note
+    assert "is NOT equated with the legal effective date" in form15.note
+    assert "remains unestablished" in form15.note
+    # The derivable date is named as derivable and refused, never recorded.
+    assert "2005-09-01 is derivable but conditional" in form15.note
+    everything = "\n".join([f.fact + f.citation for f in _shipped_ipet().lifecycle_facts])
+    assert "2005-09-01" not in everything

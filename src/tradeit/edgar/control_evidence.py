@@ -57,6 +57,40 @@ __all__ = [
 #: lifecycle date is precisely the failure class this project keeps guarding.
 SCHEMA_VERSION = 2
 
+# Why there is no version 3 yet, and what would justify one.
+#
+# A nullable ``LifecycleFact.date`` was proposed during the IPET pilot, for one
+# genuinely undated fact: the 10-K states the common stock continued to trade
+# over the counter under the symbol IPETZ after the 2001-01-18 delisting, and
+# gives no start or end date. A dependency audit found the change technically
+# safe -- ``date`` has three consumers (the parse guard here, ``summary()``'s
+# ``isoformat()``, and one diagnostic f-string), nothing sorts, groups or orders
+# facts by date, and ``control_evidence`` is imported by ``cli_edgar`` alone, so
+# a null could not reach any denominator count.
+#
+# It was still declined, for three reasons worth keeping:
+#
+# 1. **One instance is not a demonstration.** Two of the three originally
+#    proposed undated facts turned out to be metadata and a legal qualification
+#    rather than lifecycle events, and belonged in notes. The pressure for the
+#    schema change was mostly a modelling error, not a gap.
+# 2. **The damage would land on a consumer that does not exist yet.**
+#    Point-in-time logic ("what was true as of D") naturally filters
+#    ``fact.date <= D``, and a null silently drops out of every window -- no
+#    error, no diagnostic. That is the silent-omission failure class this
+#    project has repeatedly dug out of the parser.
+# 3. **A nullable scalar is probably the wrong shape.** The IPETZ fact is an
+#    interval with unknown bounds, not a point with no date: it is bounded below
+#    by the delisting. ``earliest``/``latest``, or an explicit date certainty,
+#    would carry more truth than a null -- and designing that on a single example
+#    would be designing it blind.
+#
+# Revisit when two further controls produce a genuinely undated lifecycle fact,
+# or when point-in-time research logic is specified, whichever comes first.
+# Until then an undated fact is preserved in ``scope_notes`` with its citation,
+# and the cost -- that it is readable but not queryable by scope -- is stated in
+# the note itself rather than left for a reader to discover.
+
 DEFAULT_EVIDENCE_PATH = (
     Path(__file__).resolve().parents[3] / "docs" / "research" / "control_identity_evidence.json"
 )
