@@ -159,7 +159,8 @@ def cmd_audit_paths(args: argparse.Namespace) -> int:
         print(f"no form.idx files under {root}")
         return 2
 
-    total = parsed_ok = path_match = 0
+    raw_occurrences = raw_distinct = parsed_ok = path_match = 0
+    duplicate_rawpaths = 0
     path_mismatch: list[tuple[str, str, str, str]] = []
     accession_mismatch: list[tuple[str, str, str]] = []
     by_quarter: dict[str, int] = {}
@@ -170,14 +171,21 @@ def cmd_audit_paths(args: argparse.Namespace) -> int:
         text = path_file.read_text(encoding="latin-1")
         parsed = parse_index(text, quarter_label=label, strict=False)
 
-        # Re-scan the raw lines and pair them to parsed rows by accession-free
-        # identity: the raw path itself.
+        # Occurrences AND distinct values, because they are different numbers
+        # and comparing a de-duplicated set against a row list manufactures a
+        # shortfall that looks like missing coverage. One File Name can appear
+        # on more than one index line -- a filing listed under two form types,
+        # for instance -- and that is a property of the index, not a defect.
         raw_paths: set[str] = set()
+        occurrences = 0
         for raw in text.splitlines():
             found = _RAW_PATH.search(raw)
             if found:
+                occurrences += 1
                 raw_paths.add(found.group(1).strip())
-        total += len(raw_paths)
+        raw_occurrences += occurrences
+        raw_distinct += len(raw_paths)
+        duplicate_rawpaths += occurrences - len(raw_paths)
         parsed_ok += len(parsed.rows)
 
         for row in parsed.rows:
@@ -194,12 +202,14 @@ def cmd_audit_paths(args: argparse.Namespace) -> int:
             if row.accession != expected and len(accession_mismatch) < 20:
                 accession_mismatch.append((label, row.accession, expected))
 
-    print(f"index files scanned      : {len(files)}")
-    print(f"raw File Name values     : {total:,}")
-    print(f"rows parsed              : {parsed_ok:,}")
+    print(f"index files scanned       : {len(files)}")
+    print(f"raw File Name OCCURRENCES : {raw_occurrences:,}   <- compare this to rows parsed")
+    print(f"raw File Name DISTINCT    : {raw_distinct:,}")
+    print(f"  duplicate File Names    : {duplicate_rawpaths:,} (same path on >1 index line)")
+    print(f"rows parsed               : {parsed_ok:,}")
     print(f"paths matching raw exactly: {path_match:,}")
-    print(f"PATH MISMATCHES          : {parsed_ok - path_match:,}")
-    print(f"ACCESSION MISMATCHES     : {len(accession_mismatch):,} (sampled, cap 20)")
+    print(f"PATH MISMATCHES           : {parsed_ok - path_match:,}")
+    print(f"ACCESSION MISMATCHES      : {len(accession_mismatch):,} (sampled, cap 20)")
 
     if by_quarter:
         print("\npath mismatches by quarter")
