@@ -167,6 +167,11 @@ class FullIndexRow:
     path: str
     accession: str
     index_quarter: str
+    #: 1-based line number of the source line in the index file. Provenance
+    #: only -- nothing in classification reads it -- but it is what lets an
+    #: external auditor compare a row against the exact line it came from
+    #: instead of guessing at an alignment.
+    source_line: int = 0
 
 
 _SEPARATOR = re.compile(r"^-{5,}")
@@ -331,7 +336,7 @@ def _assert_path_verbatim(path: str, line: str) -> None:
 
 
 def _parse_fixed_row(
-    line: str, header: IndexHeader, quarter_label: str
+    line: str, header: IndexHeader, quarter_label: str, source_line: int
 ) -> tuple[FullIndexRow | None, SkipReason | None, FreeTextSplit | None]:
     """Parse a fixed-width row **right-anchored**, which is the robust direction.
 
@@ -395,6 +400,7 @@ def _parse_fixed_row(
             path=path,
             accession=accession_from_path(path),
             index_quarter=quarter_label,
+            source_line=source_line,
         ),
         None,
         rule,
@@ -402,7 +408,7 @@ def _parse_fixed_row(
 
 
 def _parse_pipe_row(
-    line: str, header: IndexHeader, quarter_label: str
+    line: str, header: IndexHeader, quarter_label: str, source_line: int
 ) -> tuple[FullIndexRow | None, SkipReason | None]:
     parts = [p.strip() for p in line.split("|")]
     if len(parts) < len(header.fields):
@@ -429,6 +435,7 @@ def _parse_pipe_row(
             path=path,
             accession=accession_from_path(path),
             index_quarter=quarter_label,
+            source_line=source_line,
         ),
         None,
     )
@@ -497,7 +504,7 @@ def parse_index(text: str, *, quarter_label: str, strict: bool = True) -> Parsed
     seen_separator = False
     parsed = ParsedIndex(rows=[], quarter_label=quarter_label, header=None)
 
-    for raw in text.splitlines():
+    for source_line, raw in enumerate(text.splitlines(), start=1):
         line = raw.rstrip("\r\n")
         if not line.strip():
             continue
@@ -521,10 +528,10 @@ def parse_index(text: str, *, quarter_label: str, strict: bool = True) -> Parsed
             continue
 
         if header.layout is IndexLayout.PIPE:
-            row, reason = _parse_pipe_row(line, header, quarter_label)
+            row, reason = _parse_pipe_row(line, header, quarter_label, source_line)
             rule = None
         else:
-            row, reason, rule = _parse_fixed_row(line, header, quarter_label)
+            row, reason, rule = _parse_fixed_row(line, header, quarter_label, source_line)
 
         if row is None:
             parsed.record_skip(reason or SkipReason.OTHER, line)

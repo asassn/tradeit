@@ -8,7 +8,7 @@ Three commands, in the order an operator uses them::
     tradeit edgar controls --diagnose          # control identity + citations
     tradeit edgar verify-control AAPL ...      # gather CIK candidates for one control
     tradeit edgar cik-filings 1100683 ...      # every filing for one CIK, chronologically
-    tradeit edgar audit-paths --index-root DIR # corpus-wide raw-vs-parsed path audit
+    tradeit edgar audit-paths --index-root DIR # corpus-wide raw-vs-parsed field audit
 
 ``fetch-recipe`` prints shell rather than running it. Downloading ~130 quarterly
 index files is a long, rate-limited, network-dependent operation that belongs in
@@ -22,6 +22,7 @@ import argparse
 import datetime as dt
 import json
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -139,19 +140,222 @@ def cmd_inspect_index(args: argparse.Namespace) -> int:
     return 0
 
 
-#: Independent of the fixed-width/rsplit logic on purpose. Comparing the parser
-#: against itself proves nothing; this extracts the File Name field by a
-#: different rule so the two can genuinely disagree.
+# ---------------------------------------------------------------------------
+# The independent raw extractor
+#
+# Everything below deliberately duplicates work the production parser already
+# does, by a *different* method, because an audit that calls the parser is an
+# audit of nothing. The production fixed-width reader peels the row from the
+# right with ``rsplit(maxsplit=3)`` and separates the two free-text fields using
+# the header's column offsets. The extractor here never looks at the header, never
+# splits on token counts, and instead matches the row's *shape*: padding runs of
+# two or more spaces delimit the free-text fields, and the CIK, date and File Name
+# are each pinned by their own literal form.
+#
+# When the shape does not match, the row is reported as an extraction failure. It
+# is never guessed at, and it is never quietly counted as agreeing with the
+# parser -- an auditor that cannot read a row has not verified that row.
+# ---------------------------------------------------------------------------
+
+#: File Name occurrences, used for the duplicate accounting only.
 _RAW_PATH = re.compile(r"(edgar/data/\S+)", re.IGNORECASE)
+
+#: A dashed rule closes the preamble. Re-derived here rather than imported.
+_RAW_SEPARATOR = re.compile(r"^\s*-{5,}")
+
+#: Shape-driven fixed-width extraction. ``\s{2,}`` is the column padding, which
+#: is why ``SC 13D`` and ``AMERICAN TELEPHONE & TELEGRAPH CO`` survive: a single
+#: space inside a field is never a delimiter. Both free-text groups are lazy, so
+#: a name containing a double space still resolves -- the tail must be digits,
+#: then a date, then a path, and no interior point of a name satisfies that.
+_RAW_FIXED_ROW = re.compile(
+    r"^(?P<form>\S.*?)\s{2,}"
+    r"(?P<name>\S.*?)\s{2,}"
+    r"(?P<cik>\d{1,10})\s+"
+    r"(?P<date>\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{8})\s+"
+    r"(?P<path>edgar/data/\S+?)\s*$",
+    re.IGNORECASE,
+)
+
+#: Second-tier extraction for the historical rows the shape rule cannot read: a
+#: company name wide enough to consume its column's padding runs straight into
+#: the CIK, leaving ``...GENERAL L P5011`` as one token with no delimiter to find.
+#: The CIK is then taken from the path's own ``edgar/data/<cik>/`` and required to
+#: be the trailing digits of that token. This is corroboration, not independent
+#: extraction -- the production parser recovers those rows the same way -- so rows
+#: read this way are counted and reported under their own heading and never
+#: folded into the independently-verified population.
+_RAW_GLUED_ROW = re.compile(
+    r"^(?P<form>\S.*?)\s{2,}"
+    r"(?P<tail>\S.*?)\s+"
+    r"(?P<date>\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{8})\s+"
+    r"(?P<path>edgar/data/\S+?)\s*$",
+    re.IGNORECASE,
+)
+
+_RAW_PATH_CIK = re.compile(r"edgar/data/(\d+)/", re.IGNORECASE)
+
+_RAW_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%Y%m%d")
+
+#: strptime is width-lenient -- ``%Y%m%d`` happily reads the six-digit CIK
+#: ``320193`` as the year 3201 -- and in a pipe row the auditor identifies fields
+#: by shape, so a CIK that can pass for a date would steal the date's identity.
+#: The shape is therefore pinned before any coercion is attempted.
+_RAW_DATE_SHAPE = re.compile(r"^(?:\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{8})$")
+
+
+@dataclass(frozen=True, slots=True)
+class _RawRow:
+    """One index line as read by the auditor, with no help from the parser."""
+
+    form_type: str
+    company_name: str
+    cik: int
+    filed_at: dt.date
+    path: str
+    line: str
+    #: ``True`` when the CIK came from the path rather than from its own column,
+    #: which makes the CIK comparison corroborative rather than independent.
+    cik_from_path: bool = False
+
+
+def _raw_date(text: str) -> dt.date | None:
+    if not _RAW_DATE_SHAPE.match(text):
+        return None
+    for fmt in _RAW_DATE_FORMATS:
+        try:
+            return dt.datetime.strptime(text, fmt).replace(tzinfo=dt.UTC).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _raw_extract_pipe(line: str) -> _RawRow | None:
+    """Pipe rows by field *shape*, not by header order.
+
+    The path, date and CIK identify themselves. Whichever of the two remaining
+    fields is the form type follows from where the CIK sits: CIK first is the
+    ``master.idx`` order, CIK third is the ``form.idx`` order. Any other
+    arrangement is refused rather than assumed.
+    """
+    parts = [p.strip() for p in line.split("|")]
+    if len(parts) != 5:
+        return None
+    path_at = next((i for i, p in enumerate(parts) if "edgar/data/" in p.lower()), None)
+    date_at = next((i for i, p in enumerate(parts) if _raw_date(p) is not None), None)
+    cik_at = next((i for i, p in enumerate(parts) if p.isdigit() and i != date_at), None)
+    if path_at is None or date_at is None or cik_at is None:
+        return None
+    if cik_at == 0:
+        form_at, name_at = 2, 1
+    elif cik_at == 2:
+        form_at, name_at = 0, 1
+    else:
+        return None
+    filed_at = _raw_date(parts[date_at])
+    if filed_at is None:
+        return None
+    return _RawRow(
+        form_type=parts[form_at],
+        company_name=parts[name_at],
+        cik=int(parts[cik_at]),
+        filed_at=filed_at,
+        path=parts[path_at],
+        line=line,
+    )
+
+
+def _raw_extract_glued(line: str) -> _RawRow | None:
+    found = _RAW_GLUED_ROW.match(line)
+    if found is None:
+        return None
+    path = found.group("path").strip()
+    in_path = _RAW_PATH_CIK.search(path)
+    if in_path is None:
+        return None
+    path_cik = in_path.group(1)
+    tail = found.group("tail")
+    if not tail.endswith(path_cik):
+        return None
+    filed_at = _raw_date(found.group("date"))
+    if filed_at is None:
+        return None
+    return _RawRow(
+        form_type=found.group("form").strip(),
+        company_name=tail[: -len(path_cik)].strip(),
+        cik=int(path_cik),
+        filed_at=filed_at,
+        path=path,
+        line=line,
+        cik_from_path=True,
+    )
+
+
+def _raw_extract(line: str) -> _RawRow | None:
+    if "|" in line:
+        return _raw_extract_pipe(line)
+    stripped = line.rstrip()
+    found = _RAW_FIXED_ROW.match(stripped)
+    if found is None:
+        return _raw_extract_glued(stripped)
+    filed_at = _raw_date(found.group("date"))
+    if filed_at is None:
+        return None
+    return _RawRow(
+        form_type=found.group("form").strip(),
+        company_name=found.group("name").strip(),
+        cik=int(found.group("cik")),
+        filed_at=filed_at,
+        path=found.group("path").strip(),
+        line=line,
+    )
+
+
+@dataclass(slots=True)
+class _AuditTotals:
+    """Every number the gate is decided on, so none of them is recomputed twice."""
+
+    files: int = 0
+    raw_candidates: int = 0
+    raw_extracted: int = 0
+    raw_corroborated: int = 0
+    raw_failures: int = 0
+    parsed_rows: int = 0
+    compared: int = 0
+    unverifiable: int = 0
+    parser_skipped: int = 0
+    raw_occurrences: int = 0
+    raw_distinct: int = 0
+    duplicate_rawpaths: int = 0
+    form_case_only: int = 0
+    name_mismatch: int = 0
+
+    mismatches: dict[str, int] = field(default_factory=dict)
+
+    def bump(self, category: str) -> None:
+        self.mismatches[category] = self.mismatches.get(category, 0) + 1
+
+
+_MISMATCH_CATEGORIES = ("form_type", "cik", "filed_at", "path", "accession")
+
+#: The three fields ``classify_corpus`` actually consumes. A mismatch in any of
+#: them is a denominator problem, not a provenance problem.
+_CLASSIFICATION_INPUTS = ("cik", "form_type", "filed_at")
 
 
 def cmd_audit_paths(args: argparse.Namespace) -> int:
-    """Compare every parsed row's path against the raw line, corpus-wide.
+    """Compare all five parsed fields against an independent read of the raw line.
 
-    Blast-radius instrument for a reported path/accession corruption. It
-    re-reads each index line, extracts the File Name by an **independent**
-    regex, and compares field by field. Mismatches are reported, never repaired
-    and never skipped -- a repair here would destroy the evidence being sought.
+    Blast-radius instrument for a reported path/accession corruption, widened to
+    the fields that decide classification. For every parsed row it re-reads the
+    exact source line -- ``FullIndexRow.source_line`` makes that alignment exact
+    rather than inferred -- extracts form type, CIK, date and File Name by the
+    independent rules above, and compares field by field.
+
+    Mismatches are reported, never repaired and never skipped: a repair here
+    destroys the evidence being sought. Lines the auditor cannot read are counted
+    as extraction failures and excluded from the verified population, because
+    "could not check" and "checked and agreed" are different facts.
     """
     root = Path(args.index_root)
     files = sorted(root.glob("*/QTR*/form.idx"))
@@ -159,103 +363,238 @@ def cmd_audit_paths(args: argparse.Namespace) -> int:
         print(f"no form.idx files under {root}")
         return 2
 
-    raw_occurrences = raw_distinct = parsed_ok = path_match = 0
-    duplicate_rawpaths = 0
-    path_mismatch: list[tuple[str, str, str, str]] = []
-    accession_mismatch: list[tuple[str, str, str]] = []
-    by_quarter: dict[str, int] = {}
+    totals = _AuditTotals(files=len(files))
+    by_quarter: dict[str, dict[str, int]] = {}
     dupes_by_quarter: dict[str, int] = {}
     dupe_examples: list[tuple[str, str, list[str]]] = []
-    field_damage = {"cik": 0, "form_type": 0, "filed_at": 0, "company_name": 0}
+    samples: dict[str, list[tuple[str, _RawRow, FullIndexRow]]] = {}
+    failure_samples: list[tuple[str, int, str]] = []
+
+    def note(label: str, category: str) -> None:
+        by_quarter.setdefault(label, {})[category] = (
+            by_quarter.setdefault(label, {}).get(category, 0) + 1
+        )
 
     for path_file in files:
         label = f"{path_file.parent.parent.name}-{path_file.parent.name}"
         text = path_file.read_text(encoding="latin-1")
         parsed = parse_index(text, quarter_label=label, strict=False)
+        totals.parsed_rows += len(parsed.rows)
 
-        # Occurrences AND distinct values, because they are different numbers
-        # and comparing a de-duplicated set against a row list manufactures a
-        # shortfall that looks like missing coverage. One File Name can appear
-        # on more than one index line -- a filing listed under two form types,
-        # for instance -- and that is a property of the index, not a defect.
+        raw_by_line: dict[int, _RawRow] = {}
         first_line: dict[str, str] = {}
-        occurrences = 0
         repeated: dict[str, list[str]] = {}
-        for raw in text.splitlines():
-            found = _RAW_PATH.search(raw)
+        occurrences = 0
+        seen_separator = False
+
+        for number, raw in enumerate(text.splitlines(), start=1):
+            line = raw.rstrip()
+            if not line.strip():
+                continue
+            if _RAW_SEPARATOR.match(line):
+                seen_separator = True
+                continue
+            if not seen_separator:
+                continue
+
+            totals.raw_candidates += 1
+
+            # Duplicate accounting is deliberately kept on *occurrences*. One
+            # File Name can legitimately appear on more than one index line --
+            # the same document listed under two form types -- and collapsing
+            # those into a set manufactures a shortfall that looks like missing
+            # coverage.
+            found = _RAW_PATH.search(line)
             if found:
                 occurrences += 1
                 value = found.group(1).strip()
                 previous = first_line.get(value)
                 if previous is None:
-                    first_line[value] = raw.rstrip()
+                    first_line[value] = line
                 else:
-                    repeated.setdefault(value, [previous]).append(raw.rstrip())
-        raw_paths = set(first_line)
-        raw_occurrences += occurrences
-        raw_distinct += len(raw_paths)
-        duplicates = occurrences - len(raw_paths)
-        duplicate_rawpaths += duplicates
+                    repeated.setdefault(value, [previous]).append(line)
+
+            extracted = _raw_extract(line)
+            if extracted is None:
+                totals.raw_failures += 1
+                note(label, "raw_extraction_failure")
+                if len(failure_samples) < 20:
+                    failure_samples.append((label, number, line[:180]))
+                continue
+            if extracted.cik_from_path:
+                totals.raw_corroborated += 1
+                note(label, "cik_corroborated_from_path")
+            else:
+                totals.raw_extracted += 1
+            raw_by_line[number] = extracted
+
+        totals.raw_occurrences += occurrences
+        totals.raw_distinct += len(first_line)
+        duplicates = occurrences - len(first_line)
+        totals.duplicate_rawpaths += duplicates
         if duplicates:
             dupes_by_quarter[label] = duplicates
             if len(dupe_examples) < 5 and repeated:
-                name, lines = next(iter(sorted(repeated.items())))
-                dupe_examples.append((label, name, lines[:2]))
-        parsed_ok += len(parsed.rows)
+                name, repeats = next(iter(sorted(repeated.items())))
+                dupe_examples.append((label, name, repeats[:2]))
 
+        matched_lines: set[int] = set()
         for row in parsed.rows:
-            if row.path in raw_paths:
-                path_match += 1
-            else:
-                by_quarter[label] = by_quarter.get(label, 0) + 1
-                if len(path_mismatch) < 20:
-                    near = next(
-                        (p for p in raw_paths if p.endswith(row.path.rsplit("/", 1)[-1])), ""
-                    )
-                    path_mismatch.append((label, str(row.cik), row.path, near))
-            expected = accession_from_path(row.path)
-            if row.accession != expected and len(accession_mismatch) < 20:
-                accession_mismatch.append((label, row.accession, expected))
+            raw_row = raw_by_line.get(row.source_line)
+            if raw_row is None:
+                totals.unverifiable += 1
+                note(label, "parsed_but_unreadable_raw")
+                continue
+            matched_lines.add(row.source_line)
+            totals.compared += 1
 
-    print(f"index files scanned       : {len(files)}")
-    print(f"raw File Name OCCURRENCES : {raw_occurrences:,}   <- compare this to rows parsed")
-    print(f"raw File Name DISTINCT    : {raw_distinct:,}")
-    print(f"  duplicate File Names    : {duplicate_rawpaths:,} (same path on >1 index line)")
-    print(f"rows parsed               : {parsed_ok:,}")
-    print(f"paths matching raw exactly: {path_match:,}")
-    print(f"PATH MISMATCHES           : {parsed_ok - path_match:,}")
-    print(f"ACCESSION MISMATCHES      : {len(accession_mismatch):,} (sampled, cap 20)")
+            differences: list[str] = []
+            # The parser upper-cases form type; that is a documented production
+            # normalisation, so it is compared case-insensitively AND the
+            # case-only difference is counted, rather than being normalised out
+            # of sight.
+            if raw_row.form_type.upper() != row.form_type:
+                differences.append("form_type")
+            elif raw_row.form_type != row.form_type:
+                totals.form_case_only += 1
+            if raw_row.cik != row.cik:
+                differences.append("cik")
+            if raw_row.filed_at != row.filed_at:
+                differences.append("filed_at")
+            if raw_row.path != row.path:
+                differences.append("path")
+            if accession_from_path(raw_row.path) != row.accession:
+                differences.append("accession")
+            if raw_row.company_name != row.company_name:
+                totals.name_mismatch += 1
+
+            for category in differences:
+                totals.bump(category)
+                note(label, category)
+                bucket = samples.setdefault(category, [])
+                if len(bucket) < 5:
+                    bucket.append((label, raw_row, row))
+
+        skipped = len(raw_by_line) - len(matched_lines)
+        if skipped:
+            totals.parser_skipped += skipped
+            note(label, "raw_read_but_parser_skipped")
+
+    return _report_audit(
+        totals, by_quarter, dupes_by_quarter, dupe_examples, samples, failure_samples
+    )
+
+
+def _report_audit(
+    totals: _AuditTotals,
+    by_quarter: dict[str, dict[str, int]],
+    dupes_by_quarter: dict[str, int],
+    dupe_examples: list[tuple[str, str, list[str]]],
+    samples: dict[str, list[tuple[str, _RawRow, FullIndexRow]]],
+    failure_samples: list[tuple[str, int, str]],
+) -> int:
+    print(f"index files scanned            : {totals.files}")
+    print(f"raw candidate rows            : {totals.raw_candidates:,}")
+    print(f"raw rows independently read   : {totals.raw_extracted:,}")
+    print(
+        f"  + CIK corroborated by path  : {totals.raw_corroborated:,} (name adjoins CIK, see note)"
+    )
+    print(f"raw-extraction FAILURES       : {totals.raw_failures:,}")
+    print(f"rows parsed                   : {totals.parsed_rows:,}")
+    print(f"rows compared field-by-field  : {totals.compared:,}")
+    print(f"  parsed, raw unreadable      : {totals.unverifiable:,} (not verified either way)")
+    print(f"  raw read, parser skipped    : {totals.parser_skipped:,}")
+    print()
+    print(f"FORM mismatches               : {totals.mismatches.get('form_type', 0):,}")
+    print(f"CIK mismatches                : {totals.mismatches.get('cik', 0):,}")
+    print(f"DATE mismatches               : {totals.mismatches.get('filed_at', 0):,}")
+    print(f"PATH mismatches               : {totals.mismatches.get('path', 0):,}")
+    print(f"ACCESSION mismatches          : {totals.mismatches.get('accession', 0):,}")
+    print()
+    print(f"raw File Name OCCURRENCES     : {totals.raw_occurrences:,}")
+    print(f"raw File Name DISTINCT        : {totals.raw_distinct:,}")
+    print(f"  duplicate File Names        : {totals.duplicate_rawpaths:,} (same path on >1 line)")
+    print()
+    print(f"form type differing by case   : {totals.form_case_only:,} (parser upper-cases)")
+    print(f"company name differences      : {totals.name_mismatch:,} (informational, not an input)")
+
+    interesting = sorted(by_quarter.items())
+    if interesting:
+        print("\ncounts by quarter, every mismatch, failure and corroboration category")
+        for label, counts in interesting:
+            detail = "  ".join(f"{k}={v:,}" for k, v in sorted(counts.items()))
+            print(f"  {label}  {detail}")
+    else:
+        print("\nNo mismatch or failure in any quarter.")
 
     if dupes_by_quarter:
-        print(
-            f"\nduplicate File Names by quarter "
-            f"({len(dupes_by_quarter)} of {len(files)} quarters affected)"
-        )
+        print(f"\nduplicate File Names by quarter ({len(dupes_by_quarter)} quarters affected)")
         for label, count in sorted(dupes_by_quarter.items()):
             print(f"  {label}  {count:,}")
-        print("\nrepresentative duplicated File Names (the raw lines that share one path)")
-        for label, name, lines in dupe_examples:
+        print("\nrepresentative duplicated File Names (the raw lines sharing one path)")
+        for label, name, repeats in dupe_examples:
             print(f"  {label}  {name}")
-            for raw in lines:
+            for raw in repeats:
                 print(f"    {raw[:160]}")
 
-    if by_quarter:
-        print("\npath mismatches by quarter")
-        for label, count in sorted(by_quarter.items()):
-            print(f"  {label}  {count:,}")
-    if path_mismatch:
-        print("\nrepresentative path mismatches (quarter, cik, parsed, nearest raw)")
-        for label, cik, got, near in path_mismatch:
+    if failure_samples:
+        print("\nrepresentative raw-extraction failures (quarter, line number, raw line)")
+        for label, number, line in failure_samples:
+            print(f"  {label}:{number}\n    {line}")
+
+    for category in _MISMATCH_CATEGORIES:
+        bucket = samples.get(category)
+        if not bucket:
+            continue
+        print(f"\nrepresentative {category.upper()} mismatches (raw line, then parsed object)")
+        for label, raw_row, row in bucket:
+            print(f"  {label}")
+            print(f"    raw line : {raw_row.line[:170]}")
             print(
-                f"  {label}  cik={cik}\n    parsed : {got}\n    raw    : {near or '(none found)'}"
+                f"    raw read : form={raw_row.form_type!r} cik={raw_row.cik} "
+                f"filed={raw_row.filed_at.isoformat()} path={raw_row.path!r}"
             )
-        print(f"\nfields also differing across mismatched rows: {field_damage}")
-    else:
-        print("\nEvery parsed path appears verbatim in its raw index line.")
-    if accession_mismatch:
-        print("\naccession != accession_from_path(path) -- should be impossible")
-        for label, got, expected in accession_mismatch:
-            print(f"  {label}  parsed={got}  from_path={expected}")
+            print(
+                f"    parsed   : form={row.form_type!r} cik={row.cik} "
+                f"filed={row.filed_at.isoformat()} path={row.path!r} "
+                f"accession={row.accession!r} line={row.source_line}"
+            )
+
+    total_mismatches = sum(totals.mismatches.get(c, 0) for c in _MISMATCH_CATEGORIES)
+    classification_damage = sum(totals.mismatches.get(c, 0) for c in _CLASSIFICATION_INPUTS)
+
+    print()
+    if classification_damage:
+        print("STOP. Classification inputs disagree with the raw index:")
+        for category in _CLASSIFICATION_INPUTS:
+            print(f"  {category}: {totals.mismatches.get(category, 0):,}")
+        print("The denominator requires investigation before any further work.")
+        return 1
+    if total_mismatches:
+        print(f"GATE NOT PASSED: {total_mismatches:,} provenance mismatch(es).")
+        print("No classification input is affected, but path/accession provenance is.")
+        return 1
+    if totals.raw_failures or totals.unverifiable:
+        print(
+            f"GATE PARTIAL: every one of the {totals.compared:,} independently readable rows "
+            f"agreed on all five fields, but {totals.raw_failures:,} raw line(s) could not be "
+            f"read by the auditor and {totals.unverifiable:,} parsed row(s) are therefore "
+            "unverified. Those rows are listed above and are neither passed nor failed."
+        )
+        return 1
+    print(
+        f"EDGAR parser/classification-input integrity gate: PASSED. All five fields "
+        f"agreed on every one of the {totals.compared:,} rows, checked against an "
+        f"independent read of each raw line. The denominator does not require regeneration."
+    )
+    if totals.raw_corroborated:
+        print(
+            f"Qualifier, stated rather than buried: on {totals.raw_corroborated:,} of those "
+            "rows the company name adjoins the CIK with no delimiter, so the auditor took "
+            "the CIK from the path's own edgar/data/<cik>/ -- the same corroboration the "
+            "parser uses. Their form type, date, path and accession are independently "
+            "verified; their CIK is corroborated, not independently extracted."
+        )
     return 0
 
 

@@ -365,6 +365,60 @@ over a directory that quietly lacked 2001 QTR3 would report a real dip in
 terminations, which is exactly the kind of artefact that survives into a
 conclusion.
 
+## 7c. The parser-integrity gate, and one anomaly left open
+
+The denominator's classification consumes exactly three fields per row — `cik`,
+`form_type` and `filed_at`. `path` and `accession` are provenance. A reported
+accession discrepancy on a 2002 IPET Holdings 10-K made it necessary to
+establish, rather than assume, that none of the five is corrupt anywhere in the
+corpus.
+
+`tradeit edgar audit-paths --index-root DIR` is that instrument. For every parsed
+row across all 129 quarterly `form.idx` files it re-reads the exact source line —
+`FullIndexRow.source_line` makes the alignment exact rather than inferred — and
+compares form type, CIK, filing date, File Name and accession against an
+**independent** read of that line.
+
+Independent means what it says. The production reader peels a fixed-width row
+from the right with `rsplit(maxsplit=3)` and separates the two free-text fields
+using the header's column offsets. The auditor never looks at the header and
+never splits on token counts; it matches the row's *shape*, with padding runs of
+two or more spaces as the delimiters and the CIK, date and File Name each pinned
+by their own literal form. Pipe rows are read by field shape too, with the
+layout inferred from where the CIK sits rather than from the header's order. An
+audit that called the parser would be an audit of nothing.
+
+Three rules keep the result honest:
+
+- **Nothing is repaired, normalised away or skipped.** A repair destroys the
+  evidence being sought. The parser's one documented normalisation — it
+  upper-cases form type — is compared case-insensitively *and* the case-only
+  difference is counted on its own line.
+- **Rows the auditor cannot read are reported, not passed.** "Could not check"
+  and "checked and agreed" are different facts and are printed as different
+  numbers. A row whose company name adjoins its CIK with no delimiter
+  (`...GENERAL L P5011`) is readable only by taking the CIK from the path, which
+  is the same corroboration the parser uses; those rows are counted under their
+  own heading and the verdict names them rather than absorbing them.
+- **Duplicate File Names stay as occurrences.** One File Name can legitimately
+  appear on more than one index line — the same document listed under two form
+  types. An earlier version of this audit collapsed them into a set and compared
+  that against a row list, which manufactured a shortfall of 1,523 rows that
+  looked like missing coverage and was not.
+
+The verdict is decided in code, not in prose: any mismatch in `cik`, `form_type`
+or `filed_at` prints `STOP` and names the denominator; a `path` or `accession`
+mismatch alone is reported as provenance damage; unreadable rows withhold the
+gate rather than pass it.
+
+**The IPET anomaly itself remains open.** The recorded status is: *unexplained,
+not reproducible on the current or committed implementation; no committed code
+change explains it.* `cmd_cik_filings` is byte-identical across the commit that
+introduced it and the commit that followed, the path-verbatim invariant added in
+between only raises and never assigns, and no earlier implementation of the
+command exists. No cause is claimed. It is written down here so that a future
+recurrence is recognised as a second occurrence rather than a first.
+
 ## 8. Build order
 
 | step | output | cost |

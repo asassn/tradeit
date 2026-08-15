@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from tradeit.cli_edgar import cmd_audit_paths
+from tradeit import cli_edgar
+from tradeit.cli_edgar import _raw_extract, cmd_audit_paths
 from tradeit.edgar.controls import CONTROL_UNIVERSE, unverified
 from tradeit.edgar.denominator import (
     RESEARCH_GRADE_THRESHOLD,
@@ -941,18 +944,131 @@ def test_the_fixture_covers_the_failure_modes_it_claims_to() -> None:
 
 
 # ---------------------------------------------------------------------------
-# audit-paths accounting
+# the independent audit extractor
+#
+# These test the auditor, not the parser. If the auditor were wrong in the same
+# direction as the parser the audit would prove nothing, so each authentic row
+# shape is asserted against values read off the raw line by eye.
 # ---------------------------------------------------------------------------
 
 
-def _write_index(root: Path, quarter: str, rows: list[str]) -> None:
-    target = root / quarter.split("-")[0] / quarter.split("-")[1]
-    target.mkdir(parents=True)
-    header = [
-        "Form Type   Company Name" + " " * 39 + "CIK         Date Filed  File Name",
-        "-" * 100,
+def test_raw_extractor_reads_each_authentic_fixed_width_shape() -> None:
+    cases = [
+        (
+            "10-C        3COM CORP                                     738076    "
+            "1994-08-24  edgar/data/738076/0000738076-94-000018.txt",
+            "10-C",
+            "3COM CORP",
+            738076,
+            dt.date(1994, 8, 24),
+        ),
+        # A form type containing a single space must not be split on it.
+        (
+            "SC 13D      GENERAL MOTORS CORP                           40730     "
+            "1994-07-05  edgar/data/40730/0000040730-94-000003.txt",
+            "SC 13D",
+            "GENERAL MOTORS CORP",
+            40730,
+            dt.date(1994, 7, 5),
+        ),
+        # Nor must a company name containing spaces and an ampersand.
+        (
+            "10-K        AMERICAN TELEPHONE & TELEGRAPH CO             5907      "
+            "1994-09-15  edgar/data/5907/0000005907-94-000012.txt",
+            "10-K",
+            "AMERICAN TELEPHONE & TELEGRAPH CO",
+            5907,
+            dt.date(1994, 9, 15),
+        ),
+        # A name that overflows its column still leaves padding before the CIK.
+        (
+            "8-A12B      A VERY LONG COMPANY NAME THAT OVERFLOWS ITS COLUMN WIDTH  "
+            "1234567   1994-09-30  edgar/data/1234567/0001234567-94-000009.txt",
+            "8-A12B",
+            "A VERY LONG COMPANY NAME THAT OVERFLOWS ITS COLUMN WIDTH",
+            1234567,
+            dt.date(1994, 9, 30),
+        ),
     ]
-    (target / "form.idx").write_text("\n".join(header + rows) + "\n", encoding="latin-1")
+    for line, form, name, cik, filed in cases:
+        raw = _raw_extract(line)
+        assert raw is not None, line
+        assert (raw.form_type, raw.company_name, raw.cik, raw.filed_at) == (form, name, cik, filed)
+        assert raw.cik_from_path is False
+
+
+def test_raw_extractor_flags_the_glued_name_as_corroborated_not_independent() -> None:
+    """'...GENERAL L P5011' has no delimiter, so the CIK comes from the path.
+
+    That is corroboration, not an independent read, and the auditor has to say
+    so -- the production parser recovers the same row the same way, and an audit
+    that quietly counted it as independent agreement would be auditing itself.
+    """
+    raw = _raw_extract(
+        "10-K405     HOLDINGS MACHINES MOTORS & TELEGRAPH GENERAL L P5011      "
+        "1994-09-17  edgar/data/5011/0000005011-94-000123.txt"
+    )
+    assert raw is not None
+    assert raw.cik == 5011
+    assert raw.company_name == "HOLDINGS MACHINES MOTORS & TELEGRAPH GENERAL L P"
+    assert raw.cik_from_path is True
+
+
+def test_raw_extractor_reads_pipe_rows_by_shape_not_by_header() -> None:
+    raw = _raw_extract(
+        "320193|APPLE INC|10-K|1998-12-23|edgar/data/320193/0000320193-98-000110.txt"
+    )
+    assert raw is not None
+    assert (raw.cik, raw.form_type, raw.company_name) == (320193, "10-K", "APPLE INC")
+    assert raw.filed_at == dt.date(1998, 12, 23)
+
+
+def test_raw_extractor_refuses_rather_than_guesses() -> None:
+    for line in (
+        "this row is not a filing at all",
+        "10-K        ACME INC    notacik    1994-09-17  edgar/data/12345/0000012345-94-000001.txt",
+        "10-K        ACME INC    12345    1994-09-17  no/path/here.txt",
+    ):
+        assert _raw_extract(line) is None
+
+
+# ---------------------------------------------------------------------------
+# the corpus audit
+# ---------------------------------------------------------------------------
+
+_AUDIT_HEADER = [
+    "Form Type   Company Name" + " " * 39 + "CIK         Date Filed  File Name",
+    "-" * 100,
+]
+
+
+def _write_index(root: Path, quarter: str, rows: list[str]) -> None:
+    year, qtr = quarter.split("-")
+    target = root / year / qtr
+    target.mkdir(parents=True)
+    (target / "form.idx").write_text("\n".join(_AUDIT_HEADER + rows) + "\n", encoding="latin-1")
+
+
+def test_audit_passes_the_gate_when_all_five_fields_agree(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_index(
+        tmp_path,
+        "2002-QTR1",
+        [
+            "10-K        IPET HOLDINGS INC" + " " * 34 + "1100683     2002-03-29  "
+            "edgar/data/1100683/0000891618-02-001559.txt",
+            "SC 13D      GENERAL MOTORS CORP" + " " * 32 + "40730       2002-02-01  "
+            "edgar/data/40730/0000040730-02-000003.txt",
+        ],
+    )
+    assert cmd_audit_paths(argparse.Namespace(index_root=str(tmp_path))) == 0
+    out = capsys.readouterr().out
+    assert "rows compared field-by-field  : 2" in out
+    for label in ("FORM", "CIK", "DATE", "PATH", "ACCESSION"):
+        assert f"{label} mismatches" in out
+    assert "integrity gate: PASSED" in out
+    assert "does not require regeneration" in out
 
 
 def test_audit_counts_occurrences_not_distinct_paths(
@@ -977,17 +1093,102 @@ def test_audit_counts_occurrences_not_distinct_paths(
             "edgar/data/1234567/0000000000-02-000001.txt",
         ],
     )
-    args = argparse.Namespace(index_root=str(tmp_path))
-    assert cmd_audit_paths(args) == 0
+    assert cmd_audit_paths(argparse.Namespace(index_root=str(tmp_path))) == 0
     out = capsys.readouterr().out
 
-    assert "raw File Name OCCURRENCES : 3" in out
-    assert "raw File Name DISTINCT    : 2" in out
-    assert "duplicate File Names    : 1" in out
-    assert "rows parsed               : 3" in out
-    assert "paths matching raw exactly: 3" in out
-    assert "PATH MISMATCHES           : 0" in out
-    # The duplicate is attributed to a quarter and shown with its raw lines, so
-    # the reason a File Name repeats is visible rather than asserted.
+    assert "raw File Name OCCURRENCES     : 3" in out
+    assert "raw File Name DISTINCT        : 2" in out
+    assert "duplicate File Names        : 1" in out
+    assert "rows parsed                   : 3" in out
+    assert "PATH mismatches               : 0" in out
+    # Attributed to a quarter and shown with its raw lines, so the reason a File
+    # Name repeats is visible rather than asserted.
     assert "2002-QTR1  1" in out
     assert out.count("edgar/data/1100683/0000891618-02-001559.txt") >= 3
+
+
+def test_audit_reports_unreadable_raw_lines_instead_of_passing_them(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ "Could not check" and "checked and agreed" are different facts."""
+    _write_index(
+        tmp_path,
+        "1994-QTR3",
+        [
+            "10-C        3COM CORP" + " " * 42 + "738076      1994-08-24  "
+            "edgar/data/738076/0000738076-94-000018.txt",
+            "a line the auditor cannot read at all",
+        ],
+    )
+    code = cmd_audit_paths(argparse.Namespace(index_root=str(tmp_path)))
+    out = capsys.readouterr().out
+    assert "raw-extraction FAILURES       : 1" in out
+    assert "raw_extraction_failure=1" in out
+    assert "a line the auditor cannot read at all" in out
+    # One unreadable line is enough to withhold the gate.
+    assert code == 1
+    assert "GATE PARTIAL" in out
+
+
+def test_audit_stops_on_a_classification_input_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A corrupted CIK must halt the run and name the denominator, not warn.
+
+    The corruption is injected at the parser boundary because the real parser
+    does not produce one; what is under test is that the audit would catch it.
+    """
+    _write_index(
+        tmp_path,
+        "2002-QTR1",
+        [
+            "10-K        IPET HOLDINGS INC" + " " * 34 + "1100683     2002-03-29  "
+            "edgar/data/1100683/0000891618-02-001559.txt",
+        ],
+    )
+    real_parse = cli_edgar.parse_index
+
+    def corrupt(text: str, *, quarter_label: str, strict: bool = True) -> Any:
+        parsed = real_parse(text, quarter_label=quarter_label, strict=strict)
+        parsed.rows = [replace(row, cik=999) for row in parsed.rows]
+        return parsed
+
+    monkeypatch.setattr(cli_edgar, "parse_index", corrupt)
+    code = cmd_audit_paths(argparse.Namespace(index_root=str(tmp_path)))
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "CIK mismatches                : 1" in out
+    assert "STOP. Classification inputs disagree with the raw index" in out
+    assert "requires investigation" in out
+    # The evidence is shown, not summarised away.
+    assert "raw read : form='10-K' cik=1100683" in out
+    assert "cik=999" in out
+
+
+def test_audit_separates_provenance_damage_from_classification_damage(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wrong accession with intact cik/form/date is not a denominator problem."""
+    _write_index(
+        tmp_path,
+        "2002-QTR1",
+        [
+            "10-K        IPET HOLDINGS INC" + " " * 34 + "1100683     2002-03-29  "
+            "edgar/data/1100683/0000891618-02-001559.txt",
+        ],
+    )
+    real_parse = cli_edgar.parse_index
+
+    def corrupt(text: str, *, quarter_label: str, strict: bool = True) -> Any:
+        parsed = real_parse(text, quarter_label=quarter_label, strict=strict)
+        parsed.rows = [replace(row, accession="0001095811-02-001559") for row in parsed.rows]
+        return parsed
+
+    monkeypatch.setattr(cli_edgar, "parse_index", corrupt)
+    code = cmd_audit_paths(argparse.Namespace(index_root=str(tmp_path)))
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "ACCESSION mismatches          : 1" in out
+    assert "STOP. Classification inputs" not in out
+    assert "GATE NOT PASSED" in out
+    assert "No classification input is affected" in out
