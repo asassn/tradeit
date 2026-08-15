@@ -15,10 +15,13 @@ test whose failure is unambiguous.
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
+from pathlib import Path
 
 import pytest
 
+from tradeit.cli_edgar import cmd_audit_paths
 from tradeit.edgar.controls import CONTROL_UNIVERSE, unverified
 from tradeit.edgar.denominator import (
     RESEARCH_GRADE_THRESHOLD,
@@ -935,3 +938,56 @@ def test_the_fixture_covers_the_failure_modes_it_claims_to() -> None:
     assert len(reuse) == 3
     short_lived = [c for c in CONTROL_UNIVERSE if "short-lived" in c.control_class]
     assert len(short_lived) == 4
+
+
+# ---------------------------------------------------------------------------
+# audit-paths accounting
+# ---------------------------------------------------------------------------
+
+
+def _write_index(root: Path, quarter: str, rows: list[str]) -> None:
+    target = root / quarter.split("-")[0] / quarter.split("-")[1]
+    target.mkdir(parents=True)
+    header = [
+        "Form Type   Company Name" + " " * 39 + "CIK         Date Filed  File Name",
+        "-" * 100,
+    ]
+    (target / "form.idx").write_text("\n".join(header + rows) + "\n", encoding="latin-1")
+
+
+def test_audit_counts_occurrences_not_distinct_paths(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A File Name on two index lines is not a missing row.
+
+    The audit once accumulated raw paths into a set and compared that against a
+    list of parsed rows, which manufactures a shortfall proportional to the
+    number of legitimately repeated File Names. Occurrences, distinct values and
+    duplicates are three different numbers and are now reported as three.
+    """
+    _write_index(
+        tmp_path,
+        "2002-QTR1",
+        [
+            "10-K        IPET HOLDINGS INC" + " " * 34 + "1100683     2002-03-29  "
+            "edgar/data/1100683/0000891618-02-001559.txt",
+            "10-K405     IPET HOLDINGS INC" + " " * 34 + "1100683     2002-03-29  "
+            "edgar/data/1100683/0000891618-02-001559.txt",
+            "8-K         SOME OTHER CO" + " " * 38 + "1234567     2002-02-01  "
+            "edgar/data/1234567/0000000000-02-000001.txt",
+        ],
+    )
+    args = argparse.Namespace(index_root=str(tmp_path))
+    assert cmd_audit_paths(args) == 0
+    out = capsys.readouterr().out
+
+    assert "raw File Name OCCURRENCES : 3" in out
+    assert "raw File Name DISTINCT    : 2" in out
+    assert "duplicate File Names    : 1" in out
+    assert "rows parsed               : 3" in out
+    assert "paths matching raw exactly: 3" in out
+    assert "PATH MISMATCHES           : 0" in out
+    # The duplicate is attributed to a quarter and shown with its raw lines, so
+    # the reason a File Name repeats is visible rather than asserted.
+    assert "2002-QTR1  1" in out
+    assert out.count("edgar/data/1100683/0000891618-02-001559.txt") >= 3

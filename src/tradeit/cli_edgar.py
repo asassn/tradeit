@@ -164,6 +164,8 @@ def cmd_audit_paths(args: argparse.Namespace) -> int:
     path_mismatch: list[tuple[str, str, str, str]] = []
     accession_mismatch: list[tuple[str, str, str]] = []
     by_quarter: dict[str, int] = {}
+    dupes_by_quarter: dict[str, int] = {}
+    dupe_examples: list[tuple[str, str, list[str]]] = []
     field_damage = {"cik": 0, "form_type": 0, "filed_at": 0, "company_name": 0}
 
     for path_file in files:
@@ -176,16 +178,29 @@ def cmd_audit_paths(args: argparse.Namespace) -> int:
         # shortfall that looks like missing coverage. One File Name can appear
         # on more than one index line -- a filing listed under two form types,
         # for instance -- and that is a property of the index, not a defect.
-        raw_paths: set[str] = set()
+        first_line: dict[str, str] = {}
         occurrences = 0
+        repeated: dict[str, list[str]] = {}
         for raw in text.splitlines():
             found = _RAW_PATH.search(raw)
             if found:
                 occurrences += 1
-                raw_paths.add(found.group(1).strip())
+                value = found.group(1).strip()
+                previous = first_line.get(value)
+                if previous is None:
+                    first_line[value] = raw.rstrip()
+                else:
+                    repeated.setdefault(value, [previous]).append(raw.rstrip())
+        raw_paths = set(first_line)
         raw_occurrences += occurrences
         raw_distinct += len(raw_paths)
-        duplicate_rawpaths += occurrences - len(raw_paths)
+        duplicates = occurrences - len(raw_paths)
+        duplicate_rawpaths += duplicates
+        if duplicates:
+            dupes_by_quarter[label] = duplicates
+            if len(dupe_examples) < 5 and repeated:
+                name, lines = next(iter(sorted(repeated.items())))
+                dupe_examples.append((label, name, lines[:2]))
         parsed_ok += len(parsed.rows)
 
         for row in parsed.rows:
@@ -210,6 +225,19 @@ def cmd_audit_paths(args: argparse.Namespace) -> int:
     print(f"paths matching raw exactly: {path_match:,}")
     print(f"PATH MISMATCHES           : {parsed_ok - path_match:,}")
     print(f"ACCESSION MISMATCHES      : {len(accession_mismatch):,} (sampled, cap 20)")
+
+    if dupes_by_quarter:
+        print(
+            f"\nduplicate File Names by quarter "
+            f"({len(dupes_by_quarter)} of {len(files)} quarters affected)"
+        )
+        for label, count in sorted(dupes_by_quarter.items()):
+            print(f"  {label}  {count:,}")
+        print("\nrepresentative duplicated File Names (the raw lines that share one path)")
+        for label, name, lines in dupe_examples:
+            print(f"  {label}  {name}")
+            for raw in lines:
+                print(f"    {raw[:160]}")
 
     if by_quarter:
         print("\npath mismatches by quarter")
