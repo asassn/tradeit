@@ -48,6 +48,7 @@ from tradeit.edgar.index import (
     IndexLayout,
     IndexQuarter,
     SkipReason,
+    _assert_path_verbatim,
     accession_from_path,
     parse_full_index,
     parse_index,
@@ -335,6 +336,95 @@ def test_path_cik_differs_from_the_accession_prefix() -> None:
     arden = rows[225051]
     assert arden.accession.startswith("0000912057")
     assert "edgar/data/225051/" in arden.path
+
+
+# ---------------------------------------------------------------------------
+# the path is the raw File Name field, byte for byte
+#
+# A wrong path silently produces a wrong accession, which produces a citation
+# that resolves to a DIFFERENT filing -- worse than no citation, because it
+# looks checkable. These pin the invariant rather than the mechanism, because
+# the mechanism is exactly what a future edit would change.
+# ---------------------------------------------------------------------------
+
+
+def test_authentic_2002_10k_row_filing_agent_prefix_differs_from_registrant_cik() -> None:
+    """CIK 1100683, accession prefix 0000891618. The two must not be confused."""
+    header = (
+        "Form Type   Company Name                                      "
+        "CIK       Date Filed   File Name\n" + "-" * 100 + "\n"
+    )
+    row = (
+        "10-K        IPET HOLDINGS INC                             1100683   "
+        "2002-03-29  edgar/data/1100683/0000891618-02-001559.txt\n"
+    )
+    parsed = parse_index(header + row, quarter_label="2002-QTR1")
+    assert len(parsed.rows) == 1
+    got = parsed.rows[0]
+    assert got.cik == 1100683
+    assert got.form_type == "10-K"
+    assert got.company_name == "IPET HOLDINGS INC"
+    assert got.filed_at == dt.date(2002, 3, 29)
+    assert got.path == "edgar/data/1100683/0000891618-02-001559.txt"
+    assert got.accession == "0000891618-02-001559"
+    # The registrant CIK must never leak into the accession, and vice versa.
+    assert "1100683" not in got.accession.split("-")[0]
+
+
+@pytest.mark.parametrize(
+    ("cik", "path", "expected_accession"),
+    [
+        # IPET: three different filing agents across one registrant's history.
+        (1100683, "edgar/data/1100683/0001095811-00-004383.txt", "0001095811-00-004383"),
+        (1100683, "edgar/data/1100683/0000891618-01-000054.txt", "0000891618-01-000054"),
+        (1100683, "edgar/data/1100683/0000950134-05-011306.txt", "0000950134-05-011306"),
+        # Old GM: registrant CIK far from the agent prefix.
+        (40730, "edgar/data/40730/0001193125-09-045144.txt", "0001193125-09-045144"),
+        # An agent filing for itself -- prefix and registrant genuinely equal.
+        (1095811, "edgar/data/1095811/0001095811-02-001559.txt", "0001095811-02-001559"),
+    ],
+)
+def test_agent_prefix_never_synthesised_from_registrant_cik(
+    cik: int, path: str, expected_accession: str
+) -> None:
+    header = (
+        "Form Type   Company Name                                      "
+        "CIK       Date Filed   File Name\n" + "-" * 100 + "\n"
+    )
+    row = f"{'8-K':<12}{'SOME REGISTRANT INC':<46}{cik:<10}{'2002-03-29':<12}{path}\n"
+    got = parse_index(header + row, quarter_label="2002-QTR1").rows[0]
+    assert got.cik == cik
+    assert got.path == path
+    assert got.accession == expected_accession
+
+
+def test_accession_is_always_derivable_from_the_emitted_path() -> None:
+    """accession == accession_from_path(path), for every row of every fixture."""
+    for body, label in (
+        (FORM_IDX_BODY, "1994Q3"),
+        (INDEX_BODY, "1998-QTR4"),
+    ):
+        for row in parse_index(body, quarter_label=label, strict=False).rows:
+            assert row.accession == accession_from_path(row.path)
+
+
+def test_every_parsed_path_appears_verbatim_in_its_source_line() -> None:
+    for body, label in ((FORM_IDX_BODY, "1994Q3"), (INDEX_BODY, "1998-QTR4")):
+        lines = body.splitlines()
+        for row in parse_index(body, quarter_label=label, strict=False).rows:
+            assert any(row.path in line for line in lines)
+
+
+def test_a_reconstructed_path_is_rejected_not_emitted() -> None:
+    """The guard itself: if any future edit produced a path that is not in the
+    raw line, parsing must fail loudly rather than emit a citation pointing at
+    a different filing."""
+    with pytest.raises(DataError, match="does not appear verbatim"):
+        _assert_path_verbatim(
+            "edgar/data/1100683/0001095811-02-001559.txt",
+            "10-K  IPET HOLDINGS INC  1100683  2002-03-29  "
+            "edgar/data/1100683/0000891618-02-001559.txt",
+        )
 
 
 def test_summary_reports_the_diagnostic_fields() -> None:

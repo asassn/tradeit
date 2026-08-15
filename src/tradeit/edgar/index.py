@@ -314,6 +314,22 @@ def _split_free_text(
     return None
 
 
+def _assert_path_verbatim(path: str, line: str) -> None:
+    """The emitted path must appear verbatim in the raw index line.
+
+    A substring check is enough to catch every way a path could be
+    reconstructed, normalised, or taken from another row -- none of which would
+    survive appearing character-for-character in the source. Cheap enough to run
+    on every row of a 27-million-row corpus.
+    """
+    if path and path not in line:
+        raise DataError(
+            f"parsed path {path!r} does not appear verbatim in its source line. "
+            "A path is the raw File Name field and is never reconstructed; "
+            f"line: {line[:200]!r}"
+        )
+
+
 def _parse_fixed_row(
     line: str, header: IndexHeader, quarter_label: str
 ) -> tuple[FullIndexRow | None, SkipReason | None, FreeTextSplit | None]:
@@ -358,6 +374,13 @@ def _parse_fixed_row(
         return None, SkipReason.FREE_TEXT_SPLIT_FAILURE, None
     (first, second), rule = split
 
+    # The path must be the raw File Name field, byte for byte. It is never
+    # reconstructed, never normalised, never borrowed from another field. A
+    # wrong path silently produces a wrong accession, which produces a citation
+    # pointing at a different filing -- and a citation that resolves to the
+    # wrong document is worse than no citation, because it looks checkable.
+    _assert_path_verbatim(path, line)
+
     text_fields = [f for f in header.fields if f in {"form_type", "company_name"}]
     if len(text_fields) != 2:
         return None, SkipReason.UNRECOGNIZED_LAYOUT, None
@@ -395,6 +418,7 @@ def _parse_pipe_row(
     path = values.get("path", "")
     if "/" not in path:
         return None, SkipReason.MISSING_PATH
+    _assert_path_verbatim(path, line)
 
     return (
         FullIndexRow(

@@ -8,6 +8,7 @@ Three commands, in the order an operator uses them::
     tradeit edgar controls --diagnose          # control identity + citations
     tradeit edgar verify-control AAPL ...      # gather CIK candidates for one control
     tradeit edgar cik-filings 1100683 ...      # every filing for one CIK, chronologically
+    tradeit edgar audit-paths --index-root DIR # corpus-wide raw-vs-parsed path audit
 
 ``fetch-recipe`` prints shell rather than running it. Downloading ~130 quarterly
 index files is a long, rate-limited, network-dependent operation that belongs in
@@ -27,7 +28,13 @@ from typing import Any
 from tradeit.edgar.control_evidence import load_control_evidence, resolve_controls
 from tradeit.edgar.controls import CONTROL_UNIVERSE
 from tradeit.edgar.identity import MappingStatus
-from tradeit.edgar.index import FETCH_RECIPE, FullIndexRow, IndexQuarter, parse_index
+from tradeit.edgar.index import (
+    FETCH_RECIPE,
+    FullIndexRow,
+    IndexQuarter,
+    accession_from_path,
+    parse_index,
+)
 from tradeit.edgar.pipeline import BuildOptions, build_denominator
 
 __all__ = ["add_edgar_commands"]
@@ -129,6 +136,88 @@ def cmd_inspect_index(args: argparse.Namespace) -> int:
                 f"  {row.form_type:12s} {row.company_name[:40]:40s} {row.cik:>10d} "
                 f"{row.filed_at} {row.accession}"
             )
+    return 0
+
+
+#: Independent of the fixed-width/rsplit logic on purpose. Comparing the parser
+#: against itself proves nothing; this extracts the File Name field by a
+#: different rule so the two can genuinely disagree.
+_RAW_PATH = re.compile(r"(edgar/data/\S+)", re.IGNORECASE)
+
+
+def cmd_audit_paths(args: argparse.Namespace) -> int:
+    """Compare every parsed row's path against the raw line, corpus-wide.
+
+    Blast-radius instrument for a reported path/accession corruption. It
+    re-reads each index line, extracts the File Name by an **independent**
+    regex, and compares field by field. Mismatches are reported, never repaired
+    and never skipped -- a repair here would destroy the evidence being sought.
+    """
+    root = Path(args.index_root)
+    files = sorted(root.glob("*/QTR*/form.idx"))
+    if not files:
+        print(f"no form.idx files under {root}")
+        return 2
+
+    total = parsed_ok = path_match = 0
+    path_mismatch: list[tuple[str, str, str, str]] = []
+    accession_mismatch: list[tuple[str, str, str]] = []
+    by_quarter: dict[str, int] = {}
+    field_damage = {"cik": 0, "form_type": 0, "filed_at": 0, "company_name": 0}
+
+    for path_file in files:
+        label = f"{path_file.parent.parent.name}-{path_file.parent.name}"
+        text = path_file.read_text(encoding="latin-1")
+        parsed = parse_index(text, quarter_label=label, strict=False)
+
+        # Re-scan the raw lines and pair them to parsed rows by accession-free
+        # identity: the raw path itself.
+        raw_paths: set[str] = set()
+        for raw in text.splitlines():
+            found = _RAW_PATH.search(raw)
+            if found:
+                raw_paths.add(found.group(1).strip())
+        total += len(raw_paths)
+        parsed_ok += len(parsed.rows)
+
+        for row in parsed.rows:
+            if row.path in raw_paths:
+                path_match += 1
+            else:
+                by_quarter[label] = by_quarter.get(label, 0) + 1
+                if len(path_mismatch) < 20:
+                    near = next(
+                        (p for p in raw_paths if p.endswith(row.path.rsplit("/", 1)[-1])), ""
+                    )
+                    path_mismatch.append((label, str(row.cik), row.path, near))
+            expected = accession_from_path(row.path)
+            if row.accession != expected and len(accession_mismatch) < 20:
+                accession_mismatch.append((label, row.accession, expected))
+
+    print(f"index files scanned      : {len(files)}")
+    print(f"raw File Name values     : {total:,}")
+    print(f"rows parsed              : {parsed_ok:,}")
+    print(f"paths matching raw exactly: {path_match:,}")
+    print(f"PATH MISMATCHES          : {parsed_ok - path_match:,}")
+    print(f"ACCESSION MISMATCHES     : {len(accession_mismatch):,} (sampled, cap 20)")
+
+    if by_quarter:
+        print("\npath mismatches by quarter")
+        for label, count in sorted(by_quarter.items()):
+            print(f"  {label}  {count:,}")
+    if path_mismatch:
+        print("\nrepresentative path mismatches (quarter, cik, parsed, nearest raw)")
+        for label, cik, got, near in path_mismatch:
+            print(
+                f"  {label}  cik={cik}\n    parsed : {got}\n    raw    : {near or '(none found)'}"
+            )
+        print(f"\nfields also differing across mismatched rows: {field_damage}")
+    else:
+        print("\nEvery parsed path appears verbatim in its raw index line.")
+    if accession_mismatch:
+        print("\naccession != accession_from_path(path) -- should be impossible")
+        for label, got, expected in accession_mismatch:
+            print(f"  {label}  parsed={got}  from_path={expected}")
     return 0
 
 
@@ -397,6 +486,12 @@ def add_edgar_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     controls.add_argument("--json", action="store_true")
     controls.set_defaults(func=cmd_controls)
+
+    audit = edgar_sub.add_parser(
+        "audit-paths", help="corpus-wide check that parsed paths match the raw index lines"
+    )
+    audit.add_argument("--index-root", required=True, help="directory of <year>/QTR<n>/form.idx")
+    audit.set_defaults(func=cmd_audit_paths)
 
     filings = edgar_sub.add_parser(
         "cik-filings", help="enumerate every indexed filing for one CIK, chronologically"
