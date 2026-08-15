@@ -9,6 +9,7 @@ Three commands, in the order an operator uses them::
     tradeit edgar verify-control AAPL ...      # gather CIK candidates for one control
     tradeit edgar cik-filings 1100683 ...      # every filing for one CIK, chronologically
     tradeit edgar audit-paths --index-root DIR # corpus-wide raw-vs-parsed field audit
+    tradeit edgar audit-exceptions ...          # explain each row the audit flagged
 
 ``fetch-recipe`` prints shell rather than running it. Downloading ~130 quarterly
 index files is a long, rate-limited, network-dependent operation that belongs in
@@ -32,8 +33,10 @@ from tradeit.edgar.identity import MappingStatus
 from tradeit.edgar.index import (
     FETCH_RECIPE,
     FullIndexRow,
+    IndexHeader,
     IndexQuarter,
     accession_from_path,
+    explain_row,
     parse_index,
 )
 from tradeit.edgar.pipeline import BuildOptions, build_denominator
@@ -598,6 +601,123 @@ def _report_audit(
     return 0
 
 
+def cmd_audit_exceptions(args: argparse.Namespace) -> int:
+    """Dump, in full, every row the auditor could read and the parser did not emit.
+
+    The corpus audit answers "how many"; a two-row exception needs "which, and
+    why". For each such row this prints the raw line verbatim, the independent
+    extraction, the parser's *own* skip verdict -- obtained by re-running the
+    production row reader on that line rather than by reasoning about it from
+    outside -- and every other index line carrying the same File Name together
+    with whether that line was parsed.
+
+    That last part is the question that decides whether an omission matters: a
+    filing whose File Name appears on another line that *was* parsed contributes
+    no evidence event that the corpus does not already have.
+    """
+    root = Path(args.index_root)
+    wanted = set(args.quarter or [])
+    files = sorted(root.glob("*/QTR*/form.idx"))
+    if not files:
+        print(f"no form.idx files under {root}")
+        return 2
+
+    exceptions = 0
+    corroborated = 0
+
+    for path_file in files:
+        label = f"{path_file.parent.parent.name}-{path_file.parent.name}"
+        if wanted and label not in wanted:
+            continue
+        text = path_file.read_text(encoding="latin-1")
+        parsed = parse_index(text, quarter_label=label, strict=False)
+        emitted = {row.source_line: row for row in parsed.rows}
+
+        header: IndexHeader | None = parsed.header
+        lines = text.splitlines()
+
+        # Every line carrying each File Name, so a skipped row can be checked
+        # against its siblings rather than judged alone.
+        occurrences: dict[str, list[int]] = {}
+        seen_separator = False
+        candidates: dict[int, str] = {}
+        for number, raw in enumerate(lines, start=1):
+            line = raw.rstrip()
+            if not line.strip():
+                continue
+            if _RAW_SEPARATOR.match(line):
+                seen_separator = True
+                continue
+            if not seen_separator:
+                continue
+            candidates[number] = line
+            found = _RAW_PATH.search(line)
+            if found:
+                occurrences.setdefault(found.group(1).strip(), []).append(number)
+
+        for number, line in candidates.items():
+            extracted = _raw_extract(line)
+            if extracted is None:
+                continue
+            skipped = number not in emitted
+            if not skipped and not extracted.cik_from_path:
+                continue
+            if extracted.cik_from_path:
+                corroborated += 1
+            if skipped:
+                exceptions += 1
+
+            kind = "SKIPPED BY PARSER" if skipped else "parsed (CIK corroborated by path)"
+            print(f"\n{'=' * 78}\n{label} line {number}  --  {kind}\n{'=' * 78}")
+            print(f"raw line:\n  {line!r}")
+            print("\nindependently extracted:")
+            print(f"  form_type    : {extracted.form_type!r}")
+            print(f"  company_name : {extracted.company_name!r}")
+            source = "  (from path)" if extracted.cik_from_path else ""
+            print(f"  cik          : {extracted.cik}{source}")
+            print(f"  filed_at     : {extracted.filed_at.isoformat()}")
+            print(f"  path         : {extracted.path!r}")
+            print(f"  accession    : {accession_from_path(extracted.path)!r}")
+
+            if header is None:
+                print("\nparser verdict: header unreadable for this file")
+            else:
+                row, reason = explain_row(line, header, quarter_label=label, source_line=number)
+                if row is None:
+                    print(f"\nparser verdict: SKIPPED, reason = {reason}")
+                else:
+                    print("\nparser verdict: parsed")
+                    print(
+                        f"  form_type={row.form_type!r} company_name={row.company_name!r} "
+                        f"cik={row.cik} filed_at={row.filed_at.isoformat()}"
+                    )
+                    print(f"  path={row.path!r} accession={row.accession!r}")
+
+            siblings = occurrences.get(extracted.path, [])
+            others = [n for n in siblings if n != number]
+            print(f"\nsame File Name on {len(siblings)} index line(s) in this quarter")
+            if not others:
+                print("  no other line carries this File Name")
+            for other in others:
+                state = "PARSED" if other in emitted else "skipped"
+                print(f"  line {other}  [{state}]")
+                print(f"    {candidates[other]!r}")
+                sibling = emitted.get(other)
+                if sibling is not None:
+                    print(
+                        f"    -> form_type={sibling.form_type!r} cik={sibling.cik} "
+                        f"filed_at={sibling.filed_at.isoformat()} "
+                        f"accession={sibling.accession!r}"
+                    )
+
+    print(f"\n{'=' * 78}")
+    print(f"rows the auditor read and the parser did not emit : {exceptions}")
+    print(f"rows whose CIK was corroborated from the path     : {corroborated}")
+    if exceptions == 0:
+        print("\nNothing to explain: the parser emitted a row for every readable line.")
+    return 0
+
+
 def cmd_cik_filings(args: argparse.Namespace) -> int:
     """Every indexed filing for one CIK, chronologically.
 
@@ -869,6 +989,20 @@ def add_edgar_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     audit.add_argument("--index-root", required=True, help="directory of <year>/QTR<n>/form.idx")
     audit.set_defaults(func=cmd_audit_paths)
+
+    exceptions = edgar_sub.add_parser(
+        "audit-exceptions",
+        help="explain, in full, every row the auditor read and the parser did not emit",
+    )
+    exceptions.add_argument(
+        "--index-root", required=True, help="directory of <year>/QTR<n>/form.idx"
+    )
+    exceptions.add_argument(
+        "--quarter",
+        action="append",
+        help="limit to one quarter label, e.g. 1997-QTR1; repeatable",
+    )
+    exceptions.set_defaults(func=cmd_audit_exceptions)
 
     filings = edgar_sub.add_parser(
         "cik-filings", help="enumerate every indexed filing for one CIK, chronologically"

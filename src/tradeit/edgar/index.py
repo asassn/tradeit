@@ -60,6 +60,7 @@ __all__ = [
     "ParsedIndex",
     "SkipReason",
     "accession_from_path",
+    "explain_row",
     "full_index_url",
     "parse_full_index",
     "parse_index",
@@ -581,6 +582,23 @@ def _assert_parse_plausible(parsed: ParsedIndex) -> None:
             f"Samples: {list(parsed.skipped_samples[:2])}. "
             f"Run `tradeit edgar inspect-index <file>` for the full breakdown."
         )
+
+
+def explain_row(
+    line: str, header: IndexHeader, *, quarter_label: str = "", source_line: int = 0
+) -> tuple[FullIndexRow | None, SkipReason | None]:
+    """Run the production row reader on one line and report exactly what it did.
+
+    A skip rate is a count; this is the individual verdict behind one of them.
+    It exists so that a row an external auditor could read but the parser did
+    not emit can be explained by the parser's own reason rather than by
+    reconstructing its logic from the outside and hoping the reconstruction is
+    faithful.
+    """
+    if header.layout is IndexLayout.PIPE:
+        return _parse_pipe_row(line, header, quarter_label, source_line)
+    row, reason, _ = _parse_fixed_row(line, header, quarter_label, source_line)
+    return row, reason
 
 
 def parse_full_index(text: str, *, quarter_label: str, strict: bool = True) -> list[FullIndexRow]:

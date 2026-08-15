@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 
 from tradeit import cli_edgar
-from tradeit.cli_edgar import _raw_extract, cmd_audit_paths
+from tradeit.cli_edgar import _raw_extract, cmd_audit_exceptions, cmd_audit_paths
 from tradeit.edgar.controls import CONTROL_UNIVERSE, unverified
 from tradeit.edgar.denominator import (
     RESEARCH_GRADE_THRESHOLD,
@@ -56,8 +56,10 @@ from tradeit.edgar.index import (
     SkipReason,
     _assert_path_verbatim,
     accession_from_path,
+    explain_row,
     parse_full_index,
     parse_index,
+    parse_index_header,
     quarters,
 )
 from tradeit.edgar.lifecycle import (
@@ -1192,3 +1194,100 @@ def test_audit_separates_provenance_damage_from_classification_damage(
     assert "STOP. Classification inputs" not in out
     assert "GATE NOT PASSED" in out
     assert "No classification input is affected" in out
+
+
+# ---------------------------------------------------------------------------
+# the exception report
+# ---------------------------------------------------------------------------
+
+#: The one row shape the auditor can read and the production parser cannot: the
+#: company-name column is empty, so there is no second padding run and the
+#: parser cannot produce two free-text fields from one. The auditor falls back
+#: to its path-corroborated rule, which needs no name at all.
+_EMPTY_NAME_ROW = (
+    "10-K" + " " * 54 + "12345     1997-01-02  edgar/data/12345/0000012345-97-000001.txt"
+)
+
+
+def test_the_parser_and_the_auditor_disagree_only_on_an_unsplittable_prefix() -> None:
+    """Pin the exact divergence, so a new one cannot appear unnoticed.
+
+    The auditor reading a row the parser skipped is the audit working, not
+    failing -- but it is only sound while the disagreement is understood. Note
+    the auditor's own read of such a row is poor: with nothing to split on it
+    reports an empty company name. That is tolerable precisely because these
+    rows are excluded from the field-by-field comparison rather than counted as
+    agreement.
+    """
+    header = parse_index_header(
+        "Form Type   Company Name" + " " * 38 + "CIK       Date Filed   File Name"
+    )
+    raw = _raw_extract(_EMPTY_NAME_ROW)
+    assert raw is not None
+    assert raw.company_name == ""
+    assert raw.cik == 12345
+    assert raw.cik_from_path is True
+
+    row, reason = explain_row(_EMPTY_NAME_ROW, header, quarter_label="1997-QTR1")
+    assert row is None
+    assert reason is SkipReason.FREE_TEXT_SPLIT_FAILURE
+
+
+def test_exception_report_shows_the_row_the_reason_and_its_siblings(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The question that decides whether an omission matters is the sibling one.
+
+    A skipped filing whose File Name also appears on a line that *was* parsed
+    contributes no evidence event the corpus does not already hold.
+    """
+    _write_index(
+        tmp_path,
+        "1997-QTR1",
+        [
+            "10-K        ACME CORP" + " " * 42 + "12345       1997-01-02  "
+            "edgar/data/12345/0000012345-97-000001.txt",
+            _EMPTY_NAME_ROW,
+        ],
+    )
+    assert cmd_audit_exceptions(argparse.Namespace(index_root=str(tmp_path), quarter=None)) == 0
+    out = capsys.readouterr().out
+
+    assert "SKIPPED BY PARSER" in out
+    assert "1997-QTR1 line 4" in out
+    assert "parser verdict: SKIPPED, reason = free_text_split_failure" in out
+    assert "cik          : 12345  (from path)" in out
+    assert "accession    : '0000012345-97-000001'" in out
+    # Same File Name as the row above it, and that one was parsed -- which is
+    # what makes this particular omission evidentially empty.
+    assert "same File Name on 2 index line(s)" in out
+    assert "[PARSED]" in out
+    assert "rows the auditor read and the parser did not emit : 1" in out
+
+
+def test_exception_report_can_be_limited_to_named_quarters(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_index(tmp_path, "1997-QTR1", [_EMPTY_NAME_ROW])
+    _write_index(tmp_path, "2016-QTR1", [_EMPTY_NAME_ROW])
+    cmd_audit_exceptions(argparse.Namespace(index_root=str(tmp_path), quarter=["2016-QTR1"]))
+    out = capsys.readouterr().out
+    assert "2016-QTR1" in out
+    assert "1997-QTR1" not in out
+    assert "rows the auditor read and the parser did not emit : 1" in out
+
+
+def test_exception_report_is_silent_when_there_is_nothing_to_explain(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_index(
+        tmp_path,
+        "2002-QTR1",
+        [
+            "10-K        IPET HOLDINGS INC" + " " * 34 + "1100683     2002-03-29  "
+            "edgar/data/1100683/0000891618-02-001559.txt",
+        ],
+    )
+    assert cmd_audit_exceptions(argparse.Namespace(index_root=str(tmp_path), quarter=None)) == 0
+    out = capsys.readouterr().out
+    assert "Nothing to explain" in out
