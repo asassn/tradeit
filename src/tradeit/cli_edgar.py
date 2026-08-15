@@ -10,6 +10,7 @@ Three commands, in the order an operator uses them::
     tradeit edgar cik-filings 1100683 ...      # every filing for one CIK, chronologically
     tradeit edgar audit-paths --index-root DIR # corpus-wide raw-vs-parsed field audit
     tradeit edgar audit-exceptions ...          # explain each row the audit flagged
+    tradeit edgar cik-lifecycle 1036125 ...     # one CIK's lifecycle, with counterfactuals
 
 ``fetch-recipe`` prints shell rather than running it. Downloading ~130 quarterly
 index files is a long, rate-limited, network-dependent operation that belongs in
@@ -29,6 +30,7 @@ from typing import Any
 
 from tradeit.edgar.control_evidence import load_control_evidence, resolve_controls
 from tradeit.edgar.controls import CONTROL_UNIVERSE
+from tradeit.edgar.evidence import classify_form
 from tradeit.edgar.identity import MappingStatus
 from tradeit.edgar.index import (
     FETCH_RECIPE,
@@ -39,7 +41,9 @@ from tradeit.edgar.index import (
     explain_row,
     parse_index,
 )
-from tradeit.edgar.pipeline import BuildOptions, build_denominator
+from tradeit.edgar.lifecycle import ExitResolution, build_timelines, resolve_exit
+from tradeit.edgar.pipeline import BuildOptions, build_denominator, evidence_from_rows
+from tradeit.errors import DataError
 
 __all__ = ["add_edgar_commands"]
 
@@ -840,6 +844,136 @@ def cmd_controls(args: argparse.Namespace) -> int:
     return 0
 
 
+def _injected_row(spec: str, cik: int) -> FullIndexRow:
+    """Parse ``FORM|YYYY-MM-DD|path`` into a row that was never persisted."""
+    parts = [p.strip() for p in spec.split("|")]
+    if len(parts) != 3:
+        raise DataError(f"--inject expects 'FORM|YYYY-MM-DD|path', got {spec!r}")
+    form_type, filed, path = parts
+    return FullIndexRow(
+        cik=cik,
+        company_name="",
+        form_type=form_type.upper(),
+        filed_at=dt.date.fromisoformat(filed),
+        path=path,
+        accession=accession_from_path(path),
+        index_quarter="(injected, not persisted)",
+        source_line=0,
+    )
+
+
+def _resolution_fields(resolution: ExitResolution | None) -> dict[str, object]:
+    if resolution is None:
+        return {
+            "present in denominator": False,
+            "evidence_type": "(absent)",
+            "strength": "(absent)",
+            "evidence_date": "(absent)",
+            "effective_date": "(absent)",
+            "last_periodic": "(absent)",
+            "scopes": "(absent)",
+            "accessions": "(absent)",
+        }
+    summary = resolution.summary()
+    return {
+        "present in denominator": True,
+        "evidence_type": summary["evidence_type"],
+        "strength": summary["strength"],
+        "evidence_date": summary["evidence_date"],
+        "effective_date": summary["effective_date"],
+        "last_periodic": summary["last_periodic"],
+        "scopes": ", ".join(sorted(str(s) for s in resolution.scopes)),
+        "accessions": ", ".join(summary["accessions"]),  # type: ignore[arg-type]
+    }
+
+
+def cmd_cik_lifecycle(args: argparse.Namespace) -> int:
+    """One CIK's lifecycle result, optionally with a counterfactual row injected.
+
+    Built to answer a bounded question: would admitting a row the parser refused
+    change anything the denominator publishes? The injected row exists only in
+    this process. Nothing is written, no corpus is regenerated, and the
+    production parser is untouched -- the row is constructed directly and pushed
+    through the same pipeline the real rows take.
+    """
+    cik = int(args.cik)
+    root = Path(args.index_root)
+    as_of = dt.date.fromisoformat(args.as_of) if args.as_of else dt.datetime.now(dt.UTC).date()
+
+    rows = [
+        row
+        for path in sorted(root.glob("*/QTR*/form.idx"))
+        for row in _index_rows(path)
+        if row.cik == cik
+    ]
+    rows.sort(key=lambda r: (r.filed_at, r.accession))
+
+    print(f"CIK {cik}   as_of={as_of.isoformat()}")
+    print(f"parsed filings in corpus  : {len(rows)}")
+    if rows:
+        print(f"first parsed filing date  : {rows[0].filed_at.isoformat()}")
+        print(f"last parsed filing date   : {rows[-1].filed_at.isoformat()}")
+        forms: dict[str, int] = {}
+        for row in rows:
+            forms[row.form_type] = forms.get(row.form_type, 0) + 1
+        rendered = "  ".join(f"{f}={n}" for f, n in sorted(forms.items()))
+        print(f"forms represented         : {rendered}")
+    else:
+        print("this CIK has no parsed rows anywhere in the corpus")
+
+    kept = evidence_from_rows(rows)
+    print(f"rows surviving evidence_from_rows: {len(kept)} of {len(rows)}")
+    print("  (a form classified IRRELEVANT is dropped before it can reach a timeline)")
+
+    def resolve(source: list[FullIndexRow]) -> ExitResolution | None:
+        timelines = build_timelines(evidence_from_rows(source))
+        timeline = timelines.get(cik)
+        return None if timeline is None else resolve_exit(timeline, as_of=as_of)
+
+    before = resolve(rows)
+    if not args.inject:
+        print("\nlifecycle resolution")
+        for key, value in _resolution_fields(before).items():
+            print(f"  {key:24s}: {value}")
+        return 0
+
+    injected = [_injected_row(spec, cik) for spec in args.inject]
+    print("\ninjected counterfactually, in memory only:")
+    for row in injected:
+        signal = classify_form(row.form_type, row.filed_at)
+        print(
+            f"  {row.form_type} {row.filed_at.isoformat()} {row.accession} "
+            f"-> role={signal.role} evidence_type={signal.evidence_type} "
+            f"strength={signal.strength}"
+        )
+    survivors = evidence_from_rows(injected)
+    print(f"  of these, {len(survivors)} of {len(injected)} survive evidence_from_rows")
+
+    after = resolve([*rows, *injected])
+    fields_before = _resolution_fields(before)
+    fields_after = _resolution_fields(after)
+
+    print(f"\n{'field':24s} {'before':38s} {'after':38s} delta")
+    print("-" * 108)
+    changed = 0
+    for key in fields_before:
+        old, new = str(fields_before[key]), str(fields_after[key])
+        mark = "SAME" if old == new else "*** CHANGED ***"
+        if old != new:
+            changed += 1
+        print(f"{key:24s} {old[:38]:38s} {new[:38]:38s} {mark}")
+
+    print()
+    if changed:
+        print(f"STOP: {changed} field(s) changed. The injected row is classification-relevant.")
+        return 1
+    print(
+        "Zero delta. Admitting this row would change no evidence type, no strength, "
+        "no date, no year assignment and no aggregate bucket for this CIK."
+    )
+    return 0
+
+
 def _index_rows(path: Path) -> list[FullIndexRow]:
     """Parse one quarterly index file, non-strict, for candidate gathering."""
     return parse_index(
@@ -1010,6 +1144,22 @@ def add_edgar_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     filings.add_argument("cik", help="the CIK to enumerate, e.g. 1100683")
     filings.add_argument("--index-root", required=True, help="directory of <year>/QTR<n>/form.idx")
     filings.set_defaults(func=cmd_cik_filings)
+
+    lifecycle = edgar_sub.add_parser(
+        "cik-lifecycle",
+        help="one CIK's lifecycle result, with an optional in-memory counterfactual row",
+    )
+    lifecycle.add_argument("cik", help="the CIK to resolve, e.g. 1036125")
+    lifecycle.add_argument(
+        "--index-root", required=True, help="directory of <year>/QTR<n>/form.idx"
+    )
+    lifecycle.add_argument(
+        "--inject",
+        action="append",
+        help="counterfactual row as 'FORM|YYYY-MM-DD|path'; in memory only, repeatable",
+    )
+    lifecycle.add_argument("--as-of", help="pin the cessation clock, e.g. 2026-08-15")
+    lifecycle.set_defaults(func=cmd_cik_lifecycle)
 
     verify = edgar_sub.add_parser(
         "verify-control", help="gather CIK candidates for one control from the local index"

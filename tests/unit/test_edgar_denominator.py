@@ -35,6 +35,7 @@ from tradeit.edgar.denominator import (
     classify_corpus,
 )
 from tradeit.edgar.evidence import (
+    PERIODIC_FORMS,
     EvidenceStrength,
     EvidenceType,
     FormRole,
@@ -51,6 +52,7 @@ from tradeit.edgar.identity import (
 )
 from tradeit.edgar.index import (
     EDGAR_FIRST_QUARTER,
+    FullIndexRow,
     IndexLayout,
     IndexQuarter,
     SkipReason,
@@ -1291,3 +1293,151 @@ def test_exception_report_is_silent_when_there_is_nothing_to_explain(
     assert cmd_audit_exceptions(argparse.Namespace(index_root=str(tmp_path), quarter=None)) == 0
     out = capsys.readouterr().out
     assert "Nothing to explain" in out
+
+
+# ---------------------------------------------------------------------------
+# the two refused source rows, and why they cannot matter
+# ---------------------------------------------------------------------------
+
+#: The two rows the production parser refuses across the whole 129-quarter
+#: corpus, both malformed the same way: the company-name column is blank.
+_REFUSED = (
+    ("SC 13D", dt.date(1997, 3, 24), 1036125, "edgar/data/1036125/0000950134-97-002093.txt"),
+    ("485BPOS", dt.date(2016, 2, 26), 1593547, "edgar/data/1593547/0001135428-16-001124.txt"),
+)
+
+
+def _row(cik: int, form: str, filed: str, accession: str) -> FullIndexRow:
+    return FullIndexRow(
+        cik=cik,
+        company_name="X CO",
+        form_type=form,
+        filed_at=dt.date.fromisoformat(filed),
+        path=f"edgar/data/{cik}/{accession}.txt",
+        accession=accession,
+        index_quarter="Q",
+        source_line=1,
+    )
+
+
+@pytest.mark.parametrize(("form", "filed", "_cik", "_path"), _REFUSED)
+def test_neither_refused_form_is_classification_relevant(
+    form: str, filed: dt.date, _cik: int, _path: str
+) -> None:
+    """SC 13D and 485BPOS carry no lifecycle meaning under this methodology.
+
+    An SC 13D is a third party's beneficial-ownership report about an issuer;
+    a 485BPOS is an investment company's post-effective registration amendment.
+    Neither is a birth, an exit, a periodic report or a transaction pointer.
+    """
+    signal = classify_form(form, filed)
+    assert signal.role is FormRole.IRRELEVANT
+    assert signal.evidence_type is None
+    assert signal.strength is EvidenceStrength.NONE
+    assert form not in PERIODIC_FORMS
+
+
+@pytest.mark.parametrize(("form", "filed", "cik", "path"), _REFUSED)
+def test_a_refused_row_is_dropped_before_it_can_reach_a_timeline(
+    form: str, filed: dt.date, cik: int, path: str
+) -> None:
+    """The filter is upstream of grouping, which is what makes the delta zero.
+
+    ``evidence_from_rows`` discards an IRRELEVANT form before ``build_timelines``
+    ever sees it, so such a row cannot create a registrant, cannot extend a
+    filing window and cannot contribute an accession.
+    """
+    row = FullIndexRow(
+        cik=cik,
+        company_name="",
+        form_type=form,
+        filed_at=filed,
+        path=path,
+        accession=accession_from_path(path),
+        index_quarter="Q",
+        source_line=0,
+    )
+    assert evidence_from_rows([row]) == []
+    assert build_timelines(evidence_from_rows([row])) == {}
+
+
+@pytest.mark.parametrize(("form", "filed", "cik", "path"), _REFUSED)
+def test_injecting_a_refused_row_changes_no_lifecycle_result(
+    form: str, filed: dt.date, cik: int, path: str
+) -> None:
+    """The counterfactual, across every shape of history the CIK could have.
+
+    This is the check that closed the denominator gate: not "we looked and it
+    was fine", but "there is no prior history for which it would not be".
+    """
+    as_of = dt.date(2026, 8, 15)
+    injected = FullIndexRow(
+        cik=cik,
+        company_name="",
+        form_type=form,
+        filed_at=filed,
+        path=path,
+        accession=accession_from_path(path),
+        index_quarter="Q",
+        source_line=0,
+    )
+    histories: dict[str, list[FullIndexRow]] = {
+        "no other filings": [],
+        "periodic only": [_row(cik, "10-K", "1998-03-01", "0000000001-98-000001")],
+        "deregistration": [
+            _row(cik, "10-K", "1998-03-01", "0000000001-98-000001"),
+            _row(cik, "15-12G", "2000-05-01", "0000000001-00-000002"),
+        ],
+        "delisting": [_row(cik, "25-NSE", "2009-07-08", "0000000001-09-000003")],
+        "extinguished": [
+            _row(cik, "25-NSE", "2009-07-08", "0000000001-09-000003"),
+            _row(cik, "15-12B", "2009-08-01", "0000000001-09-000004"),
+        ],
+        "exit candidate only": [_row(cik, "8-K", "2001-09-10", "0000000001-01-000005")],
+        "birth only": [_row(cik, "8-A12G", "1996-01-05", "0000000001-96-000006")],
+    }
+
+    def resolve(rows: list[FullIndexRow]) -> dict[str, object] | None:
+        timeline = build_timelines(evidence_from_rows(rows)).get(cik)
+        return None if timeline is None else resolve_exit(timeline, as_of=as_of).summary()
+
+    for label, history in histories.items():
+        assert resolve(history) == resolve([*history, injected]), label
+
+
+def test_injecting_both_refused_rows_leaves_the_published_report_identical() -> None:
+    """Aggregates, not just per-CIK results: registrant count included."""
+    as_of = dt.date(2026, 8, 15)
+    corpus = [
+        _row(320193, "10-K", "1998-12-23", "0000320193-98-000110"),
+        _row(1100683, "15-12G", "2005-06-03", "0000950134-05-011306"),
+        _row(40730, "25-NSE", "2009-07-08", "0000876661-09-000303"),
+        _row(40730, "15-12B", "2009-08-01", "0000876661-09-000400"),
+    ]
+    injected = [
+        FullIndexRow(
+            cik=cik,
+            company_name="",
+            form_type=form,
+            filed_at=filed,
+            path=path,
+            accession=accession_from_path(path),
+            index_quarter="Q",
+            source_line=0,
+        )
+        for form, filed, cik, path in _REFUSED
+    ]
+
+    def report(rows: list[FullIndexRow]) -> dict[str, Any]:
+        timelines = build_timelines(evidence_from_rows(rows))
+        denominator = Denominator(
+            resolutions=[resolve_exit(t, as_of=as_of) for t in timelines.values()],
+            timelines=timelines,
+            mappings={},
+            missing_quarters=(),
+        )
+        return denominator.report()
+
+    before, after = report(corpus), report([*corpus, *injected])
+    assert before == after
+    assert before["registrants"] == after["registrants"] == 3

@@ -411,6 +411,54 @@ or `filed_at` prints `STOP` and names the denominator; a `path` or `accession`
 mismatch alone is reported as provenance damage; unreadable rows withhold the
 gate rather than pass it.
 
+### The gate result, and the two rows it turns on
+
+Across all 129 quarters: **27,084,670 raw candidate rows, 27,084,668 accepted by
+the parser, 0 FORM / CIK / DATE / PATH / ACCESSION mismatches** against an
+independent read of every accepted row. The 1,525 duplicate File Names are
+occurrences of one document indexed under two form types, which is a property of
+the index; an earlier version of this audit compared a de-duplicated set against
+a row list and reported 1,523, the difference being exactly the two rows below.
+
+Exactly **two** rows in 27 million are refused, both malformed the same way —
+the company-name column is blank, so there is one free-text field where the
+layout requires two, and the parser returns `free_text_split_failure` rather than
+invent a name:
+
+| quarter | line | form | CIK | filed | accession |
+|---|---|---|---|---|---|
+| 1997-QTR1 | 54239 | `SC 13D` | 1036125 | 1997-03-24 | `0000950134-97-002093` |
+| 2016-QTR1 | 171819 | `485BPOS` | 1593547 | 2016-02-26 | `0001135428-16-001124` |
+
+Neither can affect any published number, and the reason is structural rather
+than lucky. `classify_form` puts both form types at `FormRole.IRRELEVANT` — an
+`SC 13D` is a third party's beneficial-ownership report about an issuer, a
+`485BPOS` is an investment company's post-effective registration amendment, and
+neither is a birth, an exit, a periodic report or a transaction pointer.
+`evidence_from_rows` then drops every IRRELEVANT row **before**
+`build_timelines` groups anything, so such a row cannot create a registrant,
+cannot extend a filing window, cannot contribute an accession and cannot reach a
+year bucket. That the two rows' File Names are unique in their quarters is
+therefore not load-bearing: uniqueness would matter only for a form type the
+methodology reads, and these are not.
+
+The counterfactual is pinned in tests rather than asserted: each row is injected
+in memory against seven shapes of prior history — none, periodic-only,
+deregistration, delisting, delisting-plus-deregistration, exit-candidate-only and
+birth-only — and the resolution is identical in every case, as is the full
+denominator report including the registrant count. `tradeit edgar cik-lifecycle
+CIK --inject 'FORM|DATE|path'` runs the same counterfactual against the real
+corpus, in memory, writing nothing.
+
+**The parser is not changed to admit them.** A row with no readable company name
+is a row for which the parser would have to fabricate a field, and making
+candidate counts equal accepted counts is not a reason to do that. The two are
+recorded here as known malformed-source exceptions, deliberately refused.
+
+On that basis the **EDGAR parser / classification-input / denominator integrity
+gate is closed**: the 27,084,668-row denominator stands and requires no
+regeneration.
+
 **The IPET anomaly itself remains open.** The recorded status is: *unexplained,
 not reproducible on the current or committed implementation; no committed code
 change explains it.* `cmd_cik_filings` is byte-identical across the commit that
