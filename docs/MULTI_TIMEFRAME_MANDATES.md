@@ -507,6 +507,17 @@ cheap to *keep*; it is expensive to *acquire*.
 
 ---
 
+## 7b. The mandate hierarchies are what a strategy definition references
+
+The hierarchies in §4 are **current architectural defaults**, not eternal
+strategy thresholds. The [`Strategy Builder`](STRATEGY_BUILDER.md) — the gate
+that follows this one — treats them as the eligible set a strategy definition may
+select *within*, and may not select outside.
+
+That relationship is the reason the two gates are ordered this way: a strategy's
+timeframe hierarchy is part of its definition, so the mandate hierarchies must
+exist before a definition can reference them.
+
 ## 8. Multi-timeframe coordinator — future layer
 
 **Its job is not detection.** Every detector already produces independent,

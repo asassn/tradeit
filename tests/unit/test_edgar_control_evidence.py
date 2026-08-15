@@ -448,13 +448,68 @@ def test_shipped_aapl_invents_no_ticker_validity_dates() -> None:
     assert mapping.valid_to is None
 
 
-def test_shipped_ipet_remains_untouched() -> None:
-    """The AAPL and GM pilots must not have moved IPET."""
-    ipet = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["IPET"]
-    for mapping in ipet.mappings:
-        assert mapping.cik is None
-        assert mapping.status is MappingStatus.UNRESOLVED
-        assert mapping.unresolved_reason
+# ---------------------------------------------------------------------------
+# the shipped IPET record -- a 2000-era delisted issuer, ticker from the
+# offering document because no ticker reference file will ever hold it
+# ---------------------------------------------------------------------------
+
+
+def _shipped_ipet() -> Any:
+    return load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["IPET"].mappings[0]
+
+
+def test_shipped_ipet_identity() -> None:
+    ipet = _shipped_ipet()
+    assert ipet.cik == 1100683
+    assert ipet.ticker == "IPET"
+    assert ipet.status is MappingStatus.MANUAL_VERIFIED
+    assert ipet.verified_on == dt.date(2026, 8, 14)
+
+
+def test_shipped_ipet_promotion_is_not_a_name_match() -> None:
+    """'Pets.com, Inc.' resembling the control name is not what promoted it."""
+    ipet = _shipped_ipet()
+    assert ipet.evidence is MappingEvidence.MANUAL_FILING_CITATION
+    assert ipet.evidence is not MappingEvidence.NAME_MATCH
+    assert "0000891618-00-000749" in ipet.citation
+    assert "IPET" in ipet.citation
+
+
+def test_shipped_ipet_wind_down_is_issuer_scoped_and_cited() -> None:
+    fact = next(f for f in _shipped_ipet().lifecycle_facts if f.date == dt.date(2000, 11, 7))
+    assert fact.scope is LifecycleScope.ISSUER
+    assert fact.date_source is FactDateSource.BODY_TEXT
+    assert "0001095811-00-004383" in fact.citation
+    assert "wind down" in fact.fact.lower()
+
+
+def test_shipped_ipet_wind_down_is_not_corporate_death_or_delisting() -> None:
+    """The single most important negative assertion in this record.
+
+    An operational wind-down is not dissolution, not bankruptcy, not delisting
+    and not the end of ticker validity. Each would need its own filing.
+    """
+    ipet = _shipped_ipet()
+    # No exchange-listing fact was recorded, because none was evidenced.
+    assert all(f.scope is not LifecycleScope.EXCHANGE_LISTING for f in ipet.lifecycle_facts)
+    # And the wind-down date did not leak into generic ticker validity.
+    assert ipet.valid_to is None
+    wind_down = next(f for f in ipet.lifecycle_facts if f.date == dt.date(2000, 11, 7))
+    note = wind_down.note.lower()
+    for excluded in ("dissolution", "bankruptcy", "delisting", "extinguishment", "valid_to"):
+        assert excluded in note
+
+
+def test_shipped_ipet_invents_no_validity_dates() -> None:
+    """Approval for quotation is not the date ticker validity began."""
+    ipet = _shipped_ipet()
+    assert ipet.valid_from is None
+    assert ipet.valid_to is None
+
+
+def test_shipped_ipet_records_exactly_one_lifecycle_fact() -> None:
+    """Only what was evidenced. No delisting date was consulted, so none exists."""
+    assert len(_shipped_ipet().lifecycle_facts) == 1
 
 
 # ---------------------------------------------------------------------------

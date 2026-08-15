@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "notes": "Curated CIK/ticker identity evidence for the 30-control universe. Every record must cite a checkable primary source, and no CIK may be written from recollection. Statuses follow the approved evidence hierarchy: MANUAL_VERIFIED requires a human-checked filing citation; RESOLVED is reached by sec_company_tickers or filing_document_text; name matching and full-text search can never establish a mapping on their own. Absence of evidence is recorded as absence. Dated lifecycle facts are scope-tagged and kept out of valid_from/valid_to, which mean generic ticker validity and are a broader claim than any single filing supports. Verified so far: AAPL, GM (both issuers). Run `tradeit edgar verify-control <ID> --index-root <DIR>` to gather candidates for the rest.",
+  "notes": "Curated CIK/ticker identity evidence for the 30-control universe. Every record must cite a checkable primary source, and no CIK may be written from recollection. Statuses follow the approved evidence hierarchy: MANUAL_VERIFIED requires a human-checked filing citation; RESOLVED is reached by sec_company_tickers or filing_document_text; name matching and full-text search can never establish a mapping on their own. Absence of evidence is recorded as absence. Dated lifecycle facts are scope-tagged and kept out of valid_from/valid_to, which mean generic ticker validity and are a broader claim than any single filing supports. Verified so far: AAPL, GM (both issuers), IPET. Run `tradeit edgar verify-control <ID> --index-root <DIR>` to gather candidates for the rest.",
   "controls": [
     {
       "control_id": "AAPL",
@@ -27,20 +27,30 @@
       "control_id": "IPET",
       "expected_company": "Pets.com, Inc.",
       "identity_break": false,
-      "notes": "The hard case. Pets.com listed in February 2000 and wound up in November 2000, so it appears in no current SEC ticker file and EDGAR full-text search does not reach back to 2000. EDGAR can establish that a registrant of this name existed and filed, and can supply its CIK; what it cannot easily supply is the TICKER, because EDGAR is CIK-centric and 2000-era filings do not carry an authoritative ticker field. This control is expected to end at AMBIGUOUS or UNRESOLVED, and that is the honest outcome rather than a failure. A ticker read off a prospectus cover page would be FILING_DOCUMENT_TEXT evidence and could support RESOLVED; a ticker recalled from memory is not evidence at all.",
+      "notes": "The hard case, and it resolved. Pets.com listed in February 2000 and wound up operations in November 2000, so it appears in no current SEC ticker file and EDGAR full-text search does not reach back to 2000 \u2014 which is why the anticipated outcome was AMBIGUOUS or UNRESOLVED. The prospectus settled it: a 424B4 states the trading symbol outright, which is exactly the filing_document_text route the record was waiting on, inspected by hand and therefore MANUAL_VERIFIED. The lesson worth keeping: for a pre-2001 delisted issuer the ticker is recoverable from the offering document even though no ticker reference file will ever contain it.",
       "mappings": [
         {
           "issuer_label": "primary",
-          "cik": null,
-          "ticker": null,
-          "status": "unresolved",
-          "evidence": null,
-          "citation": "",
-          "verified_on": null,
+          "cik": 1100683,
+          "ticker": "IPET",
+          "status": "manual_verified",
+          "evidence": "manual_filing_citation",
+          "citation": "SEC Form 424B4 filed 2000-02-11, Pets.com, Inc., CIK 1100683, accession 0000891618-00-000749 (local copy petscom-2000-424b4.txt), manually inspected: \"The shares have been approved for quotation on the Nasdaq National Market under the symbol 'IPET.'\", and on the cover summary \"Proposed Nasdaq National Market symbol ........ 'IPET'\"",
+          "verified_on": "2026-08-14",
           "valid_from": null,
           "valid_to": null,
-          "scope_notes": "issuer lifecycle establishable from EDGAR; exchange_listing lifecycle is the hard part",
-          "unresolved_reason": "sec.gov unreachable from the authoring environment. Verification route: locate the registrant in the local EDGAR full-index for 1999-2001 to obtain the CIK, then read the S-1/424B cover page for the proposed Nasdaq symbol (evidence filing_document_text, citation = accession). If no filing states the symbol, this control stays UNRESOLVED and is reported as such."
+          "scope_notes": "Pets.com, Inc. The CIK-to-ticker relationship rests on the offering document stating the symbol, not on the registrant name resembling the control name. valid_from is null: the prospectus proves the symbol was approved for quotation as of that filing, which is not the same claim as the date ticker validity began \u2014 approval for quotation and first trade are different events and the filing dates only the former. valid_to is null: nothing consulted establishes a delisting date, and none may be inferred from the wind-down.",
+          "unresolved_reason": "",
+          "lifecycle_facts": [
+            {
+              "scope": "issuer",
+              "fact": "Operational wind-down. On 2000-11-04 the Board resolved that if no viable acquisition or financing offer was received by 9:00 a.m. on 2000-11-07, the Company would begin the orderly wind down of its operations, lay off approximately 255 of its 320 employees, and undertake efforts to sell the majority of its assets including inventory, distribution-center equipment, URLs, content and intellectual property. The filing states that no viable offers had been received by 9:00 a.m. on 2000-11-07.",
+              "date": "2000-11-07",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2000-11-07, Pets.com, Inc., CIK 1100683, accession 0001095811-00-004383 (local copy petscom-2000-11-07-8k.txt); the attached press release is headed \"Pets.com (Nasdaq: IPET)\"",
+              "note": "This is an OPERATIONAL fact about the issuer and nothing more. It is NOT a legal dissolution date, NOT a bankruptcy date, NOT an exchange delisting date, NOT a security extinguishment date, and NOT a ticker valid_to. A company that begins winding down operations continues to exist legally, may keep filing, and its securities may keep trading for some period afterwards. Each of those would need its own filing to establish, and none has been consulted."
+            }
+          ]
         }
       ]
     },

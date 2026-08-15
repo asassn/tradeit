@@ -15,6 +15,7 @@ authorisation.
 | — | Empirical data access & validation gate | ✅ Complete (Outcome B) |
 | 6 | Fundamentals & earnings quality | In progress — data architecture |
 | — | **Multi-Timeframe & Portfolio Mandate Architecture** | **Not started.** May overlap Phase 6; **must complete before Phase 7** |
+| — | **Strategy Definition / Builder Architecture** | **Not started.** Follows the multi-timeframe gate; **must complete before Phase 7** |
 | 7 | Opportunity scoring | Not started |
 | 8 | Portfolio construction, risk & compounding | Not started |
 | 9 | Portfolio backtesting & Monte Carlo analysis | Not started |
@@ -175,6 +176,46 @@ expansion gets separate derivation runs and corpora, and must independently pass
 the same causality and provenance gates Daily passed.
 
 See [`MULTI_TIMEFRAME_MANDATES.md`](MULTI_TIMEFRAME_MANDATES.md).
+
+## Strategy Definition / Builder Architecture
+
+**Not a numbered phase.** Same precedent as the two gates above; Phases 3, 4 and
+5 are not renumbered.
+
+TradeIt must not be a collection of hard-coded strategies. Strategies must be
+**created, edited, versioned, backtested, paper-traded, compared, promoted and
+retired** — eventually through the dashboard, without writing Python.
+
+A strategy is a **versioned declarative object composed from capabilities the
+platform already has**: universe, timeframe hierarchy, regime requirements,
+fundamental filters, indicators, patterns, breakout confirmation, entry, sizing,
+stops, exits, portfolio risk and execution assumptions — each a *reference into
+an existing engine*, never a reimplementation.
+
+*Placement:* **after the multi-timeframe gate, before Phase 7.** Phase 7 is the
+first stage that ranks anything, and "portfolio fit" is meaningless without a
+strategy object to fit to. Ranking before strategies are first-class would bake
+one implicit hard-coded strategy into the ranking layer — the exact outcome this
+milestone exists to prevent. It follows the multi-timeframe gate because a
+strategy's timeframe hierarchy is part of its definition.
+
+*The governing constraint:* the builder is an orchestration and definition layer,
+**not a loophole**. A strategy definition cannot bypass point-in-time reads,
+`knowledge_time` provenance, causal detection, the completed-bar rule,
+survivorship eligibility or timeframe eligibility. If a strategy could express
+something the engines refuse, the expression is the bug.
+
+*Lifecycle:* `DRAFT → VALIDATED → BACKTESTING → OUT_OF_SAMPLE_TESTING →
+PAPER_TRADING → ELIGIBLE_FOR_CAPITAL → LIVE → PAUSED → RETIRED`, with the gates
+operating on strategy **versions**. An edit creates a new version and drops it
+back to `DRAFT`; it does not inherit its parent's evidence. **No strategy becomes
+LIVE because a backtest was profitable**, and live trading remains behind the
+[ADR-0004](adr/0004-live-trading-safety-interlock.md) interlock regardless.
+
+*Does not include:* any implementation, any authored strategy, any threshold, any
+profitability or comparison metric.
+
+See [`STRATEGY_BUILDER.md`](STRATEGY_BUILDER.md).
 
 ## Phase 7 — Opportunity scoring
 

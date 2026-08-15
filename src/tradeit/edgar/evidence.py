@@ -64,7 +64,12 @@ class LifecycleScope(StrEnum):
     each ends at a different time.
     """
 
-    #: The legal entity: does the company exist and operate?
+    #: The legal entity and its operations. Deliberately spans both, because
+    #: they separate: a company can wind down operations, lay off staff and sell
+    #: its assets while continuing to exist legally for months or years. An
+    #: issuer-scoped fact must therefore say in its own text *which* it is --
+    #: "began an orderly wind-down" and "was dissolved" are both issuer-scope
+    #: and are not the same event.
     ISSUER = "issuer"
     #: A class of securities: does this particular security still exist?
     SECURITY_CLASS = "security_class"

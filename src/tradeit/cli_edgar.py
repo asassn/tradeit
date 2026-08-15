@@ -26,7 +26,7 @@ from typing import Any
 from tradeit.edgar.control_evidence import load_control_evidence, resolve_controls
 from tradeit.edgar.controls import CONTROL_UNIVERSE
 from tradeit.edgar.identity import MappingStatus
-from tradeit.edgar.index import FETCH_RECIPE, IndexQuarter, parse_index
+from tradeit.edgar.index import FETCH_RECIPE, FullIndexRow, IndexQuarter, parse_index
 from tradeit.edgar.pipeline import BuildOptions, build_denominator
 
 __all__ = ["add_edgar_commands"]
@@ -194,6 +194,15 @@ def cmd_controls(args: argparse.Namespace) -> int:
     return 0
 
 
+def _index_rows(path: Path) -> list[FullIndexRow]:
+    """Parse one quarterly index file, non-strict, for candidate gathering."""
+    return parse_index(
+        path.read_text(encoding="latin-1"),
+        quarter_label=f"{path.parent.parent.name}-{path.parent.name}",
+        strict=False,
+    ).rows
+
+
 def cmd_verify_control(args: argparse.Namespace) -> int:
     """Gather CIK candidates for one control from local primary sources.
 
@@ -219,18 +228,31 @@ def cmd_verify_control(args: argparse.Namespace) -> int:
         return 2
 
     root = Path(args.index_root)
+    files = sorted(root.glob("*/QTR*/form.idx"))
+
+    # Pass 1: which CIKs does the NAME search reach? A name search is the only
+    # way in, because a CIK is what we are trying to discover.
+    matched: dict[int, int] = {}
+    for path in files:
+        for row in _index_rows(path):
+            if all(term in row.company_name.upper() for term in terms):
+                matched[row.cik] = matched.get(row.cik, 0) + 1
+
+    print(f"searched {len(files)} quarterly index files for terms {terms}")
+    if not matched:
+        print("\nNO CANDIDATES. Record the control as UNRESOLVED with this as the reason.")
+        return 0
+
+    # Pass 2: for each candidate CIK, count EVERY row it has -- not only the
+    # ones whose registrant name happened to match. Once a CIK is a candidate,
+    # the CIK is the identity, and a registrant that renamed or was indexed
+    # under a variant spelling still filed those documents. Counting only
+    # name-matched rows under-reports the filing count AND narrows the reported
+    # date range, which is the more dangerous half of the same bug.
     hits: dict[int, dict[str, Any]] = {}
-    scanned = 0
-    for path in sorted(root.glob("*/QTR*/form.idx")):
-        scanned += 1
-        parsed = parse_index(
-            path.read_text(encoding="latin-1"),
-            quarter_label=f"{path.parent.parent.name}-{path.parent.name}",
-            strict=False,
-        )
-        for row in parsed.rows:
-            upper = row.company_name.upper()
-            if not all(term in upper for term in terms):
+    for path in files:
+        for row in _index_rows(path):
+            if row.cik not in matched:
                 continue
             entry = hits.setdefault(
                 row.cik,
@@ -248,16 +270,23 @@ def cmd_verify_control(args: argparse.Namespace) -> int:
             entry["forms"].add(row.form_type)
             entry["n"] += 1
 
-    print(f"searched {scanned} quarterly index files for terms {terms}")
-    if not hits:
-        print("\nNO CANDIDATES. Record the control as UNRESOLVED with this as the reason.")
-        return 0
-
     print(f"\n{len(hits)} candidate CIK(s):\n")
     for cik, entry in sorted(hits.items(), key=lambda kv: -kv[1]["n"]):
-        print(f"  CIK {cik}   filings={entry['n']}   {entry['first']} .. {entry['last']}")
+        print(
+            f"  CIK {cik}   filings_total={entry['n']}   "
+            f"filings_name_matched={matched[cik]}   {entry['first']} .. {entry['last']}"
+        )
+        unmatched = sorted(
+            n for n in entry["names"] if not all(term in n.upper() for term in terms)
+        )
         for name in sorted(entry["names"]):
-            print(f"    name : {name}")
+            flag = "  <- did NOT match the search terms" if name in unmatched else ""
+            print(f"    name : {name}{flag}")
+        if unmatched:
+            print(
+                f"    NOTE: filings_total - filings_name_matched = "
+                f"{entry['n'] - matched[cik]}, filed under the name variant(s) flagged above"
+            )
         print(f"    forms: {sorted(entry['forms'])[:12]}")
     print(
         "\nThese are NAME MATCHES over primary SEC index data. Name matching can never\n"
