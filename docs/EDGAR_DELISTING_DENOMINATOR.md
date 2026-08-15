@@ -70,6 +70,38 @@ would be near-empty for the dot-com collapse and would then "prove" that almost
 nothing delisted in 2001** — a conclusion so wrong it would invalidate the whole
 measurement.
 
+### 2.1b Nasdaq issuers of the era would not file a Form 25 at all
+
+Worse than §2.1, and found while verifying a control rather than by reasoning
+about the rule. Pets.com's filing set (CIK 1100683) contains **`8-A12G`**, not
+`8-A12B` — its class was registered under section **12(g)**.
+
+That is the expected shape for the period: **Nasdaq was not a registered national
+securities exchange until 2006.** Before then it was an NASD-operated quotation
+market, its issuers registered under 12(g) rather than 12(b), and Rule 12d2-2 —
+the rule Form 25 exists to serve — applies to securities listed on an
+*exchange*. So a Nasdaq issuer that stopped being quoted in 2000 or 2001 had no
+occasion to file a Form 25, and no exchange filed one for it.
+
+**Status: CORROBORATED, not verified** — `sec.gov` is unreachable from this
+environment. But it is consistent with the primary evidence actually in hand: the
+`8-A12G` registration, and the total absence of any Form 25 from a 39-filing set
+that does include a `15-12G`.
+
+**The consequence for the denominator is large.** §2.1 already said Form 25 is
+sparse before 2005 because it was paper-filed. This is a stronger and different
+claim: for the *Nasdaq* population — which is most of the dot-com cohort — a Form
+25 would not exist even in principle. Any per-year delisting count for 1998–2002
+built on Form 25 is therefore not merely incomplete; it is close to empty for
+exactly the securities the corpus is about.
+
+**What replaces it:** the **Form 15 family**, which terminates or suspends a
+registration regardless of where the security was quoted, and which IPET's set
+does contain. That elevates §2.2's `15-12G`/`15-12B` signals from corroboration
+to the primary dot-com-era exit evidence — and it re-emphasises the scope
+discipline, because a Form 15 ends a *reporting* obligation and still says
+nothing directly about when quotation ceased.
+
 ### 2.2 8-K item numbering changed in 2004
 
 Modern item numbers (1.03 bankruptcy, 2.01 completion of acquisition, 3.01

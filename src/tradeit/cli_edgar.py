@@ -7,6 +7,7 @@ Three commands, in the order an operator uses them::
     tradeit edgar denominator --index-root DIR # build and report
     tradeit edgar controls --diagnose          # control identity + citations
     tradeit edgar verify-control AAPL ...      # gather CIK candidates for one control
+    tradeit edgar cik-filings 1100683 ...      # every filing for one CIK, chronologically
 
 ``fetch-recipe`` prints shell rather than running it. Downloading ~130 quarterly
 index files is a long, rate-limited, network-dependent operation that belongs in
@@ -128,6 +129,65 @@ def cmd_inspect_index(args: argparse.Namespace) -> int:
                 f"  {row.form_type:12s} {row.company_name[:40]:40s} {row.cik:>10d} "
                 f"{row.filed_at} {row.accession}"
             )
+    return 0
+
+
+def cmd_cik_filings(args: argparse.Namespace) -> int:
+    """Every indexed filing for one CIK, chronologically.
+
+    ``verify-control`` aggregates; this enumerates. Aggregates are what let a
+    registrant's rename, deregistration or post-operational afterlife hide
+    inside a filing count, so the enumeration is a separate command rather than
+    a flag nobody passes.
+
+    Registrant-name changes are flagged where they occur, because the index
+    records the name as filed and that transition is itself the evidence of
+    when a rename was first reflected.
+    """
+    cik = int(args.cik)
+    root = Path(args.index_root)
+    rows = [
+        row
+        for path in sorted(root.glob("*/QTR*/form.idx"))
+        for row in _index_rows(path)
+        if row.cik == cik
+    ]
+    rows.sort(key=lambda r: (r.filed_at, r.accession))
+
+    if not rows:
+        print(f"no filings found for CIK {cik} in {root}")
+        return 0
+
+    print(f"CIK {cik}: {len(rows)} filings, {rows[0].filed_at} .. {rows[-1].filed_at}")
+    print("(this is filings_total: every indexed row for this CIK, name-independent)\n")
+    print(f"{'#':>3} {'filed':10s} {'form':12s} {'company name':34s} {'accession':22s} path")
+
+    previous_name: str | None = None
+    for index, row in enumerate(rows, start=1):
+        if previous_name is not None and row.company_name != previous_name:
+            print(
+                f"    ---- indexed registrant name changes here: "
+                f"{previous_name!r} -> {row.company_name!r} ----"
+            )
+        previous_name = row.company_name
+        print(
+            f"{index:>3} {row.filed_at.isoformat():10s} {row.form_type:12s} "
+            f"{row.company_name[:34]:34s} {row.accession:22s} {row.path}"
+        )
+
+    names: dict[str, list[str]] = {}
+    for row in rows:
+        span = names.setdefault(row.company_name, [row.filed_at.isoformat(), ""])
+        span[1] = row.filed_at.isoformat()
+    print("\nindexed registrant names and the span each was used over")
+    for name, (first, last) in names.items():
+        print(f"  {name:40s} {first} .. {last}")
+    print(
+        "\nA name change in the index is the date the rename was first REFLECTED in a\n"
+        "filing, which is not necessarily the date it took legal effect. And a shared\n"
+        "CIK is not by itself evidence of a continuing issuer -- that needs a filing\n"
+        "that says so."
+    )
     return 0
 
 
@@ -337,6 +397,13 @@ def add_edgar_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     controls.add_argument("--json", action="store_true")
     controls.set_defaults(func=cmd_controls)
+
+    filings = edgar_sub.add_parser(
+        "cik-filings", help="enumerate every indexed filing for one CIK, chronologically"
+    )
+    filings.add_argument("cik", help="the CIK to enumerate, e.g. 1100683")
+    filings.add_argument("--index-root", required=True, help="directory of <year>/QTR<n>/form.idx")
+    filings.set_defaults(func=cmd_cik_filings)
 
     verify = edgar_sub.add_parser(
         "verify-control", help="gather CIK candidates for one control from the local index"
