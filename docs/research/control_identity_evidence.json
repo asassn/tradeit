@@ -1,12 +1,12 @@
 {
-  "schema_version": 1,
-  "notes": "Curated CIK/ticker identity evidence for the 30-control universe. Every record must cite a checkable primary source. No CIK in this file may be written from recollection: sec.gov is unreachable from the build environment where the schema was authored, so all three pilot records ship UNRESOLVED with their verification route recorded. Absence of evidence is recorded as absence. Run `tradeit edgar verify-control <ID> --index-root <DIR>` on a machine with the EDGAR archive to gather candidates, then fill in a record here.",
+  "schema_version": 2,
+  "notes": "Curated CIK/ticker identity evidence for the 30-control universe. Every record must cite a checkable primary source, and no CIK may be written from recollection. Statuses follow the approved evidence hierarchy: MANUAL_VERIFIED requires a human-checked filing citation; RESOLVED is reached by sec_company_tickers or filing_document_text; name matching and full-text search can never establish a mapping on their own. Absence of evidence is recorded as absence. Dated lifecycle facts are scope-tagged and kept out of valid_from/valid_to, which mean generic ticker validity and are a broader claim than any single filing supports. Verified so far: AAPL, GM (both issuers). Run `tradeit edgar verify-control <ID> --index-root <DIR>` to gather candidates for the rest.",
   "controls": [
     {
       "control_id": "AAPL",
       "expected_company": "Apple Inc. (formerly Apple Computer, Inc.)",
       "identity_break": false,
-      "notes": "The easy case, and the pilot's baseline. One issuer, continuously listed, currently trading, so the SEC's own company_tickers.json is authoritative for the CURRENT CIK-to-ticker relationship. Recorded as RESOLVED rather than MANUAL_VERIFIED: sec_company_tickers is sufficient primary SEC evidence under the approved ranking, while MANUAL_VERIFIED stays reserved for a human-checked filing citation. valid_from and valid_to are deliberately null — the ticker file proves the mapping as of its retrieval date and says nothing about which historical dates AAPL was valid, and the filing spine corroborates issuer continuity without dating the ticker.",
+      "notes": "The easy case, and the pilot's baseline. One issuer, continuously listed, currently trading, so the SEC's own company_tickers.json is authoritative for the CURRENT CIK-to-ticker relationship. Recorded as RESOLVED rather than MANUAL_VERIFIED: sec_company_tickers is sufficient primary SEC evidence under the approved ranking, while MANUAL_VERIFIED stays reserved for a human-checked filing citation. valid_from and valid_to are deliberately null \u2014 the ticker file proves the mapping as of its retrieval date and says nothing about which historical dates AAPL was valid, and the filing spine corroborates issuer continuity without dating the ticker.",
       "mappings": [
         {
           "issuer_label": "primary",
@@ -48,33 +48,51 @@
       "control_id": "GM",
       "expected_company": "General Motors Corporation (pre-2009) and General Motors Company (2010-)",
       "identity_break": true,
-      "notes": "Two distinct registrants that shared the ticker GM across a bankruptcy roughly a year apart. They must never be merged: doing so produces exactly the spliced series that full-01 already failed on with BBBY, and a one-CIK-per-control model cannot express the break at all. Each issuer therefore carries its own CIK, ticker validity window and evidence, and identity_break is true so the merge cannot happen by accident. The old registrant continued to exist as Motors Liquidation Company after the sale, under a different ticker, which is a further reason the two records must stay apart.",
+      "notes": "Two distinct registrants that shared the ticker GM across a bankruptcy roughly a year apart. They must never be merged: doing so produces exactly the spliced series that full-01 already failed on with BBBY, and a one-CIK-per-control model cannot express the break at all. Each issuer carries its own CIK and evidence, and identity_break is true so the merge cannot happen by accident. Note the asymmetry the two records preserve: old GM's ISSUER lifecycle continued through bankruptcy and liquidation long after its EXCHANGE LISTING ended, so those two scopes close at different times and are recorded separately. Neither issuer carries a valid_from or valid_to: the evidence establishes CIK-to-ticker relationships and one dated exchange-listing removal, and none of it dates generic ticker validity at either end.",
       "mappings": [
         {
           "issuer_label": "old_gm",
-          "cik": null,
-          "ticker": null,
-          "status": "unresolved",
-          "evidence": null,
-          "citation": "",
-          "verified_on": null,
+          "cik": 40730,
+          "ticker": "GM",
+          "status": "manual_verified",
+          "evidence": "manual_filing_citation",
+          "citation": "SEC Form 10-K for fiscal 2008, GENERAL MOTORS CORP, CIK 40730, accession 0001193125-09-045144 (local copy gm-2009-10k.txt), manually inspected: the filing states the registrant's common stock was listed under the trading symbol \"GM\" on the New York Stock Exchange",
+          "verified_on": "2026-08-14",
           "valid_from": null,
           "valid_to": null,
-          "scope_notes": "General Motors Corporation; later renamed Motors Liquidation Company. Its issuer lifecycle continues past the point at which it stopped being the holder of the GM ticker, so exchange_listing and issuer scopes end at different times.",
-          "unresolved_reason": "sec.gov unreachable from the authoring environment. Verification route: EDGAR company search for the registrant, confirm the CIK, and use the Form 25 or 8-K covering the 2009 NYSE delisting as the citation for the end of the ticker validity window."
+          "scope_notes": "General Motors Corporation, later Motors Liquidation Company. The CIK-to-ticker relationship rests on filing-document evidence manually inspected, not on name matching. valid_to is deliberately null: the July 2009 NYSE removal is an EXCHANGE-LISTING fact and is recorded as a lifecycle fact rather than as generic ticker validity, because a Form 25-NSE proves removal from one exchange and does not prove the symbol could never appear in another venue or context afterwards. This is emphatically not the issuer's corporate death date -- old GM continued as a legal entity through the bankruptcy and liquidation process.",
+          "unresolved_reason": "",
+          "lifecycle_facts": [
+            {
+              "scope": "exchange_listing",
+              "fact": "NYSE stated its intention to remove General Motors Corporation common stock from listing and registration on the Exchange at the opening of business on July 20, 2009, following the Company's June 1, 2009 voluntary Chapter 11 filing and the Exchange's determination that the securities were no longer suitable for continued listing and trading.",
+              "date": "2009-07-20",
+              "date_source": "body_text",
+              "citation": "SEC Form 25-NSE, accession 0000876661-09-000303, filed by NEW YORK STOCK EXCHANGE INC for issuer GENERAL MOTORS CORP (CIK 40730), security: Common Stock",
+              "note": "This is the common-stock Form 25-NSE. It is NOT accession 0000876661-09-000262, which concerns the 1.50% Series D Convertible Senior Debentures due June 1, 2009 and must never be cited as the common-stock lifecycle evidence."
+            },
+            {
+              "scope": "exchange_listing",
+              "fact": "SGML header EFFECTIVENESS DATE of the common-stock Form 25-NSE.",
+              "date": "2009-07-08",
+              "date_source": "header_field",
+              "citation": "SEC Form 25-NSE, accession 0000876661-09-000303, document header field EFFECTIVENESS DATE: 20090708",
+              "note": "Recorded separately and deliberately NOT equated with the body-stated removal date of 2009-07-20. They are different fields making different claims, and collapsing them would silently pick one."
+            }
+          ]
         },
         {
           "issuer_label": "new_gm",
-          "cik": null,
-          "ticker": null,
-          "status": "unresolved",
-          "evidence": null,
-          "citation": "",
-          "verified_on": null,
+          "cik": 1467858,
+          "ticker": "GM",
+          "status": "resolved",
+          "evidence": "sec_company_tickers",
+          "citation": "SEC company_tickers.json, https://www.sec.gov/files/company_tickers.json, retrieved 2026-08-14; exactly one GM match: {\"cik_str\": 1467858, \"ticker\": \"GM\", \"title\": \"General Motors Co\"}",
+          "verified_on": "2026-08-14",
           "valid_from": null,
           "valid_to": null,
-          "scope_notes": "General Motors Company; a separate registrant with its own CIK, which acquired the ticker at its 2010 IPO.",
-          "unresolved_reason": "sec.gov unreachable from the authoring environment. Verification route: company_tickers.json gives the current CIK for GM authoritatively (evidence sec_company_tickers); the 2010 Form 8-A12B establishes when the listing began."
+          "scope_notes": "General Motors Company: a separate registrant with its own CIK that later held the ticker GM. RESOLVED rather than MANUAL_VERIFIED, matching the AAPL precedent -- manually viewing the SEC ticker JSON does not make it a filing citation, and the evidence hierarchy is preserved. Independently corroborated by the local SEC full-index: CIK 1467858, General Motors Co, 2,138 filings spanning 2009-07-16 to 2026-08-11. Its filing history is entirely separate from CIK 40730's and must never be concatenated with it. valid_from is null: the ticker file dates nothing, and the first filing date is not the date the ticker was acquired.",
+          "unresolved_reason": ""
         }
       ]
     }

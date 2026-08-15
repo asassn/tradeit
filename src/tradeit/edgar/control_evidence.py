@@ -30,10 +30,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from tradeit.edgar.controls import CONTROL_UNIVERSE, ControlSecurity
+from tradeit.edgar.evidence import LifecycleScope
 from tradeit.edgar.identity import MappingEvidence, MappingStatus, SecurityMapping
 from tradeit.errors import ConfigError
 
@@ -42,13 +44,18 @@ __all__ = [
     "SCHEMA_VERSION",
     "ControlEvidence",
     "ControlEvidenceFile",
+    "FactDateSource",
     "IssuerMapping",
+    "LifecycleFact",
     "ResolvedControl",
     "load_control_evidence",
     "resolve_controls",
 ]
 
-SCHEMA_VERSION = 1
+#: Bumped to 2 when lifecycle_facts was added. A version-1 reader would have
+#: silently dropped dated exchange-listing facts, and silently dropping a
+#: lifecycle date is precisely the failure class this project keeps guarding.
+SCHEMA_VERSION = 2
 
 DEFAULT_EVIDENCE_PATH = (
     Path(__file__).resolve().parents[3] / "docs" / "research" / "control_identity_evidence.json"
@@ -66,6 +73,52 @@ _INSUFFICIENT_ALONE = frozenset({MappingEvidence.NAME_MATCH, MappingEvidence.FUL
 _CONTROL_IDS = {c.ticker for c in CONTROL_UNIVERSE}
 
 
+class FactDateSource(StrEnum):
+    """Where a lifecycle date came from, because the sources disagree.
+
+    A Form 25-NSE carries an ``EFFECTIVENESS DATE`` in its SGML header *and* a
+    removal date in its body text, and they are **not the same fact**. GM's
+    common-stock Form 25-NSE has a header effectiveness of 2009-07-08 and a body
+    stating removal "at the opening of business on July 20, 2009". Recording
+    either without saying which it is would silently pick one.
+    """
+
+    BODY_TEXT = "body_text"
+    HEADER_FIELD = "header_field"
+    DERIVED = "derived"
+
+
+@dataclass(frozen=True, slots=True)
+class LifecycleFact:
+    """One dated, cited fact about one lifecycle scope.
+
+    Exists because ``valid_from``/``valid_to`` mean *generic ticker validity*,
+    which is a weaker and broader claim than "the NYSE removed this common stock
+    from listing on this date". A Form 25-NSE proves the second and says nothing
+    about the first -- a delisted symbol can still appear in another venue, and
+    the issuer can outlive its listing by years. Overloading ``valid_to`` with an
+    exchange-listing boundary would assert more than the filing supports, so
+    exchange-listing facts live here, scoped and cited.
+    """
+
+    scope: LifecycleScope
+    fact: str
+    date: dt.date
+    date_source: FactDateSource
+    citation: str
+    note: str = ""
+
+    def summary(self) -> dict[str, object]:
+        return {
+            "scope": str(self.scope),
+            "fact": self.fact,
+            "date": self.date.isoformat(),
+            "date_source": str(self.date_source),
+            "citation": self.citation,
+            "note": self.note,
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class IssuerMapping:
     """One issuer's identity within a control, with its provenance."""
@@ -79,13 +132,17 @@ class IssuerMapping:
     #: Accession, URL, or another checkable pointer. Required for MANUAL_VERIFIED.
     citation: str = ""
     verified_on: dt.date | None = None
-    #: When this issuer held this ticker. Both ends may be unknown.
+    #: When this issuer held this ticker, in the **generic** sense. Both ends may
+    #: be unknown, and an exchange-listing boundary does not belong here -- see
+    #: :class:`LifecycleFact`.
     valid_from: dt.date | None = None
     valid_to: dt.date | None = None
     #: Which lifecycle this record is about, where it matters.
     scope_notes: str = ""
     #: Why it is not resolved. Required whenever the status is not resolved.
     unresolved_reason: str = ""
+    #: Dated, cited, scope-tagged lifecycle facts. Never merged into validity.
+    lifecycle_facts: tuple[LifecycleFact, ...] = ()
 
     def as_security_mapping(self) -> SecurityMapping:
         """Round-trip through the shared type so the approved rules apply."""
@@ -115,6 +172,7 @@ class IssuerMapping:
             "valid_to": self.valid_to.isoformat() if self.valid_to else None,
             "scope_notes": self.scope_notes,
             "unresolved_reason": self.unresolved_reason,
+            "lifecycle_facts": [f.summary() for f in self.lifecycle_facts],
         }
 
 
@@ -219,6 +277,40 @@ def _parse_cik(value: Any, where: str) -> int | None:
     return value
 
 
+def _parse_lifecycle_fact(raw: Any, where: str) -> LifecycleFact:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}: each lifecycle fact must be an object")
+
+    scope = _as_enum(raw.get("scope"), LifecycleScope, "scope", where)
+    if scope is None:
+        raise ConfigError(f"{where}: scope is required; a dated fact about nothing is not a fact")
+    date = _as_date(raw.get("date"), "date", where)
+    if date is None:
+        raise ConfigError(f"{where}: date is required")
+    source = _as_enum(raw.get("date_source"), FactDateSource, "date_source", where)
+    if source is None:
+        raise ConfigError(
+            f"{where}: date_source is required. A Form 25-NSE header effectiveness date "
+            "and a body-stated removal date are different facts, and a record that does "
+            "not say which it holds has silently picked one"
+        )
+    fact = str(raw.get("fact", "") or "").strip()
+    if not fact:
+        raise ConfigError(f"{where}: fact text is required")
+    citation = str(raw.get("citation", "") or "").strip()
+    if not citation:
+        raise ConfigError(f"{where}: citation is required; an uncited lifecycle date is a claim")
+
+    return LifecycleFact(
+        scope=scope,
+        fact=fact,
+        date=date,
+        date_source=source,
+        citation=citation,
+        note=str(raw.get("note", "") or "").strip(),
+    )
+
+
 def _parse_mapping(raw: Any, where: str) -> IssuerMapping:
     if not isinstance(raw, dict):
         raise ConfigError(f"{where}: each mapping must be an object")
@@ -237,6 +329,14 @@ def _parse_mapping(raw: Any, where: str) -> IssuerMapping:
     citation = str(raw.get("citation", "") or "").strip()
     unresolved_reason = str(raw.get("unresolved_reason", "") or "").strip()
 
+    raw_facts = raw.get("lifecycle_facts", [])
+    if not isinstance(raw_facts, list):
+        raise ConfigError(f"{where}: lifecycle_facts must be a list")
+    facts = tuple(
+        _parse_lifecycle_fact(item, f"{where}.lifecycle_facts[{i}]")
+        for i, item in enumerate(raw_facts)
+    )
+
     mapping = IssuerMapping(
         issuer_label=label,
         cik=_parse_cik(raw.get("cik"), where),
@@ -249,6 +349,7 @@ def _parse_mapping(raw: Any, where: str) -> IssuerMapping:
         valid_to=_as_date(raw.get("valid_to"), "valid_to", where),
         scope_notes=str(raw.get("scope_notes", "") or "").strip(),
         unresolved_reason=unresolved_reason,
+        lifecycle_facts=facts,
     )
 
     # The approved identity rules, enforced by the shared type rather than

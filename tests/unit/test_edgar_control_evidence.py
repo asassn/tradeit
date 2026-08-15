@@ -24,10 +24,12 @@ import pytest
 from tradeit.edgar.control_evidence import (
     DEFAULT_EVIDENCE_PATH,
     SCHEMA_VERSION,
+    FactDateSource,
     load_control_evidence,
     resolve_controls,
 )
 from tradeit.edgar.controls import CONTROL_UNIVERSE
+from tradeit.edgar.evidence import LifecycleScope
 from tradeit.edgar.identity import MappingEvidence, MappingStatus
 from tradeit.errors import ConfigError
 
@@ -446,14 +448,151 @@ def test_shipped_aapl_invents_no_ticker_validity_dates() -> None:
     assert mapping.valid_to is None
 
 
-def test_shipped_gm_and_ipet_remain_untouched() -> None:
-    """The AAPL pilot must not have moved the other two."""
-    loaded = load_control_evidence(DEFAULT_EVIDENCE_PATH)
-    for control_id in ("GM", "IPET"):
-        for mapping in loaded.controls[control_id].mappings:
-            assert mapping.cik is None
-            assert mapping.status is MappingStatus.UNRESOLVED
-            assert mapping.unresolved_reason
+def test_shipped_ipet_remains_untouched() -> None:
+    """The AAPL and GM pilots must not have moved IPET."""
+    ipet = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["IPET"]
+    for mapping in ipet.mappings:
+        assert mapping.cik is None
+        assert mapping.status is MappingStatus.UNRESOLVED
+        assert mapping.unresolved_reason
+
+
+# ---------------------------------------------------------------------------
+# the shipped GM record -- ticker reuse across two registrants
+# ---------------------------------------------------------------------------
+
+
+def _shipped_gm() -> dict[str, Any]:
+    gm = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["GM"]
+    return {m.issuer_label: m for m in gm.mappings} | {"_control": gm}
+
+
+def test_shipped_gm_has_exactly_two_issuers_and_declares_the_break() -> None:
+    gm = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["GM"]
+    assert gm.identity_break is True
+    assert len(gm.mappings) == 2
+    assert {m.issuer_label for m in gm.mappings} == {"old_gm", "new_gm"}
+
+
+def test_shipped_gm_issuers_share_a_ticker_but_not_a_cik() -> None:
+    """The whole point: one ticker, two registrants, never concatenated."""
+    issuers = _shipped_gm()
+    assert issuers["old_gm"].cik == 40730
+    assert issuers["new_gm"].cik == 1467858
+    assert issuers["old_gm"].cik != issuers["new_gm"].cik
+    assert issuers["old_gm"].ticker == "GM"
+    assert issuers["new_gm"].ticker == "GM"
+
+
+def test_shipped_old_gm_is_manual_verified_from_a_filing_citation() -> None:
+    old = _shipped_gm()["old_gm"]
+    assert old.status is MappingStatus.MANUAL_VERIFIED
+    assert old.evidence is MappingEvidence.MANUAL_FILING_CITATION
+    assert old.citation
+    assert "0001193125-09-045144" in old.citation
+    assert old.verified_on == dt.date(2026, 8, 14)
+
+
+def test_shipped_new_gm_is_resolved_from_the_sec_ticker_file() -> None:
+    """Same precedent as AAPL: viewing the JSON by hand is not a filing citation."""
+    new = _shipped_gm()["new_gm"]
+    assert new.status is MappingStatus.RESOLVED
+    assert new.status is not MappingStatus.MANUAL_VERIFIED
+    assert new.evidence is MappingEvidence.SEC_COMPANY_TICKERS
+    assert "company_tickers.json" in new.citation
+
+
+def test_shipped_gm_invents_no_ticker_validity_dates() -> None:
+    """The July 2009 removal is an exchange-listing fact, not generic validity."""
+    issuers = _shipped_gm()
+    for label in ("old_gm", "new_gm"):
+        assert issuers[label].valid_from is None
+        assert issuers[label].valid_to is None
+
+
+def test_old_gm_records_the_nyse_common_stock_removal_as_a_scoped_fact() -> None:
+    old = _shipped_gm()["old_gm"]
+    removal = next(
+        f
+        for f in old.lifecycle_facts
+        if f.date_source is FactDateSource.BODY_TEXT and f.scope is LifecycleScope.EXCHANGE_LISTING
+    )
+    assert removal.date == dt.date(2009, 7, 20)
+    assert "0000876661-09-000303" in removal.citation
+
+
+def test_old_gm_keeps_the_header_effectiveness_date_separate() -> None:
+    """Header EFFECTIVENESS DATE and body removal date are different claims."""
+    old = _shipped_gm()["old_gm"]
+    header = next(f for f in old.lifecycle_facts if f.date_source is FactDateSource.HEADER_FIELD)
+    body = next(f for f in old.lifecycle_facts if f.date_source is FactDateSource.BODY_TEXT)
+    assert header.date == dt.date(2009, 7, 8)
+    assert body.date == dt.date(2009, 7, 20)
+    assert header.date != body.date
+
+
+def test_the_debenture_form_25_is_never_cited_as_common_stock_evidence() -> None:
+    """0000876661-09-000262 covers the Series D debentures, not the common stock.
+
+    It may appear in a note that explains why it is excluded; it must never
+    appear as the citation of a lifecycle fact or of a mapping.
+    """
+    old = _shipped_gm()["old_gm"]
+    debenture = "0000876661-09-000262"
+    assert debenture not in old.citation
+    for fact in old.lifecycle_facts:
+        assert debenture not in fact.citation
+
+
+def test_gm_control_status_is_its_weakest_issuer() -> None:
+    """MANUAL_VERIFIED + RESOLVED aggregates to RESOLVED, which is correct."""
+    resolved = {
+        r.control.ticker: r for r in resolve_controls(load_control_evidence(DEFAULT_EVIDENCE_PATH))
+    }
+    assert resolved["GM"].status is MappingStatus.RESOLVED
+
+
+# ---------------------------------------------------------------------------
+# lifecycle-fact validation
+# ---------------------------------------------------------------------------
+
+
+def _fact(**overrides: Any) -> dict[str, Any]:
+    record = {
+        "scope": "exchange_listing",
+        "fact": "removed from listing",
+        "date": "2009-07-20",
+        "date_source": "body_text",
+        "citation": "accession 0000876661-09-000303",
+    }
+    record.update(overrides)
+    return record
+
+
+@pytest.mark.parametrize(
+    ("override", "match"),
+    [
+        ({"date_source": None}, "date_source is required"),
+        ({"citation": ""}, "citation is required"),
+        ({"scope": None}, "scope is required"),
+        ({"fact": ""}, "fact text is required"),
+        ({"date": None}, "date is required"),
+        ({"scope": "not_a_scope"}, "unknown scope"),
+        ({"date_source": "guessed"}, "unknown date_source"),
+    ],
+)
+def test_lifecycle_fact_validation(tmp_path: Path, override: dict[str, Any], match: str) -> None:
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": "AAPL",
+                "mappings": [_verified_mapping(lifecycle_facts=[_fact(**override)])],
+            }
+        ],
+    )
+    with pytest.raises(ConfigError, match=match):
+        load_control_evidence(path)
 
 
 def test_the_shipped_gm_record_models_the_identity_break() -> None:

@@ -175,6 +175,12 @@ def cmd_controls(args: argparse.Namespace) -> int:
                     print(f"     valid    : {m.valid_from or '?'} .. {m.valid_to or '?'}")
                 if m.scope_notes:
                     print(f"     scope    : {m.scope_notes}")
+                for fact in m.lifecycle_facts:
+                    print(f"     lifecycle fact [{fact.scope}] {fact.date} ({fact.date_source})")
+                    print(f"       {fact.fact}")
+                    print(f"       cite: {fact.citation}")
+                    if fact.note:
+                        print(f"       note: {fact.note}")
                 if m.unresolved_reason:
                     print(f"     UNRESOLVED REASON: {m.unresolved_reason}")
             print()
