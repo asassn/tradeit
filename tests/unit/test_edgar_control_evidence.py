@@ -1010,7 +1010,7 @@ def test_bel_merger_date_and_vz_trading_date_cannot_collapse() -> None:
 def test_bel_never_claims_vz_traded_before_the_evidenced_date() -> None:
     """A prospective statement does not become generic ticker validity."""
     bel = _shipped_bel()
-    assert bel.ticker == "VZ"
+    assert bel.ticker == "BEL"
     assert bel.valid_from is None
     assert bel.valid_to is None
 
@@ -1022,18 +1022,74 @@ def test_bel_never_claims_vz_traded_before_the_evidenced_date() -> None:
     assert "IPET precedent" in bel.scope_notes
 
 
-def test_bel_asserts_no_ticker_it_cannot_cite() -> None:
-    """The control is keyed 'BEL' and no inspected filing names that symbol.
+def test_bel_ticker_is_cited_not_assumed(tmp_path: Path) -> None:
+    """'BEL' is in the mapping because a filing says so, not because we knew it.
 
-    Background knowledge is not evidence. The mapping carries the symbol the
-    8-K states, and the gap is recorded rather than filled in.
+    The record carried 'VZ' here for one commit, with the historical symbol
+    recorded as an open gap, precisely because no inspected filing named it.
+    The 1999 filing closed the gap by stating the NYSE symbol outright, and this
+    test fails if the ticker is ever present without that citation behind it.
     """
     bel = _shipped_bel()
-    assert bel.ticker == "VZ"
-    assert "does NOT name the prior symbol" in bel.scope_notes
-    assert "background knowledge is not evidence" in bel.scope_notes
-    # 'BEL' is never asserted as this issuer's ticker anywhere in the record.
-    assert bel.ticker != "BEL"
+    assert bel.ticker == "BEL"
+    assert bel.cik == 732712
+    assert bel.status is MappingStatus.MANUAL_VERIFIED
+    assert "0000950130-99-002148" in bel.citation
+    assert "under the symbol 'BEL'" in bel.citation
+    # The gap language from the previous draft is gone, not merely contradicted.
+    assert "does NOT name the prior symbol" not in bel.scope_notes
+    assert "background knowledge is not evidence" not in bel.scope_notes
+
+    # And the grade itself cannot survive without a citation: MANUAL_VERIFIED
+    # with the citation removed is a load error, not a silent downgrade.
+    with pytest.raises(ConfigError, match="requires a citation"):
+        load_control_evidence(
+            _write(
+                tmp_path,
+                [
+                    {
+                        "control_id": "BEL",
+                        "expected_company": "Bell Atlantic Corporation",
+                        "mappings": [_verified_mapping(cik=732712, ticker="BEL", citation="")],
+                    }
+                ],
+            )
+        )
+
+
+def test_bel_keeps_vz_as_a_dated_fact_rather_than_a_second_mapping() -> None:
+    """Both symbols are recorded; only one of them is an issuer mapping.
+
+    A symbol change on a continuing issuer is not a second identity. The model
+    refuses the wrong shape twice over -- two mappings sharing a CIK is a load
+    error, and any second mapping would force identity_break true -- so VZ is
+    carried where it belongs, as a dated exchange_listing fact.
+    """
+    control = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["BEL"]
+    assert len(control.mappings) == 1
+    assert control.mappings[0].ticker == "BEL"
+    assert control.identity_break is False
+
+    listing = next(
+        f for f in control.mappings[0].lifecycle_facts if f.scope is LifecycleScope.EXCHANGE_LISTING
+    )
+    assert "VZ" in listing.fact
+    assert listing.date == dt.date(2000, 7, 3)
+    # VZ is not smuggled into the mapping by any route.
+    assert control.mappings[0].ticker != "VZ"
+    assert all(m.ticker != "VZ" for m in control.mappings)
+
+
+def test_bel_invents_no_last_trading_day_for_the_old_symbol() -> None:
+    """The Friday before is derivable from a calendar and is not evidence."""
+    bel = _shipped_bel()
+    assert bel.valid_to is None
+    assert "arithmetic, not evidence" in bel.scope_notes
+    # The two dates a careless reading would reach for appear on no fact and on
+    # no validity boundary.
+    for invented in (dt.date(2000, 6, 30), dt.date(2000, 7, 3)):
+        assert bel.valid_from != invented
+        assert bel.valid_to != invented
 
 
 def test_bel_records_a_dba_and_invents_no_legal_name_change_date() -> None:
