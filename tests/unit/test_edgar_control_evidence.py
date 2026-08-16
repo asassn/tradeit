@@ -1110,3 +1110,151 @@ def test_bel_share_issuance_is_not_a_new_class_or_an_extinguishment() -> None:
     assert "1.175 billion" in issuance.fact
     assert "not the creation of a new class" in issuance.note
     assert "not the extinguishment of the old one" in issuance.note
+
+
+# ---------------------------------------------------------------------------
+# the TGLO pilot -- the negative control
+#
+# Every other control so far proves an event happened. This one proves several
+# did not. TGLO carries the full set of ingredients for a false exit -- a
+# restructured business, a Nasdaq delisting, a move to the OTC bulletin board,
+# and a 598-day hole in the filing history -- and the correct output is no exit
+# at all. These tests fail if any of those ingredients is ever promoted.
+# ---------------------------------------------------------------------------
+
+
+def _shipped_tglo() -> IssuerMapping:
+    control = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["TGLO"]
+    assert len(control.mappings) == 1
+    return control.mappings[0]
+
+
+def test_tglo_maps_to_its_cik_and_ticker_from_cited_filings() -> None:
+    """Both symbol eras are cited, and neither is assumed."""
+    tglo = _shipped_tglo()
+    assert tglo.cik == 1066684
+    assert tglo.ticker == "TGLO"
+    assert tglo.status is MappingStatus.MANUAL_VERIFIED
+    assert tglo.evidence is MappingEvidence.MANUAL_FILING_CITATION
+    # Nasdaq era: the FY2000 annual report names the symbol outright.
+    assert "0000950130-01-001623" in tglo.citation
+    assert "under the Symbol 'TGLO'" in tglo.citation
+    # OTC era: the 10-Q names the same symbol on the new venue.
+    assert "0000950130-01-501712" in tglo.citation
+
+
+def test_tglo_delisting_is_dated_exactly_and_scoped_to_the_listing() -> None:
+    facts = _shipped_tglo().lifecycle_facts
+    assert len(facts) == 1
+    delisting = facts[0]
+    assert delisting.date == dt.date(2001, 4, 23)
+    assert delisting.date_source is FactDateSource.BODY_TEXT
+    assert delisting.scope is LifecycleScope.EXCHANGE_LISTING
+    assert "0000950130-01-501712" in delisting.citation
+    assert "$1 bid price" in delisting.fact or "$1 bid price" in delisting.citation
+
+
+def test_tglo_delisting_is_not_an_issuer_exit() -> None:
+    """The whole point of the control, asserted on the record itself."""
+    delisting = _shipped_tglo().lifecycle_facts[0]
+    note = delisting.note
+    for excluded in (
+        "NOT issuer extinction",
+        "NOT bankruptcy",
+        "NOT registration termination",
+        "NOT security-class extinguishment",
+        "NOT a survivorship exit",
+    ):
+        assert excluded in note
+    # No fact of any other scope exists, because no other event was evidenced.
+    scopes = {f.scope for f in _shipped_tglo().lifecycle_facts}
+    assert scopes == {LifecycleScope.EXCHANGE_LISTING}
+
+
+def test_tglo_otc_continuation_creates_no_second_issuer() -> None:
+    """A change of quotation venue is not a change of identity."""
+    control = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["TGLO"]
+    assert len(control.mappings) == 1
+    assert control.identity_break is False
+    assert control.mappings[0].ticker == "TGLO"
+    assert "not a second security" in control.mappings[0].scope_notes
+
+
+def test_tglo_ob_is_venue_notation_not_a_ticker_identity() -> None:
+    """'.OB' is where the quote came from, not what the security is called."""
+    tglo = _shipped_tglo()
+    assert tglo.ticker == "TGLO"
+    assert tglo.ticker != "TGLO.OB"
+    # It is explained in the notes and asserted nowhere as an identity.
+    assert "TGLO.OB" in tglo.scope_notes
+    assert "venue notation" in tglo.scope_notes
+    assert all("TGLO.OB" not in f.fact for f in tglo.lifecycle_facts)
+
+
+def test_tglo_records_no_sec_reporting_event_from_the_interior_gap() -> None:
+    """598 days of silence that later ends is not cessation, and never becomes it."""
+    tglo = _shipped_tglo()
+    assert all(f.scope is not LifecycleScope.SEC_REPORTING for f in tglo.lifecycle_facts)
+    assert "INTERIOR gap" in tglo.scope_notes
+    assert "not cessation" in tglo.scope_notes
+    # The gap's endpoints appear on no fact and on no validity boundary.
+    for endpoint in (dt.date(2003, 9, 23), dt.date(2005, 5, 13)):
+        assert all(f.date != endpoint for f in tglo.lifecycle_facts)
+        assert tglo.valid_from != endpoint
+        assert tglo.valid_to != endpoint
+
+
+def test_tglo_restructuring_is_not_promoted_to_extinction() -> None:
+    """$41.3m of charges and a closed business line are not a closed company."""
+    notes = _shipped_tglo().scope_notes
+    assert "41.3 million" in notes
+    assert "Seattle e-commerce" in notes
+    for excluded in (
+        "NOT a complete business shutdown",
+        "NOT shell status",
+        "NOT dissolution",
+        "NOT deregistration",
+        "NOT security extinguishment",
+        "NOT an identity break",
+    ):
+        assert excluded in notes
+    # And it is not a dated lifecycle fact, because no filing dates it.
+    assert all("restructuring" not in f.fact.lower() for f in _shipped_tglo().lifecycle_facts)
+
+
+def test_tglo_infers_no_identity_break_from_collapse_delisting_or_otc() -> None:
+    control = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["TGLO"]
+    assert control.identity_break is False
+    assert len({m.cik for m in control.mappings}) == 1
+    # Contrast: GM's break rests on two registrants, not on a bad year.
+    gm = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["GM"]
+    assert gm.identity_break is True
+    assert len({m.cik for m in gm.mappings}) == 2
+
+
+def test_tglo_leaves_no_partial_date_workaround_behind() -> None:
+    """The exact day was found, so no month-precision hedge may remain.
+
+    Before the 10-Q was inspected, the best available precision was 'April
+    2001', which the schema cannot store. That pressure is gone and the record
+    must not carry a residue of it.
+    """
+    tglo = _shipped_tglo()
+    delisting = tglo.lifecycle_facts[0]
+    assert delisting.date == dt.date(2001, 4, 23)
+    for hedge in ("April 2001", "month precision", "approximately", "circa", "on or about"):
+        assert hedge not in delisting.fact
+        assert hedge not in delisting.note
+    # The two boundary days a guess would have reached for are recorded nowhere.
+    for guessed in (dt.date(2001, 4, 1), dt.date(2001, 4, 30)):
+        assert all(f.date != guessed for f in tglo.lifecycle_facts)
+
+
+def test_tglo_keeps_the_four_dates_of_the_delisting_apart() -> None:
+    """Determination, appeal, delisting and filing are four different dates."""
+    delisting = _shipped_tglo().lifecycle_facts[0]
+    assert delisting.date == dt.date(2001, 4, 23)
+    assert "only the last is recorded here" in delisting.note
+    # Neither the FY2000 filing date nor the 10-Q filing date became the event.
+    for filing_date in (dt.date(2001, 4, 2), dt.date(2001, 5, 15)):
+        assert delisting.date != filing_date
