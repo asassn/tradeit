@@ -63,6 +63,32 @@ functions that `return`, or `if`/`else` structure.
   empty for a reason that has nothing to do with the question. Reach for the
   amendment only when the amended item is the one being asked about.
 
+## Parsing the EDGAR index
+
+**Do not hand-parse `form.idx` in a throwaway block.** In order of preference:
+
+1. **An accession already established** in this project's record. Re-deriving a
+   known accession introduces a chance of getting it wrong for no benefit.
+2. **The CLI** — `edgar cik-filings`, `edgar verify-control`, `edgar
+   inspect-index` — which run `parse_index`, the reader the corpus audit
+   verified field by field against an independent extractor over 27,084,668
+   rows with zero mismatches. When filtering its output, match on a
+   **substring** (`"424B" in line`) and pull values with anchored regexes
+   (`\d{10}-\d{2}-\d{6}`, `\d{4}-\d{2}-\d{2}`) rather than by field position.
+3. **Raw parsing only when unavoidable**, and then to the format, not to
+   whitespace. Two specific traps, both found the hard way:
+   - **Never slice the form type from a fixed column** (`prefix[:12]`). The
+     column width is an assumption; a longer form type is silently truncated.
+   - **Right-anchored `rsplit` is sound for path, date and CIK** — that is the
+     production strategy and it survives company names containing spaces,
+     ampersands and multi-word form types. What it does *not* handle alone is a
+     name wide enough to consume its column padding and run into the CIK
+     (`...GENERAL L P5011`); production recovers those from
+     `edgar/data/<cik>/`, and an ad-hoc script that just skips a row whose CIK
+     field is not all digits will drop filings **silently**. In a search whose
+     purpose is to find something, a silent false negative is the worst
+     available failure.
+
 ## Accessions and URLs
 
 - **Validate before constructing a URL.** An accession must match
