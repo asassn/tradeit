@@ -57,6 +57,11 @@ functions that `return`, or `if`/`else` structure.
   issuer.
 - **Print the candidate set and the selection before acting on it**, so the
   choice is auditable from the output alone.
+- **Among annual reports, prefer a primary `10-K` or `10-K405` over a
+  `10-K/A`.** An amendment usually restates one item and omits everything else,
+  so a search for market or symbol information in an amendment can come back
+  empty for a reason that has nothing to do with the question. Reach for the
+  amendment only when the amended item is the one being asked about.
 
 ## Accessions and URLs
 
@@ -72,8 +77,22 @@ functions that `return`, or `if`/`else` structure.
 - Write to `<name>.part`, rename only after the fetch succeeds, and delete the
   `.part` on failure. Without this, a truncated file looks like a completed
   download to the next run's skip check.
+- Rename only when the fetch returned zero **and** the `.part` is non-empty. A
+  zero-length success is a failure with better manners.
 - Skip files already present and non-empty.
 - Report SUCCESS / FAILED / SKIP per accession.
+- **Baseline `curl` flags**, all of them, every time:
+
+  ```
+  --silent --show-error --fail --location --compressed
+  --connect-timeout 20 --retry 3 --retry-delay 2 --max-time 300
+  ```
+
+  `--show-error` because `--silent` alone swallows the reason for a failure and
+  leaves only an exit code. `--location` because a redirect otherwise lands a
+  redirect stub in the `.part` and looks like a short download. `--connect-timeout`
+  because `--max-time` alone lets a stalled connection consume the whole budget
+  before the first byte arrives.
 - Say in the surrounding prose **exactly which files a block may download**.
   A block that touches the network must never look read-only.
 - Prefer `subprocess.run([...])` with a list of arguments over a shell string:
