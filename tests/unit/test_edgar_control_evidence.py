@@ -25,6 +25,7 @@ from tradeit.edgar.control_evidence import (
     DEFAULT_EVIDENCE_PATH,
     SCHEMA_VERSION,
     FactDateSource,
+    IssuerMapping,
     load_control_evidence,
     resolve_controls,
 )
@@ -397,8 +398,18 @@ def test_a_historical_failure_may_stay_unresolved_honestly(tmp_path: Path) -> No
 
 
 def test_the_shipped_evidence_file_is_valid() -> None:
+    """Every recorded control is a real one, and none is silently dropped.
+
+    The roster is asserted as a superset rather than an exact set: it grows by
+    one every time a control is verified, and a test that has to be edited for
+    each addition trains people to edit it without reading it. What must not
+    happen is a control disappearing or an unknown id appearing, and both of
+    those this catches.
+    """
     loaded = load_control_evidence(DEFAULT_EVIDENCE_PATH)
-    assert set(loaded.controls) == {"AAPL", "IPET", "GM"}
+    verified_pilots = {"AAPL", "IPET", "GM", "BEL"}
+    assert verified_pilots <= set(loaded.controls)
+    assert set(loaded.controls) <= {c.ticker for c in CONTROL_UNIVERSE}
 
 
 def test_every_shipped_cik_carries_a_citation() -> None:
@@ -814,3 +825,138 @@ def test_ipet_form_15_dates_never_become_a_legal_termination_date() -> None:
     assert "2005-09-01 is derivable but conditional" in form15.note
     everything = "\n".join([f.fact + f.citation for f in _shipped_ipet().lifecycle_facts])
     assert "2005-09-01" not in everything
+
+
+# ---------------------------------------------------------------------------
+# the BEL pilot -- one continuing issuer whose ticker changed
+#
+# BEL exists in the fixture as the deliberate contrast to GM. Both controls end
+# with one ticker attached to something other than what it started on, and the
+# whole methodology turns on the two cases being different: GM is two
+# registrants sharing a symbol, BEL is one registrant changing symbol. A model
+# that treats "the ticker changed" as the trigger for identity_break gets one of
+# them wrong, and it is not obvious from the outside which.
+# ---------------------------------------------------------------------------
+
+
+def _shipped_bel() -> IssuerMapping:
+    control = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["BEL"]
+    assert len(control.mappings) == 1
+    return control.mappings[0]
+
+
+def test_bel_is_one_continuing_issuer_not_a_succession() -> None:
+    control = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["BEL"]
+    assert control.identity_break is False
+    assert len(control.mappings) == 1
+    assert control.mappings[0].cik == 732712
+    assert control.mappings[0].status is MappingStatus.MANUAL_VERIFIED
+    assert "0000950134-00-005461" in control.mappings[0].citation
+
+
+def test_bel_records_the_merger_direction_so_the_survivor_is_unambiguous() -> None:
+    """A reverse triangular merger, and which side disappeared decides identity.
+
+    Bell Atlantic's own subsidiary merged into GTE. Read carelessly -- "Bell
+    Atlantic and GTE merged" -- this is the shape that invites a successor
+    issuer that does not exist.
+    """
+    merger = next(
+        f
+        for f in _shipped_bel().lifecycle_facts
+        if f.scope is LifecycleScope.ISSUER and "Beta Gamma" in f.fact
+    )
+    assert merger.date == dt.date(2000, 6, 30)
+    assert "merged with and into GTE" in merger.fact
+    assert "wholly owned subsidiary of Bell Atlantic" in merger.fact
+    assert "remained the continuing parent issuer" in merger.fact
+    assert "NOT an identity break" in merger.note
+
+
+def test_bel_and_gm_differ_by_cik_count_not_by_ticker_change() -> None:
+    """The distinction the whole control pair exists to prove.
+
+    Both controls involve a ticker that ends up meaning something else. GM is
+    two registrants; BEL is one. identity_break tracks distinct CIKs, and this
+    test fails if it ever starts tracking ticker changes instead.
+    """
+    evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
+    bel, gm = evidence.controls["BEL"], evidence.controls["GM"]
+
+    assert len({m.cik for m in bel.mappings}) == 1
+    assert bel.identity_break is False
+
+    assert len({m.cik for m in gm.mappings}) == 2
+    assert gm.identity_break is True
+
+    # And the rule generalises across every shipped control.
+    for control in evidence.controls.values():
+        assert control.identity_break == (len({m.cik for m in control.mappings}) > 1)
+
+
+def test_bel_merger_date_and_vz_trading_date_cannot_collapse() -> None:
+    """2000-06-30 and 2000-07-03 are different events three days apart."""
+    facts = _shipped_bel().lifecycle_facts
+    merger = next(f for f in facts if "Beta Gamma" in f.fact)
+    listing = next(f for f in facts if f.scope is LifecycleScope.EXCHANGE_LISTING)
+
+    assert merger.date == dt.date(2000, 6, 30)
+    assert listing.date == dt.date(2000, 7, 3)
+    assert merger.date != listing.date
+    assert "NOT THE MERGER DATE" in listing.note
+
+    # No listing fact is dated on the merger date, and no issuer fact is dated
+    # on the trading date -- the two dates never cross scopes.
+    assert all(
+        f.date != dt.date(2000, 6, 30) for f in facts if f.scope is LifecycleScope.EXCHANGE_LISTING
+    )
+    assert all(f.date != dt.date(2000, 7, 3) for f in facts if f.scope is LifecycleScope.ISSUER)
+
+
+def test_bel_never_claims_vz_traded_before_the_evidenced_date() -> None:
+    """A prospective statement does not become generic ticker validity."""
+    bel = _shipped_bel()
+    assert bel.ticker == "VZ"
+    assert bel.valid_from is None
+    assert bel.valid_to is None
+
+    listing = next(f for f in bel.lifecycle_facts if f.scope is LifecycleScope.EXCHANGE_LISTING)
+    assert listing.date == dt.date(2000, 7, 3)
+    assert "PROSPECTIVE STATEMENT" in listing.note
+    # Nothing anywhere dates VZ earlier than the evidenced Monday.
+    assert all(f.date <= dt.date(2000, 7, 3) or "VZ" not in f.fact for f in bel.lifecycle_facts)
+    assert "IPET precedent" in bel.scope_notes
+
+
+def test_bel_asserts_no_ticker_it_cannot_cite() -> None:
+    """The control is keyed 'BEL' and no inspected filing names that symbol.
+
+    Background knowledge is not evidence. The mapping carries the symbol the
+    8-K states, and the gap is recorded rather than filled in.
+    """
+    bel = _shipped_bel()
+    assert bel.ticker == "VZ"
+    assert "does NOT name the prior symbol" in bel.scope_notes
+    assert "background knowledge is not evidence" in bel.scope_notes
+    # 'BEL' is never asserted as this issuer's ticker anywhere in the record.
+    assert bel.ticker != "BEL"
+
+
+def test_bel_records_a_dba_and_invents_no_legal_name_change_date() -> None:
+    dba = next(f for f in _shipped_bel().lifecycle_facts if "Doing Business As" in f.fact)
+    assert dba.date == dt.date(2000, 6, 30)
+    assert "A D/B/A IS NOT A LEGAL NAME CHANGE" in dba.note
+    assert "not used as a legal effective date" in dba.note
+    # No fact in the record claims a corporate-name-change effective date.
+    assert all("name change" not in f.fact.lower() for f in _shipped_bel().lifecycle_facts)
+
+
+def test_bel_share_issuance_is_not_a_new_class_or_an_extinguishment() -> None:
+    """1.175 billion new shares into an existing class is dilution, not a birth."""
+    issuance = next(
+        f for f in _shipped_bel().lifecycle_facts if f.scope is LifecycleScope.SECURITY_CLASS
+    )
+    assert issuance.date == dt.date(2000, 6, 30)
+    assert "1.175 billion" in issuance.fact
+    assert "not the creation of a new class" in issuance.note
+    assert "not the extinguishment of the old one" in issuance.note

@@ -153,6 +153,61 @@
           "unresolved_reason": ""
         }
       ]
+    },
+    {
+      "control_id": "BEL",
+      "expected_company": "Bell Atlantic Corporation",
+      "identity_break": false,
+      "notes": "One continuing registrant across a merger, a d/b/a and a ticker change. The GTE transaction was a REVERSE TRIANGULAR merger: Bell Atlantic's wholly owned subsidiary Beta Gamma Corporation merged with and into GTE, leaving GTE a subsidiary of Bell Atlantic. The registrant itself merged into nothing, survived as the parent, and kept CIK 732712 -- which is why identity_break is false and why this control is the deliberate contrast to GM, where two genuinely different registrants shared a ticker.\n\nThe existing schema turned out to express this without change. A ticker-interval structure was proposed conditionally before the evidence arrived; it is not needed, because the VZ transition carries a DATE and therefore fits LifecycleFact, which the IPETZ transition did not.\n\nGAP, RECORDED NOT PAPERED OVER: the control's own identifier 'BEL' is not established by any filing inspected. The 8-K names the incoming symbol VZ and calls it 'new', which implies a prior symbol without naming it. The mapping therefore carries the ticker the evidence proves.",
+      "mappings": [
+        {
+          "issuer_label": "primary",
+          "cik": 732712,
+          "ticker": "VZ",
+          "status": "manual_verified",
+          "evidence": "manual_filing_citation",
+          "citation": "SEC Form 8-K filed 2000-06-30, Bell Atlantic Corporation, CIK 732712, accession 0000950134-00-005461, manually inspected. The filing states that on June 30, 2000 Bell Atlantic Corporation and GTE consummated their merger; that Beta Gamma Corporation, a New York corporation and a wholly owned subsidiary of Bell Atlantic, was merged with and into GTE so that GTE became a wholly owned subsidiary of Bell Atlantic; and that Bell Atlantic common stock would be listed on the New York Stock Exchange under the symbol VZ. The attached press release states that Verizon Communications would begin trading on the NYSE under the new symbol VZ on Monday, July 3, 2000.",
+          "verified_on": "2026-08-15",
+          "valid_from": null,
+          "valid_to": null,
+          "scope_notes": "One issuer, CIK 732712, continuous across the GTE merger. The registrant was the acquiring parent in a reverse triangular merger and did not itself merge into anything; GTE became its subsidiary. No second issuer exists for this control and identity_break is false.\n\nTICKER FIELD HOLDS 'VZ', NOT 'BEL', AND THAT IS DELIBERATE. The inspected 8-K proves CIK 732712 listed on the NYSE under the symbol VZ. It does NOT name the prior symbol: the press release calls VZ a 'new symbol', which establishes that a previous one existed without stating what it was. The control fixture is keyed 'BEL' on background knowledge, and background knowledge is not evidence, so 'BEL' is not asserted here. Closing that gap needs a pre-2000 Bell Atlantic filing that names the symbol -- a 10-K Item 5 or an offering document -- which is exactly the route that closed IPET.\n\nvalid_from IS NULL EVEN THOUGH 2000-07-03 IS KNOWN, on the IPET precedent. The press release is PROSPECTIVE: it says trading 'would begin' on Monday, July 3, 2000. IPET's valid_from stayed null while only the prospectus said the symbol had been 'approved for quotation', and moved only when a later 10-K stated retrospectively that the stock had traded from a given date. No such retrospective statement has been inspected for VZ, so the date lives in a dated exchange_listing fact where its prospective character is recorded, and not in generic ticker validity.\n\nvalid_to is null because the issuer is extant and listed.\n\nNO LEGAL NAME-CHANGE EFFECTIVE DATE IS RECORDED. The bylaws attached to the 8-K, marked amended effective as of 2000-06-30, identify the registrant as 'BELL ATLANTIC CORPORATION (Doing Business As Verizon Communications)'. A d/b/a is not a legal name change, and no date for a legal change is inferred from it or from the later EDGAR index and header showing VERIZON COMMUNICATIONS INC with a former name of BELL ATLANTIC CORP.",
+          "unresolved_reason": "",
+          "lifecycle_facts": [
+            {
+              "scope": "issuer",
+              "fact": "Merger consummated on 2000-06-30. Beta Gamma Corporation, a New York corporation and a wholly owned subsidiary of Bell Atlantic Corporation, was merged with and into GTE, and as a result GTE became a wholly owned subsidiary of Bell Atlantic. Bell Atlantic Corporation, CIK 732712, remained the continuing parent issuer.",
+              "date": "2000-06-30",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2000-06-30, Bell Atlantic Corporation, CIK 732712, accession 0000950134-00-005461",
+              "note": "REVERSE TRIANGULAR MERGER, AND THE DIRECTION MATTERS. The disappearing entity was Bell Atlantic's own subsidiary, not Bell Atlantic; GTE survived as a subsidiary. The registrant is therefore continuous and this is NOT an identity break, NOT a successor issuer and NOT a security extinguishment. Contrast GM, where two different registrants with two different CIKs shared one ticker -- there the break is real and declared."
+            },
+            {
+              "scope": "security_class",
+              "fact": "In the merger, GTE common shares were converted into the right to receive Bell Atlantic common shares, and Bell Atlantic would issue approximately 1.175 billion Bell Atlantic common shares in the transaction.",
+              "date": "2000-06-30",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2000-06-30, Bell Atlantic Corporation, CIK 732712, accession 0000950134-00-005461",
+              "note": "This is an ISSUANCE into the existing common class, not the creation of a new class and not the extinguishment of the old one. The security a holder of Bell Atlantic common owned before the merger is the same security afterwards, in a larger share count. The class whose shares were extinguished was GTE's, and GTE is a different registrant that is not part of this control."
+            },
+            {
+              "scope": "exchange_listing",
+              "fact": "Bell Atlantic common stock was to be listed on the New York Stock Exchange under the symbol VZ, and trading under that new symbol was to begin on Monday, 2000-07-03.",
+              "date": "2000-07-03",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2000-06-30, Bell Atlantic Corporation, CIK 732712, accession 0000950134-00-005461: the filing states Bell Atlantic common stock would be listed on the NYSE under the symbol VZ, and the attached press release of the same date states that Verizon Communications would begin trading on the NYSE under the new symbol VZ on Monday, July 3, 2000.",
+              "note": "THIS DATE IS NOT THE MERGER DATE. The merger was consummated 2000-06-30; trading under VZ began 2000-07-03. They are three days and one weekend apart and they are different events -- collapsing them would place the symbol change on a day no filing supports.\n\nPROSPECTIVE STATEMENT. The press release says trading 'would begin' on that Monday. No retrospective confirmation has been inspected, which is why this date is recorded here rather than as ticker valid_from.\n\nTHE PRIOR SYMBOL IS NOT NAMED. 'New symbol' establishes that one existed; the filing does not say what it was, and none is supplied from background knowledge.\n\nUnlike IPET's 2001 Nasdaq delisting, exchange_listing is unambiguously the right scope here: the New York Stock Exchange was a registered national securities exchange throughout."
+            },
+            {
+              "scope": "issuer",
+              "fact": "Bylaws attached to the 8-K and marked amended effective as of 2000-06-30 identify the registrant as \"BELL ATLANTIC CORPORATION (Doing Business As Verizon Communications)\".",
+              "date": "2000-06-30",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2000-06-30, Bell Atlantic Corporation, CIK 732712, accession 0000950134-00-005461, attached amended bylaws",
+              "note": "A D/B/A IS NOT A LEGAL NAME CHANGE, and this record does not claim one. What is evidenced is that as of 2000-06-30 the registrant was doing business as Verizon Communications while its stated corporate name was still Bell Atlantic Corporation. No legal corporate-name-change effective date is recorded anywhere in this record.\n\nMETADATA, KEPT AS METADATA: a later filing under the same CIK 732712 is indexed as VERIZON COMMUNICATIONS INC and identifies BELL ATLANTIC CORP as the former company. That is EDGAR reflecting a name, and the IPET pilot established that such header values can conflict with the filing-body chronology outright. It is not used as a legal effective date and the contemporaneous 8-K governs."
+            }
+          ]
+        }
+      ]
     }
   ]
 }
