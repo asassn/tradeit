@@ -38,6 +38,7 @@ from tradeit.errors import ConfigError
 def _write(tmp_path: Path, controls: list[dict[str, Any]], **top: Any) -> Path:
     payload: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "controls": controls}
     payload.update(top)
+    tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / "evidence.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
@@ -873,25 +874,118 @@ def test_bel_records_the_merger_direction_so_the_survivor_is_unambiguous() -> No
     assert "NOT an identity break" in merger.note
 
 
-def test_bel_and_gm_differ_by_cik_count_not_by_ticker_change() -> None:
-    """The distinction the whole control pair exists to prove.
+def test_bel_and_gm_are_the_two_proven_ends_of_the_ticker_question() -> None:
+    """The distinction the control pair exists to prove, pinned as two facts.
 
     Both controls involve a ticker that ends up meaning something else. GM is
-    two registrants; BEL is one. identity_break tracks distinct CIKs, and this
-    test fails if it ever starts tracking ticker changes instead.
+    two registrants sharing one symbol; BEL is one registrant changing symbol.
+    These are assertions about **these two controls**, established from their
+    filings -- deliberately not a general rule inferred from them. See
+    :func:`test_cik_count_is_context_for_an_identity_break_not_its_definition`.
     """
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     bel, gm = evidence.controls["BEL"], evidence.controls["GM"]
 
-    assert len({m.cik for m in bel.mappings}) == 1
+    # BEL: the 8-K names the merger direction, so continuity is evidenced.
+    assert bel.identity_break is False
+    assert {m.cik for m in bel.mappings} == {732712}
+    assert len(bel.mappings) == 1
+
+    # GM: two registrants, proven separately, each with its own citation.
+    assert gm.identity_break is True
+    assert len({m.cik for m in gm.mappings}) == 2
+    assert len(gm.mappings) == 2
+
+
+def test_a_ticker_change_alone_does_not_imply_an_identity_break() -> None:
+    """BEL's symbol changed and its issuer did not, and the record says both."""
+    bel = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["BEL"]
+    listing = next(
+        f for f in bel.mappings[0].lifecycle_facts if f.scope is LifecycleScope.EXCHANGE_LISTING
+    )
+    assert "new symbol" in listing.fact or "new symbol" in listing.note
     assert bel.identity_break is False
 
-    assert len({m.cik for m in gm.mappings}) == 2
+
+def test_a_shared_ticker_alone_does_not_imply_continuity() -> None:
+    """The converse, which is the error full-01 actually made.
+
+    Both GM issuers carry the ticker GM. Identical symbols across two
+    registrants is precisely what a naive merge treats as one series.
+    """
+    gm = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["GM"]
+    assert {m.ticker for m in gm.mappings} == {"GM"}
     assert gm.identity_break is True
 
-    # And the rule generalises across every shipped control.
-    for control in evidence.controls.values():
-        assert control.identity_break == (len({m.cik for m in control.mappings}) > 1)
+
+def test_cik_count_is_context_for_an_identity_break_not_its_definition(
+    tmp_path: Path,
+) -> None:
+    """``identity_break`` is a declared finding, never computed from CIK count.
+
+    An earlier version of this file asserted
+    ``identity_break == (len({m.cik for m in mappings}) > 1)`` across every
+    shipped control. It passed, and it was wrong to assert: two controls are not
+    a definition, and promoting an observation about them into a universal rule
+    would let CIK arithmetic stand in for reading the legal history. A registrant
+    that keeps its CIK through a genuine discontinuity would then be
+    unrecordable *by rule* rather than *by evidence*.
+
+    What the loader actually enforces is a consistency check on **mapping
+    count** -- the declaration and the record must agree -- which is a different
+    claim, and this test pins that difference.
+    """
+    two_issuers = [
+        _verified_mapping(issuer_label="old", cik=40730, ticker="GM"),
+        _verified_mapping(issuer_label="new", cik=1467858, ticker="GM"),
+    ]
+
+    # The declaration is read from the record, not derived from the CIKs.
+    loaded = load_control_evidence(
+        _write(
+            tmp_path / "ok",
+            [
+                {
+                    "control_id": "GM",
+                    "expected_company": "General Motors",
+                    "identity_break": True,
+                    "mappings": two_issuers,
+                }
+            ],
+        )
+    )
+    assert loaded.controls["GM"].identity_break is True
+
+    # And what is enforced is agreement with the number of ISSUERS recorded --
+    # the error names issuers, not CIKs.
+    with pytest.raises(ConfigError, match="issuers but identity_break is false"):
+        load_control_evidence(
+            _write(
+                tmp_path / "undeclared",
+                [
+                    {
+                        "control_id": "GM",
+                        "expected_company": "General Motors",
+                        "identity_break": False,
+                        "mappings": two_issuers,
+                    }
+                ],
+            )
+        )
+    with pytest.raises(ConfigError, match="only one issuer is recorded"):
+        load_control_evidence(
+            _write(
+                tmp_path / "overdeclared",
+                [
+                    {
+                        "control_id": "BEL",
+                        "expected_company": "Bell Atlantic Corporation",
+                        "identity_break": True,
+                        "mappings": [_verified_mapping(cik=732712, ticker="VZ")],
+                    }
+                ],
+            )
+        )
 
 
 def test_bel_merger_date_and_vz_trading_date_cannot_collapse() -> None:
