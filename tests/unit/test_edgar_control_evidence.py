@@ -1258,3 +1258,43 @@ def test_tglo_keeps_the_four_dates_of_the_delisting_apart() -> None:
     # Neither the FY2000 filing date nor the 10-Q filing date became the event.
     for filing_date in (dt.date(2001, 4, 2), dt.date(2001, 5, 15)):
         assert delisting.date != filing_date
+
+
+def test_tglo_does_not_claim_a_continuous_filing_history() -> None:
+    """The gap is disclosed where the history is described, not only elsewhere.
+
+    An earlier draft opened the scope notes with "continuous from 1998 to the
+    present", which is true of the issuer and false of the filing history, and
+    a reader has no way to tell which was meant. The record now says which.
+    """
+    tglo = _shipped_tglo()
+    assert "NOT literally continuous" in tglo.scope_notes
+    assert "598-day interior periodic-filing gap" in tglo.scope_notes
+    assert "2003-09-23" in tglo.scope_notes and "2005-05-13" in tglo.scope_notes
+    # And the methodological point survives the rewording.
+    assert "must not be treated as filing cessation" in tglo.scope_notes
+
+
+def test_tglo_negative_findings_state_what_was_actually_searched() -> None:
+    """A negative result is only as broad as the search behind it.
+
+    The index search covered form types across all 360 filings; the manual
+    search covered four filing bodies. Those are different scopes and the
+    record names both rather than merging them into an unqualified "nothing
+    establishes".
+    """
+    notes = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["TGLO"].notes
+    assert "PROGRAMMATIC" in notes and "MANUAL" in notes
+    assert "all 360 indexed filings" in notes
+    assert "no evidence of an issuer discontinuity was found in the filings inspected" in notes
+    # The limit of the claim is stated, not left for a reader to infer.
+    assert "not a proof that no such filing exists anywhere" in notes
+    assert "356 of the 360 filing bodies were not read" in notes
+    # Each manually inspected accession is named so the scope is checkable.
+    for accession in (
+        "0000950130-01-001623",
+        "0001015402-02-001340",
+        "0000950130-01-501712",
+        "0001144204-06-012657",
+    ):
+        assert accession in notes
