@@ -214,6 +214,39 @@ relayed, or from what the answer "should" be is fabrication with a procedural
 alibi — and it is indistinguishable, in the written record, from having actually
 checked.
 
+### Prefer what happened over what was going to happen
+
+**A post-effective filing describing an event in the past tense beats chaining
+prospective terms through an intervening amendment.** Registration and proxy
+materials state what *will* occur; anything filed between them and the closing
+can change it. A chain of "terms said X" plus "the deal closed" is only as good
+as the assumption that nothing in between touched X — and that assumption is
+exactly what a reader cannot verify.
+
+A filing made after the event, describing it in the past tense, is downstream of
+every amendment. It does not answer the intervening-change question; it makes it
+irrelevant. Look for that document first.
+
+Worked example: Enron's Reincorporation Merger. The 1996 registration materials
+said each share *will be* converted one-for-one, but a First Amendment dated
+1997-04-14 sat between them and the 1997-07-01 effectiveness. The POS AM filed
+1997-07-11 states that as a result of the merger each issued share of Old Enron
+common *was converted into* one share of New Enron common — and the amendment
+question stopped mattering.
+
+### Search for the specific document, not the generic phrase
+
+Two failures from the same investigation:
+
+- **Broad survival-clause searches produce noise, not evidence.** "remains in
+  full force and effect" and "all other terms" appear in every unrelated
+  contract and exhibit in a large filing. Searching for them without transaction
+  context returns hits that look responsive and are not.
+- **Prefer a named exhibit or file number over a keyword.** `EX-3.02 ARTICLES OF
+  MERGER`, or Registration No. `33-60417`, identifies a document; "amendment"
+  identifies a word. When a filing's own inventory or a cross-reference names
+  the operative document, go to it directly rather than grepping toward it.
+
 ### Relevance before exhaustion
 
 **Document relevance must be established before a negative document result can
