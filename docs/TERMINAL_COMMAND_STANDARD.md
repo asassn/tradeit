@@ -27,6 +27,22 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m tradeit.cli ...
 Never change the operator's working directory permanently. Use a subshell
 (`( cd "$REPO" && ... )`) where a directory change is needed at all.
 
+**The data lives outside the repository.** The full index is under
+`~/Documents/TradeItData`, not under `~/Documents/GitHub/tradeit`. A block that
+looks for `form.idx` by globbing the repository finds nothing and reports "no
+local corpus" on a machine that has the entire corpus — a false negative
+manufactured by the block itself. Take the index root from the table above, or
+accept it as an argument. Never discover it by searching the repo.
+
+**Never paste a path from the assistant's own environment.** The session
+container is Linux and its repo sits at `/home/user/tradeit`; the operator's is
+macOS at `/Users/ericsasson/Documents/GitHub/tradeit`. A block written against
+container paths does not degrade gracefully on the operator's Mac — the
+interpreter path does not exist, so nothing runs at all. This has happened
+once: a checkpoint block was dry-run in the container, passed there, and was
+unrunnable as handed over. Dry-running a block proves it is syntactically sound,
+never that it is addressed to the right machine.
+
 ## Shell hazards, and why Python is usually the answer
 
 zsh is interactive here, which makes three things fail that would be fine in a
@@ -288,3 +304,32 @@ marker, e.g. `===== <NAME> COMPLETE =====`, so a truncated paste is obvious.
 
 State which one a block is, in the prose, before the block. A read-only block
 should contain no `curl` at all.
+
+## Git and GitHub
+
+**Terminal Git is local and read-only. Remote synchronization happens in GitHub
+Desktop.**
+
+GitHub HTTPS authentication does not work from Terminal on the operator's Mac.
+Any command that reaches the remote — `git fetch`, `git pull`, `git push`,
+`git ls-remote`, `git clone`, `git remote update` — stops at an interactive
+`Username for 'https://github.com':` prompt and hangs the block. There is no
+credential to type, so the block cannot succeed; it can only be interrupted.
+
+So a Terminal block may use, freely:
+
+```
+git status, git log, git show, git diff, git branch, git rev-parse
+```
+
+and any other command that reads only what is already on disk. It may also
+commit locally when the operator has asked for a commit.
+
+It may **never** contain a networked Git command. When remote state needs to
+change — pushing a commit, picking up a branch — say so in prose and let the
+operator do it in GitHub Desktop. When remote state needs to be *read*, ask the
+operator for the value rather than fetching it.
+
+This restriction is lifted only when the operator states explicitly that CLI
+authentication has been repaired. Until then it holds regardless of how
+convenient a one-line push would be.
