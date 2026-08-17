@@ -133,6 +133,15 @@ functions that `return`, or `if`/`else` structure.
   local file fails header validation, **stop and report it. Do not delete it
   and do not overwrite it** — it may be evidence of how the wrong file got
   there, and destroying it destroys the trail.
+- **Normalise the CIK before comparing it.** The header writes it zero-padded
+  to ten digits (`0000072859`); the index and our records write it bare
+  (`72859`). Compare as integers. A string comparison fails on every filing and
+  looks like a header mismatch.
+- **Collect every `CENTRAL INDEX KEY`, not the first.** A submission can carry
+  several FILER blocks — co-registrants on an S-4, a parent and a financing
+  subsidiary — and validating against the first one silently accepts a filing
+  belonging to a different registrant. Check the expected CIK is *among* them,
+  and print the names so co-registration is visible rather than inferred.
 - Skip files already present, non-empty **and header-validated**.
 - Report SUCCESS / FAILED / SKIP / HEADER-MISMATCH per accession.
 - **Baseline `curl` flags**, all of them, every time:
@@ -167,6 +176,20 @@ Every negative finding must state its scope, using these terms:
 | local filing-body search | only the filing bodies already downloaded, named |
 | individual manual read | one document, read by a human |
 | inference | not evidence; label it and justify it |
+
+### A result is only what the output shows
+
+**Never report on a section of a command whose output you have not seen.** "The
+block completed successfully" means it ran. It does not say what any search
+found, and a multi-part block routinely returns one part to the reader and not
+another — scrolled off, truncated, or simply not pasted.
+
+If a block had five sections and three were relayed, the other two are
+**undetermined**, not passed and not failed. Say so and ask for them. Inferring
+a section's result from the block exiting cleanly, from the parts that were
+relayed, or from what the answer "should" be is fabrication with a procedural
+alibi — and it is indistinguishable, in the written record, from having actually
+checked.
 
 ### Relevance before exhaustion
 
