@@ -148,6 +148,37 @@ Every negative finding must state its scope, using these terms:
 | individual manual read | one document, read by a human |
 | inference | not evidence; label it and justify it |
 
+### Relevance before exhaustion
+
+**Document relevance must be established before a negative document result can
+be treated as evidentiary exhaustion.**
+
+A filing only spends an evidentiary attempt if the fact being sought is one that
+filing would reasonably be expected to state. A standalone debt prospectus that
+never mentions the common stock has not been *asked* whether the issuer's common
+trades under a given symbol, and its silence says nothing about the answer.
+Counting it as a failed attempt conflates "this document did not answer" with
+"this document answered no", and burns a search budget on a document that was
+never a witness.
+
+So, in order:
+
+1. **Classify what the document is about** — which security, which section, what
+   the filing exists to disclose.
+2. **Only then** apply the acceptance criterion.
+3. A **non-probative** document is recorded as inspected and not probative. It
+   does not count toward exhaustion, and its silence is never cited as evidence
+   against the proposition.
+
+This is an applicability screen, not a softening of the acceptance standard. A
+probative document that is silent is a real negative and must be recorded as
+one.
+
+Worked example, from the ENE successor-ticker search: Item 5 of a 10-K is
+literally "Market for Registrant's Common Equity", and a proxy statement carries
+shareholder and common-stock information — both are probative, so their silence
+counted. A `424B` covering a note issue would not be, and its silence would not.
+
 ## Output
 
 Bounded. Cap matches per file and characters per match; a block that prints a
