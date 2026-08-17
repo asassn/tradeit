@@ -142,6 +142,14 @@ functions that `return`, or `if`/`else` structure.
   subsidiary — and validating against the first one silently accepts a filing
   belonging to a different registrant. Check the expected CIK is *among* them,
   and print the names so co-registration is visible rather than inferred.
+- **A validated header identifies the file, not the speaker.** In a
+  multi-registrant submission, the presence of a CIK in the header does **not**
+  attribute any body sentence to that registrant. Attribution has to come from
+  the text: which entity is named, what tense is used, and what the document
+  says each party is. Enron's 1996 reincorporation filing carries both the
+  predecessor and the newly formed successor as filers, and states one's stock
+  "is traded" while the other's "will be listed" — the tense, not the header,
+  is what separates them.
 - Skip files already present, non-empty **and header-validated**.
 - Report SUCCESS / FAILED / SKIP / HEADER-MISMATCH per accession.
 - **Baseline `curl` flags**, all of them, every time:
