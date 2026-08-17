@@ -4,10 +4,13 @@ Free, public domain, and independent of any price vendor. This package builds
 the instrument that *measures* whether a vendor's delisted roster is complete,
 rather than accepting the roster's own account of itself.
 
-Four modules, in the order they run:
+Six modules, in the order they run:
 
 ``index``
     Read the quarterly full-index. The spine starts at **1994 Q3**.
+``submission``
+    Read one downloaded submission: its SGML header and its documents, so a
+    filing is checked against the index row that named it before it is read.
 ``evidence``
     Decide what each filing proves, across four separate lifecycles.
 ``lifecycle``
@@ -49,6 +52,13 @@ from tradeit.edgar.index import (
     parse_full_index,
 )
 from tradeit.edgar.lifecycle import ExitResolution, build_timelines, resolve_exit
+from tradeit.edgar.submission import (
+    SubmissionDocument,
+    SubmissionHeader,
+    header_mismatches,
+    parse_submission_header,
+    split_documents,
+)
 
 __all__ = [
     "EDGAR_FIRST_QUARTER",
@@ -67,11 +77,16 @@ __all__ = [
     "MappingEvidence",
     "MappingStatus",
     "SecurityMapping",
+    "SubmissionDocument",
+    "SubmissionHeader",
     "SurvivorshipClass",
     "build_timelines",
     "classify_corpus",
     "classify_form",
+    "header_mismatches",
     "parse_full_index",
+    "parse_submission_header",
     "resolve_exit",
     "resolve_mapping",
+    "split_documents",
 ]
