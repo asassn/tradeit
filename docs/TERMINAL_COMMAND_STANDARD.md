@@ -24,8 +24,19 @@ filings     /Users/ericsasson/Documents/TradeItData/edgar/filings
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m tradeit.cli ...
 ```
 
-Never change the operator's working directory permanently. Use a subshell
-(`( cd "$REPO" && ... )`) where a directory change is needed at all.
+**Do not `cd` at all — not even in a subshell.** An earlier version of this rule
+permitted `( cd "$REPO" && ... )`, and that permission is withdrawn. Nothing in
+this project needs a working directory: `PYTHONPATH` and the interpreter both
+take absolute paths, and Python's module resolution does not consult the cwd
+when `PYTHONPATH` names the source root. So write
+
+```
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/Users/ericsasson/Documents/GitHub/tradeit/src \
+  /Users/ericsasson/Documents/GitHub/tradeit/.venv/bin/python -m tradeit.cli ...
+```
+
+If a directory change ever does become technically unavoidable, say in the
+prose why, before the block.
 
 **The data lives outside the repository.** The full index is under
 `~/Documents/TradeItData`, not under `~/Documents/GitHub/tradeit`. A block that
