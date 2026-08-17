@@ -190,6 +190,20 @@ the CIK and accession are both in hand, the path is known.
   the index row or the assumption behind them is wrong, and analysing the file
   anyway attaches evidence to the wrong filing — the failure this project has
   worked hardest to prevent.
+- **Parse the header with `tradeit.edgar.submission`, not a fresh regex.**
+  `parse_submission_header`, `split_documents` and `header_mismatches` are
+  tested; a block that re-derives them is not. This rule exists because the
+  ad-hoc version captured the submission type with `\S+`, which stops at the
+  first space: `DEF 14A` became `DEF`, and the gate refused a filing that was
+  exactly the one requested. Four of thirty-four stored submissions carried the
+  same truncation — `POS AM`, `PRE 14A`, `DEF 14A`.
+
+  The prohibition on `line.split()[n]` for a form type was already written down
+  here, and `\S+` re-broke it through a different construct. **Any first-token
+  read of a form type is the same bug**, whatever syntax reaches for it. The
+  forms that expose it are the multi-word ones — `DEF 14A`, `PRE 14A`,
+  `POS AM`, `SC 13D`, `SC 13G` — and a pipeline that has only ever validated
+  `10-K`, `10-Q` and `8-A12B` has not been tested against it at all.
 - **Compare the form by exact normalised equality, not by prefix.**
   `t.upper() == "8-K"`, never `t.startswith("8-K")` — the prefix test silently
   accepts `8-K/A`, and an amendment usually restates one item and omits the
