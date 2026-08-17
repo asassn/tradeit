@@ -75,6 +75,14 @@ functions that `return`, or `if`/`else` structure.
    rows with zero mismatches. When filtering its output, match on a
    **substring** (`"424B" in line`) and pull values with anchored regexes
    (`\d{10}-\d{2}-\d{6}`, `\d{4}-\d{2}-\d{2}`) rather than by field position.
+
+   **This applies to the CLI's output too, not only to `form.idx`.** A block
+   that correctly used regexes for accession and date still reached for
+   `line.split()[2]` to get the form type in an adjacent section — and that
+   fails on exactly the forms most worth finding, because `SC 13D`, `DEF 14A`
+   and `10-K405 /A` contain spaces. There is no token position that is safe
+   across form types. Use a regex for the specific forms being sought
+   (`424B[0-9A-Z]*`), or a structured accessor. Never an index into a split.
 3. **Raw parsing only when unavoidable**, and then to the format, not to
    whitespace. Two specific traps, both found the hard way:
    - **Never slice the form type from a fixed column** (`prefix[:12]`). The
