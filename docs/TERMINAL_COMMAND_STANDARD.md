@@ -335,6 +335,26 @@ Bounded. Cap matches per file and characters per match; a block that prints a
 whole 10-K is unusable. End every substantial block with an explicit completion
 marker, e.g. `===== <NAME> COMPLETE =====`, so a truncated paste is obvious.
 
+### An intentional stop must exit non-zero
+
+**`raise SystemExit` with no argument exits 0.** A block that refuses a
+mismatched header, aborts on a failed fetch, or stops because a derivation
+disagreed with its cross-check therefore reports *success* to the shell — and
+to anything reading `$?`, a CI wrapper, or an `&&` chain. Every refusal branch
+must carry a status:
+
+```python
+raise SystemExit(2)
+```
+
+Normal completion falls off the end of the script and stays 0. Nothing else
+changes.
+
+The completion marker and the exit status are complementary, not redundant. The
+marker tells a human the paste is whole; the status tells the shell whether the
+work actually happened. A stop shows neither the marker nor a zero status, so
+the two together make an intentional abort impossible to mistake for a pass.
+
 ## Read-only vs network
 
 State which one a block is, in the prose, before the block. A read-only block
