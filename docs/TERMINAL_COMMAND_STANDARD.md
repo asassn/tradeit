@@ -108,11 +108,21 @@ functions that `return`, or `if`/`else` structure.
 ## Downloads
 
 - Identify with a descriptive SEC-compliant User-Agent including contact.
-- Write to `<name>.part`, rename only after the fetch succeeds, and delete the
-  `.part` on failure. Without this, a truncated file looks like a completed
-  download to the next run's skip check.
-- Rename only when the fetch returned zero **and** the `.part` is non-empty. A
-  zero-length success is a failure with better manners.
+- Download to a temporary file, then publish. Without this, a truncated file
+  looks like a completed download to the next run's skip check.
+- **The temporary name must be unique to the invocation**, not a predictable
+  shared `<accession>.txt.part`. A fixed name collides with a concurrent run
+  and with a stale fragment from an earlier failed one, and cleaning up "the"
+  `.part` then destroys somebody else's in-flight download. Use
+  `tempfile.mkstemp(dir=target_directory)` so the file is owned by this run and
+  lands on the same filesystem as the target, keeping the publish atomic.
+- **Delete only the temporary file this invocation created.** Never remove a
+  pre-existing temporary file, and never remove or overwrite a completed
+  target.
+- **Publish only if the fetch returned zero, the temporary file is non-empty,
+  and the target does not already exist.** A zero-length success is a failure
+  with better manners, and an existing target means another run got there
+  first — leave it alone and report it rather than racing it.
 - **A successful fetch is not a validated one.** "curl returned zero and the
   file is non-empty" says the transfer worked, not that the right document
   arrived. Before accepting a download as evidence, parse its SGML header and
@@ -125,10 +135,15 @@ functions that `return`, or `if`/`else` structure.
   FILED AS OF DATE            matches the index
   ```
 
-  Rename the `.part` only after those match. A mismatch means the URL, the
-  index row or the assumption behind them is wrong, and analysing the file
+  Rename the temporary file only after those match. A mismatch means the URL,
+  the index row or the assumption behind them is wrong, and analysing the file
   anyway attaches evidence to the wrong filing — the failure this project has
   worked hardest to prevent.
+- **Compare the form by exact normalised equality, not by prefix.**
+  `t.upper() == "8-K"`, never `t.startswith("8-K")` — the prefix test silently
+  accepts `8-K/A`, and an amendment usually restates one item and omits the
+  rest, so it answers a different question than the one asked. If amendments
+  belong in the set, declare them in the set explicitly.
 - Apply the same check to a file that is **already present**. If an existing
   local file fails header validation, **stop and report it. Do not delete it
   and do not overwrite it** — it may be evidence of how the wrong file got
