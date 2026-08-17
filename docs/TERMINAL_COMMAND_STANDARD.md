@@ -132,6 +132,30 @@ functions that `return`, or `if`/`else` structure.
 - **Strip whitespace and newlines** from any value pulled out of command output.
 - **Skip empty values** rather than building a URL with a hole in it.
 
+## The local filing store has a layout — use it
+
+Downloaded filings live at a deterministic path:
+
+```
+<filings root>/<cik>/<accession>.txt
+```
+
+So an existence check for a known filing is one `Path.is_file()`:
+
+```python
+target = FILINGS_ROOT / str(cik) / f"{accession}.txt"
+```
+
+**Never answer "do we already have this?" with `rglob` over the filings root.**
+A recursive walk of the whole local EDGAR archive to find a file whose exact
+path is already known is unnecessary work that grows with the archive and can
+take a very long time; it has already made one checkpoint slower than the
+download it was guarding. The same applies to listing the root just to show
+what is there — enumerate the one CIK directory instead.
+
+Recursive search is for questions where the path genuinely is not known. When
+the CIK and accession are both in hand, the path is known.
+
 ## Downloads
 
 - Identify with a descriptive SEC-compliant User-Agent including contact.
