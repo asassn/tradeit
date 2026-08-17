@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ import pytest
 from tradeit.edgar.control_evidence import (
     DEFAULT_EVIDENCE_PATH,
     SCHEMA_VERSION,
+    ControlEvidence,
     FactDateSource,
     IssuerMapping,
     load_control_evidence,
@@ -1298,3 +1300,263 @@ def test_tglo_negative_findings_state_what_was_actually_searched() -> None:
         "0001144204-06-012657",
     ):
         assert accession in notes
+
+
+# ---------------------------------------------------------------------------
+# the ENE pilot -- succession where the equity survived
+#
+# ENE is the third shape of identity break. IPET renamed itself and stayed one
+# issuer. BEL's own subsidiary disappeared and BEL survived. GM's registrant
+# was replaced and the old equity was extinguished. ENE is none of those: the
+# registrant itself merged out of existence, a new registrant survived under
+# the same name and ticker, and every share converted one-for-one. The boolean
+# that records the break cannot express that difference, so these tests pin
+# the facts that carry it -- and pin the four dates, two conversion ratios and
+# three unproved propositions that a later summary could collapse.
+# ---------------------------------------------------------------------------
+
+
+def _shipped_ene() -> ControlEvidence:
+    return load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["ENE"]
+
+
+def _ene_mapping(label: str) -> IssuerMapping:
+    matches = [m for m in _shipped_ene().mappings if m.issuer_label == label]
+    assert len(matches) == 1, f"expected exactly one {label!r} mapping"
+    return matches[0]
+
+
+def _ene_text() -> list[str]:
+    """Every free-text field on the ENE record, for whole-record assertions."""
+    control = _shipped_ene()
+    out = [control.notes]
+    for mapping in control.mappings:
+        out += [mapping.citation, mapping.scope_notes, mapping.unresolved_reason]
+        for fact in mapping.lifecycle_facts:
+            out += [fact.fact, fact.citation, fact.note]
+    return out
+
+
+def test_ene_is_two_issuers_with_the_break_declared() -> None:
+    """Two registrants, one ticker, and a break that does not mean what GM's means."""
+    control = _shipped_ene()
+    assert control.identity_break is True
+    assert len(control.mappings) == 2
+    assert {m.cik for m in control.mappings} == {72859, 1024401}
+    assert {m.ticker for m in control.mappings} == {"ENE"}
+    assert all(m.status is MappingStatus.MANUAL_VERIFIED for m in control.mappings)
+    assert all(m.evidence is MappingEvidence.MANUAL_FILING_CITATION for m in control.mappings)
+
+    # The boolean is identical to GM's; the records are not. ENE carries a
+    # security-class conversion fact because the equity continued. GM carries
+    # none because it did not. That difference lives in the facts, never in
+    # the flag, and a consumer reading only the flag must not conclude either.
+    ene_scopes = {f.scope for m in control.mappings for f in m.lifecycle_facts}
+    gm = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["GM"]
+    gm_scopes = {f.scope for m in gm.mappings for f in m.lifecycle_facts}
+    assert gm.identity_break is control.identity_break is True
+    assert LifecycleScope.SECURITY_CLASS in ene_scopes
+    assert LifecycleScope.SECURITY_CLASS not in gm_scopes
+
+
+def test_ene_delaware_predecessor_ceased_to_exist() -> None:
+    """The registrant was the disappearing party, and the direction is recorded."""
+    delaware = _ene_mapping("delaware")
+    assert delaware.cik == 72859
+    assert delaware.ticker == "ENE"
+    assert "0000950129-96-002469" in delaware.citation
+
+    facts = delaware.lifecycle_facts
+    assert len(facts) == 1
+    merger = facts[0]
+    assert merger.scope is LifecycleScope.ISSUER
+    assert merger.date == dt.date(1997, 7, 1)
+    assert merger.date_source is FactDateSource.BODY_TEXT
+    assert "merged with and into" in merger.fact
+    assert "ceased to exist" in merger.fact
+    assert "0001024401-97-000002" in merger.citation
+
+    # Direction is the whole finding: BEL's registrant survived, this one did not.
+    assert "inverse of BEL" in merger.note
+
+    # The predecessor's ticker rests on the text, not on a header that names
+    # two filers, and the record says so rather than letting a reader assume.
+    assert "MULTIPLE FILER BLOCKS" in delaware.scope_notes
+    assert "1024401" in delaware.scope_notes
+
+
+def test_ene_oregon_successor_became_the_successor_issuer() -> None:
+    """The successor's ticker is proved by its own filing, not carried across."""
+    oregon = _ene_mapping("oregon")
+    assert oregon.cik == 1024401
+    assert oregon.ticker == "ENE"
+    # A post-merger filing by this registrant, offering this registrant's stock.
+    assert "0000950129-98-001874" in oregon.citation
+    assert "trades under the symbol ENE" in oregon.citation
+    assert "not carried across the merger by inference" in oregon.scope_notes
+
+    succession = [
+        f
+        for f in oregon.lifecycle_facts
+        if f.scope is LifecycleScope.ISSUER and f.date == dt.date(1997, 7, 1)
+    ]
+    assert len(succession) == 1
+    assert "survived" in succession[0].fact
+    assert "successor issuer" in succession[0].fact
+    assert succession[0].date_source is FactDateSource.BODY_TEXT
+
+    # The SGML name-change date contradicts the bodies and is kept as an
+    # anomaly rather than silently adopted as the rename date.
+    assert "19961008" in succession[0].note
+    assert succession[0].date != dt.date(1996, 10, 8)
+
+
+def test_ene_conversion_ratios_cannot_be_attributed_to_the_wrong_transaction() -> None:
+    """Two mergers, two ratios, and no path by which they can swap."""
+    oregon = _ene_mapping("oregon")
+    conversions = [f for f in oregon.lifecycle_facts if f.scope is LifecycleScope.SECURITY_CLASS]
+    assert len(conversions) == 1
+    conversion = conversions[0]
+    assert conversion.date == dt.date(1997, 7, 1)
+    assert "one-for-one" in conversion.fact
+
+    # The PGC ratio is named only to be excluded, and never inside the fact.
+    assert "0.9825" not in conversion.fact
+    assert "0.9825" in conversion.note
+    assert "PGC Merger" in conversion.note
+    assert "must never be attributed to the Reincorporation Merger" in conversion.note
+
+    # And it reaches no other field of the record either.
+    assert sum("0.9825" in text for text in _ene_text()) == 1
+
+
+def test_ene_conversion_is_sourced_to_the_pos_am_body() -> None:
+    """Post-effective operative text, in DOCUMENT 1, not an exhibit or a prospectus."""
+    conversion = next(
+        f
+        for f in _ene_mapping("oregon").lifecycle_facts
+        if f.scope is LifecycleScope.SECURITY_CLASS
+    )
+    assert "0000950129-97-002781" in conversion.citation
+    assert "DOCUMENT 1" in conversion.citation
+    assert "post-effective" in conversion.citation
+
+    # The exhibits carry the effective date, not the conversion terms, and are
+    # named as non-sources so neither is later cited for this fact.
+    assert "EX-3.02" in conversion.note and "EX-3.03" in conversion.note
+    assert "do NOT carry the one-for-one conversion statement" in conversion.note
+
+    # The 1996 prospective registration is antecedent context, never the source.
+    assert "0000950129-96-002469" not in conversion.citation
+    assert "0000950129-96-002433" not in conversion.citation
+
+
+def test_ene_chapter_11_is_dated_and_issuer_scoped() -> None:
+    """A petition is an issuer event and stays one."""
+    bankruptcies = [
+        f for f in _ene_mapping("oregon").lifecycle_facts if f.date == dt.date(2001, 12, 2)
+    ]
+    assert len(bankruptcies) == 1
+    chapter_11 = bankruptcies[0]
+    assert chapter_11.scope is LifecycleScope.ISSUER
+    assert chapter_11.date_source is FactDateSource.BODY_TEXT
+    assert "0001024401-01-500046" in chapter_11.citation
+    assert "Chapter 11" in chapter_11.fact
+
+    for excluded in (
+        "NOT a delisting",
+        "NOT cessation of trading",
+        "NOT ticker termination",
+        "NOT security extinguishment",
+        "NOT registration termination",
+        "NOT issuer extinction",
+    ):
+        assert excluded in chapter_11.note
+
+    # The subsidiaries filed later; their dates belong to them and never
+    # become the parent's date.
+    for subsidiary_day in (dt.date(2001, 12, 3), dt.date(2001, 12, 6)):
+        assert all(f.date != subsidiary_day for f in _ene_mapping("oregon").lifecycle_facts)
+
+
+def test_ene_records_no_listing_or_reporting_fact() -> None:
+    """Nothing was proved about the listing or the registration, so nothing is recorded."""
+    scopes = {f.scope for m in _shipped_ene().mappings for f in m.lifecycle_facts}
+    assert scopes == {LifecycleScope.ISSUER, LifecycleScope.SECURITY_CLASS}
+    assert LifecycleScope.EXCHANGE_LISTING not in scopes
+    assert LifecycleScope.SEC_REPORTING not in scopes
+
+    notes = _ene_mapping("oregon").scope_notes
+    # The Form 25 absence cannot support a delisting inference in this era.
+    assert "electronic Form 25 filing began 2005-04-24" in notes
+    assert "Absence therefore proves nothing" in notes
+    # A registrant that stops filing has not thereby done anything.
+    assert "2005-11-29" in notes
+    assert "NOT a registration termination" in notes
+
+    # The control-level record refuses the headline the fixture invites.
+    control_notes = _shipped_ene().notes
+    assert "does NOT establish an NYSE delisting" in control_notes
+    assert "large-cap disappearance" in control_notes
+    assert "NOT proved by this record" in control_notes
+
+
+def test_ene_asserts_no_validity_boundaries() -> None:
+    """Every symbol statement is present-tense, so neither end is known."""
+    for mapping in _shipped_ene().mappings:
+        assert mapping.valid_from is None
+        assert mapping.valid_to is None
+
+    # In particular, no event date leaked into a generic ticker window: not the
+    # merger, not the petition, not any filing date.
+    fact_dates = {f.date for m in _shipped_ene().mappings for f in m.lifecycle_facts}
+    assert fact_dates == {dt.date(1997, 7, 1), dt.date(2001, 12, 2)}
+    for mapping in _shipped_ene().mappings:
+        assert mapping.valid_from not in fact_dates
+        assert mapping.valid_to not in fact_dates
+
+
+def test_ene_co_registrant_creates_no_mapping() -> None:
+    """A co-registrant on one filing is not an issuer under this control."""
+    control = _shipped_ene()
+    assert 924024 not in {m.cik for m in control.mappings}
+    assert len(control.mappings) == 2
+
+    # It is identified rather than ignored, so a later reader meets it here
+    # instead of rediscovering an unexplained CIK in the header.
+    conversion = next(
+        f
+        for f in _ene_mapping("oregon").lifecycle_facts
+        if f.scope is LifecycleScope.SECURITY_CLASS
+    )
+    assert "924024" in conversion.note
+    assert "ENRON CAPITAL RESOURCES LP" in conversion.note
+    assert "No issuer mapping is created for it" in conversion.note
+
+
+def test_ene_8k_citation_uses_the_filed_as_of_date() -> None:
+    """The 8-K was filed 1997-07-16. Three other dates sit next to it.
+
+    Its Date of Report and signature date are July 15, 1997, and the merger
+    took effect July 1, 1997. Only the first may follow the word "filed", and
+    an earlier draft of this record used the report date as the filing date.
+    """
+    citing = [text for text in _ene_text() if "0001024401-97-000002" in text]
+    assert citing, "the 8-K is cited somewhere on the record"
+    for text in citing:
+        assert "filed 1997-07-16" in text
+        assert "filed 1997-07-15" not in text
+
+    # No field anywhere calls 1997-07-15 a filing date, in any phrasing.
+    for text in _ene_text():
+        assert re.search(r"[Ff]iled[^.]{0,40}1997-07-15", text) is None
+
+    # The event the fact is dated on is the merger, not any of the three
+    # dates the filing itself carries.
+    merger_dates = {
+        f.date
+        for m in _shipped_ene().mappings
+        for f in m.lifecycle_facts
+        if "0001024401-97-000002" in f.citation
+    }
+    assert merger_dates == {dt.date(1997, 7, 1)}

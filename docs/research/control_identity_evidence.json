@@ -239,6 +239,76 @@
           ]
         }
       ]
+    },
+    {
+      "control_id": "ENE",
+      "expected_company": "Enron Corp.",
+      "identity_break": true,
+      "notes": "Two legal corporations under one ticker, with the common-share lineage continuing through a documented one-for-one conversion. On 1997-07-01 Enron Corp., a Delaware corporation, merged WITH AND INTO Enron Oregon Corp., an Oregon corporation; the Delaware entity ceased to exist and the Oregon entity survived and took its name. The registrant itself was the disappearing party, which is the inverse of BEL, where the registrant survived and its own subsidiary disappeared. ENE is independently established on both sides of the succession by filing text attributable to the relevant issuer; the attribution reasoning for the predecessor is set out in that mapping's scope_notes, because its source filing carries multiple FILER blocks.\n\nidentity_break is true because two distinct issuer identities fall under this control's ticker, which is what the field means in code and what it instructs a consumer not to merge silently. It does NOT mean the shareholders' interest broke: each share of Old Enron common was converted into one share of New Enron common, and that lineage is recorded as a security_class fact rather than left to a boolean. GM carries the same flag for the opposite reason -- there the equity was extinguished.\n\nWHAT THIS RECORD DOES NOT ESTABLISH, AND MUST NOT BE SUMMARIZED AS HAVING ESTABLISHED. It establishes a Chapter 11 petition on 2001-12-02 and an identity chain across 1997-07-01. It does NOT establish an NYSE delisting, does NOT establish SEC registration termination, and does NOT establish the ultimate disposition of the issuer or its securities. The control fixture's proposition 'large-cap disappearance' is therefore NOT proved by this record, and no later summary may treat it as proved.",
+      "mappings": [
+        {
+          "issuer_label": "delaware",
+          "cik": 72859,
+          "ticker": "ENE",
+          "status": "manual_verified",
+          "evidence": "manual_filing_citation",
+          "citation": "SEC filing, accession 0000950129-96-002469, CIK 72859, manually inspected: \"Enron Common Stock is traded on the NYSE and on the Chicago, Pacific, London and Frankfurt exchanges under the symbol 'ENE'\"",
+          "verified_on": "2026-08-16",
+          "valid_from": null,
+          "valid_to": null,
+          "scope_notes": "The Delaware predecessor. ATTRIBUTION RESTS ON THE TEXT, NOT THE HEADER: accession 0000950129-96-002469 carries MULTIPLE FILER BLOCKS, CIK 72859 and CIK 1024401, so the header proves which file this is and not which registrant a sentence describes. The quoted sentence attaches to the Delaware issuer because the same document uses present tense for it -- 'is traded' -- while using 'will be listed' and 'upon consummation' for New Enron, and because it describes New Enron as a wholly owned subsidiary formed to succeed to Enron's business, which is not an entity whose stock trades on five exchanges.\n\nvalid_from IS NULL: 'is traded' states a condition, not a start date. valid_to IS NULL: no filing inspected states a last trading session, and the date this issuer ceased to exist is recorded as a lifecycle fact rather than copied into a generic ticker-validity field.\n\nENE traded on five venues in 1996 -- NYSE, Chicago, Pacific, London, Frankfurt -- and three in 1998. An action by one venue, by itself, would not establish cessation of trading on all venues.",
+          "unresolved_reason": "",
+          "lifecycle_facts": [
+            {
+              "scope": "issuer",
+              "fact": "On 1997-07-01 Enron Corp., a Delaware corporation, merged with and into Enron Oregon Corp., an Oregon corporation, in the Reincorporation Merger, and ceased to exist as a separate legal entity.",
+              "date": "1997-07-01",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 1997-07-16 (Date of Report July 15, 1997), Enron Corp., CIK 1024401, accession 0001024401-97-000002: \"On July 1, 1997, Enron Corp., a Delaware corporation, merged with and into Enron Oregon Corp., an Oregon corporation (the 'Reincorporation Merger'), and the name of Enron Oregon Corp. was changed to Enron Corp.\" Corroborated post-effectively by SEC Form POS AM filed 1997-07-11, accession 0000950129-97-002781, DOCUMENT 1 (TYPE 'POS AM', DESCRIPTION 'ENRON CORP. & ENRON CAPITAL RESOURCES, L.P.'), which describes the succession transaction as the Reincorporation Merger of Old Enron, a Delaware corporation, with and into the registrant.",
+              "note": "THE DIRECTION IS THE FINDING. 'Merged with and into' is directional: the party that merges into another ceases to exist. Here that party is the registrant itself, which is the inverse of BEL, where Bell Atlantic's own subsidiary disappeared and the registrant survived. This is NOT a rename, NOT ordinary continuity and NOT a security death -- the security converted and continued under the successor, which is recorded separately.\n\nFOUR DATES ARE KEPT APART IN THIS CITATION. The 8-K's FILED AS OF DATE is 1997-07-16; its Date of Report and signature date are July 15, 1997; the merger took effect July 1, 1997. Only the first may follow the word 'filed', and the merger date is the one this fact is dated on."
+            }
+          ]
+        },
+        {
+          "issuer_label": "oregon",
+          "cik": 1024401,
+          "ticker": "ENE",
+          "status": "manual_verified",
+          "evidence": "manual_filing_citation",
+          "citation": "SEC Form 424B4 filed 1998-05-05, Enron Corp., CIK 1024401, accession 0000950129-98-001874, an offering of 15,000,000 shares of the registrant's Common Stock, manually inspected: \"Enron's Common Stock is listed on the New York, Chicago and Pacific Stock Exchanges where it trades under the symbol ENE.\"",
+          "verified_on": "2026-08-16",
+          "valid_from": null,
+          "valid_to": null,
+          "scope_notes": "The Oregon successor, CIK 1024401, which survived the Reincorporation Merger and was renamed Enron Corp.\n\nTHE SUCCESSOR'S TICKER IS ESTABLISHED INDEPENDENTLY OF THE PREDECESSOR'S. ENE is not carried across the merger by inference: the 424B4 is a post-merger filing by this registrant, offering its own Common Stock, stating the symbol in the present tense. Three earlier filings were inspected and were silent on the symbol -- 10-K 0001024401-98-000009, 10-K 0001024401-99-000007 and DEF 14A 0000950129-99-001251. All three were probative documents, so their silence is recorded as silence; none contradicts the 424B4.\n\nvalid_from IS NULL: 'is listed' states a condition, not a start date. valid_to IS NULL: nothing establishes an end. No boundary is taken from a filing date or from the merger date.\n\nNYSE DELISTING IS NOT ESTABLISHED AND NO FACT IS RECORDED FOR IT. Three February 2002 8-Ks were individually read -- 0000909518-02-000089, 0000909518-02-000098 and 0000909518-02-000120 -- and none contains delisting, removal, trading-cessation, OTC or venue-change evidence. The single 'suspend' hit in 0000909518-02-000120 is contractual and regulatory-authorisation boilerplate, not an exchange or trading suspension, and is recorded here so it cannot later be mistaken for evidence. No date is inferred from the bankruptcy, from equity-value language, from filing chronology, or from the absence of a Form 25.\n\nFORM 15 AND FORM 25: none of either family appears for this CIK in an EXHAUSTIVE LOCAL-INDEX SEARCH covering 1996-2006. The Form 15 absence is reasonably probative, since Form 15 was filed electronically in that era; it remains local-index scope and is not proof that no such filing exists. The Form 25 absence is NON-PROBATIVE for this era: electronic Form 25 filing began 2005-04-24, so a 2002 NYSE removal would have been paper-filed and absent from EDGAR regardless. Absence therefore proves nothing about whether an exchange removal occurred.\n\nSEC REPORTING: indexed filings for this CIK run to 2005-11-29 and then stop. That is an undated cessation candidate and NOT a registration termination. No sec_reporting fact is recorded, because a registrant that stops filing has not thereby done anything.",
+          "unresolved_reason": "",
+          "lifecycle_facts": [
+            {
+              "scope": "issuer",
+              "fact": "On 1997-07-01 Enron Oregon Corp., an Oregon corporation, survived the Reincorporation Merger as the continuing corporation, its name was changed to Enron Corp., and it became the successor issuer to the Common Stock and Debt Securities of Enron Corp., the Delaware corporation.",
+              "date": "1997-07-01",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 1997-07-16 (Date of Report July 15, 1997), Enron Corp., CIK 1024401, accession 0001024401-97-000002: \"On July 1, 1997, Enron Corp., a Delaware corporation, merged with and into Enron Oregon Corp., an Oregon corporation (the 'Reincorporation Merger'), and the name of Enron Oregon Corp. was changed to Enron Corp.\" Successor-issuer status is stated post-effectively in SEC Form POS AM filed 1997-07-11, accession 0000950129-97-002781, DOCUMENT 1 (TYPE 'POS AM', DESCRIPTION 'ENRON CORP. & ENRON CAPITAL RESOURCES, L.P.'): Enron Corp., formerly Enron Oregon Corp., an Oregon corporation, became the successor issuer to the Common Stock and Debt Securities of Enron Corp., a Delaware corporation, effective July 1, 1997.",
+              "note": "METADATA DISCREPANCY PRESERVED: the SGML header for CIK 1024401 carries DATE OF NAME CHANGE 19961008, which precedes the merger and conflicts with the filing-body chronology. It is preserved as unexplained metadata and is NOT used as the reincorporation or rename date; the contemporaneous filings govern. A separate transaction described in the same materials -- Portland General Corporation merging with and into the surviving Enron -- is not part of this control and is not recorded here.\n\nFOUR DATES ARE KEPT APART IN THIS CITATION. The 8-K's FILED AS OF DATE is 1997-07-16; its Date of Report and signature date are July 15, 1997; the merger took effect July 1, 1997. Only the first may follow the word 'filed', and the merger date is the one this fact is dated on."
+            },
+            {
+              "scope": "security_class",
+              "fact": "As a result of the Reincorporation Merger effective 1997-07-01, each issued share of Old Enron common stock, par value $.10 per share, was converted into one share of New Enron common stock, without par value. The conversion ratio for this transaction is one-for-one.",
+              "date": "1997-07-01",
+              "date_source": "body_text",
+              "citation": "SEC Form POS AM filed 1997-07-11, accession 0000950129-97-002781, DOCUMENT 1 (TYPE 'POS AM', DESCRIPTION 'ENRON CORP. & ENRON CAPITAL RESOURCES, L.P.'): \"As a result of the Reincorporation Merger, (i) each issued share of common stock, par value $.10 per share, of Old Enron was converted into one share of common stock, without par value, of the registrant ('New Enron Common Stock')\". This is post-effective, past-tense language in the POS AM body itself.",
+              "note": "DIRECTLY SUPPORTED BY A POST-EFFECTIVE FILING. The POS AM was made 1997-07-11, ten days after effectiveness, and describes what occurred. It is downstream of every amendment to the merger agreement, including the First Amendment dated 1997-04-14, so no bridge from the prospective 1996 registration terms is needed and none is asserted. The 1996 materials (0000950129-96-002469 and 0000950129-96-002433) remain useful antecedent evidence of transaction design and are not the source of this fact.\n\nTHE RATIO BELONGS TO THIS TRANSACTION ONLY. The same POS AM document states that in the separate PGC Merger each share of PGC common stock was converted into 0.9825 share of New Enron Common Stock. That ratio belongs to the PGC Merger and must never be attributed to the Reincorporation Merger, nor this one to that.\n\nSOURCE LOCATION IS DOCUMENT 1, NOT AN EXHIBIT. EX-3.02 (Articles of Merger of Enron Oregon Corp.) and EX-3.03 (Articles of Merger of Enron Corp.) support the July 1, 1997 effective date but do NOT carry the one-for-one conversion statement, and neither is cited as its source.\n\nCO-REGISTRANT: the submission header also identifies CIK 924024, ENRON CAPITAL RESOURCES LP. It is a co-registrant on this filing only. No issuer mapping is created for it and it forms no part of this control's identity.\n\nTHIS IS THE LINEAGE FACT THAT identity_break CANNOT CARRY. Two legal issuers with a one-for-one conversion is a different thing from two legal issuers with an extinguished equity, and the boolean says only that there are two. The distinction has a specified home downstream in RESEARCH_01_DATA_CONTRACT.md section 3, security_relationships.relationship = successor_of with a ratio, whose default is that lineage is recorded and never auto-followed."
+            },
+            {
+              "scope": "issuer",
+              "fact": "On 2001-12-02 Enron Corp. and certain other subsidiaries each filed voluntary petitions for relief under Chapter 11 of title 11 of the United States Code in the United States Bankruptcy Court for the Southern District of New York. Additional subsidiaries filed between 2001-12-03 and 2001-12-06. The Debtors continued to manage their properties and operate their businesses as debtors-in-possession.",
+              "date": "2001-12-02",
+              "date_source": "body_text",
+              "citation": "SEC Form 8-K filed 2001-12-17, Enron Corp., CIK 1024401, accession 0001024401-01-500046, reported under old Form 8-K Item 3, \"Bankruptcy or Receivership\"",
+              "note": "AN ISSUER EVENT AND NOTHING MORE. This is NOT a delisting, NOT cessation of trading, NOT ticker termination, NOT security extinguishment, NOT registration termination, NOT issuer extinction, NOT liquidation and NOT emergence. Each is a separate proposition requiring separate evidence, and none is established. 'Debtors-in-possession' is affirmative continuity: the entity continued to operate.\n\nTHE PARENT DATE IS 2001-12-02 AND THE SUBSIDIARY DATES ARE NOT MERGED INTO IT. The filing states additional subsidiaries filed 3-6 December; that range belongs to other entities and is preserved rather than flattened. No subsidiary lifecycle facts are recorded: this control is the parent issuer.\n\nThe header CONFORMED PERIOD OF REPORT 20011202 AGREES with the body text -- the first such agreement in this project, where header and body have otherwise conflicted or described different events. date_source remains body_text; the header corroborates.\n\nThe filing's contemporaneous 'NYSE: ENE' references are a press-release identifier convention, not a listing-status disclosure, and are deliberately not folded into this fact."
+            }
+          ]
+        }
+      ]
     }
   ]
 }
