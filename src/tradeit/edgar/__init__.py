@@ -10,7 +10,8 @@ Six modules, in the order they run:
     Read the quarterly full-index. The spine starts at **1994 Q3**.
 ``submission``
     Read one downloaded submission: its SGML header and its documents, so a
-    filing is checked against the index row that named it before it is read.
+    filing is checked against the index row that named it before it is read --
+    and so *who filed it* stays distinct from *who it is about*.
 ``evidence``
     Decide what each filing proves, across four separate lifecycles.
 ``lifecycle``
@@ -53,15 +54,21 @@ from tradeit.edgar.index import (
 )
 from tradeit.edgar.lifecycle import ExitResolution, build_timelines, resolve_exit
 from tradeit.edgar.submission import (
+    KNOWN_ENTITY_ROLES,
     SubmissionDocument,
+    SubmissionEntity,
     SubmissionHeader,
+    cik_roles,
+    entities_for_role,
     header_mismatches,
     parse_submission_header,
     split_documents,
+    unknown_roles,
 )
 
 __all__ = [
     "EDGAR_FIRST_QUARTER",
+    "KNOWN_ENTITY_ROLES",
     "Classification",
     "CoverageBounds",
     "Denominator",
@@ -78,15 +85,19 @@ __all__ = [
     "MappingStatus",
     "SecurityMapping",
     "SubmissionDocument",
+    "SubmissionEntity",
     "SubmissionHeader",
     "SurvivorshipClass",
     "build_timelines",
+    "cik_roles",
     "classify_corpus",
     "classify_form",
+    "entities_for_role",
     "header_mismatches",
     "parse_full_index",
     "parse_submission_header",
     "resolve_exit",
     "resolve_mapping",
     "split_documents",
+    "unknown_roles",
 ]
