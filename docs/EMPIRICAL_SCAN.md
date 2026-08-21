@@ -8,8 +8,13 @@ the Phase 4/5 gate checks had nothing to read and SKIPPED.
 
 ```
 tradeit scan --snapshot <snapshot-id> [--symbols AAPL NVDA] [--scan-id my-scan]
-             [--start ISO] [--end ISO] [--progress] [--json out.json]
+             [--start ISO] [--end ISO] [--progress] [--json out/scan.json]
 ```
+
+`--json` writes wherever you point it, and `out/` is the directory to point it
+at: it is created on demand and git ignores it at the repository root, so a
+diagnostic session leaves no untracked `scan-*.json` or redirected `.log` files
+next to the source. Redirect console logs there too — `> out/scan.log`.
 
 ---
 

@@ -66,6 +66,28 @@ from tradeit.validation.context import load_context
 from tradeit.validation.runner import run_validation
 from tradeit.validation.survivorship import control_required_start, required_history_start
 
+#: Where local diagnostic and validation output belongs, relative to wherever the
+#: operator runs the command. Ignored by git at the repository root, so a
+#: diagnostic session leaves nothing untracked next to the source.
+OUTPUT_DIRNAME = "out"
+
+
+def _write_json_report(path: str, payload: dict[str, Any]) -> Path:
+    """Write a report payload, creating its directory if it does not exist.
+
+    ``--json`` takes whatever path the operator names, and the documented form is
+    now ``--json out/scan.json`` rather than a bare filename that lands in the
+    repository root. A missing ``out/`` must not be the thing that loses the
+    report: a full scan runs for a long time, and failing with FileNotFoundError
+    after the work is done -- with the payload still only in memory -- discards
+    exactly what the run was for. The acquisition and enrichment paths already
+    create their report directories the same way.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return target
+
 
 def cmd_package_spec(args: argparse.Namespace) -> int:
     """Emit the data specification an operator hands to a vendor."""
@@ -194,10 +216,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     print(run.render())
     if args.json:
-        Path(args.json).write_text(
-            json.dumps(run.to_payload(), indent=2, sort_keys=True), encoding="utf-8"
-        )
-        print(f"\nwrote {args.json}")
+        print(f"\nwrote {_write_json_report(args.json, run.to_payload())}")
 
     usable, _ = run.is_evidence
     # Exit non-zero when the run is not citable. A CI job that treats a
@@ -238,10 +257,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     print()
     print(report.render())
     if args.json:
-        Path(args.json).write_text(
-            json.dumps(report.to_payload(), indent=2, sort_keys=True), encoding="utf-8"
-        )
-        print(f"\nwrote {args.json}")
+        print(f"\nwrote {_write_json_report(args.json, report.to_payload())}")
     return 1 if report.problems else 0
 
 
@@ -741,14 +757,22 @@ def add_data_commands(sub: argparse._SubParsersAction) -> None:  # type: ignore[
         help="re-scan instruments already completed under this --scan-id",
     )
     scan.add_argument("--progress", action="store_true", help="print per-instrument progress")
-    scan.add_argument("--json", default=None, help="also write the scan report payload here")
+    scan.add_argument(
+        "--json",
+        default=None,
+        help=f"also write the scan report payload here, e.g. {OUTPUT_DIRNAME}/scan.json",
+    )
     scan.add_argument("--code-version", default="unknown")
     scan.set_defaults(func=cmd_scan)
 
     validate = sub.add_parser("validate", help="run the empirical checks over a snapshot")
     validate.add_argument("--snapshot", required=True, help="snapshot id from a data import")
     validate.add_argument("--as-of", default=None, help="ISO date; defaults to the export date")
-    validate.add_argument("--json", default=None, help="also write the report payload here")
+    validate.add_argument(
+        "--json",
+        default=None,
+        help=f"also write the report payload here, e.g. {OUTPUT_DIRNAME}/validation-report.json",
+    )
     validate.add_argument("--code-version", default="unknown")
     validate.add_argument(
         "--scan-id",

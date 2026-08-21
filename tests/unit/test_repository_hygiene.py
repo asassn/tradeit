@@ -19,10 +19,13 @@ strings, so this suite makes no filesystem changes and works on a clean tree.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from tradeit.cli_data import OUTPUT_DIRNAME, _write_json_report
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,6 +77,59 @@ class TestAcquiredDataIsIgnored:
         assert is_ignored(path), f"{path} would be committed"
 
 
+class TestLocalOutputIsIgnored:
+    """A diagnostic session must not leave untracked files next to the source.
+
+    Eleven of them once did: scan-diagnostic.json, scan-full-01.json/.log,
+    validation-report*.json and friends, all written into the repository root
+    because the documented examples were bare filenames and the command was run
+    from a clone. `/out/` is where they belong now.
+    """
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "out/scan.json",
+            "out/scan.log",
+            "out/validation-report.json",
+            "out/2026-08-21/scan-diagnostic-02.json",
+        ],
+    )
+    def test_the_output_directory_is_ignored(self, path: str) -> None:
+        assert is_ignored(path), f"{path} would be committed"
+
+    def test_the_documented_directory_is_the_ignored_one(self) -> None:
+        """The name the CLI advertises and the name git hides are one name."""
+        assert is_ignored(f"{OUTPUT_DIRNAME}/anything.json")
+
+
+class TestReportWriting:
+    """`--json out/scan.json` must work before `out/` exists.
+
+    A full scan runs for a long time and the payload lives only in memory until
+    it is written. Failing with FileNotFoundError at that point discards exactly
+    what the run was for, so the directory is created rather than required.
+    """
+
+    def test_a_missing_output_directory_is_created(self, tmp_path: Path) -> None:
+        target = tmp_path / OUTPUT_DIRNAME / "scan.json"
+        assert not target.parent.exists()
+
+        written = _write_json_report(str(target), {"checks": [], "usable": True})
+
+        assert written == target
+        assert json.loads(target.read_text(encoding="utf-8")) == {"checks": [], "usable": True}
+
+    def test_a_bare_filename_still_writes_where_it_is_told(self, tmp_path: Path) -> None:
+        """Existing invocations keep working: only the documented path changed."""
+        target = tmp_path / "report.json"
+
+        written = _write_json_report(str(target), {"ok": 1})
+
+        assert written == target
+        assert target.exists()
+
+
 class TestSourceIsNotIgnored:
     """The half that would have caught the original defect.
 
@@ -95,11 +151,21 @@ class TestSourceIsNotIgnored:
             "docs/empirical-guide.md",
             "tests/fixtures/empirical-sample.csv",
             "tests/unit/empirical-data/fixture.csv",
+            # Names that brush against `/out/` without being at the root. `out`
+            # is a short, common word, which is exactly why the rule is anchored.
+            "src/tradeit/validation/out.py",
+            "src/tradeit/scanning/out/writer.py",
+            "docs/out-of-sample.md",
+            "tests/fixtures/out/expected.json",
             # Fixtures and documents that are committed on purpose.
             "tests/unit/test_acquisition_fmp.py",
             "docs/LOCAL_DATA_ACQUISITION.md",
             "docs/VENDOR_SEMANTICS.md",
             "DATA_REQUIRED.md",
+            # The curated identity evidence. A .json file, and the research
+            # output rather than a rebuildable artifact -- a blanket `*.json`
+            # rule to catch diagnostic output would hide it.
+            "docs/research/control_identity_evidence.json",
             # A package directory nested under source must not vanish either.
             "src/tradeit/packages/registry.py",
             "src/tradeit/market-data/loader.py",
@@ -120,7 +186,7 @@ class TestSourceIsNotIgnored:
         symptom: a pattern mentioning data must either start with `/` — root
         only — or name `_acquisition`, which no source tree uses.
         """
-        risky = {"data", "packages", "market-data", "empirical"}
+        risky = {"data", "packages", "market-data", "empirical", "out"}
         offenders: list[str] = []
         for raw in (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines():
             line = raw.strip()
@@ -136,4 +202,26 @@ class TestSourceIsNotIgnored:
             f"unanchored data ignore pattern(s) {offenders}. Anchor them to the "
             "repository root with a leading `/`, or they will also match "
             "directories inside src/."
+        )
+
+    def test_no_blanket_pattern_catches_diagnostic_output_by_name(self) -> None:
+        """The tempting fix for stray reports, refused in code.
+
+        A rule like `*.json` or `validation-*` would have swept up the eleven
+        stray diagnostic files in one line -- and would also hide
+        docs/research/control_identity_evidence.json, any future fixture named
+        for a scan, and any document named for validation. The directory is
+        ignored; the shapes of filenames are not.
+        """
+        banned = {"*.json", "*.log", "scan-*", "validation-*", "*.jsonl"}
+        found = [
+            line
+            for raw in (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+            if (line := raw.strip()) in banned
+        ]
+        assert found == [], (
+            f"blanket ignore pattern(s) {found}. Diagnostic output is kept out of "
+            "commits by writing it into the ignored /out/ directory, not by "
+            "matching filenames -- a name-shaped rule cannot tell a rebuildable "
+            "report from committed research evidence."
         )

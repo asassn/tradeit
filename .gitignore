@@ -57,3 +57,26 @@ htmlcov/
 /empirical-*/
 /market-data/
 /packages/
+
+# ---------------------------------------------------------------------------
+# Local diagnostic and validation output.
+#
+# `tradeit scan --json <path>` and `tradeit validate --json <path>` take a path
+# the operator chooses, and the documented examples used to be bare filenames --
+# `--json out.json`, `--json report.json` -- which land in whatever directory the
+# command was run from. Run from a clone, that is the repository root, and a
+# diagnostic session leaves scan-*.json, validation-report-*.json and redirected
+# .log files sitting next to pyproject.toml as untracked clutter.
+#
+# `/out/` is the one place those belong. The documentation now points there and
+# the CLI creates it on demand.
+#
+# WHAT IS DELIBERATELY *NOT* IGNORED, AND WHY. Not `*.json`: the curated identity
+# evidence in docs/research/ is a .json file, it is the research output rather
+# than a rebuildable artifact, and a blanket rule would hide it the way the old
+# unanchored `data/` rule hid src/tradeit/data/. Not `*.log`, `scan-*` or
+# `validation-*` either -- each would silently swallow a future source file,
+# fixture or document whose name happens to match. The rule is narrow on
+# purpose: one root-anchored directory, chosen for output, ignored entirely.
+# ---------------------------------------------------------------------------
+/out/

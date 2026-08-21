@@ -399,7 +399,7 @@ It prints a `snapshot_id`. That id is what every result cites.
 **Step 6 — validate.**
 
 ```bash
-tradeit validate --snapshot <snapshot-id> --json report.json
+tradeit validate --snapshot <snapshot-id> --json out/validation-report.json
 ```
 
 Expect failures. `data.survivorship_coverage` will fail unless your package
