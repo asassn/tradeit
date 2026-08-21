@@ -25,7 +25,10 @@ import pytest
 
 from tradeit import cli_edgar
 from tradeit.cli_edgar import _raw_extract, cmd_audit_exceptions, cmd_audit_paths
-from tradeit.edgar.control_evidence import outstanding_controls
+from tradeit.edgar.control_evidence import (
+    controls_awaiting_manual_verification,
+    unresolved_controls,
+)
 from tradeit.edgar.controls import CONTROL_UNIVERSE
 from tradeit.edgar.denominator import (
     RESEARCH_GRADE_THRESHOLD,
@@ -939,12 +942,19 @@ def test_milestone_0b_reports_itself_incomplete() -> None:
 
     This used to read `len(unverified()) == 30`, which passed because the check
     could not return anything else: it read the fixture's placeholder mapping and
-    never opened the evidence file. The gate now reads the evidence, so the
-    number moves as controls are verified -- and the assertion is that work
+    never opened the evidence file. Both measurements now read the evidence, so
+    the numbers move as controls are verified -- and the assertion is that work
     remains, not that none has been done.
+
+    The milestone gate is the stricter of the two: it asks for MANUAL_VERIFIED,
+    which a RESOLVED control does not supply, so it can never report fewer
+    outstanding than the identity measurement.
     """
-    outstanding = outstanding_controls()
-    assert 0 < len(outstanding) < len(CONTROL_UNIVERSE)
+    unresolved = unresolved_controls()
+    awaiting = controls_awaiting_manual_verification()
+    assert 0 < len(unresolved) < len(CONTROL_UNIVERSE)
+    assert 0 < len(awaiting) <= len(CONTROL_UNIVERSE)
+    assert len(awaiting) >= len(unresolved)
 
 
 def test_the_fixture_covers_the_failure_modes_it_claims_to() -> None:

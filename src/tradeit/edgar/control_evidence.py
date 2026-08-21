@@ -48,9 +48,10 @@ __all__ = [
     "IssuerMapping",
     "LifecycleFact",
     "ResolvedControl",
+    "controls_awaiting_manual_verification",
     "load_control_evidence",
-    "outstanding_controls",
     "resolve_controls",
+    "unresolved_controls",
 ]
 
 #: Bumped to 2 when lifecycle_facts was added. A version-1 reader would have
@@ -267,6 +268,20 @@ class ResolvedControl:
         segment that would splice a series.
         """
         return bool(self.mappings) and all(m.counts_in_numerator for m in self.mappings)
+
+    @property
+    def is_manually_verified(self) -> bool:
+        """Whether every issuer was checked by a human against primary evidence.
+
+        Strictly stronger than :attr:`counts_in_numerator`, and deliberately so.
+        ``RESOLVED`` means one defensible mapping from a dated primary source --
+        enough to count a control as identified, and enough for the survivorship
+        numerator. ``MANUAL_VERIFIED`` additionally means a person read a filing
+        and recorded a citation to it. Milestone 0b asks for the second, so a
+        ``RESOLVED`` control clears the identity question and still leaves the
+        milestone's work to do.
+        """
+        return self.status is MappingStatus.MANUAL_VERIFIED
 
     @property
     def unresolved_reason(self) -> str:
@@ -553,31 +568,58 @@ def resolve_controls(evidence: ControlEvidenceFile | None = None) -> list[Resolv
     return out
 
 
-def outstanding_controls(
+# Two questions, two functions, one resolution.
+#
+# "Do we know which registrant this control is?" and "has a person confirmed it
+# against a filing?" are different questions with different answers, and a single
+# count cannot report both. Answering them with one number is how a milestone
+# that asks for MANUAL_VERIFIED gets reported complete on RESOLVED evidence.
+#
+# Both read the same :func:`resolve_controls` join, so there is one parse of the
+# evidence file and one definition of each status; only the predicate differs.
+
+
+def unresolved_controls(
     evidence: ControlEvidenceFile | None = None,
 ) -> tuple[ResolvedControl, ...]:
-    """Milestone 0b's remaining work, measured where the evidence actually lives.
+    """Controls whose identity is still not established. **Measurement A.**
 
-    **This replaced a gate that could not move.** ``controls.unverified()`` read
-    ``ControlSecurity.mapping``, a placeholder that is ``UNRESOLVED`` for all
-    thirty by construction -- the fixture deliberately carries no CIK, so that a
-    remembered one cannot be written into source. Identity is recorded in the
-    evidence file instead, which that check never opened. It therefore reported
-    thirty outstanding whatever the evidence said, and would still have reported
-    thirty on the day the last control was verified: a completion gate that
-    cannot observe completion.
+    Outstanding while the effective status is ``UNRESOLVED`` or ``AMBIGUOUS``.
+    Both ``RESOLVED`` and ``MANUAL_VERIFIED`` clear it: each is a defensible
+    mapping from a dated primary source, and this is the same predicate the
+    survivorship numerator uses, so a control that counts there counts here.
 
-    Reading through :func:`resolve_controls` is the whole fix. There is one join
-    of fixture to evidence, one validation pass, and one definition of acceptable
-    evidence -- :attr:`IssuerMapping.counts_in_numerator` -- rather than a second
-    opinion that agrees with the first only by coincidence.
+    What does **not** clear it is the mere existence of a record. An
+    ``UNRESOLVED`` mapping must state why it is unresolved, and saying so
+    honestly leaves the control counted.
 
-    A control is outstanding while its effective status is ``UNRESOLVED`` or
-    ``AMBIGUOUS``. Both ``RESOLVED`` and ``MANUAL_VERIFIED`` clear it, because
-    they are different strengths of a defensible mapping rather than a draft and
-    a final: ``AAPL`` is ``RESOLVED`` from the SEC ticker file on purpose, with
-    ``MANUAL_VERIFIED`` reserved for a human-checked filing citation. What does
-    **not** clear it is the mere existence of a record: an ``UNRESOLVED`` mapping
-    must state why it is unresolved, and it stays counted here.
+    **This is not the Milestone 0b gate** -- see
+    :func:`controls_awaiting_manual_verification`.
     """
     return tuple(c for c in resolve_controls(evidence) if not c.counts_in_numerator)
+
+
+def controls_awaiting_manual_verification(
+    evidence: ControlEvidenceFile | None = None,
+) -> tuple[ResolvedControl, ...]:
+    """Milestone 0b's remaining work. **Measurement B, and the completion gate.**
+
+    The milestone is *30 controls to* ``MANUAL_VERIFIED``, so only
+    ``MANUAL_VERIFIED`` clears it and the gate closes at 30/30. A ``RESOLVED``
+    control -- ``AAPL`` from the SEC ticker file, ``GM`` whose weakest issuer is
+    ``RESOLVED`` -- is a known identity and is still counted here, because the
+    milestone asks for a human who read a filing and cited it, and no ticker
+    reference file supplies that.
+
+    **This gate is strictly harder than** :func:`unresolved_controls`, and its
+    count is therefore never lower. Reporting the easier number against the
+    milestone's wording is the confusion this pair exists to prevent.
+
+    **Neither gate replaced the one that could not move.** ``controls.unverified()``
+    read ``ControlSecurity.mapping``, a placeholder pinned at ``UNRESOLVED`` for
+    all thirty so that a remembered CIK can never be written into source. It
+    never opened the evidence file, so it reported thirty outstanding whatever
+    had been verified -- and would have reported thirty on the day the last
+    control was confirmed.
+    """
+    return tuple(c for c in resolve_controls(evidence) if not c.is_manually_verified)

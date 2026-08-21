@@ -8,9 +8,15 @@ fabrication -- the specific failure the whole identity design exists to prevent
 needed to lift it recorded beside it.
 
 Milestone 0b is complete when
-:func:`tradeit.edgar.control_evidence.outstanding_controls` returns an empty
-tuple. It does not, today. That check deliberately lives in the evidence layer
-rather than here: what a control's identity *is* comes from
+:func:`tradeit.edgar.control_evidence.controls_awaiting_manual_verification`
+returns an empty tuple -- all thirty at ``MANUAL_VERIFIED``, which is the
+milestone's own wording. It does not, today. That is a **stricter** question than
+:func:`tradeit.edgar.control_evidence.unresolved_controls`, which asks only
+whether a control's identity is established at all and which ``RESOLVED``
+satisfies; the two counts are reported separately and are not interchangeable.
+
+Both checks deliberately live in the evidence layer rather than here: what a
+control's identity *is* comes from
 ``docs/research/control_identity_evidence.json``, and a gate that reads only the
 placeholder below would report every control outstanding forever.
 
@@ -348,7 +354,9 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
 
 
 # Milestone 0b's remaining work is reported by
-# `tradeit.edgar.control_evidence.outstanding_controls`, not from here.
+# `tradeit.edgar.control_evidence.controls_awaiting_manual_verification`, and the
+# weaker "is this control's identity known at all" question by
+# `unresolved_controls` in the same module. Neither is answered from here.
 #
 # Two functions used to live at the bottom of this file -- `unverified()` and
 # `verification_table()` -- and both read `ControlSecurity.mapping` as though it

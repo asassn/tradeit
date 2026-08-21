@@ -792,19 +792,32 @@ def cmd_controls(args: argparse.Namespace) -> int:
     counts: dict[str, int] = {}
     for r in resolved:
         counts[str(r.status)] = counts.get(str(r.status), 0) + 1
-    verified = counts.get(str(MappingStatus.MANUAL_VERIFIED), 0)
-    # The Milestone 0b gate itself, read off the same resolution this command
-    # prints rather than computed a second way. `outstanding_controls` applies
-    # exactly this filter; reusing the list already in hand avoids re-reading and
-    # re-validating the evidence file to answer a question just answered.
-    outstanding = [r for r in resolved if not r.counts_in_numerator]
+    # Two measurements, printed separately because they answer different
+    # questions and one is strictly harder than the other. Both are read off the
+    # resolution already in hand -- `unresolved_controls` and
+    # `controls_awaiting_manual_verification` apply exactly these filters -- so
+    # the evidence file is parsed once, not three times.
+    total = len(resolved)
+    unresolved = [r for r in resolved if not r.counts_in_numerator]
+    awaiting = [r for r in resolved if not r.is_manually_verified]
+    identified = total - len(unresolved)
+    verified = total - len(awaiting)
     source = evidence.source_path
     print(f"evidence file : {source}{'' if source and source.exists() else '  (absent)'}")
-    print(f"controls      : {len(resolved)}   manual-verified: {verified}")
+    print(f"controls      : {total}")
     print(f"by status     : {dict(sorted(counts.items()))}")
+    print()
     print(
-        f"milestone 0b  : {len(outstanding)} of {len(resolved)} outstanding, "
-        f"complete at 0   ({', '.join(r.control.ticker for r in outstanding) or 'none'})"
+        f"identity      : {identified} of {total} resolved by evidence "
+        f"(RESOLVED or MANUAL_VERIFIED); {len(unresolved)} unresolved"
+    )
+    print(
+        f"milestone 0b  : {verified} of {total} MANUAL_VERIFIED; "
+        f"{len(awaiting)} still require it"
+    )
+    print(
+        "                complete only at "
+        f"{total}/{total} MANUAL_VERIFIED -- a RESOLVED control does not clear it"
     )
     print()
 

@@ -28,9 +28,10 @@ from tradeit.edgar.control_evidence import (
     ControlEvidence,
     FactDateSource,
     IssuerMapping,
+    controls_awaiting_manual_verification,
     load_control_evidence,
-    outstanding_controls,
     resolve_controls,
+    unresolved_controls,
 )
 from tradeit.edgar.controls import CONTROL_UNIVERSE
 from tradeit.edgar.evidence import LifecycleScope
@@ -397,67 +398,92 @@ def test_a_historical_failure_may_stay_unresolved_honestly(tmp_path: Path) -> No
 
 
 # ---------------------------------------------------------------------------
-# the Milestone 0b completion gate
+# the two control measurements
 #
-# It used to be `controls.unverified()`, which read `ControlSecurity.mapping` --
+# They answer different questions and must not be conflated:
+#
+#   unresolved_controls()                     -- is this control's identity known?
+#                                                RESOLVED and MANUAL_VERIFIED clear it
+#   controls_awaiting_manual_verification()   -- Milestone 0b: "30 controls to
+#                                                MANUAL_VERIFIED". Only MANUAL_VERIFIED
+#                                                clears it; RESOLVED does not
+#
+# The second is strictly harder, so its count is never lower. Reporting the
+# easier number against the milestone's wording would let 0b be declared complete
+# on evidence the milestone does not ask for.
+#
+# Both replaced `controls.unverified()`, which read `ControlSecurity.mapping` --
 # a placeholder pinned at UNRESOLVED so no CIK is ever written into source. It
-# therefore reported thirty outstanding no matter what had been verified, and
-# would have gone on reporting thirty after the last control was confirmed. The
-# gate now reads the evidence file through `resolve_controls`, and these tests
-# pin the distinctions that made the old one useless.
+# reported thirty outstanding no matter what had been verified, and would have
+# gone on reporting thirty after the last control was confirmed.
 # ---------------------------------------------------------------------------
 
 
-def test_a_control_with_no_evidence_stays_outstanding(tmp_path: Path) -> None:
+def _measure(path: Path) -> tuple[set[str], set[str]]:
+    """(unresolved identities, controls still needing MANUAL_VERIFIED)."""
+    evidence = load_control_evidence(path)
+    return (
+        {c.control.ticker for c in unresolved_controls(evidence)},
+        {c.control.ticker for c in controls_awaiting_manual_verification(evidence)},
+    )
+
+
+def test_a_control_with_no_evidence_fails_both_measurements(tmp_path: Path) -> None:
     path = _write(tmp_path, [{"control_id": "AAPL", "mappings": [_verified_mapping()]}])
-    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
-    assert "MSFT" in outstanding
-    assert len(outstanding) == len(CONTROL_UNIVERSE) - 1
+    unresolved, awaiting = _measure(path)
+    assert "MSFT" in unresolved
+    assert "MSFT" in awaiting
 
 
-def test_a_record_that_resolves_nothing_stays_outstanding(tmp_path: Path) -> None:
+def test_a_record_that_resolves_nothing_fails_both_measurements(tmp_path: Path) -> None:
     """The existence of a record is not evidence. Only its content is.
 
     An UNRESOLVED mapping must say why it is unresolved, and saying so does not
-    discharge the milestone -- otherwise the gate could be cleared by writing
+    discharge either measurement -- otherwise both could be cleared by writing
     thirty honest admissions of ignorance.
+    """
+    path = _write(tmp_path, [{"control_id": "IPET", "mappings": [_unresolved_mapping()]}])
+    unresolved, awaiting = _measure(path)
+    assert "IPET" in unresolved
+    assert "IPET" in awaiting
+    assert len(unresolved) == len(CONTROL_UNIVERSE)
+    assert len(awaiting) == len(CONTROL_UNIVERSE)
+
+
+def test_resolved_clears_identity_but_not_milestone_0b(tmp_path: Path) -> None:
+    """The distinction this pair of measurements exists for.
+
+    AAPL is RESOLVED on purpose -- one defensible mapping from the SEC ticker
+    file -- so its identity is known. Milestone 0b asks for MANUAL_VERIFIED: a
+    person who read a filing and cited it. No ticker reference file supplies
+    that, so a RESOLVED control is identified and still outstanding for 0b.
     """
     path = _write(
         tmp_path,
-        [{"control_id": "IPET", "mappings": [_unresolved_mapping()]}],
-    )
-    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
-    assert "IPET" in outstanding
-    assert len(outstanding) == len(CONTROL_UNIVERSE)
-
-
-def test_a_resolved_control_is_no_longer_outstanding(tmp_path: Path) -> None:
-    """RESOLVED clears the gate. AAPL is RESOLVED on purpose, from the SEC
-    ticker file, with MANUAL_VERIFIED reserved for a human-checked citation."""
-    path = _write(
-        tmp_path,
-        [
-            {
-                "control_id": "AAPL",
-                "mappings": [_verified_mapping(status="resolved")],
-            }
-        ],
+        [{"control_id": "AAPL", "mappings": [_verified_mapping(status="resolved")]}],
     )
     resolved = {r.control.ticker: r for r in resolve_controls(load_control_evidence(path))}
     assert resolved["AAPL"].status is MappingStatus.RESOLVED
-    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
-    assert "AAPL" not in outstanding
+    assert resolved["AAPL"].counts_in_numerator is True
+    assert resolved["AAPL"].is_manually_verified is False
+
+    unresolved, awaiting = _measure(path)
+    assert "AAPL" not in unresolved
+    assert "AAPL" in awaiting
 
 
-def test_a_manual_verified_control_is_no_longer_outstanding(tmp_path: Path) -> None:
+def test_manual_verified_clears_both_measurements(tmp_path: Path) -> None:
     path = _write(tmp_path, [{"control_id": "AAPL", "mappings": [_verified_mapping()]}])
     resolved = {r.control.ticker: r for r in resolve_controls(load_control_evidence(path))}
     assert resolved["AAPL"].status is MappingStatus.MANUAL_VERIFIED
-    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
-    assert "AAPL" not in outstanding
+    assert resolved["AAPL"].is_manually_verified is True
+
+    unresolved, awaiting = _measure(path)
+    assert "AAPL" not in unresolved
+    assert "AAPL" not in awaiting
 
 
-def test_a_half_mapped_identity_break_stays_outstanding(tmp_path: Path) -> None:
+def test_a_half_mapped_identity_break_fails_both_measurements(tmp_path: Path) -> None:
     """One verified issuer and one unverified one is not a verified control.
 
     This is the case the whole evidence layer exists for: the unverified half is
@@ -476,33 +502,68 @@ def test_a_half_mapped_identity_break_stays_outstanding(tmp_path: Path) -> None:
             }
         ],
     )
-    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
-    assert "GM" in outstanding
+    unresolved, awaiting = _measure(path)
+    assert "GM" in unresolved
+    assert "GM" in awaiting
 
 
-def test_an_all_verified_universe_empties_the_gate(tmp_path: Path) -> None:
-    """The state the old gate could never reach, and the one that ends 0b."""
+def _universe_at(status: str) -> list[dict[str, Any]]:
+    return [
+        {"control_id": c.ticker, "mappings": [_verified_mapping(ticker=c.ticker, status=status)]}
+        for c in CONTROL_UNIVERSE
+    ]
+
+
+def test_an_all_resolved_universe_knows_every_identity_and_does_not_finish_0b(
+    tmp_path: Path,
+) -> None:
+    """The state that would be mistaken for completion by a single count."""
+    path = _write(tmp_path, _universe_at("resolved"))
+    evidence = load_control_evidence(path)
+
+    assert unresolved_controls(evidence) == ()
+    awaiting = controls_awaiting_manual_verification(evidence)
+    assert len(awaiting) == len(CONTROL_UNIVERSE)
+
+
+def test_an_all_manual_verified_universe_completes_milestone_0b(tmp_path: Path) -> None:
+    """The only state that ends 0b: 30/30 MANUAL_VERIFIED."""
+    path = _write(tmp_path, _universe_at("manual_verified"))
+    evidence = load_control_evidence(path)
+
+    assert unresolved_controls(evidence) == ()
+    assert controls_awaiting_manual_verification(evidence) == ()
+    assert all(r.is_manually_verified for r in resolve_controls(evidence))
+
+
+def test_the_milestone_gate_is_never_easier_than_the_identity_measurement(
+    tmp_path: Path,
+) -> None:
+    """A structural property, over a deliberately mixed file.
+
+    Every unresolved identity is also awaiting manual verification, so the 0b
+    count can never come in below the unresolved count. If that inverts, the two
+    predicates have drifted apart.
+    """
     path = _write(
         tmp_path,
         [
-            {
-                "control_id": c.ticker,
-                "mappings": [_verified_mapping(ticker=c.ticker)],
-            }
-            for c in CONTROL_UNIVERSE
+            {"control_id": "AAPL", "mappings": [_verified_mapping(status="resolved")]},
+            {"control_id": "MSFT", "mappings": [_verified_mapping(ticker="MSFT")]},
+            {"control_id": "IPET", "mappings": [_unresolved_mapping()]},
         ],
     )
-    evidence = load_control_evidence(path)
-    assert outstanding_controls(evidence) == ()
-    assert all(r.counts_in_numerator for r in resolve_controls(evidence))
+    unresolved, awaiting = _measure(path)
+    assert unresolved <= awaiting
+    assert len(awaiting) >= len(unresolved)
 
 
-def test_malformed_evidence_cannot_satisfy_the_gate(tmp_path: Path) -> None:
-    """A file that does not load can never report zero outstanding.
+def test_malformed_evidence_cannot_satisfy_either_measurement(tmp_path: Path) -> None:
+    """A file that does not load can never report zero of anything.
 
-    The failure mode worth refusing is a gate that treats an unreadable or
+    The failure mode worth refusing is a measurement that treats an unreadable or
     invalid evidence file as "nothing outstanding" -- silence read as success.
-    Loading raises, so the gate is never reached with a hollow answer.
+    Loading raises, so neither measurement is reached with a hollow answer.
     """
     path = _write(
         tmp_path,
@@ -516,38 +577,65 @@ def test_malformed_evidence_cannot_satisfy_the_gate(tmp_path: Path) -> None:
         ],
     )
     with pytest.raises(ConfigError):
-        outstanding_controls(load_control_evidence(path))
+        unresolved_controls(load_control_evidence(path))
+    with pytest.raises(ConfigError):
+        controls_awaiting_manual_verification(load_control_evidence(path))
 
 
-def test_an_evidence_file_that_is_not_json_cannot_satisfy_the_gate(tmp_path: Path) -> None:
+def test_an_evidence_file_that_is_not_json_cannot_satisfy_either_measurement(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "evidence.json"
     path.write_text("{ not json", encoding="utf-8")
     with pytest.raises(ConfigError):
-        outstanding_controls(load_control_evidence(path))
+        unresolved_controls(load_control_evidence(path))
+    with pytest.raises(ConfigError):
+        controls_awaiting_manual_verification(load_control_evidence(path))
 
 
-def test_the_shipped_file_reports_its_measured_outstanding_count() -> None:
-    """The real number, asserted as a relationship rather than a constant.
+def test_the_shipped_measurements_agree_with_the_resolution() -> None:
+    """Relationships rather than constants, so this needs no edit per control.
 
-    A hard-coded 23 would have to be edited every time a control is verified,
-    which trains people to edit it without reading it -- the same reasoning that
-    made the shipped-roster check a superset assertion. What must hold is that
-    the gate and the resolution agree, and that it is not yet zero.
+    The counts themselves move every time a control is verified; what must hold
+    whatever they are is that each measurement equals its own predicate over the
+    resolution, and that neither has reached zero.
     """
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     resolved = resolve_controls(evidence)
-    outstanding = outstanding_controls(evidence)
+    unresolved = unresolved_controls(evidence)
+    awaiting = controls_awaiting_manual_verification(evidence)
 
     assert len(resolved) == len(CONTROL_UNIVERSE)
-    assert len(outstanding) == sum(1 for r in resolved if not r.counts_in_numerator)
-    assert len(outstanding) == len(CONTROL_UNIVERSE) - len(evidence.controls)
-    assert outstanding, "Milestone 0b is not complete; a zero here needs a roadmap update"
+    assert len(unresolved) == sum(1 for r in resolved if not r.counts_in_numerator)
+    assert len(awaiting) == sum(1 for r in resolved if not r.is_manually_verified)
+    assert {c.control.ticker for c in unresolved} <= {c.control.ticker for c in awaiting}
+    assert unresolved, "every identity is resolved; the roadmap needs updating"
+    assert awaiting, "Milestone 0b is complete; the roadmap needs updating"
 
-    cleared = {r.control.ticker for r in resolved if r.counts_in_numerator}
-    assert cleared == set(evidence.controls), (
+    identified = {r.control.ticker for r in resolved if r.counts_in_numerator}
+    assert identified == set(evidence.controls), (
         "every shipped record currently resolves; if that stops being true this "
         "assertion is the place to record which record does not"
     )
+
+
+def test_the_shipped_state_measures_23_unresolved_and_25_awaiting_verification() -> None:
+    """The current shipped snapshot, deliberately hard-coded.
+
+    Every other test here is written as a relationship so it survives the next
+    control being verified. This one is the exception on purpose: it is what the
+    roadmap's status line quotes, so the two are pinned together and verifying a
+    control fails this test until the roadmap is updated with it.
+    """
+    evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
+    resolved = resolve_controls(evidence)
+
+    assert len(resolved) == 30
+    assert len(unresolved_controls(evidence)) == 23
+    assert len(controls_awaiting_manual_verification(evidence)) == 25
+    assert sum(1 for r in resolved if r.counts_in_numerator) == 7
+    assert sum(1 for r in resolved if r.is_manually_verified) == 5
+    assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 2
 
 
 # ---------------------------------------------------------------------------
