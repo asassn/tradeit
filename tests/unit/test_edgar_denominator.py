@@ -25,7 +25,8 @@ import pytest
 
 from tradeit import cli_edgar
 from tradeit.cli_edgar import _raw_extract, cmd_audit_exceptions, cmd_audit_paths
-from tradeit.edgar.controls import CONTROL_UNIVERSE, unverified
+from tradeit.edgar.control_evidence import outstanding_controls
+from tradeit.edgar.controls import CONTROL_UNIVERSE
 from tradeit.edgar.denominator import (
     RESEARCH_GRADE_THRESHOLD,
     Classification,
@@ -934,7 +935,16 @@ def test_no_control_carries_a_fabricated_cik() -> None:
 
 
 def test_milestone_0b_reports_itself_incomplete() -> None:
-    assert len(unverified()) == 30
+    """Incomplete, and measured rather than assumed.
+
+    This used to read `len(unverified()) == 30`, which passed because the check
+    could not return anything else: it read the fixture's placeholder mapping and
+    never opened the evidence file. The gate now reads the evidence, so the
+    number moves as controls are verified -- and the assertion is that work
+    remains, not that none has been done.
+    """
+    outstanding = outstanding_controls()
+    assert 0 < len(outstanding) < len(CONTROL_UNIVERSE)
 
 
 def test_the_fixture_covers_the_failure_modes_it_claims_to() -> None:

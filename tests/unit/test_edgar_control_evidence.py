@@ -29,6 +29,7 @@ from tradeit.edgar.control_evidence import (
     FactDateSource,
     IssuerMapping,
     load_control_evidence,
+    outstanding_controls,
     resolve_controls,
 )
 from tradeit.edgar.controls import CONTROL_UNIVERSE
@@ -393,6 +394,160 @@ def test_a_historical_failure_may_stay_unresolved_honestly(tmp_path: Path) -> No
     assert ipet.status is MappingStatus.UNRESOLVED
     assert "full-text search does not reach 2000" in ipet.unresolved_reason
     assert ipet.mappings[0].counts_in_numerator is False
+
+
+# ---------------------------------------------------------------------------
+# the Milestone 0b completion gate
+#
+# It used to be `controls.unverified()`, which read `ControlSecurity.mapping` --
+# a placeholder pinned at UNRESOLVED so no CIK is ever written into source. It
+# therefore reported thirty outstanding no matter what had been verified, and
+# would have gone on reporting thirty after the last control was confirmed. The
+# gate now reads the evidence file through `resolve_controls`, and these tests
+# pin the distinctions that made the old one useless.
+# ---------------------------------------------------------------------------
+
+
+def test_a_control_with_no_evidence_stays_outstanding(tmp_path: Path) -> None:
+    path = _write(tmp_path, [{"control_id": "AAPL", "mappings": [_verified_mapping()]}])
+    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
+    assert "MSFT" in outstanding
+    assert len(outstanding) == len(CONTROL_UNIVERSE) - 1
+
+
+def test_a_record_that_resolves_nothing_stays_outstanding(tmp_path: Path) -> None:
+    """The existence of a record is not evidence. Only its content is.
+
+    An UNRESOLVED mapping must say why it is unresolved, and saying so does not
+    discharge the milestone -- otherwise the gate could be cleared by writing
+    thirty honest admissions of ignorance.
+    """
+    path = _write(
+        tmp_path,
+        [{"control_id": "IPET", "mappings": [_unresolved_mapping()]}],
+    )
+    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
+    assert "IPET" in outstanding
+    assert len(outstanding) == len(CONTROL_UNIVERSE)
+
+
+def test_a_resolved_control_is_no_longer_outstanding(tmp_path: Path) -> None:
+    """RESOLVED clears the gate. AAPL is RESOLVED on purpose, from the SEC
+    ticker file, with MANUAL_VERIFIED reserved for a human-checked citation."""
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": "AAPL",
+                "mappings": [_verified_mapping(status="resolved")],
+            }
+        ],
+    )
+    resolved = {r.control.ticker: r for r in resolve_controls(load_control_evidence(path))}
+    assert resolved["AAPL"].status is MappingStatus.RESOLVED
+    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
+    assert "AAPL" not in outstanding
+
+
+def test_a_manual_verified_control_is_no_longer_outstanding(tmp_path: Path) -> None:
+    path = _write(tmp_path, [{"control_id": "AAPL", "mappings": [_verified_mapping()]}])
+    resolved = {r.control.ticker: r for r in resolve_controls(load_control_evidence(path))}
+    assert resolved["AAPL"].status is MappingStatus.MANUAL_VERIFIED
+    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
+    assert "AAPL" not in outstanding
+
+
+def test_a_half_mapped_identity_break_stays_outstanding(tmp_path: Path) -> None:
+    """One verified issuer and one unverified one is not a verified control.
+
+    This is the case the whole evidence layer exists for: the unverified half is
+    the segment that would splice a price series.
+    """
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": "GM",
+                "identity_break": True,
+                "mappings": [
+                    _verified_mapping(issuer_label="new_gm", cik=1467858, ticker="GM"),
+                    _unresolved_mapping(issuer_label="old_gm"),
+                ],
+            }
+        ],
+    )
+    outstanding = {c.control.ticker for c in outstanding_controls(load_control_evidence(path))}
+    assert "GM" in outstanding
+
+
+def test_an_all_verified_universe_empties_the_gate(tmp_path: Path) -> None:
+    """The state the old gate could never reach, and the one that ends 0b."""
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": c.ticker,
+                "mappings": [_verified_mapping(ticker=c.ticker)],
+            }
+            for c in CONTROL_UNIVERSE
+        ],
+    )
+    evidence = load_control_evidence(path)
+    assert outstanding_controls(evidence) == ()
+    assert all(r.counts_in_numerator for r in resolve_controls(evidence))
+
+
+def test_malformed_evidence_cannot_satisfy_the_gate(tmp_path: Path) -> None:
+    """A file that does not load can never report zero outstanding.
+
+    The failure mode worth refusing is a gate that treats an unreadable or
+    invalid evidence file as "nothing outstanding" -- silence read as success.
+    Loading raises, so the gate is never reached with a hollow answer.
+    """
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": c.ticker,
+                # A CIK with a status that cannot carry one, and no reason given.
+                "mappings": [_verified_mapping(ticker=c.ticker, status="unresolved")],
+            }
+            for c in CONTROL_UNIVERSE
+        ],
+    )
+    with pytest.raises(ConfigError):
+        outstanding_controls(load_control_evidence(path))
+
+
+def test_an_evidence_file_that_is_not_json_cannot_satisfy_the_gate(tmp_path: Path) -> None:
+    path = tmp_path / "evidence.json"
+    path.write_text("{ not json", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        outstanding_controls(load_control_evidence(path))
+
+
+def test_the_shipped_file_reports_its_measured_outstanding_count() -> None:
+    """The real number, asserted as a relationship rather than a constant.
+
+    A hard-coded 23 would have to be edited every time a control is verified,
+    which trains people to edit it without reading it -- the same reasoning that
+    made the shipped-roster check a superset assertion. What must hold is that
+    the gate and the resolution agree, and that it is not yet zero.
+    """
+    evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
+    resolved = resolve_controls(evidence)
+    outstanding = outstanding_controls(evidence)
+
+    assert len(resolved) == len(CONTROL_UNIVERSE)
+    assert len(outstanding) == sum(1 for r in resolved if not r.counts_in_numerator)
+    assert len(outstanding) == len(CONTROL_UNIVERSE) - len(evidence.controls)
+    assert outstanding, "Milestone 0b is not complete; a zero here needs a roadmap update"
+
+    cleared = {r.control.ticker for r in resolved if r.counts_in_numerator}
+    assert cleared == set(evidence.controls), (
+        "every shipped record currently resolves; if that stops being true this "
+        "assertion is the place to record which record does not"
+    )
 
 
 # ---------------------------------------------------------------------------

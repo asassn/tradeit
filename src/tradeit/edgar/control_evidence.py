@@ -49,6 +49,7 @@ __all__ = [
     "LifecycleFact",
     "ResolvedControl",
     "load_control_evidence",
+    "outstanding_controls",
     "resolve_controls",
 ]
 
@@ -254,6 +255,18 @@ class ResolvedControl:
             MappingStatus.MANUAL_VERIFIED,
         ]
         return min(self.mappings, key=lambda m: order.index(m.status)).status
+
+    @property
+    def counts_in_numerator(self) -> bool:
+        """Whether every issuer this control names has acceptable evidence.
+
+        The same predicate :class:`IssuerMapping` uses, applied across the whole
+        control rather than restated for it. ``all`` is the rule :attr:`status`
+        expresses by taking the weakest issuer: a half-mapped identity break is
+        not a verified control, because the half without evidence is exactly the
+        segment that would splice a series.
+        """
+        return bool(self.mappings) and all(m.counts_in_numerator for m in self.mappings)
 
     @property
     def unresolved_reason(self) -> str:
@@ -538,3 +551,33 @@ def resolve_controls(evidence: ControlEvidenceFile | None = None) -> list[Resolv
             )
         )
     return out
+
+
+def outstanding_controls(
+    evidence: ControlEvidenceFile | None = None,
+) -> tuple[ResolvedControl, ...]:
+    """Milestone 0b's remaining work, measured where the evidence actually lives.
+
+    **This replaced a gate that could not move.** ``controls.unverified()`` read
+    ``ControlSecurity.mapping``, a placeholder that is ``UNRESOLVED`` for all
+    thirty by construction -- the fixture deliberately carries no CIK, so that a
+    remembered one cannot be written into source. Identity is recorded in the
+    evidence file instead, which that check never opened. It therefore reported
+    thirty outstanding whatever the evidence said, and would still have reported
+    thirty on the day the last control was verified: a completion gate that
+    cannot observe completion.
+
+    Reading through :func:`resolve_controls` is the whole fix. There is one join
+    of fixture to evidence, one validation pass, and one definition of acceptable
+    evidence -- :attr:`IssuerMapping.counts_in_numerator` -- rather than a second
+    opinion that agrees with the first only by coincidence.
+
+    A control is outstanding while its effective status is ``UNRESOLVED`` or
+    ``AMBIGUOUS``. Both ``RESOLVED`` and ``MANUAL_VERIFIED`` clear it, because
+    they are different strengths of a defensible mapping rather than a draft and
+    a final: ``AAPL`` is ``RESOLVED`` from the SEC ticker file on purpose, with
+    ``MANUAL_VERIFIED`` reserved for a human-checked filing citation. What does
+    **not** clear it is the mere existence of a record: an ``UNRESOLVED`` mapping
+    must state why it is unresolved, and it stays counted here.
+    """
+    return tuple(c for c in resolve_controls(evidence) if not c.counts_in_numerator)

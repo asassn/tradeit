@@ -7,8 +7,12 @@ fabrication -- the specific failure the whole identity design exists to prevent
 -- so every entry sits at ``MappingStatus.UNRESOLVED`` with the exact evidence
 needed to lift it recorded beside it.
 
-Milestone 0b is complete when :func:`unverified` returns an empty tuple. It does
-not, today.
+Milestone 0b is complete when
+:func:`tradeit.edgar.control_evidence.outstanding_controls` returns an empty
+tuple. It does not, today. That check deliberately lives in the evidence layer
+rather than here: what a control's identity *is* comes from
+``docs/research/control_identity_evidence.json``, and a gate that reads only the
+placeholder below would report every control outstanding forever.
 
 Tickers, names and years below are **UNVERIFIED recollection** used to *seek*
 primary evidence, never to stand in for it. A control that cannot be confirmed
@@ -21,7 +25,7 @@ from dataclasses import dataclass, field
 
 from tradeit.edgar.identity import MappingStatus, SecurityMapping
 
-__all__ = ["CONTROL_UNIVERSE", "ControlSecurity", "unverified", "verification_table"]
+__all__ = ["CONTROL_UNIVERSE", "ControlSecurity"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,24 +347,18 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
 )
 
 
-def unverified() -> tuple[ControlSecurity, ...]:
-    """Controls not yet at ``MANUAL_VERIFIED``. Milestone 0b's remaining work."""
-    return tuple(
-        c for c in CONTROL_UNIVERSE if c.mapping.status is not MappingStatus.MANUAL_VERIFIED
-    )
-
-
-def verification_table() -> list[dict[str, object]]:
-    return [
-        {
-            "ticker": c.ticker,
-            "name": c.name,
-            "control_class": c.control_class,
-            "expected_event": c.expected_event,
-            "expected_year": c.expected_year,
-            "cik": c.mapping.cik,
-            "mapping_status": str(c.mapping.status),
-            "verification_route": c.verification_route,
-        }
-        for c in CONTROL_UNIVERSE
-    ]
+# Milestone 0b's remaining work is reported by
+# `tradeit.edgar.control_evidence.outstanding_controls`, not from here.
+#
+# Two functions used to live at the bottom of this file -- `unverified()` and
+# `verification_table()` -- and both read `ControlSecurity.mapping` as though it
+# were the control's state. It never is. That field is a placeholder pinned at
+# UNRESOLVED so a remembered CIK cannot be written into source, and the identity
+# actually established for a control is recorded in
+# docs/research/control_identity_evidence.json.
+#
+# So `unverified()` returned all thirty regardless of what had been verified, and
+# would have gone on returning thirty after the last control was confirmed. The
+# fix is not a cleverer read of this file: it is that the completion gate belongs
+# to the layer that joins this fixture to that evidence, so there is one answer
+# to "is this control verified" rather than two that agree by coincidence.

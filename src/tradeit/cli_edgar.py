@@ -793,10 +793,19 @@ def cmd_controls(args: argparse.Namespace) -> int:
     for r in resolved:
         counts[str(r.status)] = counts.get(str(r.status), 0) + 1
     verified = counts.get(str(MappingStatus.MANUAL_VERIFIED), 0)
+    # The Milestone 0b gate itself, read off the same resolution this command
+    # prints rather than computed a second way. `outstanding_controls` applies
+    # exactly this filter; reusing the list already in hand avoids re-reading and
+    # re-validating the evidence file to answer a question just answered.
+    outstanding = [r for r in resolved if not r.counts_in_numerator]
     source = evidence.source_path
     print(f"evidence file : {source}{'' if source and source.exists() else '  (absent)'}")
     print(f"controls      : {len(resolved)}   manual-verified: {verified}")
     print(f"by status     : {dict(sorted(counts.items()))}")
+    print(
+        f"milestone 0b  : {len(outstanding)} of {len(resolved)} outstanding, "
+        f"complete at 0   ({', '.join(r.control.ticker for r in outstanding) or 'none'})"
+    )
     print()
 
     if not args.diagnose:
