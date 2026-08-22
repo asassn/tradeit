@@ -24,10 +24,18 @@ import argparse
 import datetime as dt
 import json
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from tradeit.edgar.acquire import (
+    DEFAULT_FORMS,
+    DEFAULT_MIN_INTERVAL_S,
+    USER_AGENT_ENV,
+    Outcome,
+    acquire_control_evidence,
+)
 from tradeit.edgar.control_evidence import load_control_evidence, resolve_controls
 from tradeit.edgar.controls import CONTROL_UNIVERSE
 from tradeit.edgar.evidence import classify_form
@@ -43,7 +51,7 @@ from tradeit.edgar.index import (
 )
 from tradeit.edgar.lifecycle import ExitResolution, build_timelines, resolve_exit
 from tradeit.edgar.pipeline import BuildOptions, build_denominator, evidence_from_rows
-from tradeit.errors import DataError
+from tradeit.errors import ConfigError, DataError
 
 __all__ = ["add_edgar_commands"]
 
@@ -812,8 +820,7 @@ def cmd_controls(args: argparse.Namespace) -> int:
         f"(RESOLVED or MANUAL_VERIFIED); {len(unresolved)} unresolved"
     )
     print(
-        f"milestone 0b  : {verified} of {total} MANUAL_VERIFIED; "
-        f"{len(awaiting)} still require it"
+        f"milestone 0b  : {verified} of {total} MANUAL_VERIFIED; {len(awaiting)} still require it"
     )
     print(
         "                complete only at "
@@ -1005,6 +1012,95 @@ def _index_rows(path: Path) -> list[FullIndexRow]:
     ).rows
 
 
+def cmd_acquire_control(args: argparse.Namespace) -> int:
+    """Acquire and extract identity evidence for one control. Promotes nothing.
+
+    The repetitive half of a Milestone 0b investigation in one command. What it
+    prints is material for a human to read and then, separately, to record. It
+    cannot reach the evidence file: :mod:`tradeit.edgar.acquire` does not import
+    the module that writes it.
+    """
+    root = Path(args.edgar_root)
+    index_root = Path(args.index_root) if args.index_root else root / "full-index"
+    filings_root = Path(args.filings_root) if args.filings_root else root / "filings"
+
+    try:
+        report = acquire_control_evidence(
+            args.control,
+            index_root=index_root,
+            filings_root=filings_root,
+            cik=args.cik,
+            accession=args.accession,
+            forms=tuple(args.forms) if args.forms else DEFAULT_FORMS,
+            offline=args.offline,
+            user_agent=args.user_agent,
+            min_interval_s=args.min_interval,
+        )
+    except ConfigError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
+
+    print(f"control        : {report.control_id}  ({report.control_class})")
+    print(f"expected name  : {report.expected_company}")
+    print(f"route          : {report.verification_route}")
+    print(f"outcome        : {report.outcome}")
+    print()
+
+    if report.candidates:
+        print(f"CIK candidates ({len(report.candidates)}):")
+        for candidate in report.candidates:
+            names = "; ".join(candidate.names[:3])
+            print(
+                f"  CIK {candidate.cik:<10} {candidate.filings:>6} filings  "
+                f"{candidate.first_filed} .. {candidate.last_filed}  {names}"
+            )
+        print()
+
+    if report.cik is not None:
+        print(f"cik            : {report.cik}")
+    if report.accession:
+        print(f"accession      : {report.accession}")
+        print(f"form           : {report.form}")
+        print(f"filed          : {report.filed_at}")
+        print(f"conformed name : {report.conformed_company_name}")
+        print(
+            f"source file    : {report.source_path}{'  (downloaded)' if report.downloaded else ''}"
+        )
+    if report.primary_document:
+        print(f"primary doc    : {report.primary_document}  <TYPE> {report.primary_document_type}")
+    print()
+
+    evidence = report.evidence
+    if evidence is not None:
+        print(f"evidence       : {evidence.status}")
+        if evidence.section_12b_heading:
+            print(f"  heading      : {evidence.section_12b_heading}")
+        if evidence.section_12b_headers:
+            print(f"  columns      : {' | '.join(evidence.section_12b_headers)}")
+        for row in evidence.section_12b_rows:
+            print(f"  row          : {' | '.join(row.cells)}")
+        for statement in evidence.symbol_statements:
+            print(f"  statement    : {statement.text}")
+        for note in evidence.notes:
+            print(f"  note         : {note}")
+        print()
+
+    for problem in report.problems:
+        print(f"PROBLEM        : {problem}")
+    if report.problems:
+        print()
+
+    if args.json:
+        target = Path(args.json)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(report.summary(), indent=2, sort_keys=True), encoding="utf-8")
+        print(f"wrote {target}")
+        print()
+
+    print(report.status_unchanged_statement)
+    return 0 if report.outcome in (Outcome.EXTRACTED, Outcome.REVIEW_NEEDED) else 1
+
+
 def cmd_verify_control(args: argparse.Namespace) -> int:
     """Gather CIK candidates for one control from local primary sources.
 
@@ -1189,3 +1285,59 @@ def add_edgar_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     verify.add_argument("control", help="control id, e.g. AAPL")
     verify.add_argument("--index-root", required=True, help="directory of <year>/QTR<n>/form.idx")
     verify.set_defaults(func=cmd_verify_control)
+
+    acquire = edgar_sub.add_parser(
+        "acquire-control",
+        help="fetch and extract identity evidence for one control (changes no status)",
+        description=(
+            "Acquires and extracts only. It never writes the evidence file, never "
+            "assigns RESOLVED or MANUAL_VERIFIED, and never moves a Milestone 0b "
+            "count. Promotion still requires a human to read the filing."
+        ),
+    )
+    acquire.add_argument("control", help="control id, e.g. CSCO")
+    acquire.add_argument(
+        "--edgar-root",
+        required=True,
+        help="EDGAR archive root holding full-index/ and filings/",
+    )
+    acquire.add_argument("--index-root", default=None, help="override <edgar-root>/full-index")
+    acquire.add_argument("--filings-root", default=None, help="override <edgar-root>/filings")
+    acquire.add_argument(
+        "--cik",
+        type=int,
+        default=None,
+        help="skip candidate discovery with a CIK a human has already established",
+    )
+    acquire.add_argument(
+        "--accession", default="", help="a specific accession instead of the latest"
+    )
+    acquire.add_argument(
+        "--form",
+        action="append",
+        dest="forms",
+        default=None,
+        help=f"exact form to look for, repeatable (default {list(DEFAULT_FORMS)})",
+    )
+    acquire.add_argument(
+        "--offline",
+        action="store_true",
+        help="analyse only what is already downloaded; never touch the network",
+    )
+    acquire.add_argument(
+        "--user-agent",
+        default=None,
+        help=f"SEC identification; defaults to ${USER_AGENT_ENV}",
+    )
+    acquire.add_argument(
+        "--min-interval",
+        type=float,
+        default=DEFAULT_MIN_INTERVAL_S,
+        help=f"seconds between SEC requests (default {DEFAULT_MIN_INTERVAL_S})",
+    )
+    acquire.add_argument(
+        "--json",
+        default=None,
+        help="also write the report here, e.g. out/csco-acquire.json",
+    )
+    acquire.set_defaults(func=cmd_acquire_control)
