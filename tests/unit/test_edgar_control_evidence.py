@@ -660,6 +660,172 @@ def test_the_shipped_evidence_file_is_valid() -> None:
     assert set(loaded.controls) <= {c.ticker for c in CONTROL_UNIVERSE}
 
 
+# ---------------------------------------------------------------------------
+# citation integrity: text must say what its source says
+#
+# A citation is presented as a verbatim quotation of a primary source, so a
+# character that is in the record but not in the filing is a defect even when
+# every field validates. The class caught here is double-escaping: text escaped
+# once by a builder and once again by the serializer, which round-trips as valid
+# JSON and reaches the operator's screen as ``(\"OTC\")``.
+# ---------------------------------------------------------------------------
+
+
+def test_ordinary_quotation_marks_in_a_citation_are_valid(tmp_path: Path) -> None:
+    """The common case, and the one the safeguard must never break.
+
+    Nearly every shipped citation quotes a filing, and 246 quotation marks are
+    already in the corpus. If quoting cost anything, citations would stop being
+    verbatim.
+    """
+    quoted = 'SEC Form 10-K, accession 0000320193-25-000001: "Common Stock, $0.00001 par value"'
+    path = _write(
+        tmp_path,
+        [{"control_id": "AAPL", "mappings": [_verified_mapping(citation=quoted)]}],
+    )
+    mapping = load_control_evidence(path).controls["AAPL"].mappings[0]
+    assert mapping.citation == quoted
+    assert "\\" not in mapping.citation
+
+
+def test_the_etys_style_escaped_quote_is_refused(tmp_path: Path) -> None:
+    """The exact defect: a backslash that survived into the runtime string.
+
+    ``json.loads`` consumes JSON escaping, so ``\\"`` on disk *is* a plain quote
+    in memory. A backslash still standing in front of a quote at runtime means
+    the text was escaped twice, and the reader is looking at the serializer
+    rather than at the filing.
+    """
+    over_escaped = 'approved for quotation on the Nasdaq National Market under \\"ETYS\\"'
+    assert "\\" in over_escaped  # the artifact is in the loaded string, not the JSON syntax
+    path = _write(
+        tmp_path,
+        [{"control_id": "AAPL", "mappings": [_verified_mapping(citation=over_escaped)]}],
+    )
+    with pytest.raises(ConfigError, match="serialization artifact"):
+        load_control_evidence(path)
+
+
+def test_literal_newline_and_tab_escapes_are_refused(tmp_path: Path) -> None:
+    """The same defect wearing a different escape.
+
+    ``\\n`` written as two characters where a paragraph break was meant is the
+    same over-escaping mistake, and reads as backslash-en in the diagnostic.
+    """
+    for artifact in ("first line\\nsecond line", "column\\tcolumn"):
+        path = _write(
+            tmp_path,
+            [{"control_id": "AAPL", "mappings": [_verified_mapping(scope_notes=artifact)]}],
+        )
+        with pytest.raises(ConfigError, match="serialization artifact"):
+            load_control_evidence(path)
+
+
+def test_real_newlines_apostrophes_and_accessions_remain_valid(tmp_path: Path) -> None:
+    """Ordinary prose is untouched.
+
+    Real paragraph breaks, possessive apostrophes, hyphenated accession numbers,
+    the registered-mark sign and the em dash all appear in the shipped corpus and
+    none of them is an escape artifact.
+    """
+    prose = (
+        "SEC Form 424B4, accession 0001047469-99-021620, filed 1999-05-20.\n\n"
+        "The registrant's own offering document -- SPDR®, — and $1.00 included."
+    )
+    path = _write(
+        tmp_path,
+        [{"control_id": "AAPL", "mappings": [_verified_mapping(scope_notes=prose)]}],
+    )
+    mapping = load_control_evidence(path).controls["AAPL"].mappings[0]
+    assert mapping.scope_notes == prose
+
+
+def test_the_check_reaches_lifecycle_facts_and_top_level_notes(tmp_path: Path) -> None:
+    """Every string in the file, not the prose fields someone remembered to list.
+
+    The shipped defect this safeguard was written for sat in *two* places -- a
+    mapping citation and a lifecycle fact's citation -- so a check wired only to
+    mapping citations would have caught half of it.
+    """
+    fact = {
+        "scope": str(LifecycleScope.EXCHANGE_LISTING),
+        "fact": "removed from listing",
+        "date": "2001-04-23",
+        "date_source": "body_text",
+        "citation": 'the Over-the-Counter (\\"OTC\\") market',
+    }
+    path = _write(
+        tmp_path,
+        [{"control_id": "AAPL", "mappings": [_verified_mapping(lifecycle_facts=[fact])]}],
+    )
+    with pytest.raises(ConfigError, match="serialization artifact"):
+        load_control_evidence(path)
+
+    path = _write(
+        tmp_path,
+        [{"control_id": "AAPL", "mappings": [_verified_mapping()]}],
+        notes='roster note with a stray \\"quote\\"',
+    )
+    with pytest.raises(ConfigError, match="serialization artifact"):
+        load_control_evidence(path)
+
+
+def test_the_escape_check_does_not_weaken_any_other_rule(tmp_path: Path) -> None:
+    """Malformed evidence still fails closed under the existing semantics.
+
+    The new walk runs before any field is interpreted, so the risk worth testing
+    is that it somehow short-circuits the rules that follow it. A record that is
+    clean of escape artifacts and still invalid must still be refused.
+    """
+    path = _write(
+        tmp_path,
+        [{"control_id": "AAPL", "mappings": [_verified_mapping(citation="")]}],
+    )
+    with pytest.raises(ConfigError, match="citation"):
+        load_control_evidence(path)
+
+
+def test_no_shipped_string_carries_a_serialization_artifact() -> None:
+    """The corpus regression test, asserted over the file rather than the loader.
+
+    ``load_control_evidence`` now refuses such a file outright, so this would pass
+    vacuously if it only called the loader. It walks the parsed payload directly,
+    so it keeps reporting *where* an artifact is if one is ever reintroduced, and
+    it keeps holding if the loader check is ever relaxed.
+    """
+    payload = json.loads(DEFAULT_EVIDENCE_PATH.read_text(encoding="utf-8"))
+
+    def walk(node: Any, path: str) -> list[tuple[str, str]]:
+        if isinstance(node, str):
+            found = re.search(r'\\["\\/bfnrtu]', node)
+            return [(path, found.group(0))] if found else []
+        if isinstance(node, dict):
+            return [hit for k, v in node.items() for hit in walk(v, f"{path}.{k}")]
+        if isinstance(node, list):
+            return [hit for i, v in enumerate(node) for hit in walk(v, f"{path}[{i}]")]
+        return []
+
+    assert walk(payload, "evidence") == []
+
+
+def test_shipped_tglo_quotes_the_filing_without_escape_artifacts() -> None:
+    """The record the defect was actually found in, pinned.
+
+    The 10-Q writes ``the Over-the-Counter ("OTC") market``. Both the mapping
+    citation and the lifecycle fact's citation quote that sentence, and both once
+    carried it double-escaped.
+    """
+    mapping = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["TGLO"].mappings[0]
+    assert 'Over-the-Counter ("OTC") market' in mapping.citation
+    assert 'Over-the-Counter ("OTC") market' in mapping.lifecycle_facts[0].citation
+    assert "\\" not in mapping.citation
+    assert "\\" not in mapping.lifecycle_facts[0].citation
+    # The correction was presentation only: the identity it records is unchanged.
+    assert mapping.cik == 1066684
+    assert mapping.ticker == "TGLO"
+    assert mapping.status is MappingStatus.MANUAL_VERIFIED
+
+
 def test_every_shipped_cik_carries_a_citation() -> None:
     """A CIK without a citation is a CIK someone remembered.
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -107,6 +108,19 @@ _MAX_CIK = 9_999_999_999
 _INSUFFICIENT_ALONE = frozenset({MappingEvidence.NAME_MATCH, MappingEvidence.FULL_TEXT_SEARCH})
 
 _CONTROL_IDS = {c.ticker for c in CONTROL_UNIVERSE}
+
+#: The characters that follow a backslash in a JSON string escape. After
+#: ``json.loads`` every one of these has already been consumed: ``\"`` on disk
+#: *is* a plain quote in memory. So a backslash still sitting in front of one of
+#: them at runtime means the text was escaped twice -- once by whoever wrote it,
+#: once by the serializer -- and the reader is looking at a serialization
+#: artifact rather than at what the cited filing says.
+_JSON_ESCAPE_CHARS = '"\\/bfnrtu'
+
+#: Only a backslash *immediately before* one of the above is rejected. A lone
+#: backslash used deliberately is left alone, because the defect being caught is
+#: specifically over-escaping, not the character itself.
+_ESCAPE_ARTIFACT = re.compile(r"\\[" + re.escape(_JSON_ESCAPE_CHARS) + r"]")
 
 
 class FactDateSource(StrEnum):
@@ -304,6 +318,52 @@ class ResolvedControl:
 # ---------------------------------------------------------------------------
 # loading and validation
 # ---------------------------------------------------------------------------
+
+
+def _reject_escape_artifacts(value: Any, where: str) -> None:
+    """Reject text that reached memory still carrying its own JSON escapes.
+
+    **The defect this catches, exactly.** A citation quotes a filing, and filings
+    quote things: ``the Over-the-Counter ("OTC") market``. Written into a Python
+    builder the inner quotes need escaping *for Python*, and it is easy to escape
+    them once more "for the JSON" -- at which point ``json.dump`` escapes the
+    backslash too, and the file on disk holds ``\\\\"OTC\\\\"``. That is valid JSON
+    and it round-trips perfectly, so nothing downstream complains; it simply means
+    something different from what the filing says. The operator reading
+    ``controls --diagnose`` sees ``(\\"OTC\\")`` in a passage presented as a verbatim
+    quotation of a primary source, which is the one thing a citation may not be.
+
+    **Why it is checked here and not at the field level.** The rule is about how
+    text was *serialized*, so it applies to every string the file carries and to
+    every field added later, not to the prose fields someone remembers to list.
+    One walk over the parsed payload cannot be forgotten by a future field.
+
+    **Why the rule is narrow.** It fires only on a backslash standing immediately
+    before a JSON escape character -- the signature of double-escaping. Real
+    newlines, real tabs, quotation marks, apostrophes, accession numbers, ``®``
+    and em dashes are all ordinary text and are untouched; the shipped corpus
+    contains 246 quotation marks and 238 newlines and none of them is affected. A
+    backslash used deliberately in front of anything else is also allowed: the
+    defect is the double escape, not the character.
+    """
+    if isinstance(value, str):
+        found = _ESCAPE_ARTIFACT.search(value)
+        if found is not None:
+            start = max(0, found.start() - 40)
+            raise ConfigError(
+                f"{where}: text contains the literal escape sequence {found.group(0)!r}, "
+                f"which is a serialization artifact rather than the source's own wording "
+                f"-- near ...{value[start : found.end() + 40]}... "
+                f"JSON escaping is undone by the parser, so a backslash surviving in front "
+                f"of {found.group(0)[1]!r} means the text was escaped twice. Write the "
+                f"character the cited document actually uses."
+            )
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _reject_escape_artifacts(item, f"{where}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _reject_escape_artifacts(item, f"{where}[{index}]")
 
 
 def _as_date(value: Any, field_name: str, where: str) -> dt.date | None:
@@ -505,6 +565,9 @@ def load_control_evidence(path: Path | str | None = None) -> ControlEvidenceFile
         raise ConfigError(f"{resolved}: not valid JSON: {exc}") from exc
     if not isinstance(payload, dict):
         raise ConfigError(f"{resolved}: top level must be an object")
+
+    # Before any field is interpreted: the text must say what its source says.
+    _reject_escape_artifacts(payload, resolved.name)
 
     version = payload.get("schema_version")
     if version != SCHEMA_VERSION:
