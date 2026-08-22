@@ -477,6 +477,140 @@ def test_prose_after_the_table_is_not_reported_as_a_registered_security() -> Non
     assert "Item 5" not in flattened
 
 
+# The layout that defeated the first row-boundary rule, from a real 10-K cover
+# page. The 12(g) line and the check-box paragraphs sit in <p> elements after
+# </table>, so they are cell breaks rather than row breaks and the whole block
+# arrived as one SIX-cell segment -- wider than the table's three columns, and
+# therefore accepted as a second registered security. The earlier synthetic
+# fixture passed only because its post-table prose happened to be two cells.
+CISCO_SHAPED_COVER_PAGE = """
+<html><body>
+<p>Securities registered pursuant to Section 12(b) of the Act:</p>
+<table>
+  <tr><td>Title of each class</td><td>Trading Symbol</td>
+      <td>Name of each exchange on which registered</td></tr>
+  <tr><td>Common Stock, par value $0.001 per share</td><td>CSCO</td>
+      <td>The Nasdaq Stock Market LLC</td></tr>
+</table>
+<p>Securities registered pursuant to Section 12(g) of the Act: None</p>
+<p>_______________________________________</p>
+<p>Indicate by check mark if the registrant is a well-known seasoned issuer, as
+defined in Rule 405 of the Securities Act. Yes No</p>
+<p>Indicate by check mark if the registrant is not required to file reports
+pursuant to Section 13 or Section 15(d) of the Act. Yes No</p>
+<p>Indicate by check mark whether the registrant is a large accelerated filer, an
+accelerated filer, a non-accelerated filer, a smaller reporting company, or an
+emerging growth company. Yes No</p>
+<p>(a) Cisco common stock is traded on the Nasdaq Global Select Market under the
+symbol CSCO.</p>
+</body></html>
+"""
+
+
+def test_a_following_statutory_heading_ends_the_section_12b_rows() -> None:
+    """The defect the first real filing found, pinned.
+
+    Only the common-stock row is a registered security here. The 12(g) line and
+    everything under it is prose, and reporting it as a row would put a
+    fabricated registered security in front of the person deciding whether the
+    control is verified -- the worst possible place for one.
+    """
+    extract = extract_identity_evidence(CISCO_SHAPED_COVER_PAGE)
+
+    assert extract.status is ExtractionStatus.FOUND
+    assert len(extract.section_12b_rows) == 1
+
+    cells = extract.section_12b_rows[0].cells
+    assert cells == (
+        "Common Stock, par value $0.001 per share",
+        "CSCO",
+        "The Nasdaq Stock Market LLC",
+    )
+
+    flattened = " ".join(c for r in extract.section_12b_rows for c in r.cells)
+    assert "12(g)" not in flattened
+    assert "Indicate by check mark" not in flattened
+    assert "Yes No" not in flattened
+    assert "___" not in flattened
+
+
+def test_the_narrative_statement_survives_the_row_boundary_fix() -> None:
+    """The two constructions are independent, and tightening one must not cost
+    the other: the ticker sentence sits well past the terminated row region."""
+    extract = extract_identity_evidence(CISCO_SHAPED_COVER_PAGE)
+    statements = [s.text for s in extract.symbol_statements]
+    assert any("under the symbol CSCO" in s for s in statements)
+    assert any("Nasdaq Global Select Market" in s for s in statements)
+
+
+def test_the_cisco_shape_reports_no_internal_sentinels() -> None:
+    extract = extract_identity_evidence(CISCO_SHAPED_COVER_PAGE)
+    reported = " ".join(
+        [extract.section_12b_heading, *extract.section_12b_headers]
+        + [c for r in extract.section_12b_rows for c in r.cells]
+        + [s.text for s in extract.symbol_statements]
+        + list(extract.notes)
+    )
+    for sentinel in ("␟", "␞", "␝"):
+        assert sentinel not in reported
+
+
+def test_the_cisco_shape_still_changes_no_control_status(tmp_path: Path) -> None:
+    """The fix is to an extractor. It must not have loosened the safety rule."""
+    from tradeit.edgar.control_evidence import DEFAULT_EVIDENCE_PATH
+
+    before = DEFAULT_EVIDENCE_PATH.read_bytes()
+    _msft_index(tmp_path)
+    _write_filing(
+        tmp_path,
+        _submission(documents=[("10-K", "csco-20250726.htm", CISCO_SHAPED_COVER_PAGE)]),
+    )
+    report = _run(tmp_path, offline=True)
+
+    assert DEFAULT_EVIDENCE_PATH.read_bytes() == before
+    payload = report.summary()
+    assert payload["control_status_changed"] is False
+    assert "status" not in payload
+
+
+def test_a_table_end_stops_collection_even_without_a_statutory_heading() -> None:
+    """Boundary 2 alone, with the 12(g) heading removed.
+
+    Each boundary has to hold on its own: a filing that omits the 12(g) line, or
+    words it differently, still ends its table where the table ends.
+    """
+    html = CISCO_SHAPED_COVER_PAGE.replace(
+        "<p>Securities registered pursuant to Section 12(g) of the Act: None</p>", ""
+    )
+    extract = extract_identity_evidence(html)
+    assert len(extract.section_12b_rows) == 1
+    assert extract.section_12b_rows[0].cells[1] == "CSCO"
+
+
+def test_a_wide_block_of_prose_is_not_a_registered_security_row() -> None:
+    """Boundary 3 alone: no </table> and no statutory heading to help.
+
+    This is the shape that broke the width rule -- many cells, each a sentence.
+    """
+    html = """
+    <p>Securities registered pursuant to Section 12(b) of the Act:</p>
+    <p>Title of each class</p><p>Trading Symbol</p>
+    <p>Name of each exchange on which registered</p>
+    <p>Common Stock, par value $0.001 per share</p><p>CSCO</p>
+    <p>The Nasdaq Stock Market LLC</p>
+    <p>Indicate by check mark whether the registrant has submitted electronically
+    every Interactive Data File required to be submitted pursuant to Rule 405 of
+    Regulation S-T during the preceding 12 months.</p>
+    <p>Indicate by check mark whether the registrant is a shell company as defined
+    in Rule 12b-2 of the Exchange Act, which is a longer sentence than any cell.</p>
+    <p>Yes No</p>
+    """
+    extract = extract_identity_evidence(html)
+    flattened = " ".join(c for r in extract.section_12b_rows for c in r.cells)
+    assert "Indicate by check mark" not in flattened
+    assert "Interactive Data File" not in flattened
+
+
 def test_no_internal_boundary_marker_reaches_reported_text() -> None:
     """A quotation must be the filing's words, not this module's scaffolding."""
     extract = extract_identity_evidence(COVER_PAGE_HTML)

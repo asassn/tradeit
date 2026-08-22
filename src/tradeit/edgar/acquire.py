@@ -491,7 +491,11 @@ def pick_primary_document(
 # ---------------------------------------------------------------------------
 
 _CELL_END = re.compile(r"</\s*(td|th|p|div|tr|li|h[1-6])\s*>", re.IGNORECASE)
-_ROW_END = re.compile(r"</\s*(tr|table)\s*>", re.IGNORECASE)
+_ROW_END = re.compile(r"</\s*tr\s*>", re.IGNORECASE)
+#: Kept distinct from the row marker. Collapsing the two loses the only signal
+#: in the token stream that says *the table itself has ended*, and everything
+#: after that point is prose no matter how many cell breaks it happens to have.
+_TABLE_END_TAG = re.compile(r"</\s*table\s*>", re.IGNORECASE)
 _BREAK = re.compile(r"<\s*br\s*/?\s*>", re.IGNORECASE)
 _TAG = re.compile(r"<[^>]*>")
 #: Collapses runs of spaces, tabs and the non-breaking spaces EDGAR HTML is
@@ -510,14 +514,23 @@ _ENTITIES = {
     "&#160;": " ",
 }
 
-#: Cell and row markers survive tag stripping so a table's shape is still
+#: Cell, row and table markers survive tag stripping so a table's shape is still
 #: readable afterwards. Without them every cover-page cell runs into the next
 #: and "Common stock" / "MSFT" / "Nasdaq" becomes one unsplittable string.
 _CELL = "␟"
 _ROW = "␞"
+_TABLE = "␝"
 
+#: **Any** statutory registration heading, not only 12(b). A cover page states
+#: 12(b) and 12(g) one after the other, and the second one starting is the first
+#: one's region ending -- a structural fact about the document, not a phrase to
+#: be filtered out of the results.
+_SECTION_HEADING = re.compile(
+    r"Securities\s+registered\s+pursuant\s+to\s+Section\s+12\s*\(\s*[a-z]\s*\)",
+    re.IGNORECASE,
+)
 _SECTION_12B = re.compile(
-    r"Securities\s+registered\s+pursuant\s+to\s+Section\s+12\s*\(\s*b\s*\)[^\n␞]*",
+    r"Securities\s+registered\s+pursuant\s+to\s+Section\s+12\s*\(\s*b\s*\)[^\n␞␝]*",
     re.IGNORECASE,
 )
 _TITLE_HEADER = re.compile(r"Title\s+of\s+each\s+class", re.IGNORECASE)
@@ -527,15 +540,26 @@ _EXCHANGE_HEADER = re.compile(r"Name\s+of\s+each\s+exchange", re.IGNORECASE)
 #: A sentence that names a security and a symbol in one construction. The match
 #: is bounded so it cannot run across a paragraph and present two unrelated
 #: clauses as one statement.
+#:
+#: Every gap is ``\s+`` rather than a literal space. Filing HTML wraps its source
+#: lines wherever the generator felt like it, so ``under the\nsymbol CSCO`` is
+#: ordinary and a pattern requiring single spaces silently misses it -- silently,
+#: because the result is an absent statement rather than an error.
 _SYMBOL_SENTENCE = re.compile(
-    r"[^.␞␟]{0,200}?\b(?:common stock|common shares|class [A-Z] common stock)\b"
-    r"[^.␞␟]{0,200}?\bunder the symbol\b[^.␞␟]{0,80}",
+    r"[^.␞␟␝]{0,200}?\b(?:common\s+stock|common\s+shares|class\s+[A-Z]\s+common\s+stock)\b"
+    r"[^.␞␟␝]{0,200}?\bunder\s+the\s+symbol\b[^.␞␟␝]{0,80}",
     re.IGNORECASE,
 )
 
 #: How far past the Section 12(b) heading to look for its table. Bounded so a
 #: heading with no table beneath it cannot absorb an unrelated later one.
 _TABLE_WINDOW = 4000
+
+#: The longest a cover-page table cell plausibly is. Cells here hold a class
+#: title, a ticker and an exchange name; the longest real one in the fixtures is
+#: well under half this. A cell holding a sentence is prose that happens to sit
+#: between two cell breaks, and prose is not a registered security.
+_MAX_CELL_CHARS = 160
 
 
 def strip_html(raw: str) -> str:
@@ -546,6 +570,7 @@ def strip_html(raw: str) -> str:
     text and is reported to a human rather than guessed at.
     """
     text = _BREAK.sub(_CELL, raw)
+    text = _TABLE_END_TAG.sub(_TABLE, text)
     text = _ROW_END.sub(_ROW, text)
     text = _CELL_END.sub(_CELL, text)
     text = _TAG.sub(" ", text)
@@ -563,11 +588,92 @@ def _clean(value: str) -> str:
     stripped; they are an implementation detail and must never appear in a
     quotation, which is meant to be the filing's own words.
     """
-    return _WS.sub(" ", value.replace(_CELL, " ").replace(_ROW, " ")).strip()
+    without_markers = value.replace(_CELL, " ").replace(_ROW, " ").replace(_TABLE, " ")
+    # All whitespace, newlines included: a quotation that spans a source line
+    # break is one sentence in the filing and should read as one here. `_WS`
+    # deliberately leaves newlines alone, because the heading patterns use them
+    # as a bound while matching; this is the reporting end, where they are noise.
+    return re.sub(r"\s+", " ", without_markers).strip()
 
 
 def _cells(segment: str) -> list[str]:
     return [_clean(c) for c in segment.split(_CELL) if _clean(c)]
+
+
+def _collect_rows(region: str, *, width: int) -> tuple[list[Section12bRow], list[str]]:
+    """Rows of the Section 12(b) table, stopping where the table stops.
+
+    **Three structural boundaries, because width alone is not one.** The first
+    version of this stopped at a segment with too few cells, which worked on a
+    fixture whose post-table prose happened to be two cells wide and failed on
+    the first real filing it met. Cisco's cover page puts its 12(g) line and its
+    check-box paragraphs in ``<p>`` elements after ``</table>``; those are cell
+    breaks, not row breaks, so the whole block arrived as one **six-cell**
+    segment -- wider than the table's three columns, and so accepted as a row of
+    registered securities. Being too narrow was never the thing that made a
+    segment prose.
+
+    What actually bounds the region:
+
+    1. **A new statutory heading.** ``Securities registered pursuant to Section
+       12(g)`` beginning is ``12(b)``'s region ending. Every cover page states
+       them in sequence, so this is the document's own structure rather than a
+       phrase being filtered out of the output.
+    2. **The end of the table.** ``</table>`` carries its own marker precisely so
+       this question can be asked; anything after it is outside the table
+       whatever its shape. It is only treated as terminal once a row has been
+       collected, so a layout that wraps the heading row in its own table is not
+       cut off before it starts.
+    3. **A cell holding prose.** A cover-page cell is a class title, a symbol or
+       an exchange name. One holding a sentence is prose that happens to fall
+       between two cell breaks.
+
+    Each is a fact about document structure, so none of them knows anything
+    about Cisco, and a filing that lays its cover page out differently is
+    reported as unreadable rather than mis-read.
+    """
+    notes: list[str] = []
+
+    # Boundary 1, applied before any segmentation: the region cannot extend past
+    # the next statutory heading, wherever the markup happens to break.
+    next_heading = _SECTION_HEADING.search(region)
+    if next_heading is not None:
+        region = region[: next_heading.start()]
+
+    rows: list[Section12bRow] = []
+    padded = region + _ROW
+    position = 0
+    for separator in re.finditer(f"[{_ROW}{_TABLE}]", padded):
+        segment = padded[position : separator.start()]
+        position = separator.end()
+        cells = _cells(segment)
+
+        if cells:
+            if len(cells) < width:
+                # Narrow: residue from the heading row before the body starts,
+                # or the end of the body once it has.
+                if rows:
+                    break
+                continue
+            if any(len(cell) > _MAX_CELL_CHARS for cell in cells):
+                if rows:
+                    notes.append(
+                        "collection stopped at a block whose cells hold prose rather than "
+                        "table values; a registered-security cell is a class title, a "
+                        "symbol or an exchange name"
+                    )
+                    break
+                continue
+            rows.append(Section12bRow(cells=tuple(cells)))
+            if len(rows) >= 8:
+                break
+
+        # Boundary 2, checked after the segment it closes so the table's own last
+        # row is kept.
+        if separator.group(0) == _TABLE and rows:
+            break
+
+    return rows, notes
 
 
 def extract_identity_evidence(document_text: str) -> EvidenceExtract:
@@ -625,26 +731,8 @@ def extract_identity_evidence(document_text: str) -> EvidenceExtract:
             ),
             default=0,
         )
-        # Collection stops at the first segment too narrow to be a row of this
-        # table, because that is where the table ended. Without the stop the
-        # prose after it -- an Item 5 heading and the paragraph under it -- comes
-        # back as a two-cell "row" and reads like registered-securities data.
-        # The scan begins mid-heading-row, so narrow segments before the first
-        # real row are residue to skip. Once a row has been collected the next
-        # narrow segment means the table has ended, and everything after it is
-        # ordinary prose.
-        width = max(len(headers), 2)
-        for segment in window[last_header:].split(_ROW):
-            cells = _cells(segment)
-            if not cells:
-                continue
-            if len(cells) < width:
-                if rows:
-                    break
-                continue
-            rows.append(Section12bRow(cells=tuple(cells)))
-            if len(rows) >= 8:
-                break
+        rows, row_notes = _collect_rows(window[last_header:], width=max(len(headers), 2))
+        notes.extend(row_notes)
         if not rows:
             notes.append("no table rows were readable beneath the Section 12(b) heading")
     else:
