@@ -1072,7 +1072,8 @@ def cmd_acquire_control(args: argparse.Namespace) -> int:
 
     evidence = report.evidence
     if evidence is not None:
-        print(f"evidence       : {evidence.status}")
+        families = ", ".join(evidence.families) or "none"
+        print(f"evidence       : {evidence.status}   [{families}]")
         if evidence.section_12b_heading:
             print(f"  heading      : {evidence.section_12b_heading}")
         if evidence.section_12b_headers:
@@ -1081,6 +1082,19 @@ def cmd_acquire_control(args: argparse.Namespace) -> int:
             print(f"  row          : {' | '.join(row.cells)}")
         for statement in evidence.symbol_statements:
             print(f"  statement    : {statement.text}")
+
+        fund = evidence.fund_trust
+        if fund.exact_name:
+            print(f"  legal name   : {fund.exact_name}")
+        for former in fund.former_names:
+            print(f"  former name  : {former}   (text only; NOT read as a rename)")
+        for shorthand in fund.shorthand_definitions:
+            print(f"  shorthand    : {shorthand}")
+        for listing in fund.listing_statements:
+            print(f"  listing      : {listing}")
+        for trading in fund.trading_statements:
+            print(f"  units/shares : {trading}")
+
         for note in evidence.notes:
             print(f"  note         : {note}")
         print()

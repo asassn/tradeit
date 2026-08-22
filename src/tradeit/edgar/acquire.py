@@ -53,18 +53,22 @@ from tradeit.edgar.submission import (
 from tradeit.errors import ConfigError
 
 __all__ = [
+    "CORPORATE_FAMILY",
     "DEFAULT_FORMS",
     "DEFAULT_MIN_INTERVAL_S",
+    "FUND_TRUST_FAMILY",
     "USER_AGENT_ENV",
     "AcquisitionReport",
     "CikCandidate",
     "EvidenceExtract",
     "ExtractionStatus",
+    "FundTrustExtract",
     "Outcome",
     "Section12bRow",
     "SymbolStatement",
     "acquire_control_evidence",
     "candidate_ciks",
+    "extract_fund_trust_identity",
     "extract_identity_evidence",
     "filing_path",
     "find_control",
@@ -86,6 +90,12 @@ DEFAULT_MIN_INTERVAL_S = 1.0
 #: supplied by the operator and never lives in source: a contact address in a
 #: repository is both a leak and a lie the moment someone else runs the code.
 USER_AGENT_ENV = "EDGAR_USER_AGENT"
+
+#: The two identity structures this extractor knows how to read. Named so a
+#: report says which one its evidence came from, because "a table row" and "a
+#: prospectus sentence" are different kinds of thing to review.
+CORPORATE_FAMILY = "corporate_section_12b"
+FUND_TRUST_FAMILY = "fund_trust_listing"
 
 _ARCHIVE = "https://www.sec.gov/Archives"
 
@@ -162,6 +172,72 @@ class SymbolStatement:
 
 
 @dataclass(frozen=True, slots=True)
+class FundTrustExtract:
+    """Identity passages from a fund or trust filing, reported not interpreted.
+
+    A trust does not have a Section 12(b) cover-page table, so the corporate
+    extractor correctly finds nothing in one and the run stops at NOT_FOUND. The
+    identity is still there, expressed differently: a legal name under an
+    explicit label, a shorthand the filing defines for itself, and a sentence
+    naming the listing exchange and the symbol together.
+
+    **Former names are text here, not events.** ``formerly known as X prior to
+    <date>`` is reproduced exactly as written and nothing reads a rename, a
+    validity window or a lifecycle fact out of it. A date inside a parenthetical
+    is a date the filing mentions, not a date this tool has established, and the
+    difference is the whole reason the field is a string rather than a date.
+
+    **The legal name comes only from an explicit label.** A sponsor, adviser or
+    distributor named elsewhere in a prospectus is not the trust, and populating
+    this from any capitalised name in the document is how a sponsor's identity
+    would be recorded as a security's.
+    """
+
+    exact_name: str = ""
+    former_names: tuple[str, ...] = ()
+    shorthand_definitions: tuple[str, ...] = ()
+    listing_statements: tuple[str, ...] = ()
+    trading_statements: tuple[str, ...] = ()
+
+    @property
+    def has_legal_identity(self) -> bool:
+        return bool(self.exact_name or self.shorthand_definitions)
+
+    @property
+    def has_listing_identity(self) -> bool:
+        """A construction naming an exchange and a symbol together.
+
+        Both statement kinds require the exchange and the symbol inside one
+        matched core, so a document that merely mentions a ticker somewhere in
+        its prose cannot satisfy this.
+        """
+        return bool(self.listing_statements or self.trading_statements)
+
+    @property
+    def is_complete(self) -> bool:
+        return self.has_legal_identity and self.has_listing_identity
+
+    @property
+    def has_anything(self) -> bool:
+        return bool(
+            self.exact_name
+            or self.former_names
+            or self.shorthand_definitions
+            or self.listing_statements
+            or self.trading_statements
+        )
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "exact_name": self.exact_name,
+            "former_names": list(self.former_names),
+            "shorthand_definitions": list(self.shorthand_definitions),
+            "listing_statements": list(self.listing_statements),
+            "trading_statements": list(self.trading_statements),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class EvidenceExtract:
     """Identity passages, reported without being interpreted.
 
@@ -170,6 +246,14 @@ class EvidenceExtract:
     makes -- including where two parts of one filing render an exchange name
     differently, which is preserved rather than reconciled into an equivalence
     the filing does not assert.
+
+    **Two evidence families, reported separately.** ``corporate_section_12b`` is
+    the operating company's cover-page table plus its narrative sentences;
+    ``fund_trust_listing`` is a fund or trust prospectus naming itself and its
+    listing. They are not alternatives to choose between and neither is a
+    fallback for the other: both run over every document, and :attr:`families`
+    names the ones that produced anything, so a reader can see which structure
+    the evidence actually came from.
     """
 
     status: ExtractionStatus
@@ -177,15 +261,27 @@ class EvidenceExtract:
     section_12b_headers: tuple[str, ...] = ()
     section_12b_rows: tuple[Section12bRow, ...] = ()
     symbol_statements: tuple[SymbolStatement, ...] = ()
+    fund_trust: FundTrustExtract = field(default_factory=FundTrustExtract)
     notes: tuple[str, ...] = ()
+
+    @property
+    def families(self) -> tuple[str, ...]:
+        found: list[str] = []
+        if self.section_12b_heading or self.section_12b_rows or self.symbol_statements:
+            found.append(CORPORATE_FAMILY)
+        if self.fund_trust.has_anything:
+            found.append(FUND_TRUST_FAMILY)
+        return tuple(found)
 
     def summary(self) -> dict[str, Any]:
         return {
             "status": str(self.status),
+            "families": list(self.families),
             "section_12b_heading": self.section_12b_heading,
             "section_12b_headers": list(self.section_12b_headers),
             "section_12b_rows": [r.summary() for r in self.section_12b_rows],
             "symbol_statements": [s.summary() for s in self.symbol_statements],
+            "fund_trust": self.fund_trust.summary(),
             "notes": list(self.notes),
         }
 
@@ -551,6 +647,62 @@ _SYMBOL_SENTENCE = re.compile(
     re.IGNORECASE,
 )
 
+#: Straight and typographic quotation marks, both of which EDGAR HTML uses,
+#: sometimes in the same document.
+#: Escaped rather than written literally: the curly forms are indistinguishable
+#: from the straight ones at a glance, and a quote class is a bad place for a
+#: character nobody can see.
+_Q = "\"'\u201c\u201d\u2018\u2019"
+
+#: The legal name, and **only** from an explicit label. A prospectus names its
+#: sponsor, its adviser, its distributor and its index provider; any of those
+#: would be captured by a pattern that looked for a capitalised name instead, and
+#: a sponsor recorded as the security's identity is a wrong mapping that reads
+#: like a right one. The capture stops before an opening parenthesis so a
+#: parenthetical history is reported separately rather than folded into the name.
+_EXACT_NAME = re.compile(
+    r"Exact\s+name\s+of\s+(?:the\s+)?(?:Trust|Fund|Registrant|Issuer)"
+    r"[^:␞␟␝]{0,60}:\s*[^(␞␟␝]{1,160}",
+    re.IGNORECASE,
+)
+
+#: Reported verbatim and never parsed. The dates inside are dates the filing
+#: mentions, not dates this tool has established.
+_FORMER_NAME = re.compile(r"formerly\s+known\s+as\b[^)␞␟␝]{0,300}", re.IGNORECASE)
+
+#: A shorthand the filing defines for itself: ``... Trust ("SPY" or the
+#: "Trust")``. The preceding name text is part of the matched core, because the
+#: shorthand without what it abbreviates establishes nothing.
+_SHORTHAND = re.compile(
+    rf"[^.␞␟␝]{{0,150}}?\(\s*[{_Q}]\s*([A-Za-z0-9.\-]{{1,10}})\s*[{_Q}]\s+or\s+the\s+"
+    rf"[{_Q}]\s*(?:Trust|Fund|Company|Registrant|Partnership)\s*[{_Q}]\s*\)",
+    re.IGNORECASE,
+)
+
+#: An exchange and a symbol inside one construction. The fund vocabulary in the
+#: lead-in is what keeps this off an operating company's "our common stock is
+#: traded on X under the symbol Y", which the corporate family already reports.
+#:
+#: The gaps exclude the cell and row sentinels but NOT the full stop, which is
+#: what bounds the corporate patterns. "NYSE Arca, Inc." and "Principal U.S.
+#: Listing Exchange" are both full of periods, so a sentence-ending bound cuts
+#: this family's evidence in half. A paragraph boundary is the right bound here
+#: and the sentinels already are one.
+_FUND_LISTING = re.compile(
+    r"[^␞␟␝]{0,200}?\b(?:Principal\s+(?:U\.?\s*S\.?\s+)?Listing\s+Exchange|Trust|Fund|ETF)\b"
+    r"[^␞␟␝]{0,200}?\bunder\s+the\s+(?:market\s+)?symbol\b[^␞␟␝]{0,60}",
+    re.IGNORECASE,
+)
+
+#: The units/shares construction, which is a second and independent statement of
+#: the same relationship in most prospectuses.
+_FUND_TRADING = re.compile(
+    r"[^␞␟␝]{0,200}?\b(?:Units|Shares)\b[^␞␟␝]{0,200}?"
+    r"\b(?:purchased\s+and\s+sold|bought\s+and\s+sold|listed|traded)\b"
+    r"[^␞␟␝]{0,200}?\bunder\s+the\s+(?:market\s+)?symbol\b[^␞␟␝]{0,60}",
+    re.IGNORECASE,
+)
+
 #: How far past the Section 12(b) heading to look for its table. Bounded so a
 #: heading with no table beneath it cannot absorb an unrelated later one.
 _TABLE_WINDOW = 4000
@@ -676,6 +828,54 @@ def _collect_rows(region: str, *, width: int) -> tuple[list[Section12bRow], list
     return rows, notes
 
 
+def _matches(pattern: re.Pattern[str], text: str, limit: int = 5) -> tuple[str, ...]:
+    """Matched cores, cleaned and de-duplicated, never a widened window."""
+    seen: list[str] = []
+    for match in pattern.finditer(text):
+        cleaned = _clean(match.group(0))
+        if cleaned and cleaned not in seen:
+            seen.append(cleaned)
+        if len(seen) >= limit:
+            break
+    return tuple(seen)
+
+
+def extract_fund_trust_identity(document_text: str) -> FundTrustExtract:
+    """The prospectus identity constructions, if this document has any.
+
+    Runs over every document rather than being switched on by form type. A form
+    is a routing label: ``485BPOS`` is where this structure usually lives, but an
+    N-1A, an S-6, a 424 prospectus or a form not yet met can carry the same
+    sentences, and a filing that does carry them should not be missed because a
+    list of form codes had not been updated. What decides is the text.
+
+    Nothing is combined or interpreted. A legal name, the parenthetical history
+    beside it, the shorthand the filing defines, and the sentences naming an
+    exchange and a symbol are each reported as written, for a person to read.
+    """
+    text = strip_html(document_text)
+    exact = _matches(_EXACT_NAME, text, limit=1)
+    trading = _matches(_FUND_TRADING, text)
+
+    # One sentence, one label. The units construction also contains the word
+    # "Trust", so the broader listing pattern matches it too; reporting the same
+    # sentence twice would read as two independent constructions when the filing
+    # made one. The more specific pattern keeps it.
+    listing = tuple(
+        statement
+        for statement in _matches(_FUND_LISTING, text)
+        if not any(statement in other or other in statement for other in trading)
+    )
+
+    return FundTrustExtract(
+        exact_name=exact[0] if exact else "",
+        former_names=_matches(_FORMER_NAME, text),
+        shorthand_definitions=_matches(_SHORTHAND, text),
+        listing_statements=listing,
+        trading_statements=trading,
+    )
+
+
 def extract_identity_evidence(document_text: str) -> EvidenceExtract:
     """Identity passages from one filing document, reported not interpreted.
 
@@ -748,14 +948,40 @@ def extract_identity_evidence(document_text: str) -> EvidenceExtract:
         notes.append("no narrative '... under the symbol ...' statement was found")
 
     has_table = bool(heading and len(headers) == 3 and rows)
-    if has_table and statements:
-        status = ExtractionStatus.FOUND
-    elif has_table or statements:
-        status = ExtractionStatus.PARTIAL
+    corporate_complete = bool(has_table and statements)
+    corporate_partial = bool(has_table or statements)
+    if corporate_partial and not corporate_complete:
         notes.append(
             "only one of the two independent constructions was extracted; a human must "
             "decide whether it carries the mapping on its own"
         )
+
+    # The second family, run over the same document rather than instead of it.
+    # A filing is not required to be one kind of thing: whichever structures are
+    # present are reported, and a document with neither is NOT_FOUND as before.
+    fund = extract_fund_trust_identity(document_text)
+    if fund.has_anything and not fund.is_complete:
+        missing = []
+        if not fund.has_legal_identity:
+            missing.append("a labelled legal name or a shorthand the filing defines")
+        if not fund.has_listing_identity:
+            missing.append("a construction naming an exchange and a symbol together")
+        notes.append(
+            "fund/trust identity passages were found but incomplete, missing "
+            + " and ".join(missing)
+            + "; a human must decide what the filing actually establishes"
+        )
+    if fund.former_names:
+        notes.append(
+            "a 'formerly known as' passage is reported verbatim and has NOT been read "
+            "as a rename, a validity window or any dated event; the dates inside it are "
+            "dates the filing mentions, not dates this tool established"
+        )
+
+    if corporate_complete or fund.is_complete:
+        status = ExtractionStatus.FOUND
+    elif corporate_partial or fund.has_anything:
+        status = ExtractionStatus.PARTIAL
     else:
         status = ExtractionStatus.NOT_FOUND
 
@@ -765,6 +991,7 @@ def extract_identity_evidence(document_text: str) -> EvidenceExtract:
         section_12b_headers=headers,
         section_12b_rows=tuple(rows),
         symbol_statements=statements,
+        fund_trust=fund,
         notes=tuple(notes),
     )
 

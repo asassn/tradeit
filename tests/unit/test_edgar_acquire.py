@@ -29,6 +29,7 @@ from tradeit.edgar.acquire import (
     acquire_control_evidence,
     candidate_ciks,
     download_submission,
+    extract_fund_trust_identity,
     extract_identity_evidence,
     filing_path,
     find_control,
@@ -774,3 +775,293 @@ def test_a_json_report_written_under_out_is_ignored_by_git(tmp_path: Path) -> No
         check=False,
     )
     assert result.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# the fund/trust prospectus family
+#
+# A trust has no Section 12(b) cover-page table, so the corporate extractor
+# correctly finds nothing in one -- which is right and useless. Its identity is
+# in a labelled legal name, a shorthand the filing defines, and sentences naming
+# the listing exchange and the symbol together.
+#
+# The fixture below is modelled structurally on a real 485BPOS: the same
+# constructions in the same order, with everything else omitted. What is being
+# pinned is that those constructions are recognised, quoted as written, and NOT
+# interpreted -- a "formerly known as" parenthetical especially.
+# ---------------------------------------------------------------------------
+
+TRUST_PROSPECTUS_HTML = """
+<html><body>
+<p>Exact name of Trust: STATE STREET SPDR S&amp;P 500 ETF TRUST (formerly known as
+SPDR TRUST SERIES 1 prior to January 27, 2010 and SPDR S&amp;P 500 ETF TRUST prior
+to January 26, 2026)</p>
+<p>State Street SPDR S&amp;P 500 ETF Trust ("SPY" or the "Trust") is a unit
+investment trust.</p>
+<p>Principal U.S. Listing Exchange for State Street SPDR S&amp;P 500 ETF Trust:
+NYSE Arca, Inc. under the symbol "SPY"</p>
+<p>The Sponsor of the Trust is a global asset management firm; the Trustee and the
+Distributor are named in the Statement of Additional Information.</p>
+<p>Individual Units of the Trust may be purchased and sold on NYSE Arca, Inc. (the
+"Exchange"), under the market symbol "SPY".</p>
+</body></html>
+"""
+
+
+def _trust_index(tmp_path: Path) -> Path:
+    return _index(
+        tmp_path,
+        [
+            (
+                MSFT_CIK,
+                "MICROSOFT CORP",
+                "485BPOS",
+                "2026-01-26",
+                MSFT_PATH,
+            )
+        ],
+    )
+
+
+def _trust_submission(**kwargs: Any) -> str:
+    defaults: dict[str, Any] = {
+        "form": "485BPOS",
+        "filed": "20260126",
+        "documents": [("485BPOS", "d77353d485bpos.htm", TRUST_PROSPECTUS_HTML)],
+    }
+    defaults.update(kwargs)
+    return _submission(**defaults)
+
+
+def test_the_trust_family_is_detected_where_the_corporate_one_finds_nothing() -> None:
+    extract = extract_identity_evidence(TRUST_PROSPECTUS_HTML)
+
+    assert extract.status is ExtractionStatus.FOUND
+    assert extract.families == ("fund_trust_listing",)
+    assert extract.section_12b_rows == ()
+    assert extract.symbol_statements == ()
+
+
+def test_the_exact_legal_trust_name_is_preserved() -> None:
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+    assert "STATE STREET SPDR S&P 500 ETF TRUST" in fund.exact_name
+    # The parenthetical history is a separate field, not part of the name.
+    assert "formerly known as" not in fund.exact_name
+
+
+def test_former_names_are_reported_and_not_interpreted() -> None:
+    """Three renderings of this trust's name exist in one sentence.
+
+    They are reproduced as written. Nothing turns them into a rename, a validity
+    window or a dated event, and the dates inside stay inside the quoted string
+    rather than becoming values.
+    """
+    extract = extract_identity_evidence(TRUST_PROSPECTUS_HTML)
+    fund = extract.fund_trust
+
+    assert fund.former_names
+    joined = " ".join(fund.former_names)
+    assert "SPDR TRUST SERIES 1" in joined
+    assert "prior to January 27, 2010" in joined
+
+    assert any("NOT been read as a rename" in n for n in extract.notes)
+    payload = fund.summary()
+    assert isinstance(payload["former_names"], list)
+    assert all(isinstance(v, str) for v in payload["former_names"])
+    assert "valid_from" not in payload
+    assert "lifecycle" not in json.dumps(payload).lower()
+
+
+def test_the_filing_defined_shorthand_is_preserved() -> None:
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+    joined = " ".join(fund.shorthand_definitions)
+    assert '"SPY" or the "Trust"' in joined
+    assert "State Street SPDR S&P 500 ETF Trust" in joined
+
+
+def test_the_exchange_and_symbol_construction_is_extracted() -> None:
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+    joined = " ".join(fund.listing_statements)
+    assert "Principal U.S. Listing Exchange" in joined
+    assert "NYSE Arca, Inc." in joined
+    assert 'under the symbol "SPY"' in joined
+
+
+def test_the_units_trading_statement_is_extracted_independently() -> None:
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+    joined = " ".join(fund.trading_statements)
+    assert "Individual Units of the Trust" in joined
+    assert "purchased and sold on NYSE Arca, Inc." in joined
+    assert 'under the market symbol "SPY"' in joined
+
+
+def test_a_missing_exchange_construction_is_partial_not_fabricated() -> None:
+    """Legal identity alone does not establish a listing."""
+    html = TRUST_PROSPECTUS_HTML
+    html = html.replace(
+        "<p>Principal U.S. Listing Exchange for State Street SPDR S&amp;P 500 ETF Trust:\n"
+        'NYSE Arca, Inc. under the symbol "SPY"</p>',
+        "",
+    )
+    html = html.replace(
+        "<p>Individual Units of the Trust may be purchased and sold on NYSE Arca, Inc. (the\n"
+        '"Exchange"), under the market symbol "SPY".</p>',
+        "",
+    )
+    extract = extract_identity_evidence(html)
+
+    assert extract.status is ExtractionStatus.PARTIAL
+    assert extract.fund_trust.has_legal_identity
+    assert not extract.fund_trust.has_listing_identity
+    assert any("exchange and a symbol together" in n for n in extract.notes)
+
+
+def test_a_missing_symbol_is_partial_not_fabricated() -> None:
+    """An exchange without a symbol names a venue, not a security."""
+    html = TRUST_PROSPECTUS_HTML.replace('under the symbol "SPY"', "").replace(
+        'under the market symbol "SPY"', ""
+    )
+    extract = extract_identity_evidence(html)
+
+    assert extract.status is ExtractionStatus.PARTIAL
+    assert not extract.fund_trust.has_listing_identity
+
+
+def test_a_sponsor_is_never_substituted_for_the_trust_identity() -> None:
+    """The legal name comes from an explicit label or from nowhere.
+
+    A prospectus names a sponsor, a trustee and a distributor. Recording one of
+    those as the security's identity would be a wrong mapping that reads like a
+    right one, so removing the label must empty the field rather than fall back
+    to some other capitalised name in the document.
+    """
+    html = TRUST_PROSPECTUS_HTML.replace("Exact name of Trust:", "Overview:")
+    fund = extract_fund_trust_identity(html)
+
+    assert fund.exact_name == ""
+    assert "Sponsor" not in " ".join(
+        [fund.exact_name, *fund.shorthand_definitions, *fund.listing_statements]
+    )
+
+
+def test_prose_merely_mentioning_a_ticker_is_not_listing_evidence() -> None:
+    """The construction is the evidence, not the presence of three letters."""
+    html = (
+        "<p>SPY is widely held. Many investors discuss SPY. The Trust is large "
+        "and SPY is often mentioned in the press.</p>"
+    )
+    extract = extract_identity_evidence(html)
+
+    assert extract.fund_trust.listing_statements == ()
+    assert extract.fund_trust.trading_statements == ()
+    assert extract.status is ExtractionStatus.NOT_FOUND
+
+
+def test_the_corporate_family_is_not_regressed_by_the_trust_family() -> None:
+    """MSFT- and CSCO-shaped cover pages keep reporting exactly as before."""
+    for html in (COVER_PAGE_HTML, CISCO_SHAPED_COVER_PAGE):
+        extract = extract_identity_evidence(html)
+        assert extract.status is ExtractionStatus.FOUND
+        assert extract.families == ("corporate_section_12b",)
+        assert extract.section_12b_rows
+        assert extract.symbol_statements
+        assert not extract.fund_trust.has_anything
+
+
+def test_the_full_trust_workflow_runs_offline_and_reports_the_family(tmp_path: Path) -> None:
+    _trust_index(tmp_path)
+    _write_filing(tmp_path, _trust_submission())
+    report = _run(tmp_path, offline=True, forms=("485BPOS",))
+
+    assert report.outcome is Outcome.EXTRACTED
+    assert report.form == "485BPOS"
+    assert report.primary_document == "d77353d485bpos.htm"
+    assert report.primary_document_type == "485BPOS"
+    assert report.evidence is not None
+    assert report.evidence.families == ("fund_trust_listing",)
+
+
+def test_a_trust_submission_still_fails_closed_on_a_mismatched_envelope(
+    tmp_path: Path,
+) -> None:
+    """The new family changes nothing about validation."""
+    _trust_index(tmp_path)
+    _write_filing(tmp_path, _trust_submission(cik=999999))
+    report = _run(tmp_path, offline=True, forms=("485BPOS",))
+
+    assert report.outcome is Outcome.VALIDATION_FAILED
+    assert report.evidence is None
+
+
+def test_a_malformed_trust_document_yields_no_evidence_rather_than_a_guess(
+    tmp_path: Path,
+) -> None:
+    _trust_index(tmp_path)
+    _write_filing(
+        tmp_path,
+        _trust_submission(documents=[("485BPOS", "d.htm", "<html><body></body></html>")]),
+    )
+    report = _run(tmp_path, offline=True, forms=("485BPOS",))
+
+    assert report.outcome is Outcome.REVIEW_NEEDED
+    assert report.evidence is not None
+    assert report.evidence.status is ExtractionStatus.NOT_FOUND
+    assert report.evidence.families == ()
+
+
+def test_a_trust_report_carries_no_mapping_status_or_promotion_field(tmp_path: Path) -> None:
+    _trust_index(tmp_path)
+    _write_filing(tmp_path, _trust_submission())
+    payload = _run(tmp_path, offline=True, forms=("485BPOS",)).summary()
+
+    assert "status" not in payload
+    assert payload["control_status_changed"] is False
+    assert "NO CONTROL STATUS WAS CHANGED" in payload["statement"]
+
+    without_disclaimer = dict(payload)
+    without_disclaimer.pop("statement")
+    serialised = json.dumps(without_disclaimer).lower()
+    assert "manual_verified" not in serialised
+    assert '"status": "resolved"' not in serialised
+
+
+def test_a_trust_run_leaves_the_evidence_file_untouched(tmp_path: Path) -> None:
+    from tradeit.edgar.control_evidence import DEFAULT_EVIDENCE_PATH
+
+    before = DEFAULT_EVIDENCE_PATH.read_bytes()
+    _trust_index(tmp_path)
+    _write_filing(tmp_path, _trust_submission())
+    _run(tmp_path, offline=True, forms=("485BPOS",))
+
+    assert DEFAULT_EVIDENCE_PATH.read_bytes() == before
+
+
+def test_the_trust_family_reports_no_internal_sentinels() -> None:
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+    reported = " ".join(
+        [
+            fund.exact_name,
+            *fund.former_names,
+            *fund.shorthand_definitions,
+            *fund.listing_statements,
+            *fund.trading_statements,
+        ]
+    )
+    for sentinel in ("␟", "␞", "␝"):
+        assert sentinel not in reported
+
+
+def test_one_sentence_is_reported_under_one_label() -> None:
+    """The units sentence also contains "Trust", so both patterns match it.
+
+    Reporting it twice would read as two independent constructions when the
+    filing made one, which is the sort of inflation that matters when a person
+    is deciding whether the evidence is sufficient.
+    """
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+
+    assert len(fund.listing_statements) == 1
+    assert len(fund.trading_statements) == 1
+    assert "Principal U.S. Listing Exchange" in fund.listing_statements[0]
+    assert "Individual Units" in fund.trading_statements[0]
+    assert fund.listing_statements[0] != fund.trading_statements[0]
