@@ -1090,6 +1090,16 @@ def cmd_acquire_control(args: argparse.Namespace) -> int:
             print(f"  former name  : {former}   (text only; NOT read as a rename)")
         for shorthand in fund.shorthand_definitions:
             print(f"  shorthand    : {shorthand}")
+        for listing_row in fund.listing_rows:
+            print(
+                f"  listing row  : {listing_row.fund} | {listing_row.exchange} "
+                f"| {listing_row.ticker}"
+            )
+        if len(fund.listing_rows) > 1:
+            print(
+                "                 several funds are listed above; which one this control "
+                "refers to is a human's decision, not this tool's"
+            )
         for listing in fund.listing_statements:
             print(f"  listing      : {listing}")
         for trading in fund.trading_statements:

@@ -1349,3 +1349,238 @@ def test_the_real_layout_emits_no_sentinels_and_no_entities() -> None:
     for entity in ("&reg;", "&amp;", "&nbsp;", "&#8217;"):
         assert entity not in emitted
     assert "®" in emitted
+
+
+# ---------------------------------------------------------------------------
+# the registration-statement pattern
+#
+# A second fund convention, structurally unlike the prospectus one. The legal
+# name is a title with a parenthetical caption UNDER it and no colon anywhere,
+# and the listing relationship is a table -- Fund | Principal U.S. Listing
+# Exchange | Ticker -- rather than a sentence. Both escaped the extractor
+# entirely: one pattern required a colon, the other required a sentence.
+# ---------------------------------------------------------------------------
+
+REGISTRATION_STATEMENT_HTML = """
+<html><body>
+<p>FORM N-1A</p>
+<p>REGISTRATION STATEMENT UNDER THE SECURITIES ACT OF 1933</p>
+<p>POST-EFFECTIVE AMENDMENT NO. 42</p>
+<p>Example Index Trust SM, Series 1</p>
+<p>(Exact Name of Registrant as Specified in Charter)</p>
+<p>Example Advisers Ltd. &mdash; Investment Adviser to the Registrant</p>
+<p>Example Trust Services LLC, Sponsor and Depositor</p>
+<table>
+  <tr><td>Fund</td><td>Principal U.S. Listing Exchange</td><td>Ticker</td></tr>
+  <tr><td>Example Index Trust SM, Series 1</td>
+      <td>The Example Stock Market LLC</td><td>EXT</td></tr>
+</table>
+<p>The Registrant was formerly known as Example Legacy Trust, Series 1 and before
+that as Example Original Trust Series 1.</p>
+<p>Shares of the Fund are bought and sold in the secondary market, where EXT is
+quoted throughout the trading day.</p>
+</body></html>
+"""
+
+
+def _registration_submission(**kwargs: Any) -> str:
+    defaults: dict[str, Any] = {
+        "form": "485BPOS",
+        "filed": "20260126",
+        "documents": [("485BPOS", "tm0000000d1_485bpos.htm", REGISTRATION_STATEMENT_HTML)],
+    }
+    defaults.update(kwargs)
+    return _submission(**defaults)
+
+
+def test_a_name_above_its_caption_is_the_legal_name() -> None:
+    """Requirement 1. The registration convention labels the name ABOVE it."""
+    fund = extract_fund_trust_identity(REGISTRATION_STATEMENT_HTML)
+    assert fund.exact_name == "Example Index Trust SM, Series 1"
+    assert fund.has_legal_identity
+
+
+def test_a_name_beside_its_caption_is_also_found() -> None:
+    """Requirement 2. The same wording appears in cell-pair layouts."""
+    html = """
+    <table><tr><td>(Exact Name of Registrant as Specified in Charter)</td>
+        <td>Example Index Trust SM, Series 1</td></tr></table>
+    """
+    fund = extract_fund_trust_identity(html)
+    assert fund.exact_name == "Example Index Trust SM, Series 1"
+
+
+def test_the_caption_itself_is_never_the_legal_name() -> None:
+    """Requirement 3."""
+    fund = extract_fund_trust_identity(REGISTRATION_STATEMENT_HTML)
+    assert "Exact Name of Registrant" not in fund.exact_name
+    assert not fund.exact_name.startswith("(")
+
+
+def test_an_adviser_or_sponsor_below_the_caption_is_never_captured() -> None:
+    """Requirement 4, and this control's own recorded verification route.
+
+    With the registrant's name removed the caption is orphaned, and the very next
+    blocks name an adviser, a sponsor and a depositor. Any of them recorded as
+    the security's identity would be a wrong mapping that reads like a right one.
+    """
+    html = REGISTRATION_STATEMENT_HTML.replace(
+        "<p>Example Index Trust SM, Series 1</p>\n<p>(Exact Name", "<p>(Exact Name"
+    )
+    fund = extract_fund_trust_identity(html)
+
+    for role in ("Adviser", "Sponsor", "Depositor", "Example Advisers", "Trust Services"):
+        assert role not in fund.exact_name
+
+
+def test_the_listing_table_headers_are_recognised() -> None:
+    """Requirement 5."""
+    fund = extract_fund_trust_identity(REGISTRATION_STATEMENT_HTML)
+    assert len(fund.listing_rows) == 1
+
+
+def test_the_listing_row_preserves_fund_exchange_and_ticker() -> None:
+    """Requirements 6, 7 and 8. The filing joined these three; nothing inferred."""
+    row = extract_fund_trust_identity(REGISTRATION_STATEMENT_HTML).listing_rows[0]
+
+    assert row.fund == "Example Index Trust SM, Series 1"
+    assert row.exchange == "The Example Stock Market LLC"
+    assert row.ticker == "EXT"
+
+
+def test_later_ticker_prose_cannot_repair_a_malformed_table() -> None:
+    """Requirement 9. A missing header is a missing table, not a lookup key."""
+    html = REGISTRATION_STATEMENT_HTML.replace(
+        "<td>Principal U.S. Listing Exchange</td>", "<td>Venue</td>"
+    )
+    fund = extract_fund_trust_identity(html)
+    assert fund.listing_rows == ()
+
+
+def test_a_legal_name_and_one_listing_row_reach_found() -> None:
+    """Requirement 10."""
+    extract = extract_identity_evidence(REGISTRATION_STATEMENT_HTML)
+    assert extract.status is ExtractionStatus.FOUND
+    assert extract.families == ("fund_trust_listing",)
+
+
+def test_a_legal_name_without_a_listing_row_stays_partial() -> None:
+    """Requirement 11."""
+    html = """
+    <p>Example Index Trust SM, Series 1</p>
+    <p>(Exact Name of Registrant as Specified in Charter)</p>
+    """
+    extract = extract_identity_evidence(html)
+    assert extract.fund_trust.has_legal_identity
+    assert not extract.fund_trust.has_listing_identity
+    assert extract.status is ExtractionStatus.PARTIAL
+
+
+def test_a_listing_row_without_a_legal_name_stays_partial() -> None:
+    """Requirement 12."""
+    html = """
+    <table>
+      <tr><td>Fund</td><td>Principal U.S. Listing Exchange</td><td>Ticker</td></tr>
+      <tr><td>Example Index Trust</td><td>The Example Stock Market LLC</td><td>EXT</td></tr>
+    </table>
+    """
+    extract = extract_identity_evidence(html)
+    assert extract.fund_trust.listing_rows
+    assert extract.fund_trust.has_listing_identity
+    assert not extract.fund_trust.has_legal_identity
+    assert extract.status is ExtractionStatus.PARTIAL
+
+
+def test_several_listing_rows_are_exposed_and_never_auto_selected() -> None:
+    """Requirement 13, the multi-series case.
+
+    Every row is reported so a human can see the choice; none is picked, and the
+    family does not reach complete on a table it cannot attribute. Selecting the
+    row whose ticker resembles the requested control would be the tool making an
+    identity judgment, which is the one thing it must not do.
+    """
+    html = """
+    <p>Example Fund Family Trust</p>
+    <p>(Exact Name of Registrant as Specified in Charter)</p>
+    <table>
+      <tr><td>Fund</td><td>Principal U.S. Listing Exchange</td><td>Ticker</td></tr>
+      <tr><td>Example Growth Fund</td><td>The Example Stock Market LLC</td><td>EXG</td></tr>
+      <tr><td>Example Value Fund</td><td>The Example Stock Market LLC</td><td>EXV</td></tr>
+    </table>
+    """
+    extract = extract_identity_evidence(html)
+    fund = extract.fund_trust
+
+    assert len(fund.listing_rows) == 2
+    assert {r.ticker for r in fund.listing_rows} == {"EXG", "EXV"}
+    assert not fund.has_listing_identity
+    assert extract.status is ExtractionStatus.PARTIAL
+    assert any("has NOT been decided here" in n for n in extract.notes)
+
+
+def test_historical_name_prose_creates_no_lifecycle_fact() -> None:
+    """Requirement 14. The registration fixture carries two prior names."""
+    extract = extract_identity_evidence(REGISTRATION_STATEMENT_HTML)
+    payload = extract.fund_trust.summary()
+
+    assert "lifecycle" not in json.dumps(payload).lower()
+    assert "valid_from" not in payload
+    assert "valid_to" not in payload
+    assert all(isinstance(v, str) for v in payload["former_names"])
+
+
+def test_the_prospectus_family_is_unchanged_by_the_registration_pattern() -> None:
+    """Requirement 15. The SPY-shaped fixture reports exactly as before."""
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+
+    assert fund.exact_name == "STATE STREET® SPDR® S&P 500® ETF TRUST"
+    assert fund.listing_rows == ()
+    assert any("Principal U.S. Listing Exchange" in s for s in fund.listing_statements)
+    assert fund.is_complete
+
+
+def test_the_corporate_family_is_unchanged_by_the_registration_pattern() -> None:
+    """Requirement 16."""
+    for html in (COVER_PAGE_HTML, CISCO_SHAPED_COVER_PAGE):
+        extract = extract_identity_evidence(html)
+        assert extract.status is ExtractionStatus.FOUND
+        assert extract.families == ("corporate_section_12b",)
+        assert not extract.fund_trust.has_anything
+
+
+def test_a_registration_run_leaves_the_evidence_file_untouched(tmp_path: Path) -> None:
+    """Requirements 17, 18 and 20."""
+    from tradeit.edgar.control_evidence import DEFAULT_EVIDENCE_PATH
+
+    before = DEFAULT_EVIDENCE_PATH.read_bytes()
+    _trust_index(tmp_path)
+    _write_filing(tmp_path, _registration_submission())
+    report = _run(tmp_path, offline=True, forms=("485BPOS",))
+
+    assert DEFAULT_EVIDENCE_PATH.read_bytes() == before
+
+    payload = report.summary()
+    assert "status" not in payload
+    assert payload["control_status_changed"] is False
+
+    fund = report.evidence.fund_trust if report.evidence else None
+    assert fund is not None
+    emitted = " ".join(
+        [fund.exact_name, *[f"{r.fund} {r.exchange} {r.ticker}" for r in fund.listing_rows]]
+    )
+    for sentinel in ("␟", "␞", "␝"):
+        assert sentinel not in emitted
+    for entity in ("&mdash;", "&amp;", "&reg;"):
+        assert entity not in emitted
+
+
+def test_a_registration_submission_still_fails_closed_on_a_bad_envelope(
+    tmp_path: Path,
+) -> None:
+    """Requirement 19."""
+    _trust_index(tmp_path)
+    _write_filing(tmp_path, _registration_submission(cik=999999))
+    report = _run(tmp_path, offline=True, forms=("485BPOS",))
+
+    assert report.outcome is Outcome.VALIDATION_FAILED
+    assert report.evidence is None

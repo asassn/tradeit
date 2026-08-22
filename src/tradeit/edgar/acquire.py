@@ -63,6 +63,7 @@ __all__ = [
     "CikCandidate",
     "EvidenceExtract",
     "ExtractionStatus",
+    "FundListingRow",
     "FundTrustExtract",
     "Outcome",
     "Section12bRow",
@@ -173,6 +174,24 @@ class SymbolStatement:
 
 
 @dataclass(frozen=True, slots=True)
+class FundListingRow:
+    """One row of an explicit fund/exchange/ticker table, as the filing wrote it.
+
+    The strongest listing evidence available, because the association is the
+    filing's own: three values on one row under three headings. Nothing here
+    inferred which ticker belongs to which fund, which is the inference every
+    prose match has to make and this one does not.
+    """
+
+    fund: str
+    exchange: str
+    ticker: str
+
+    def summary(self) -> dict[str, Any]:
+        return {"fund": self.fund, "exchange": self.exchange, "ticker": self.ticker}
+
+
+@dataclass(frozen=True, slots=True)
 class FundTrustExtract:
     """Identity passages from a fund or trust filing, reported not interpreted.
 
@@ -202,6 +221,8 @@ class FundTrustExtract:
     shorthand_definitions: tuple[str, ...] = ()
     listing_statements: tuple[str, ...] = ()
     trading_statements: tuple[str, ...] = ()
+    #: Rows of an explicit fund/exchange/ticker table, if the filing has one.
+    listing_rows: tuple[FundListingRow, ...] = ()
 
     @property
     def has_legal_identity(self) -> bool:
@@ -226,6 +247,8 @@ class FundTrustExtract:
         security on that venue -- and a symbol with no venue attached is the sort
         of near-miss that reads like evidence at a glance.
         """
+        if len(self.listing_rows) == 1:
+            return True
         return any(
             _EXCHANGE_NOUN.search(statement) and _SYMBOL_CLAUSE.search(statement)
             for statement in (*self.listing_statements, *self.trading_statements)
@@ -240,6 +263,7 @@ class FundTrustExtract:
         return bool(
             self.exact_name
             or self.exact_name_statement
+            or self.listing_rows
             or self.former_names
             or self.shorthand_definitions
             or self.listing_statements
@@ -254,6 +278,7 @@ class FundTrustExtract:
             "shorthand_definitions": list(self.shorthand_definitions),
             "listing_statements": list(self.listing_statements),
             "trading_statements": list(self.trading_statements),
+            "listing_rows": [r.summary() for r in self.listing_rows],
         }
 
 
@@ -691,6 +716,39 @@ _LABEL_ONLY_BLOCK = re.compile(r"^(?:[A-Za-z0-9]{1,3}[.)]\s*)?[A-Za-z][^:]{2,70}
 #: between a field's number and its label in most SEC form layouts.
 _ENUMERATOR_BLOCK = re.compile(r"^\(?[A-Za-z0-9]{1,3}[.)]?$")
 
+#: The registration-statement caption. A different convention entirely from the
+#: colon-terminated field: it carries no colon, it is usually parenthesised, and
+#: the name it labels comes *before* it rather than after. A registration
+#: statement is laid out as a title page, so the registrant is the title and this
+#: is the note underneath saying what the title was.
+_REGISTRANT_CAPTION = re.compile(
+    r"^\(?\s*Exact\s+Name\s+of\s+(?:the\s+)?(?:Registrant|Trust|Fund|Issuer)"
+    r"[^)␞␟␝]{0,80}\)?\.?$",
+    re.IGNORECASE,
+)
+
+#: Roles a prospectus names beside the registrant. The adviser, the sponsor and
+#: the depositor all appear within a block or two of the registrant's own name,
+#: and any of them recorded as the security's identity is a wrong mapping that
+#: reads like a right one -- which is exactly what this control's own
+#: verification route warns about.
+_ROLE_WORD = re.compile(
+    r"\b(?:Adviser|Advisor|Sponsor|Depositor|Trustee|Distributor|Custodian|"
+    r"Underwriter|Administrator|Manager|Agent|Counsel|Auditor)s?\b",
+    re.IGNORECASE,
+)
+
+#: Column headings of the registration-statement listing table. Recognised as a
+#: set rather than a fixed order, because the order is a layout choice.
+_FUND_COLUMN = re.compile(r"^Funds?(?:\s+Name)?$", re.IGNORECASE)
+_EXCHANGE_COLUMN = re.compile(
+    r"^Principal\s+(?:U\.?\s*S\.?\s+)?Listing\s+Exchange$", re.IGNORECASE
+)
+_TICKER_COLUMN = re.compile(r"^(?:Ticker|Trading)?\s*(?:Ticker|Symbol)$", re.IGNORECASE)
+
+#: A plausible ticker cell. Short, and not a sentence.
+_TICKER_VALUE = re.compile(r"^[A-Za-z0-9.\-]{1,10}$")
+
 #: How many non-empty blocks past a label may be inspected for its value. Two,
 #: because a label and its value are adjacent by definition and the allowance
 #: exists only for the spacer blocks that layout puts between them. Scanning
@@ -904,6 +962,7 @@ def extract_fund_trust_identity(document_text: str) -> FundTrustExtract:
     listing, trading = _listing_constructions(text)
 
     return FundTrustExtract(
+        listing_rows=tuple(_listing_table_rows(text)),
         exact_name=exact_name,
         exact_name_statement=exact_statement,
         former_names=_matches(_FORMER_NAME, text),
@@ -944,6 +1003,82 @@ def _blocks(text: str) -> list[_Block]:
     return found
 
 
+def _cell_rows(text: str) -> list[tuple[int, int, list[str]]]:
+    """The document as rows of cells, for the tables a block list flattens.
+
+    :func:`_blocks` answers "what are the pieces, in order", which is what a
+    label/value pair needs. A table needs the second question a block list cannot
+    answer: which pieces are on the same row. Both views are built from the same
+    sentinels -- ``␟`` between cells, ``␞`` and ``␝`` between rows -- so neither
+    is a second parse of the document, only a second way of reading one.
+    """
+    out: list[tuple[int, int, list[str]]] = []
+    position = 0
+    for separator in re.finditer(f"[{_ROW}{_TABLE}]", text + _ROW):
+        segment = text[position : separator.start()]
+        cells = [_clean(cell) for cell in segment.split(_CELL)]
+        kept = [cell for cell in cells if cell]
+        if kept:
+            out.append((position, separator.start(), kept))
+        position = separator.end()
+    return out
+
+
+def _listing_table_rows(text: str) -> list[FundListingRow]:
+    """Rows of an explicit fund/exchange/ticker table, associated by column.
+
+    A registration statement states the relationship as a table rather than a
+    sentence: ``Fund | Principal U.S. Listing Exchange | Ticker`` over a row
+    naming all three. That is stronger evidence than any prose, because the
+    filing itself has joined the three values -- nothing here has to infer which
+    ticker belongs to which fund.
+
+    **The three headings must be contiguous.** Their positions give the columns,
+    and normalising them against the leftmost is what survives a layout where
+    ordinary paragraphs share a row with the heading cells -- which happens
+    whenever a table follows prose without an intervening row break. Requiring
+    contiguity is also the sanity check: three headings scattered through a row
+    are not a header row.
+    """
+    rows = _cell_rows(text)
+    out: list[FundListingRow] = []
+
+    for index, (_, _, cells) in enumerate(rows):
+        columns: dict[str, int] = {}
+        for position, cell in enumerate(cells):
+            for name, pattern in (
+                ("fund", _FUND_COLUMN),
+                ("exchange", _EXCHANGE_COLUMN),
+                ("ticker", _TICKER_COLUMN),
+            ):
+                if name not in columns and pattern.match(cell):
+                    columns[name] = position
+        if len(columns) < 3:
+            continue
+        offsets = sorted(columns.values())
+        if offsets[-1] - offsets[0] != 2:
+            continue
+        base = offsets[0]
+        width = 3
+
+        for _, _, data in rows[index + 1 :]:
+            if len(data) < width:
+                break
+            fund = data[columns["fund"] - base]
+            exchange = data[columns["exchange"] - base]
+            ticker = data[columns["ticker"] - base]
+            if not _TICKER_VALUE.match(ticker):
+                break
+            if not any(ch.isalpha() for ch in fund) or not any(ch.isalpha() for ch in exchange):
+                break
+            out.append(FundListingRow(fund=fund, exchange=exchange, ticker=ticker))
+            if len(out) >= 8:
+                break
+        break
+
+    return out
+
+
 def _value_blocks(blocks: list[_Block], index: int) -> list[_Block]:
     """The blocks that may hold the value of the label in ``blocks[index]``.
 
@@ -977,6 +1112,10 @@ def _is_plausible_legal_name(candidate: str) -> bool:
         return False
     if ":" in candidate:
         return False
+    if _ROLE_WORD.search(candidate):
+        return False
+    if _REGISTRANT_CAPTION.match(candidate) or _EXACT_NAME_LABEL.search(candidate):
+        return False
     return not (_EXCHANGE_NOUN.search(candidate) or _SYMBOL_CLAUSE.search(candidate))
 
 
@@ -1004,7 +1143,39 @@ def _labelled_legal_name(text: str) -> tuple[str, str]:
             name = _clean(candidate.split("(")[0])
             if _is_plausible_legal_name(name):
                 return name, _clean(f"{match.group(0)} {name}")
+
+    # The registration-statement convention: a title-page caption with no colon,
+    # labelling the name ABOVE it. Tried second so a colon-terminated field is
+    # preferred where a filing has both, and searched backwards first because
+    # that is where this convention puts its value.
+    for index, block in enumerate(blocks):
+        if not _REGISTRANT_CAPTION.match(block.text):
+            continue
+        for value_block in _caption_value_blocks(blocks, index):
+            name = _clean(value_block.text.split("(")[0])
+            if _is_plausible_legal_name(name):
+                return name, _clean(f"{name} {block.text}")
     return "", ""
+
+
+def _caption_value_blocks(blocks: list[_Block], index: int) -> list[_Block]:
+    """Blocks that may hold the name a caption labels: above first, then below.
+
+    Bounded exactly as the forward search is, and for the same reason. Above,
+    because a title page puts the name over its caption; below as well, because
+    the same wording appears in cell-pair layouts where it sits beside the value.
+    Enumerators are stepped over and a labelled field ends the search, so a
+    caption whose own value is missing reaches nothing rather than reaching the
+    adviser named underneath it.
+    """
+    out: list[_Block] = []
+    for block in reversed(blocks[max(0, index - _VALUE_LOOKAHEAD) : index]):
+        if _ENUMERATOR_BLOCK.match(block.text):
+            continue
+        if _LABEL_ONLY_BLOCK.match(block.text):
+            break
+        out.append(block)
+    return out + _value_blocks(blocks, index)
 
 
 def _principal_listing_constructions(blocks: list[_Block]) -> list[tuple[int, int, str]]:
@@ -1181,12 +1352,21 @@ def extract_identity_evidence(document_text: str) -> EvidenceExtract:
     # A filing is not required to be one kind of thing: whichever structures are
     # present are reported, and a document with neither is NOT_FOUND as before.
     fund = extract_fund_trust_identity(document_text)
+    if len(fund.listing_rows) > 1:
+        notes.append(
+            f"the listing table has {len(fund.listing_rows)} fund rows; which one this "
+            "control refers to has NOT been decided here, and every row is reported for "
+            "a human to choose between"
+        )
     if fund.has_anything and not fund.is_complete:
         missing = []
         if not fund.has_legal_identity:
-            missing.append("a labelled legal name or a shorthand the filing defines")
+            missing.append("a labelled legal name")
         if not fund.has_listing_identity:
-            missing.append("a construction naming an exchange and a symbol together")
+            missing.append(
+                "a single unambiguous listing row, or a construction naming an "
+                "exchange and a symbol together"
+            )
         notes.append(
             "fund/trust identity passages were found but incomplete, missing "
             + " and ".join(missing)
