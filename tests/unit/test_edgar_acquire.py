@@ -793,15 +793,19 @@ def test_a_json_report_written_under_out_is_ignored_by_git(tmp_path: Path) -> No
 
 TRUST_PROSPECTUS_HTML = """
 <html><body>
-<p>Exact name of Trust: STATE STREET SPDR S&amp;P 500 ETF TRUST (formerly known as
-SPDR TRUST SERIES 1 prior to January 27, 2010 and SPDR S&amp;P 500 ETF TRUST prior
-to January 26, 2026)</p>
+<table><tr><td>Exact name of Trust:</td>
+    <td>STATE STREET SPDR S&amp;P 500 ETF TRUST</td></tr></table>
+<p>(formerly known as SPDR&reg; TRUST SERIES 1 prior to January 27, 2010 and
+SPDR&reg; S&amp;P 500&reg; ETF TRUST prior to January 26, 2026)</p>
 <p>State Street SPDR S&amp;P 500 ETF Trust ("SPY" or the "Trust") is a unit
 investment trust.</p>
 <p>Principal U.S. Listing Exchange for State Street SPDR S&amp;P 500 ETF Trust:
 NYSE Arca, Inc. under the symbol "SPY"</p>
 <p>The Sponsor of the Trust is a global asset management firm; the Trustee and the
 Distributor are named in the Statement of Additional Information.</p>
+<p>The Trust is an exchange-traded fund holding a portfolio of equity securities.
+Units of the Trust are listed and traded, and investors may buy and sell Units
+under the market symbol "SPY" throughout the trading day.</p>
 <p>Individual Units of the Trust may be purchased and sold on NYSE Arca, Inc. (the
 "Exchange"), under the market symbol "SPY".</p>
 </body></html>
@@ -861,7 +865,8 @@ def test_former_names_are_reported_and_not_interpreted() -> None:
 
     assert fund.former_names
     joined = " ".join(fund.former_names)
-    assert "SPDR TRUST SERIES 1" in joined
+    assert "SPDR® TRUST SERIES 1" in joined
+    assert "&reg;" not in joined
     assert "prior to January 27, 2010" in joined
 
     assert any("NOT been read as a rename" in n for n in extract.notes)
@@ -895,25 +900,81 @@ def test_the_units_trading_statement_is_extracted_independently() -> None:
     assert 'under the market symbol "SPY"' in joined
 
 
-def test_a_missing_exchange_construction_is_partial_not_fabricated() -> None:
-    """Legal identity alone does not establish a listing."""
-    html = TRUST_PROSPECTUS_HTML
-    html = html.replace(
-        "<p>Principal U.S. Listing Exchange for State Street SPDR S&amp;P 500 ETF Trust:\n"
-        'NYSE Arca, Inc. under the symbol "SPY"</p>',
-        "",
-    )
-    html = html.replace(
-        "<p>Individual Units of the Trust may be purchased and sold on NYSE Arca, Inc. (the\n"
-        '"Exchange"), under the market symbol "SPY".</p>',
-        "",
+def test_legal_identity_without_a_listing_construction_is_partial() -> None:
+    """A name is not a listing. Requirement 10, and the honest half of it."""
+    html = (
+        "<p>Exact name of Trust: EXAMPLE INDEX TRUST</p>"
+        "<p>Example Index Trust (\"EXT\" or the \"Trust\") is a unit investment trust "
+        "holding a portfolio of equity securities.</p>"
     )
     extract = extract_identity_evidence(html)
 
-    assert extract.status is ExtractionStatus.PARTIAL
+    assert extract.fund_trust.exact_name == "EXAMPLE INDEX TRUST"
     assert extract.fund_trust.has_legal_identity
     assert not extract.fund_trust.has_listing_identity
+    assert extract.status is ExtractionStatus.PARTIAL
     assert any("exchange and a symbol together" in n for n in extract.notes)
+
+
+def test_listing_identity_without_legal_identity_is_partial() -> None:
+    """Requirement 11. A shorthand names what the filing will say, not what it is."""
+    html = (
+        "<p>Example Index Trust (\"EXT\" or the \"Trust\") is a unit investment trust.</p>"
+        "<p>Principal U.S. Listing Exchange for Example Index Trust: Example Exchange LLC "
+        "under the symbol \"EXT\"</p>"
+    )
+    extract = extract_identity_evidence(html)
+
+    assert extract.fund_trust.exact_name == ""
+    assert extract.fund_trust.shorthand_definitions
+    assert not extract.fund_trust.has_legal_identity
+    assert extract.fund_trust.has_listing_identity
+    assert extract.status is ExtractionStatus.PARTIAL
+
+
+def test_legal_identity_plus_listing_identity_is_found() -> None:
+    """Requirement 12: both halves, and only then."""
+    html = (
+        "<p>Exact name of Trust: EXAMPLE INDEX TRUST</p>"
+        "<p>Principal U.S. Listing Exchange for Example Index Trust: Example Exchange LLC "
+        "under the symbol \"EXT\"</p>"
+    )
+    extract = extract_identity_evidence(html)
+
+    assert extract.fund_trust.is_complete
+    assert extract.status is ExtractionStatus.FOUND
+
+
+def test_a_label_with_no_value_is_not_legal_identity() -> None:
+    """Requirement 2, and the exact shape of the first real failure.
+
+    The helper reported "Exact name of Trust:" as the legal name because the
+    pattern accepted whitespace as a value. A label states where a name would go.
+    """
+    html = (
+        "<p>Exact name of Trust:</p>"
+        "<p>Principal U.S. Listing Exchange for the Trust: Example Exchange LLC "
+        "under the symbol \"EXT\"</p>"
+    )
+    extract = extract_identity_evidence(html)
+
+    assert extract.fund_trust.exact_name == ""
+    assert not extract.fund_trust.has_legal_identity
+    assert extract.status is ExtractionStatus.PARTIAL
+
+
+def test_a_units_statement_without_a_venue_is_not_listing_identity() -> None:
+    """Requirement 9. A symbol with no place attached is a near-miss."""
+    html = (
+        "<p>Exact name of Trust: EXAMPLE INDEX TRUST</p>"
+        "<p>Units of the Trust are bought and sold by investors throughout the day, "
+        "and are quoted under the symbol \"EXT\" wherever they change hands.</p>"
+    )
+    extract = extract_identity_evidence(html)
+
+    assert extract.fund_trust.trading_statements or extract.fund_trust.listing_statements
+    assert not extract.fund_trust.has_listing_identity
+    assert extract.status is ExtractionStatus.PARTIAL
 
 
 def test_a_missing_symbol_is_partial_not_fabricated() -> None:
@@ -1051,17 +1112,96 @@ def test_the_trust_family_reports_no_internal_sentinels() -> None:
         assert sentinel not in reported
 
 
-def test_one_sentence_is_reported_under_one_label() -> None:
-    """The units sentence also contains "Trust", so both patterns match it.
+def test_overlapping_matches_are_not_counted_as_independent_corroboration() -> None:
+    """Requirement 13, and the second half of the first real failure.
 
-    Reporting it twice would read as two independent constructions when the
-    filing made one, which is the sort of inflation that matters when a person
-    is deciding whether the evidence is sufficient.
+    Both matchers see the units sentence. Reporting it twice would show a
+    reviewer two passages that look like mutual confirmation and are one passage
+    counted twice. Overlap is resolved by source span, so each passage in the
+    filing appears exactly once across both fields.
+    """
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+    statements = [*fund.listing_statements, *fund.trading_statements]
+
+    assert len(statements) == len(set(statements))
+    for i, first in enumerate(statements):
+        for second in statements[i + 1 :]:
+            assert first not in second
+            assert second not in first
+
+    # The specific listing construction survives under its own label rather than
+    # being swallowed by a broader match, which is what hid it in the real run.
+    assert any("Principal U.S. Listing Exchange" in s for s in fund.listing_statements)
+    assert any("Individual Units of the Trust" in s for s in fund.trading_statements)
+
+
+def test_html_entities_are_decoded_in_every_emitted_passage() -> None:
+    """Requirement 5 and 20, from the real run.
+
+    The first real output quoted a trust's former name as
+    "SPDR &reg; S&P 500 &reg; ETF TRUST". Evidence a person is meant to read and
+    cite must carry the filing's wording, not its markup.
+    """
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+    emitted = " ".join(
+        [
+            fund.exact_name,
+            fund.exact_name_statement,
+            *fund.former_names,
+            *fund.shorthand_definitions,
+            *fund.listing_statements,
+            *fund.trading_statements,
+        ]
+    )
+
+    assert "®" in emitted
+    assert "&" in emitted  # S&P survived as an ampersand
+    for entity in ("&reg;", "&amp;", "&nbsp;", "&#8217;", "&quot;"):
+        assert entity not in emitted
+
+
+def test_decoding_is_not_normalization() -> None:
+    """Requirement 6. Characters change; words do not.
+
+    Three renderings of this trust's name appear in the fixture and all three
+    survive distinctly. Collapsing them into one canonical name would destroy the
+    difference a human is being asked to adjudicate.
     """
     fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
 
-    assert len(fund.listing_statements) == 1
-    assert len(fund.trading_statements) == 1
-    assert "Principal U.S. Listing Exchange" in fund.listing_statements[0]
-    assert "Individual Units" in fund.trading_statements[0]
-    assert fund.listing_statements[0] != fund.trading_statements[0]
+    assert fund.exact_name == "STATE STREET SPDR S&P 500 ETF TRUST"
+    joined = " ".join([*fund.former_names, *fund.shorthand_definitions])
+    assert "SPDR® TRUST SERIES 1" in joined
+    assert "SPDR® S&P 500® ETF TRUST" in joined
+    assert "State Street SPDR S&P 500 ETF Trust" in joined
+
+
+def test_the_legal_name_is_the_value_and_the_statement_keeps_the_label() -> None:
+    """Requirement 1. The label is context; the value is the evidence."""
+    fund = extract_fund_trust_identity(TRUST_PROSPECTUS_HTML)
+
+    assert fund.exact_name == "STATE STREET SPDR S&P 500 ETF TRUST"
+    assert not fund.exact_name.lower().startswith("exact name")
+    assert fund.exact_name_statement.startswith("Exact name of Trust:")
+    assert fund.exact_name in fund.exact_name_statement
+
+
+def test_a_shorthand_alone_cannot_complete_the_family() -> None:
+    """Requirement 8, stated directly against the predicate."""
+    html = (
+        '<p>Example Index Trust ("EXT" or the "Trust") is a unit investment trust.</p>'
+    )
+    fund = extract_fund_trust_identity(html)
+
+    assert fund.shorthand_definitions
+    assert not fund.has_legal_identity
+    assert not fund.is_complete
+
+
+def test_former_names_alone_cannot_complete_the_family() -> None:
+    html = "<p>formerly known as EXAMPLE OLD TRUST prior to January 1, 2020</p>"
+    fund = extract_fund_trust_identity(html)
+
+    assert fund.former_names
+    assert not fund.has_legal_identity
+    assert not fund.is_complete

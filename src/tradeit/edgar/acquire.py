@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import html
 import os
 import re
 from collections.abc import Sequence
@@ -193,7 +194,10 @@ class FundTrustExtract:
     would be recorded as a security's.
     """
 
+    #: The name itself, separated from the label that introduced it.
     exact_name: str = ""
+    #: Label and value together, for citation context.
+    exact_name_statement: str = ""
     former_names: tuple[str, ...] = ()
     shorthand_definitions: tuple[str, ...] = ()
     listing_statements: tuple[str, ...] = ()
@@ -201,17 +205,31 @@ class FundTrustExtract:
 
     @property
     def has_legal_identity(self) -> bool:
-        return bool(self.exact_name or self.shorthand_definitions)
+        """A labelled legal name, and nothing weaker.
+
+        **A shorthand is not a legal name.** ``("SPY" or the "Trust")`` tells a
+        reader what the filing will call the thing for the next hundred pages; it
+        does not state what the thing is. Nor do former names, which describe
+        what it stopped being called. Both are reported because they are useful
+        to a person reading the evidence, and neither counts here.
+        """
+        return bool(self.exact_name)
 
     @property
     def has_listing_identity(self) -> bool:
-        """A construction naming an exchange and a symbol together.
+        """A construction naming a place of trading and a symbol together.
 
-        Both statement kinds require the exchange and the symbol inside one
-        matched core, so a document that merely mentions a ticker somewhere in
-        its prose cannot satisfy this.
+        Matching the pattern is not enough: the retained text must actually
+        contain both halves. A units sentence that reaches "under the symbol"
+        through two hundred characters of description, without ever naming an
+        exchange or a market, describes trading in general rather than this
+        security on that venue -- and a symbol with no venue attached is the sort
+        of near-miss that reads like evidence at a glance.
         """
-        return bool(self.listing_statements or self.trading_statements)
+        return any(
+            _EXCHANGE_NOUN.search(statement) and _SYMBOL_CLAUSE.search(statement)
+            for statement in (*self.listing_statements, *self.trading_statements)
+        )
 
     @property
     def is_complete(self) -> bool:
@@ -221,6 +239,7 @@ class FundTrustExtract:
     def has_anything(self) -> bool:
         return bool(
             self.exact_name
+            or self.exact_name_statement
             or self.former_names
             or self.shorthand_definitions
             or self.listing_statements
@@ -230,6 +249,7 @@ class FundTrustExtract:
     def summary(self) -> dict[str, Any]:
         return {
             "exact_name": self.exact_name,
+            "exact_name_statement": self.exact_name_statement,
             "former_names": list(self.former_names),
             "shorthand_definitions": list(self.shorthand_definitions),
             "listing_statements": list(self.listing_statements),
@@ -598,18 +618,6 @@ _TAG = re.compile(r"<[^>]*>")
 #: full of, which are otherwise invisible in a quotation and break comparison.
 _WS = re.compile("[ \t\u00a0]+")
 
-_ENTITIES = {
-    "&nbsp;": " ",
-    "&amp;": "&",
-    "&lt;": "<",
-    "&gt;": ">",
-    "&quot;": '"',
-    "&#8217;": "'",
-    "&#8220;": '"',
-    "&#8221;": '"',
-    "&#160;": " ",
-}
-
 #: Cell, row and table markers survive tag stripping so a table's shape is still
 #: readable afterwards. Without them every cover-page cell runs into the next
 #: and "Common stock" / "MSFT" / "Nasdaq" becomes one unsplittable string.
@@ -660,11 +668,33 @@ _Q = "\"'\u201c\u201d\u2018\u2019"
 #: a sponsor recorded as the security's identity is a wrong mapping that reads
 #: like a right one. The capture stops before an opening parenthesis so a
 #: parenthetical history is reported separately rather than folded into the name.
+#:
+#: **The value is a named group, and it must contain a letter.** A label with
+#: nothing usable after it is not identity evidence, and the first real filing
+#: proved that the distinction is not academic: it reported ``Exact name of
+#: Trust:`` as the legal name because the pattern accepted whitespace as a value.
+#:
+#: **One cell boundary may sit between the label and the value.** Filings put the
+#: label in one table cell and the name in the next, so a pattern that cannot
+#: cross a single boundary misses the ordinary case; one is allowed because a
+#: label and its value are adjacent, and more than one is a different part of the
+#: document.
 _EXACT_NAME = re.compile(
     r"Exact\s+name\s+of\s+(?:the\s+)?(?:Trust|Fund|Registrant|Issuer)"
-    r"[^:␞␟␝]{0,60}:\s*[^(␞␟␝]{1,160}",
+    r"[^:␞␟␝]{0,60}:[ \t]*[␟␞]?[ \t]*"
+    r"(?P<value>[^(␞␟␝]{0,160}?[A-Za-z][^(␞␟␝]{0,160}?)"
+    r"(?=[(␞␟␝]|$)",
     re.IGNORECASE,
 )
+
+#: Generic listing vocabulary, deliberately not a list of venues. A construction
+#: that ties a symbol to a place of trading says "Exchange" or "Market" almost
+#: without exception, and requiring the noun rather than the name means a venue
+#: this project has never seen still counts.
+_EXCHANGE_NOUN = re.compile(r"\b(?:Exchange|Market)\b", re.IGNORECASE)
+
+#: The symbol half of the same construction.
+_SYMBOL_CLAUSE = re.compile(r"\bunder\s+the\s+(?:market\s+)?symbol\b", re.IGNORECASE)
 
 #: Reported verbatim and never parsed. The dates inside are dates the filing
 #: mentions, not dates this tool has established.
@@ -726,9 +756,13 @@ def strip_html(raw: str) -> str:
     text = _ROW_END.sub(_ROW, text)
     text = _CELL_END.sub(_CELL, text)
     text = _TAG.sub(" ", text)
-    for entity, char in _ENTITIES.items():
-        text = text.replace(entity, char)
-    text = re.sub(r"&#\d+;", " ", text)
+    # Every named and numeric entity, not a hand-written handful. A trust's name
+    # is routinely written "SPDR&reg; S&P 500&reg; ETF TRUST", and evidence a
+    # person is meant to read and cite must not carry markup syntax through into
+    # the quotation. Decoding happens after tags are removed, so an entity can
+    # never introduce one. It is decoding, not normalization: the characters
+    # change, the words do not.
+    text = html.unescape(text)
     text = _WS.sub(" ", text)
     return text
 
@@ -854,26 +888,100 @@ def extract_fund_trust_identity(document_text: str) -> FundTrustExtract:
     exchange and a symbol are each reported as written, for a person to read.
     """
     text = strip_html(document_text)
-    exact = _matches(_EXACT_NAME, text, limit=1)
-    trading = _matches(_FUND_TRADING, text)
 
-    # One sentence, one label. The units construction also contains the word
-    # "Trust", so the broader listing pattern matches it too; reporting the same
-    # sentence twice would read as two independent constructions when the filing
-    # made one. The more specific pattern keeps it.
-    listing = tuple(
-        statement
-        for statement in _matches(_FUND_LISTING, text)
-        if not any(statement in other or other in statement for other in trading)
-    )
+    exact_name, exact_statement = _labelled_legal_name(text)
+
+    listing, trading = _listing_constructions(text)
 
     return FundTrustExtract(
-        exact_name=exact[0] if exact else "",
+        exact_name=exact_name,
+        exact_name_statement=exact_statement,
         former_names=_matches(_FORMER_NAME, text),
         shorthand_definitions=_matches(_SHORTHAND, text),
         listing_statements=listing,
         trading_statements=trading,
     )
+
+
+def _labelled_legal_name(text: str) -> tuple[str, str]:
+    """The value beside an explicit legal-name label, or nothing at all.
+
+    Returns ``(value, whole construction)``. Empty when no label is found, when
+    the label has no value beside it, or when what follows the label is plainly
+    not a name -- and empty is the right answer in all three cases, because the
+    caller treats a missing legal name as incomplete rather than substituting
+    something weaker.
+
+    **Why the candidate is checked rather than trusted.** Filings put the label
+    in one cell and the name in the next, so the pattern is allowed to cross one
+    boundary. That allowance is indistinguishable, structurally, from a label
+    alone in a paragraph followed by an unrelated paragraph -- and the first real
+    filing had a bare label, so the crossing swallowed the sentence after it. A
+    registrant's name carries no colon, names no exchange and quotes no ticker;
+    a candidate that does any of those is a sentence that happened to be next,
+    and is refused.
+    """
+    for match in _EXACT_NAME.finditer(text):
+        candidate = _clean(match.group("value"))
+        if not candidate or not any(ch.isalpha() for ch in candidate):
+            continue
+        if ":" in candidate:
+            continue
+        if _EXCHANGE_NOUN.search(candidate) or _SYMBOL_CLAUSE.search(candidate):
+            continue
+        return candidate, _clean(match.group(0))
+    return "", ""
+
+
+def _listing_constructions(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Listing and units statements, with overlapping matches collapsed.
+
+    **Two matchers over one document produce fake corroboration unless overlap is
+    resolved by position.** The first real filing showed both failure directions
+    at once: the broad matcher swallowed the specific *Principal U.S. Listing
+    Exchange* sentence so it never appeared under its own label, and elsewhere it
+    sliced a run of trust-description prose into a second "independent"
+    construction beside a genuine one. Two passages a reviewer would read as
+    mutual confirmation were one passage counted twice.
+
+    Resolution is by **source span, shortest first**. A shorter match is the more
+    specific reading of the same text, so it is kept and anything overlapping it
+    is dropped, whichever pattern produced it. Comparing rendered strings cannot
+    do this -- two overlapping matches often share no substring relationship --
+    and preferring one pattern over the other was the bug, since either can be
+    the broader one depending on the sentence.
+    """
+    found: list[tuple[int, int, str, bool]] = []
+    trading_spans: list[tuple[int, int]] = []
+    for pattern, is_trading in ((_FUND_LISTING, False), (_FUND_TRADING, True)):
+        for match in pattern.finditer(text):
+            cleaned = _clean(match.group(0))
+            if not cleaned:
+                continue
+            found.append((match.start(), match.end(), cleaned, is_trading))
+            if is_trading:
+                trading_spans.append((match.start(), match.end()))
+
+    kept: list[tuple[int, int, str, bool]] = []
+    for start, end, cleaned, is_trading in sorted(
+        found, key=lambda item: (item[1] - item[0], item[0])
+    ):
+        if any(start < other[1] and other[0] < end for other in kept):
+            continue
+        # The span decides which text is kept; the more specific pattern decides
+        # what to call it. Where a units construction covers the same passage,
+        # the surviving text is a units construction however it was matched --
+        # otherwise the shortest-span rule quietly relabels the filing's own
+        # purchase-and-sale sentence as a generic listing mention.
+        labelled = is_trading or any(
+            start < other[1] and other[0] < end for other in trading_spans
+        )
+        kept.append((start, end, cleaned, labelled))
+
+    kept.sort(key=lambda item: item[0])
+    listing = tuple(item[2] for item in kept if not item[3])[:5]
+    trading = tuple(item[2] for item in kept if item[3])[:5]
+    return listing, trading
 
 
 def extract_identity_evidence(document_text: str) -> EvidenceExtract:
