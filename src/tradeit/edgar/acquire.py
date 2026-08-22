@@ -662,30 +662,40 @@ _SYMBOL_SENTENCE = re.compile(
 #: character nobody can see.
 _Q = "\"'\u201c\u201d\u2018\u2019"
 
-#: The legal name, and **only** from an explicit label. A prospectus names its
-#: sponsor, its adviser, its distributor and its index provider; any of those
-#: would be captured by a pattern that looked for a capitalised name instead, and
-#: a sponsor recorded as the security's identity is a wrong mapping that reads
-#: like a right one. The capture stops before an opening parenthesis so a
-#: parenthetical history is reported separately rather than folded into the name.
-#:
-#: **The value is a named group, and it must contain a letter.** A label with
-#: nothing usable after it is not identity evidence, and the first real filing
-#: proved that the distinction is not academic: it reported ``Exact name of
-#: Trust:`` as the legal name because the pattern accepted whitespace as a value.
-#:
-#: **One cell boundary may sit between the label and the value.** Filings put the
-#: label in one table cell and the name in the next, so a pattern that cannot
-#: cross a single boundary misses the ordinary case; one is allowed because a
-#: label and its value are adjacent, and more than one is a different part of the
-#: document.
-_EXACT_NAME = re.compile(
-    r"Exact\s+name\s+of\s+(?:the\s+)?(?:Trust|Fund|Registrant|Issuer)"
-    r"[^:␞␟␝]{0,60}:[ \t]*[␟␞]?[ \t]*"
-    r"(?P<value>[^(␞␟␝]{0,160}?[A-Za-z][^(␞␟␝]{0,160}?)"
-    r"(?=[(␞␟␝]|$)",
+#: The legal-name label, through its colon and no further. A prospectus names its
+#: sponsor, its depositor, its adviser and its distributor; a pattern that looked
+#: for a capitalised name instead would capture any of them, and a depositor
+#: recorded as the security's identity is a wrong mapping that reads like a right
+#: one. The value is found structurally -- see :func:`_labelled_legal_name` --
+#: rather than by letting this pattern run on, because in a real filing the label
+#: and its value are in different table cells with an unknown number of empty
+#: ones between them.
+_EXACT_NAME_LABEL = re.compile(
+    r"Exact\s+name\s+of\s+(?:the\s+)?(?:Trust|Fund|Registrant|Issuer)[^:␞␟␝]{0,60}:",
     re.IGNORECASE,
 )
+
+#: The principal-listing label, likewise through its colon. The trust name inside
+#: it is what ties the listing to a security rather than to the document at large.
+_PRINCIPAL_LISTING_LABEL = re.compile(
+    r"Principal\s+(?:U\.?\s*S\.?\s+)?Listing\s+Exchange[^:␞␟␝]{0,160}:",
+    re.IGNORECASE,
+)
+
+#: A block that is a field label and nothing else. Reaching one while looking for
+#: a value means the value is absent: the document has moved on to the next
+#: field, and whatever follows belongs to that field rather than this one.
+_LABEL_ONLY_BLOCK = re.compile(r"^(?:[A-Za-z0-9]{1,3}[.)]\s*)?[A-Za-z][^:]{2,70}:$")
+
+#: An enumerator cell -- "A.", "(1)", "iii." -- which carries no content and sits
+#: between a field's number and its label in most SEC form layouts.
+_ENUMERATOR_BLOCK = re.compile(r"^\(?[A-Za-z0-9]{1,3}[.)]?$")
+
+#: How many non-empty blocks past a label may be inspected for its value. Two,
+#: because a label and its value are adjacent by definition and the allowance
+#: exists only for the spacer blocks that layout puts between them. Scanning
+#: further is how a later field's value becomes this field's answer.
+_VALUE_LOOKAHEAD = 2
 
 #: Generic listing vocabulary, deliberately not a list of venues. A construction
 #: that ties a symbol to a place of trading says "Exchange" or "Market" almost
@@ -903,34 +913,125 @@ def extract_fund_trust_identity(document_text: str) -> FundTrustExtract:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _Block:
+    """One cell or paragraph of the stripped document, with its source span."""
+
+    start: int
+    end: int
+    text: str
+
+
+def _blocks(text: str) -> list[_Block]:
+    """The document as the ordered non-empty blocks the markup separated it into.
+
+    **Flattened text cannot express a label/value pair, and real filings are
+    full of them.** ``Exact name of Trust:`` sits in one table cell and the name
+    in another; ``Principal U.S. Listing Exchange for <trust>:`` is one block and
+    ``NYSE Arca, Inc. under the symbol "SPY"`` the next. A regex whose gaps stop
+    at the cell sentinel -- which they must, or a match would run across the
+    whole page -- can never see the second half. Splitting on those same
+    sentinels turns the boundary from an obstacle into the structure it actually
+    is.
+    """
+    found: list[_Block] = []
+    position = 0
+    for separator in re.finditer(f"[{_CELL}{_ROW}{_TABLE}]", text + _CELL):
+        cleaned = _clean(text[position : separator.start()])
+        if cleaned:
+            found.append(_Block(position, separator.start(), cleaned))
+        position = separator.end()
+    return found
+
+
+def _value_blocks(blocks: list[_Block], index: int) -> list[_Block]:
+    """The blocks that may hold the value of the label in ``blocks[index]``.
+
+    Bounded on three sides. At most :data:`_VALUE_LOOKAHEAD` blocks are
+    inspected; enumerator cells are stepped over because they are layout rather
+    than content; and any block that is itself a field label ends the search
+    immediately, because the document has moved on to the next field and its
+    value is not this one's.
+    """
+    out: list[_Block] = []
+    for block in blocks[index + 1 : index + 1 + _VALUE_LOOKAHEAD + 1]:
+        if _ENUMERATOR_BLOCK.match(block.text):
+            continue
+        if _LABEL_ONLY_BLOCK.match(block.text):
+            break
+        out.append(block)
+        if len(out) >= _VALUE_LOOKAHEAD:
+            break
+    return out
+
+
+def _is_plausible_legal_name(candidate: str) -> bool:
+    """Whether this text could be a registrant's name rather than a sentence.
+
+    A name carries no colon, names no exchange and quotes no ticker. A candidate
+    doing any of those is prose that happened to be adjacent, and refusing it is
+    what keeps a listing sentence or a neighbouring field out of the one place a
+    reader will read as the security's identity.
+    """
+    if not candidate or not any(ch.isalpha() for ch in candidate):
+        return False
+    if ":" in candidate:
+        return False
+    return not (_EXCHANGE_NOUN.search(candidate) or _SYMBOL_CLAUSE.search(candidate))
+
+
 def _labelled_legal_name(text: str) -> tuple[str, str]:
     """The value beside an explicit legal-name label, or nothing at all.
 
-    Returns ``(value, whole construction)``. Empty when no label is found, when
-    the label has no value beside it, or when what follows the label is plainly
-    not a name -- and empty is the right answer in all three cases, because the
-    caller treats a missing legal name as incomplete rather than substituting
-    something weaker.
-
-    **Why the candidate is checked rather than trusted.** Filings put the label
-    in one cell and the name in the next, so the pattern is allowed to cross one
-    boundary. That allowance is indistinguishable, structurally, from a label
-    alone in a paragraph followed by an unrelated paragraph -- and the first real
-    filing had a bare label, so the crossing swallowed the sentence after it. A
-    registrant's name carries no colon, names no exchange and quotes no ticker;
-    a candidate that does any of those is a sentence that happened to be next,
-    and is refused.
+    Returns ``(value, label and value together)``. Empty when there is no label,
+    when the label has no value beside it, or when what sits beside it is not
+    name-shaped -- and empty is the right answer in all three, because the caller
+    treats a missing legal name as incomplete rather than substituting something
+    weaker. A depositor two fields down is never reached: its own label stops the
+    search before its value is in view.
     """
-    for match in _EXACT_NAME.finditer(text):
-        candidate = _clean(match.group("value"))
-        if not candidate or not any(ch.isalpha() for ch in candidate):
+    blocks = _blocks(text)
+    for index, block in enumerate(blocks):
+        match = _EXACT_NAME_LABEL.search(block.text)
+        if match is None:
             continue
-        if ":" in candidate:
-            continue
-        if _EXCHANGE_NOUN.search(candidate) or _SYMBOL_CLAUSE.search(candidate):
-            continue
-        return candidate, _clean(match.group(0))
+
+        inline = _clean(block.text[match.end() :])
+        candidates = [inline] if inline else [b.text for b in _value_blocks(blocks, index)]
+        for candidate in candidates:
+            # A parenthetical history beside the name is reported separately, so
+            # it is trimmed off here rather than folded into the name itself.
+            name = _clean(candidate.split("(")[0])
+            if _is_plausible_legal_name(name):
+                return name, _clean(f"{match.group(0)} {name}")
     return "", ""
+
+
+def _principal_listing_constructions(blocks: list[_Block]) -> list[tuple[int, int, str]]:
+    """Listing headings joined to the value block that completes them.
+
+    The strongest listing evidence a prospectus offers, because the heading names
+    *which* trust the listing is about and the value names the venue and the
+    symbol. Reported as one construction so a reader sees the association the
+    filing made rather than three fragments they must join themselves.
+
+    Where the heading and its value are one block already, that block is used
+    unchanged. Where they are adjacent blocks, the two are joined -- and only
+    adjacent ones, so a ticker mentioned later in the document can never complete
+    a heading whose own value is missing.
+    """
+    out: list[tuple[int, int, str]] = []
+    for index, block in enumerate(blocks):
+        if _PRINCIPAL_LISTING_LABEL.search(block.text) is None:
+            continue
+        if _SYMBOL_CLAUSE.search(block.text) and _EXCHANGE_NOUN.search(block.text):
+            out.append((block.start, block.end, block.text))
+            continue
+        for candidate in _value_blocks(blocks, index):
+            if _SYMBOL_CLAUSE.search(candidate.text):
+                out.append((block.start, candidate.end, f"{block.text} {candidate.text}"))
+                break
+    return out
 
 
 def _listing_constructions(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -951,6 +1052,14 @@ def _listing_constructions(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]
     and preferring one pattern over the other was the bug, since either can be
     the broader one depending on the sentence.
     """
+    # An explicitly labelled construction outranks a prose match over the same
+    # text, whatever their relative lengths. The heading states which trust the
+    # listing is about; a generic sentence match inside it does not, and letting
+    # the shortest-span rule prefer the fragment would discard the association
+    # that makes this the strongest evidence in the document.
+    principal = _principal_listing_constructions(_blocks(text))
+    protected = [(start, end) for start, end, _ in principal]
+
     found: list[tuple[int, int, str, bool]] = []
     trading_spans: list[tuple[int, int]] = []
     for pattern, is_trading in ((_FUND_LISTING, False), (_FUND_TRADING, True)):
@@ -962,10 +1071,14 @@ def _listing_constructions(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]
             if is_trading:
                 trading_spans.append((match.start(), match.end()))
 
-    kept: list[tuple[int, int, str, bool]] = []
+    kept: list[tuple[int, int, str, bool]] = [
+        (start, end, statement, False) for start, end, statement in principal
+    ]
     for start, end, cleaned, is_trading in sorted(
         found, key=lambda item: (item[1] - item[0], item[0])
     ):
+        if any(start < other[1] and other[0] < end for other in protected):
+            continue
         if any(start < other[1] and other[0] < end for other in kept):
             continue
         # The span decides which text is kept; the more specific pattern decides
