@@ -619,24 +619,24 @@ def test_the_shipped_measurements_agree_with_the_resolution() -> None:
     )
 
 
-def test_the_shipped_state_measures_13_unresolved_and_15_awaiting_verification() -> None:
+def test_the_shipped_state_measures_12_unresolved_and_14_awaiting_verification() -> None:
     """The current shipped snapshot, deliberately hard-coded.
 
     Every other test here is written as a relationship so it survives the next
     control being verified. This one is the exception on purpose: it is what the
     roadmap's status line quotes, so the two are pinned together and verifying a
     control fails this test until the roadmap is updated with it. It has now done
-    exactly that for MSFT, CSCO, AMZN, SPY, QQQ, ETYS, WBVN, KOOP, MPPP and
-    WCOM in turn, which is the behaviour rather than a nuisance.
+    exactly that for MSFT, CSCO, AMZN, SPY, QQQ, ETYS, WBVN, KOOP, MPPP, WCOM
+    and EXDS in turn, which is the behaviour rather than a nuisance.
     """
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     resolved = resolve_controls(evidence)
 
     assert len(resolved) == 30
-    assert len(unresolved_controls(evidence)) == 13
-    assert len(controls_awaiting_manual_verification(evidence)) == 15
-    assert sum(1 for r in resolved if r.counts_in_numerator) == 17
-    assert sum(1 for r in resolved if r.is_manually_verified) == 15
+    assert len(unresolved_controls(evidence)) == 12
+    assert len(controls_awaiting_manual_verification(evidence)) == 14
+    assert sum(1 for r in resolved if r.counts_in_numerator) == 18
+    assert sum(1 for r in resolved if r.is_manually_verified) == 16
     assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 2
 
 
