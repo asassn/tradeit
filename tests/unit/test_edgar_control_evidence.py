@@ -661,6 +661,163 @@ def test_the_shipped_evidence_file_is_valid() -> None:
 
 
 # ---------------------------------------------------------------------------
+# the shipped GCTY lifecycle facts
+#
+# Two filings, two dates, two scopes, and the whole point is that they stay
+# apart. An acquisition an acquirer says it completed, and a registration
+# certification the target filed five days later, are not one event -- and
+# neither of them is the day the ticker stopped being valid, which nothing
+# inspected establishes.
+# ---------------------------------------------------------------------------
+
+
+def _shipped_gcty() -> Any:
+    return load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["GCTY"]
+
+
+def test_shipped_gcty_carries_the_acquisition_completion_on_1999_05_28() -> None:
+    """Issuer scope, body text, and the date the sentence names.
+
+    The Yahoo 8-K was *filed* 1999-06-02 and *states* a completion of
+    1999-05-28. Recording the filing date here would be recording the wrong one
+    of the two dates the document carries.
+    """
+    mapping = _shipped_gcty().mappings[0]
+    facts = [f for f in mapping.lifecycle_facts if f.scope is LifecycleScope.ISSUER]
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact.date == dt.date(1999, 5, 28)
+    assert fact.date_source is FactDateSource.BODY_TEXT
+    assert "completed the acquisition of GeoCities" in fact.citation
+    assert "0001047469-99-022911" in fact.citation
+    assert "1011006" in fact.citation  # the acquirer's CIK, whose filing this is
+
+
+def test_shipped_gcty_acquisition_fact_claims_only_completion() -> None:
+    """No silent upgrade to a stronger proposition than the filing states.
+
+    "Completed the acquisition" is what the 8-K says. "Merger effective",
+    "consummated", "ceased to exist" and "stopped trading" are each a different
+    claim, and none of them is in evidence.
+    """
+    mapping = _shipped_gcty().mappings[0]
+    fact = next(f for f in mapping.lifecycle_facts if f.scope is LifecycleScope.ISSUER)
+    for upgrade in ("merger effective", "consummated", "ceased to exist", "stopped trading"):
+        assert upgrade not in fact.fact.lower(), upgrade
+
+
+def test_shipped_gcty_carries_the_form_15_reporting_fact_on_1999_06_02() -> None:
+    """SEC-reporting scope, header field, mirroring the IPET Form 15 precedent."""
+    mapping = _shipped_gcty().mappings[0]
+    facts = [f for f in mapping.lifecycle_facts if f.scope is LifecycleScope.SEC_REPORTING]
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact.date == dt.date(1999, 6, 2)
+    assert fact.date_source is FactDateSource.HEADER_FIELD
+    assert "0001047469-99-022856" in fact.citation
+    assert "COMMON STOCK, $0.001 PAR VALUE" in fact.fact
+    assert "12g-4(a)(1)(i)" in fact.fact
+
+
+def test_shipped_gcty_form_15_is_not_restated_as_a_delisting() -> None:
+    """Termination of registration and removal from listing are different things.
+
+    The scope carries most of this -- ``sec_reporting`` is not
+    ``exchange_listing`` -- but the prose must not undo it either.
+    """
+    mapping = _shipped_gcty().mappings[0]
+    fact = next(f for f in mapping.lifecycle_facts if f.scope is LifecycleScope.SEC_REPORTING)
+    for wrong in ("delisted", "last trading", "ticker termination"):
+        assert wrong not in fact.fact.lower(), wrong
+    assert not any(f.scope is LifecycleScope.EXCHANGE_LISTING for f in mapping.lifecycle_facts)
+
+
+def test_the_two_shipped_gcty_dates_stay_distinct_propositions() -> None:
+    """The failure this pair exists to prevent is collapsing them into one.
+
+    Both filings reached EDGAR on 1999-06-02, which is exactly what makes the
+    completion date easy to lose. Two facts, two scopes, two dates, five days
+    apart.
+    """
+    facts = _shipped_gcty().mappings[0].lifecycle_facts
+    assert len(facts) == 2
+    dates = {f.scope: f.date for f in facts}
+    assert dates[LifecycleScope.ISSUER] == dt.date(1999, 5, 28)
+    assert dates[LifecycleScope.SEC_REPORTING] == dt.date(1999, 6, 2)
+    assert dates[LifecycleScope.ISSUER] != dates[LifecycleScope.SEC_REPORTING]
+
+
+def test_shipped_gcty_lifecycle_facts_assign_no_last_trading_date() -> None:
+    """No fact may date the end of the series, because nothing establishes it.
+
+    Every mention of an ending in this record is a denial. The test reads each
+    sentence containing one and requires it to be negated, which is stricter
+    than checking the words are absent -- they are *supposed* to appear, as
+    things explicitly not established.
+    """
+    control = _shipped_gcty()
+    mapping = control.mappings[0]
+    prose = " ".join(
+        [control.notes, mapping.scope_notes]
+        + [f.fact + " " + f.note for f in mapping.lifecycle_facts]
+    )
+    negations = ("does not", "not establish", "not derived", "unknown", "nothing is",
+                 "never be restated", "not adjudicated", "not supplied", "no inference")
+    for phrase in ("last gcty trading session", "cessation of quotation", "end-of-series"):
+        sentences = [s for s in prose.replace("\n", " ").split(". ") if phrase in s.lower()]
+        assert sentences, f"{phrase} should be addressed explicitly"
+        for sentence in sentences:
+            assert any(n in sentence.lower() for n in negations), sentence
+
+
+def test_shipped_gcty_keeps_a_null_validity_window_and_one_issuer() -> None:
+    """Identity is untouched by the lifecycle work.
+
+    ``valid_from``/``valid_to`` mean generic ticker validity; ``LifecycleFact``
+    exists so a lifecycle event is not overloaded onto them. Neither recorded
+    date is a ticker-validity boundary, so both ends stay unknown.
+    """
+    control = _shipped_gcty()
+    mapping = control.mappings[0]
+    assert mapping.valid_from is None
+    assert mapping.valid_to is None
+    assert control.identity_break is False
+    assert len(control.mappings) == 1
+    assert mapping.status is MappingStatus.MANUAL_VERIFIED
+    assert mapping.cik == 1062777
+    assert mapping.ticker == "GCTY"
+
+
+def test_no_yahoo_issuer_mapping_is_attached_to_gcty() -> None:
+    """The series must end, not continue into the acquirer.
+
+    Yahoo's acquisition is a lifecycle event about GeoCities. It is not a ticker
+    mapping, and the acquirer is not a second issuer for this ticker -- that
+    would be the splice the control exists to catch.
+    """
+    control = _shipped_gcty()
+    assert [m.cik for m in control.mappings] == [1062777]
+    assert [m.ticker for m in control.mappings] == ["GCTY"]
+    # The acquirer's CIK may be cited as the source of a fact, never mapped.
+    assert all(m.cik != 1011006 for m in control.mappings)
+    assert all(m.ticker != "YHOO" for m in control.mappings)
+
+
+def test_shipped_gcty_names_what_it_does_not_establish() -> None:
+    """The open questions are enumerated rather than left to inference."""
+    notes = _shipped_gcty().notes.lower()
+    for open_question in (
+        "last gcty trading session",
+        "nasdaq delisting",
+        "cessation of quotation",
+        "ticker-validity end date",
+        "effective time",
+        "reuse of the ticker",
+    ):
+        assert open_question in notes, open_question
+
+
+# ---------------------------------------------------------------------------
 # verified_on: a human's calendar date, never a clock's
 #
 # The field records when a *person* reviewed the cited evidence. Deriving it from
