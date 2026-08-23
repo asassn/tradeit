@@ -661,6 +661,136 @@ def test_the_shipped_evidence_file_is_valid() -> None:
 
 
 # ---------------------------------------------------------------------------
+# verified_on: a human's calendar date, never a clock's
+#
+# The field records when a *person* reviewed the cited evidence. Deriving it from
+# a clock answers a different question, and silently changes the recorded answer
+# at whatever midnight that clock observes. These tests hold the authoring path
+# clock-free, and hold the loader to storing what was supplied.
+# ---------------------------------------------------------------------------
+
+
+def _evidence_loader_source() -> str:
+    import tradeit.edgar.control_evidence as module
+
+    return Path(module.__file__).read_text(encoding="utf-8")
+
+
+def test_the_evidence_loader_reads_no_clock() -> None:
+    """Structural, and checked against the parse tree rather than the prose.
+
+    Three records authored either side of a UTC midnight once disagreed about
+    which day it was, because the authoring step consulted ``date -u``. Nothing
+    in the loader did, and nothing in it may start: a clock here would make the
+    stored date depend on when the file happened to be read.
+
+    The AST is asked rather than the text so an unusual spelling still fails.
+    """
+    import ast
+
+    tree = ast.parse(_evidence_loader_source())
+    clock_names = {"now", "today", "utcnow", "fromtimestamp", "time", "monotonic"}
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in clock_names:
+            found.append(func.attr)
+        elif isinstance(func, ast.Name) and func.id in clock_names:
+            found.append(func.id)
+
+    assert not found, f"the evidence loader reached for a clock: {found}"
+
+
+def test_the_evidence_loader_imports_no_clock_module() -> None:
+    """``datetime`` is imported for the type; ``time`` has no business here."""
+    import ast
+
+    tree = ast.parse(_evidence_loader_source())
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.append(node.module)
+
+    assert "time" not in imported, imported
+    assert "calendar" not in imported, imported
+
+
+def test_verified_on_is_stored_exactly_as_supplied(tmp_path: Path) -> None:
+    """Whatever the author wrote is what the record holds.
+
+    Dates far from today in both directions round-trip unchanged, which is the
+    behaviour that proves nothing clamps, defaults or second-guesses the supplied
+    value against the machine's current date.
+    """
+    for supplied in ("1999-11-05", "2026-08-22", "2026-08-23", "2099-12-31"):
+        path = _write(
+            tmp_path,
+            [{"control_id": "AAPL", "mappings": [_verified_mapping(verified_on=supplied)]}],
+        )
+        mapping = load_control_evidence(path).controls["AAPL"].mappings[0]
+        assert mapping.verified_on == dt.date.fromisoformat(supplied)
+        assert mapping.summary()["verified_on"] == supplied
+
+
+def test_a_verified_on_the_machine_would_call_future_is_not_rejected(tmp_path: Path) -> None:
+    """Deliberately permitted, and the reason is the point.
+
+    A legitimate explicitly supplied review date must not depend on the reading
+    machine's timezone or clock. An operator ahead of UTC can honestly record a
+    date this container still thinks is tomorrow, and a rule comparing against
+    "today" would reject a true statement for being read in the wrong place.
+
+    The date is a fixed literal rather than ``today() + 1``: this test asserts
+    that no clock governs the field, so consulting one to build the input would
+    undercut the thing being asserted -- and would make the test's own meaning
+    depend on when it runs.
+    """
+    ahead = "2099-12-31"
+    path = _write(
+        tmp_path,
+        [{"control_id": "AAPL", "mappings": [_verified_mapping(verified_on=ahead)]}],
+    )
+    mapping = load_control_evidence(path).controls["AAPL"].mappings[0]
+    assert mapping.verified_on == dt.date(2099, 12, 31)
+    assert mapping.status is MappingStatus.MANUAL_VERIFIED
+
+
+@pytest.mark.parametrize("bad", ["", None, "2026-13-01", "22/08/2026", "today"])
+def test_manual_verified_still_requires_a_real_iso_date(tmp_path: Path, bad: Any) -> None:
+    """The existing requirement is unchanged by documenting the convention.
+
+    An evidence-backed mapping needs a non-null, parseable ISO date. Leaving it
+    out is the honest move when the review date is unknown -- and it costs the
+    mapping its status, which is exactly the trade the convention intends.
+    """
+    path = _write(
+        tmp_path,
+        [{"control_id": "AAPL", "mappings": [_verified_mapping(verified_on=bad)]}],
+    )
+    with pytest.raises(ConfigError, match="verified_on"):
+        load_control_evidence(path)
+
+
+def test_every_shipped_verified_on_is_an_explicit_date() -> None:
+    """The corpus rule, asserted over what shipped.
+
+    Not that the dates agree with each other or with any clock -- records written
+    before the convention existed are left as they stand -- but that every
+    evidence-backed mapping carries a real supplied date rather than a blank or a
+    placeholder.
+    """
+    loaded = load_control_evidence(DEFAULT_EVIDENCE_PATH)
+    for control in loaded.controls.values():
+        for mapping in control.mappings:
+            if mapping.counts_in_numerator:
+                assert isinstance(mapping.verified_on, dt.date)
+
+
+# ---------------------------------------------------------------------------
 # citation integrity: text must say what its source says
 #
 # A citation is presented as a verbatim quotation of a primary source, so a

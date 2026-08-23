@@ -181,6 +181,23 @@ class IssuerMapping:
     evidence: MappingEvidence | None = None
     #: Accession, URL, or another checkable pointer. Required for MANUAL_VERIFIED.
     citation: str = ""
+    #: **The operator's local calendar date on which a human reviewed the cited
+    #: evidence.** Supplied explicitly during authoring, and never derived from a
+    #: clock -- not UTC, not system time, not commit time, not the filing's own
+    #: date, not the acquisition run's date. The field records *when a person did
+    #: something*, so the only authority on the day is that person's calendar; a
+    #: machine's clock answers a different question. Deriving it also breaks the
+    #: ordinary case where verification precedes recording by days.
+    #:
+    #: This was undocumented until three records authored either side of a UTC
+    #: midnight disagreed -- one took the UTC date while local was still the
+    #: previous day, one took the local date while UTC had advanced, one took UTC
+    #: in the same circumstance the other took local. None was wrong under a rule,
+    #: because there was no rule; they are left as they stand. This comment is the
+    #: rule.
+    #:
+    #: If the review date is genuinely unknown, leave it null and let the status
+    #: fall below MANUAL_VERIFIED rather than reading a clock to fill it.
     verified_on: dt.date | None = None
     #: When this issuer held this ticker, in the **generic** sense. Both ends may
     #: be unknown, and an exchange-listing boundary does not belong here -- see

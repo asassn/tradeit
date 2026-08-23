@@ -247,6 +247,19 @@ pretending otherwise would fabricate the very thing being measured.**
 - Unresolved entries are **retained permanently**, not dropped. A later mapping
   upgrades the state; nothing is ever re-derived from scratch and silently
   changed.
+- **`verified_on` is the operator's local calendar date on which a human reviewed
+  the cited evidence, supplied explicitly.** It is never derived from a clock —
+  not UTC, not system time, not commit time, not the filing's own date, not the
+  acquisition run's date. The field records *when a person did something*, so the
+  only authority on the day is that person's calendar. Deriving it would also get
+  the ordinary case wrong, where verification precedes recording by days (`BEL`,
+  `TGLO` and `ENE` were each read before they were committed). **If the review
+  date is unknown, leave it null** and let the status fall below
+  `MANUAL_VERIFIED` — a fabricated date is a fabricated claim about a person,
+  which is the same failure class as a fabricated CIK. Records written before
+  this rule existed are left as they stand; none is defective under a convention
+  that did not exist, and rewriting them for cosmetic consistency would edit
+  evidence to match a clock.
 
 ---
 
