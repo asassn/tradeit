@@ -650,10 +650,10 @@ def test_the_shipped_state_measures_7_unresolved_and_9_awaiting_verification() -
     assert len(resolved) == 30
     assert len(unresolved_controls(evidence)) == 7
     assert len(controls_awaiting_manual_verification(evidence)) == 9
-    assert len(controls_awaiting_adjudication(evidence)) == 10
+    assert len(controls_awaiting_adjudication(evidence)) == 9
     assert sum(1 for r in resolved if r.counts_in_numerator) == 23
     assert sum(1 for r in resolved if r.is_manually_verified) == 21
-    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 20
+    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 21
     assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 2
 
 
@@ -832,25 +832,42 @@ def test_gm_discharges_its_obligation_by_count_but_is_not_fully_adjudicated() ->
     assert not control.is_fully_adjudicated
 
 
-def test_is_manually_verified_still_means_only_mapping_quality() -> None:
-    """The existing property is unchanged, and must stay unchanged.
+def test_full_adjudication_implies_mapping_quality_but_never_the_reverse(
+    tmp_path: Path,
+) -> None:
+    """The two properties are ordered, not equal, and the order is one-way.
 
-    BBBY is the case that proves it: every recorded mapping was read by a
-    person, so ``is_manually_verified`` is true, while the control is not
-    finished. If this ever starts tracking completeness, one number will again
-    mean two things.
+    Written as an implication rather than against a named control on purpose.
+    An earlier version asserted that BBBY was mapping-verified yet unadjudicated,
+    which was true until BBBY's second issuer was recorded and then was not --
+    a test that decays as the corpus advances is a test that will one day be
+    edited without being read.
+
+    The durable statements: across the shipped corpus, adjudicated always
+    implies mapping-verified; and the converse fails in general, which a
+    synthetic reuse control demonstrates here rather than borrowing a real one.
     """
-    bbby = _shipped("BBBY")
-    assert bbby.is_manually_verified
-    assert not bbby.is_fully_adjudicated
-    assert bbby.status is MappingStatus.MANUAL_VERIFIED
+    for control in resolve_controls(load_control_evidence(DEFAULT_EVIDENCE_PATH)):
+        if control.is_fully_adjudicated:
+            assert control.is_manually_verified, control.control.ticker
+
+    path = _write(
+        tmp_path,
+        [{"control_id": "BBBY", "mappings": [_verified_mapping(ticker="BBBY")]}],
+    )
+    half_done = _resolved(path, "BBBY")
+    assert half_done.is_manually_verified
+    assert half_done.status is MappingStatus.MANUAL_VERIFIED
+    assert not half_done.is_fully_adjudicated
 
 
-def test_the_milestone_gate_uses_adjudication_not_mapping_quality_alone() -> None:
-    """The gate is strictly harder than the mapping-quality measurement.
+def test_the_milestone_gate_is_never_weaker_than_mapping_quality() -> None:
+    """The gate is strictly harder, so its outstanding set can only be larger.
 
-    Its count can never be lower, and today it is strictly higher by exactly the
-    controls whose issuer question is still open.
+    Every control that fails on mapping quality also fails adjudication, because
+    adjudication requires that quality *and* a settled issuer question. The
+    reverse containment must not hold in general -- that is the whole point of
+    the second condition -- so it is not asserted here.
     """
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     awaiting_mv = set(controls_awaiting_manual_verification(evidence))
@@ -858,8 +875,6 @@ def test_the_milestone_gate_uses_adjudication_not_mapping_quality_alone() -> Non
 
     assert awaiting_mv <= awaiting_adjudication
     assert len(awaiting_adjudication) >= len(awaiting_mv)
-    only_adjudication = {c.control.ticker for c in awaiting_adjudication - awaiting_mv}
-    assert only_adjudication == {"BBBY"}
 
 
 def test_every_shipped_control_with_an_open_obligation_is_a_reuse_control() -> None:
