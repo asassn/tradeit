@@ -56,6 +56,22 @@ class ControlSecurity:
     )
     #: What would lift this to MANUAL_VERIFIED.
     verification_route: str = "EDGAR company search by name; confirm CIK, form, and date"
+    #: **How many issuer identities this control must SETTLE, not how many
+    #: existed.** A value of 2 says "this control cannot be declared fully
+    #: adjudicated until the question of a second issuer identity has been
+    #: explicitly settled" -- it does NOT say a second issuer definitely
+    #: existed, and nothing may read it as evidence that one did.
+    #:
+    #: The obligation is discharged either way: by recording enough
+    #: independently evidenced mappings, or by recording a cited adjudication
+    #: that the remaining issuer question was investigated and no further
+    #: issuer was established. Both are findings; neither is assumed.
+    #:
+    #: It lives here rather than in the evidence file because it is a property
+    #: of why this control was *chosen* -- design intent, like ``proves`` --
+    #: and the evidence file holds only what was found. An expectation stored
+    #: beside findings would eventually be read as one.
+    required_issuer_investigations: int = 1
 
 
 def _c(
@@ -66,6 +82,7 @@ def _c(
     expected_year: int | None,
     proves: str,
     route: str = "EDGAR company search by name; confirm CIK, form, and date",
+    required_issuer_investigations: int = 1,
 ) -> ControlSecurity:
     return ControlSecurity(
         ticker=ticker,
@@ -75,6 +92,7 @@ def _c(
         expected_year=expected_year,
         proves=proves,
         verification_route=route,
+        required_issuer_investigations=required_issuer_investigations,
     )
 
 
@@ -267,6 +285,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         2023,
         "the exact case full-01 failed on. Non-negotiable",
         "Form 25 and Form 15 exist electronically; the later holder is a different CIK",
+        required_issuer_investigations=2,
     ),
     _c(
         "GM",
@@ -276,6 +295,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         2009,
         "short enough that a splice looks plausible — the strictest reuse case",
         "two distinct CIKs; Motors Liquidation vs General Motors Company",
+        required_issuer_investigations=2,
     ),
     _c(
         "AOL",
@@ -285,6 +305,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         2001,
         "same ticker, unrelated registrants",
         "two CIKs; the 2009 spin-off registered separately",
+        required_issuer_investigations=2,
     ),
     _c(
         "JDSU",

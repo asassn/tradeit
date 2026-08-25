@@ -39,7 +39,6 @@ from tradeit.edgar.acquire import (
 from tradeit.edgar.control_evidence import load_control_evidence, resolve_controls
 from tradeit.edgar.controls import CONTROL_UNIVERSE
 from tradeit.edgar.evidence import classify_form
-from tradeit.edgar.identity import MappingStatus
 from tradeit.edgar.index import (
     FETCH_RECIPE,
     FullIndexRow,
@@ -808,8 +807,10 @@ def cmd_controls(args: argparse.Namespace) -> int:
     total = len(resolved)
     unresolved = [r for r in resolved if not r.counts_in_numerator]
     awaiting = [r for r in resolved if not r.is_manually_verified]
+    unadjudicated = [r for r in resolved if not r.is_fully_adjudicated]
     identified = total - len(unresolved)
     verified = total - len(awaiting)
+    adjudicated = total - len(unadjudicated)
     source = evidence.source_path
     print(f"evidence file : {source}{'' if source and source.exists() else '  (absent)'}")
     print(f"controls      : {total}")
@@ -820,12 +821,28 @@ def cmd_controls(args: argparse.Namespace) -> int:
         f"(RESOLVED or MANUAL_VERIFIED); {len(unresolved)} unresolved"
     )
     print(
-        f"milestone 0b  : {verified} of {total} MANUAL_VERIFIED; {len(awaiting)} still require it"
+        f"mappings      : {verified} of {total} have every recorded mapping at "
+        f"MANUAL_VERIFIED; {len(awaiting)} do not"
+    )
+    print(
+        f"milestone 0b  : {adjudicated} of {total} fully adjudicated; "
+        f"{len(unadjudicated)} still require it"
     )
     print(
         "                complete only at "
-        f"{total}/{total} MANUAL_VERIFIED -- a RESOLVED control does not clear it"
+        f"{total}/{total} fully adjudicated -- every recorded mapping MANUAL_VERIFIED "
+        "*and* the control's issuer question settled"
     )
+    open_obligations = [r for r in resolved if not r.issuer_obligation_discharged]
+    if open_obligations:
+        print(
+            "                open issuer obligations: "
+            + ", ".join(
+                f"{r.control.ticker} ({len(r.mappings)} of "
+                f"{r.control.required_issuer_investigations})"
+                for r in open_obligations
+            )
+        )
     print()
 
     if not args.diagnose:
@@ -864,10 +881,10 @@ def cmd_controls(args: argparse.Namespace) -> int:
                     print(f"     UNRESOLVED REASON: {m.unresolved_reason}")
             print()
 
-    pending = [r for r in resolved if r.status is not MappingStatus.MANUAL_VERIFIED]
+    pending = [r for r in resolved if not r.is_fully_adjudicated]
     if pending:
         print(
-            f"\n{len(pending)} of {len(resolved)} controls are not MANUAL_VERIFIED. "
+            f"\n{len(pending)} of {len(resolved)} controls are not fully adjudicated. "
             "Milestone 0b is not complete. No CIK is guessed."
         )
     return 0

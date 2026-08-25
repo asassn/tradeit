@@ -28,6 +28,7 @@ from tradeit.edgar.control_evidence import (
     ControlEvidence,
     FactDateSource,
     IssuerMapping,
+    controls_awaiting_adjudication,
     controls_awaiting_manual_verification,
     load_control_evidence,
     resolve_controls,
@@ -72,6 +73,19 @@ def _unresolved_mapping(**overrides: Any) -> dict[str, Any]:
     }
     record.update(overrides)
     return record
+
+
+def _resolved(path: Path, control_id: str) -> Any:
+    """Resolve one control from a written-out evidence file."""
+    evidence = load_control_evidence(path)
+    return next(c for c in resolve_controls(evidence) if c.control.ticker == control_id)
+
+
+def _shipped(control_id: str) -> Any:
+    """Resolve one control from the shipped evidence file."""
+    evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
+    return next(c for c in resolve_controls(evidence) if c.control.ticker == control_id)
+
 
 
 # ---------------------------------------------------------------------------
@@ -636,8 +650,10 @@ def test_the_shipped_state_measures_7_unresolved_and_9_awaiting_verification() -
     assert len(resolved) == 30
     assert len(unresolved_controls(evidence)) == 7
     assert len(controls_awaiting_manual_verification(evidence)) == 9
+    assert len(controls_awaiting_adjudication(evidence)) == 10
     assert sum(1 for r in resolved if r.counts_in_numerator) == 23
     assert sum(1 for r in resolved if r.is_manually_verified) == 21
+    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 20
     assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 2
 
 
@@ -659,6 +675,203 @@ def test_the_shipped_evidence_file_is_valid() -> None:
     verified_pilots = {"AAPL", "IPET", "GM", "BEL"}
     assert verified_pilots <= set(loaded.controls)
     assert set(loaded.controls) <= {c.ticker for c in CONTROL_UNIVERSE}
+
+
+# ---------------------------------------------------------------------------
+# control-level adjudication: is the control FINISHED, not just well-cited
+#
+# MappingStatus answers "is this mapping's evidence good enough". It cannot
+# answer "has this control's question been settled", because a control whose
+# whole point is that two issuers shared a ticker looks perfect with one
+# impeccably cited mapping. These tests hold the two apart.
+# ---------------------------------------------------------------------------
+
+
+def _reuse_control() -> str:
+    """A control the fixture requires two issuer investigations for."""
+    return "BBBY"
+
+
+def test_an_ordinary_control_is_fully_adjudicated_on_one_verified_mapping(
+    tmp_path: Path,
+) -> None:
+    """Backward compatibility, stated as a test rather than assumed.
+
+    27 of the 30 controls require a single issuer investigation, so one recorded
+    mapping discharges the obligation and nothing about them changes.
+    """
+    path = _write(tmp_path, [{"control_id": "AAPL", "mappings": [_verified_mapping()]}])
+    control = _resolved(path, "AAPL")
+    assert control.control.required_issuer_investigations == 1
+    assert control.is_manually_verified
+    assert control.issuer_obligation_discharged
+    assert control.is_fully_adjudicated
+
+
+def test_a_reuse_control_with_one_verified_mapping_is_not_fully_adjudicated(
+    tmp_path: Path,
+) -> None:
+    """The defect this whole concept exists for.
+
+    The mapping is real, cited and read by a person. The control is still not
+    finished, because the question it was chosen to answer -- did a second
+    issuer hold this ticker -- has not been settled either way.
+    """
+    path = _write(
+        tmp_path,
+        [{"control_id": _reuse_control(), "mappings": [_verified_mapping(ticker="BBBY")]}],
+    )
+    control = _resolved(path, _reuse_control())
+    assert control.control.required_issuer_investigations == 2
+    assert control.is_manually_verified, "the recorded mapping's quality is not in question"
+    assert not control.issuer_obligation_discharged
+    assert not control.is_fully_adjudicated
+
+
+def test_path_a_two_verified_mappings_complete_a_reuse_control(tmp_path: Path) -> None:
+    """Recording the second issuer *is* the adjudication; no extra object needed."""
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": _reuse_control(),
+                "identity_break": True,
+                "mappings": [
+                    _verified_mapping(issuer_label="old", cik=886158, ticker="BBBY"),
+                    _verified_mapping(issuer_label="new", cik=1130713, ticker="BBBY"),
+                ],
+            }
+        ],
+    )
+    control = _resolved(path, _reuse_control())
+    assert len(control.mappings) == 2
+    assert control.issuer_obligation_discharged
+    assert control.is_fully_adjudicated
+
+
+def test_path_b_a_cited_negative_adjudication_completes_a_reuse_control(
+    tmp_path: Path,
+) -> None:
+    """The honest close when the expected second issuer is not established.
+
+    Without this path the only way to finish such a control would be to find
+    what was expected, which is how an expectation becomes a fabrication.
+    """
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": _reuse_control(),
+                "mappings": [_verified_mapping(ticker="BBBY")],
+                "adjudication": {
+                    "complete": True,
+                    "finding": "The local full-index was searched for a later registrant "
+                    "filing under this symbol; no further issuer was established.",
+                    "citation": "SEC full-index sweep, 2023 QTR1 through 2026 QTR3",
+                    "verified_on": "2026-08-23",
+                },
+            }
+        ],
+    )
+    control = _resolved(path, _reuse_control())
+    assert len(control.mappings) == 1
+    assert control.issuer_obligation_discharged
+    assert control.is_fully_adjudicated
+
+
+@pytest.mark.parametrize(
+    ("missing", "expected"),
+    [
+        ("citation", "requires a citation"),
+        ("finding", "requires a finding"),
+        ("verified_on", "requires verified_on"),
+    ],
+)
+def test_a_complete_adjudication_without_its_support_is_refused(
+    tmp_path: Path, missing: str, expected: str
+) -> None:
+    """A bare ``complete: true`` is never enough.
+
+    "Investigated and no further issuer was established" is an affirmative
+    research conclusion, held to the same bar as a mapping or a lifecycle fact.
+    """
+    adjudication = {
+        "complete": True,
+        "finding": "searched and found nothing further",
+        "citation": "SEC full-index sweep",
+        "verified_on": "2026-08-23",
+    }
+    del adjudication[missing]
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": _reuse_control(),
+                "mappings": [_verified_mapping(ticker="BBBY")],
+                "adjudication": adjudication,
+            }
+        ],
+    )
+    with pytest.raises(ConfigError, match=expected):
+        load_control_evidence(path)
+
+
+def test_gm_discharges_its_obligation_by_count_but_is_not_fully_adjudicated() -> None:
+    """The two conditions are independent, and GM is the proof.
+
+    GM has both issuers recorded, so its issuer question is settled -- and its
+    weakest mapping is only RESOLVED, so it fails on quality. BBBY is the mirror
+    image. Collapsing the two conditions would let either gap hide behind the
+    other.
+    """
+    control = _shipped("GM")
+    assert control.control.required_issuer_investigations == 2
+    assert len(control.mappings) == 2
+    assert control.issuer_obligation_discharged, "both issuers are recorded"
+    assert not control.is_manually_verified, "one mapping is only RESOLVED"
+    assert not control.is_fully_adjudicated
+
+
+def test_is_manually_verified_still_means_only_mapping_quality() -> None:
+    """The existing property is unchanged, and must stay unchanged.
+
+    BBBY is the case that proves it: every recorded mapping was read by a
+    person, so ``is_manually_verified`` is true, while the control is not
+    finished. If this ever starts tracking completeness, one number will again
+    mean two things.
+    """
+    bbby = _shipped("BBBY")
+    assert bbby.is_manually_verified
+    assert not bbby.is_fully_adjudicated
+    assert bbby.status is MappingStatus.MANUAL_VERIFIED
+
+
+def test_the_milestone_gate_uses_adjudication_not_mapping_quality_alone() -> None:
+    """The gate is strictly harder than the mapping-quality measurement.
+
+    Its count can never be lower, and today it is strictly higher by exactly the
+    controls whose issuer question is still open.
+    """
+    evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
+    awaiting_mv = set(controls_awaiting_manual_verification(evidence))
+    awaiting_adjudication = set(controls_awaiting_adjudication(evidence))
+
+    assert awaiting_mv <= awaiting_adjudication
+    assert len(awaiting_adjudication) >= len(awaiting_mv)
+    only_adjudication = {c.control.ticker for c in awaiting_adjudication - awaiting_mv}
+    assert only_adjudication == {"BBBY"}
+
+
+def test_every_shipped_control_with_an_open_obligation_is_a_reuse_control() -> None:
+    """Nothing acquired an obligation by accident.
+
+    Only controls whose design requires settling a second issuer may fail the
+    obligation check; an ordinary control failing it would mean the default
+    changed under everyone.
+    """
+    for control in resolve_controls(load_control_evidence(DEFAULT_EVIDENCE_PATH)):
+        if not control.issuer_obligation_discharged:
+            assert control.control.required_issuer_investigations > 1, control.control.ticker
 
 
 # ---------------------------------------------------------------------------

@@ -43,12 +43,14 @@ from tradeit.errors import ConfigError
 __all__ = [
     "DEFAULT_EVIDENCE_PATH",
     "SCHEMA_VERSION",
+    "Adjudication",
     "ControlEvidence",
     "ControlEvidenceFile",
     "FactDateSource",
     "IssuerMapping",
     "LifecycleFact",
     "ResolvedControl",
+    "controls_awaiting_adjudication",
     "controls_awaiting_manual_verification",
     "load_control_evidence",
     "resolve_controls",
@@ -58,9 +60,21 @@ __all__ = [
 #: Bumped to 2 when lifecycle_facts was added. A version-1 reader would have
 #: silently dropped dated exchange-listing facts, and silently dropping a
 #: lifecycle date is precisely the failure class this project keeps guarding.
-SCHEMA_VERSION = 2
+#:
+#: Bumped to 3 when ``adjudication`` was added, on the same reasoning one level
+#: up. An adjudication changes what *complete* means for a control: it is how a
+#: control's issuer question is closed without a mapping to show for it. A build
+#: that does not understand the field would read such a file and report a
+#: reassuring number computed from a rule it does not have. The loader refuses a
+#: version mismatch outright, so the bump converts that quiet wrong answer into
+#: a loud refusal -- which is the whole point of versioning this file.
+SCHEMA_VERSION = 3
 
-# Why there is no version 3 yet, and what would justify one.
+# Why the version-3 discussion below is kept.
+#
+# It records a schema change that was *declined*, and the reasoning outlived the
+# version number it was written under. The nullable-date question is still open;
+# the bump to 3 was made for an unrelated field and settles nothing about it.
 #
 # A nullable ``LifecycleFact.date`` was proposed during the IPET pilot, for one
 # genuinely undated fact: the 10-K states the common stock continued to trade
@@ -244,6 +258,46 @@ class IssuerMapping:
 
 
 @dataclass(frozen=True, slots=True)
+class Adjudication:
+    """A cited finding that a control's issuer question has been settled.
+
+    **Why this exists at all.** ``ControlSecurity.required_issuer_investigations``
+    can say a control must settle whether a second issuer held its ticker. That
+    obligation is normally discharged by recording the second mapping -- but the
+    honest answer is sometimes "we looked and did not establish one", and there
+    is no mapping to write for an issuer that was not found. Without this, the
+    only way to finish such a control would be to find what was expected, which
+    is how an expectation turns into a fabrication.
+
+    **Why ``complete: true`` alone is refused.** "Investigated and no further
+    issuer was established" is an affirmative research conclusion, not an
+    absence of one. It has exactly the standing of a mapping or a
+    :class:`LifecycleFact` and is held to the same bar: a non-empty finding
+    saying what was searched and concluded, a citation making it checkable, and
+    an explicitly supplied ``verified_on``. A bare boolean would be the easiest
+    claim in this file to set carelessly, and the hardest to audit later.
+    """
+
+    complete: bool
+    #: What was investigated and what was concluded. Required when complete.
+    finding: str
+    #: What makes the finding checkable -- the sources consulted. Required when
+    #: complete, for the same reason a mapping needs one.
+    citation: str
+    #: Operator-local calendar date, explicitly supplied. Never clock-derived;
+    #: see :attr:`IssuerMapping.verified_on`.
+    verified_on: dt.date | None = None
+
+    def summary(self) -> dict[str, object]:
+        return {
+            "complete": self.complete,
+            "finding": self.finding,
+            "citation": self.citation,
+            "verified_on": self.verified_on.isoformat() if self.verified_on else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ControlEvidence:
     control_id: str
     expected_company: str
@@ -251,6 +305,9 @@ class ControlEvidence:
     #: Required true when a control carries more than one issuer.
     identity_break: bool = False
     notes: str = ""
+    #: Present only when the issuer obligation was closed without enough
+    #: evidenced mappings to satisfy it. Absent is the normal case.
+    adjudication: Adjudication | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +326,7 @@ class ResolvedControl:
     mappings: tuple[IssuerMapping, ...]
     identity_break: bool = False
     notes: str = ""
+    adjudication: Adjudication | None = None
 
     @property
     def status(self) -> MappingStatus:
@@ -315,6 +373,50 @@ class ResolvedControl:
         return self.status is MappingStatus.MANUAL_VERIFIED
 
     @property
+    def issuer_obligation_discharged(self) -> bool:
+        """Whether this control's issuer question has been settled either way.
+
+        **Path A** -- enough independently evidenced mappings exist to satisfy
+        the control's design. Recording the second issuer *is* the adjudication;
+        no separate object is needed.
+
+        **Path B** -- a cited adjudication closes the remaining question without
+        inventing a mapping to represent an issuer that was not found.
+
+        Ordinary controls require one investigation, so a single recorded
+        mapping discharges them and nothing about them changes.
+        """
+        if len(self.mappings) >= self.control.required_issuer_investigations:
+            return True
+        return self.adjudication is not None and self.adjudication.complete
+
+    @property
+    def is_fully_adjudicated(self) -> bool:
+        """Milestone 0b's gate: the control is finished, not merely well-cited.
+
+        Two independent conditions, and both must hold:
+
+        * **quality** -- every *recorded* mapping is ``MANUAL_VERIFIED``
+          (:attr:`is_manually_verified`, unchanged);
+        * **completeness** -- the issuer obligation is discharged
+          (:attr:`issuer_obligation_discharged`).
+
+        They are genuinely independent, and ``GM`` shows why keeping them apart
+        matters: it has both its issuers recorded, so its obligation is
+        discharged, yet its weakest mapping is only ``RESOLVED`` -- so it fails
+        on quality. ``BBBY`` is the mirror image: one impeccably cited mapping,
+        obligation still open. Collapsing the two would let either kind of gap
+        hide behind the other.
+
+        **Why this is not folded into** :attr:`is_manually_verified`: that
+        property means "every recorded mapping was read by a person", and it is
+        the honest answer to a different question. Overloading it would make one
+        number mean both "the evidence is good" and "the work is done", which is
+        the confusion the two-measurement design already exists to prevent.
+        """
+        return self.is_manually_verified and self.issuer_obligation_discharged
+
+    @property
     def unresolved_reason(self) -> str:
         reasons = [m.unresolved_reason for m in self.mappings if m.unresolved_reason]
         return "; ".join(reasons)
@@ -326,6 +428,10 @@ class ResolvedControl:
             "expected_company": self.control.name,
             "status": str(self.status),
             "identity_break": self.identity_break,
+            "required_issuer_investigations": self.control.required_issuer_investigations,
+            "issuer_obligation_discharged": self.issuer_obligation_discharged,
+            "fully_adjudicated": self.is_fully_adjudicated,
+            "adjudication": self.adjudication.summary() if self.adjudication else None,
             "mappings": [m.summary() for m in self.mappings],
             "notes": self.notes,
             "verification_route": self.control.verification_route,
@@ -450,6 +556,40 @@ def _parse_lifecycle_fact(raw: Any, where: str) -> LifecycleFact:
     )
 
 
+def _parse_adjudication(raw: Any, where: str) -> Adjudication:
+    """Parse a closing finding, and refuse one that asserts without support."""
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}: adjudication must be an object")
+
+    complete = bool(raw.get("complete", False))
+    finding = str(raw.get("finding", "") or "").strip()
+    citation = str(raw.get("citation", "") or "").strip()
+    verified_on = _as_date(raw.get("verified_on"), "verified_on", where)
+
+    if complete:
+        if not finding:
+            raise ConfigError(
+                f"{where}: a complete adjudication requires a finding. "
+                "'Investigated and no further issuer was established' is a research "
+                "conclusion, not the absence of one, and an unstated conclusion is a claim"
+            )
+        if not citation:
+            raise ConfigError(
+                f"{where}: a complete adjudication requires a citation. "
+                "A finding that closes a control's issuer question must be checkable "
+                "against the sources it rests on, exactly as a mapping must be"
+            )
+        if verified_on is None:
+            raise ConfigError(
+                f"{where}: a complete adjudication requires verified_on -- the "
+                "operator-local date on which the research was reviewed"
+            )
+
+    return Adjudication(
+        complete=complete, finding=finding, citation=citation, verified_on=verified_on
+    )
+
+
 def _parse_mapping(raw: Any, where: str) -> IssuerMapping:
     if not isinstance(raw, dict):
         raise ConfigError(f"{where}: each mapping must be an object")
@@ -556,12 +696,20 @@ def _parse_control(raw: Any, where: str) -> ControlEvidence:
     if len(mappings) == 1 and identity_break:
         raise ConfigError(f"{where}: identity_break is true but only one issuer is recorded")
 
+    raw_adjudication = raw.get("adjudication")
+    adjudication = (
+        _parse_adjudication(raw_adjudication, f"{where}.adjudication")
+        if raw_adjudication is not None
+        else None
+    )
+
     return ControlEvidence(
         control_id=control_id,
         expected_company=str(raw.get("expected_company", "") or "").strip(),
         mappings=mappings,
         identity_break=identity_break,
         notes=str(raw.get("notes", "") or "").strip(),
+        adjudication=adjudication,
     )
 
 
@@ -643,6 +791,7 @@ def resolve_controls(evidence: ControlEvidenceFile | None = None) -> list[Resolv
                 mappings=record.mappings,
                 identity_break=record.identity_break,
                 notes=record.notes,
+                adjudication=record.adjudication,
             )
         )
     return out
@@ -703,3 +852,27 @@ def controls_awaiting_manual_verification(
     control was confirmed.
     """
     return tuple(c for c in resolve_controls(evidence) if not c.is_manually_verified)
+
+
+def controls_awaiting_adjudication(
+    evidence: ControlEvidenceFile | None = None,
+) -> tuple[ResolvedControl, ...]:
+    """Milestone 0b's remaining work. **Measurement C, and the completion gate.**
+
+    The milestone's own wording is *confirm the 30 control securities*, which is
+    a statement about **controls**, not about mappings. A control is confirmed
+    when every recorded mapping was read by a person **and** the control's
+    issuer question has been settled -- see :attr:`ResolvedControl.is_fully_adjudicated`.
+
+    **This gate is strictly harder than** :func:`controls_awaiting_manual_verification`,
+    and its count is therefore never lower. That pair replaced an earlier
+    single number for exactly this reason, one level down: a milestone asking
+    for ``MANUAL_VERIFIED`` was being reported complete on ``RESOLVED``
+    evidence. The same shape recurred a level up. A control whose whole purpose
+    is proving two issuers held one ticker could reach ``MANUAL_VERIFIED`` on a
+    single mapping, and the gate could have closed at 30/30 with the corpus's
+    most important control half-investigated -- not because anything
+    malfunctioned, but because nothing had ever told the machine how many
+    issuers the control was supposed to settle.
+    """
+    return tuple(c for c in resolve_controls(evidence) if not c.is_fully_adjudicated)

@@ -247,6 +247,18 @@ pretending otherwise would fabricate the very thing being measured.**
 - Unresolved entries are **retained permanently**, not dropped. A later mapping
   upgrades the state; nothing is ever re-derived from scratch and silently
   changed.
+- **A control is finished when its mappings are verified *and* its issuer question
+  is settled.** These are two conditions, not one. `MANUAL_VERIFIED` describes the
+  evidence quality of the mappings a record *happens to carry*; it cannot tell
+  whether a control still owes an investigation. A control whose purpose is
+  proving two issuers shared a ticker looks complete with one impeccably cited
+  mapping — which is the `full-01` failure exactly. `ControlSecurity.required_issuer_investigations`
+  states how many issuer identities a control must **settle** (not how many
+  existed); the obligation is discharged either by recording enough independently
+  evidenced mappings **or** by a cited `adjudication` finding that no further
+  issuer was established. **A bare `complete: true` is refused**: "investigated
+  and found nothing further" is an affirmative research conclusion and needs a
+  finding, a citation and a `verified_on`, exactly as a mapping does.
 - **`verified_on` is the operator's local calendar date on which a human reviewed
   the cited evidence, supplied explicitly.** It is never derived from a clock —
   not UTC, not system time, not commit time, not the filing's own date, not the

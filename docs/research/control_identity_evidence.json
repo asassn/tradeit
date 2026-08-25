@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "notes": "Curated CIK/ticker identity evidence for the 30-control universe. Every record must cite a checkable primary source, and no CIK may be written from recollection. Statuses follow the approved evidence hierarchy: MANUAL_VERIFIED requires a human-checked filing citation; RESOLVED is reached by sec_company_tickers or filing_document_text; name matching and full-text search can never establish a mapping on their own. Absence of evidence is recorded as absence. Dated lifecycle facts are scope-tagged and kept out of valid_from/valid_to, which mean generic ticker validity and are a broader claim than any single filing supports. Which controls are verified is NOT listed here: a hand-maintained roster goes stale the moment a record is added, and this one already had. Run `tradeit edgar controls` for the measured state -- it reports identity resolution and the Milestone 0b manual-verification gate separately -- and `tradeit edgar verify-control <ID> --index-root <DIR>` to gather candidates for the rest.",
   "controls": [
     {
