@@ -633,7 +633,7 @@ def test_the_shipped_measurements_agree_with_the_resolution() -> None:
     )
 
 
-def test_the_shipped_state_measures_6_unresolved_and_7_awaiting_verification() -> None:
+def test_the_shipped_state_measures_6_unresolved_and_6_awaiting_verification() -> None:
     """The current shipped snapshot, deliberately hard-coded.
 
     Every other test here is written as a relationship so it survives the next
@@ -641,7 +641,7 @@ def test_the_shipped_state_measures_6_unresolved_and_7_awaiting_verification() -
     roadmap's status line quotes, so the two are pinned together and verifying a
     control fails this test until the roadmap is updated with it. It has now done
     exactly that for MSFT, CSCO, AMZN, SPY, QQQ, ETYS, WBVN, KOOP, MPPP, WCOM,
-    EXDS, PSIX, GCTY, BCST, CPQ, BBBY, AOL and GM in turn, which is the
+    EXDS, PSIX, GCTY, BCST, CPQ, BBBY, AOL, GM and AAPL in turn, which is the
     behaviour rather than a nuisance.
     """
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
@@ -649,12 +649,12 @@ def test_the_shipped_state_measures_6_unresolved_and_7_awaiting_verification() -
 
     assert len(resolved) == 30
     assert len(unresolved_controls(evidence)) == 6
-    assert len(controls_awaiting_manual_verification(evidence)) == 7
-    assert len(controls_awaiting_adjudication(evidence)) == 7
+    assert len(controls_awaiting_manual_verification(evidence)) == 6
+    assert len(controls_awaiting_adjudication(evidence)) == 6
     assert sum(1 for r in resolved if r.counts_in_numerator) == 24
-    assert sum(1 for r in resolved if r.is_manually_verified) == 23
-    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 23
-    assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 1
+    assert sum(1 for r in resolved if r.is_manually_verified) == 24
+    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 24
+    assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1382,20 +1382,27 @@ def test_every_shipped_cik_carries_a_citation() -> None:
                 assert mapping.verified_on is not None
 
 
-def test_shipped_aapl_is_resolved_from_the_sec_ticker_file() -> None:
-    """RESOLVED, not MANUAL_VERIFIED: the SEC ticker file is primary evidence,
-    but MANUAL_VERIFIED stays reserved for a human-checked filing citation."""
+def test_shipped_aapl_was_promoted_from_the_ticker_file_to_a_filing() -> None:
+    """The last ticker-file mapping in the corpus, and its promotion.
+
+    AAPL sat at ``RESOLVED`` on ``company_tickers.json`` -- a dated primary
+    source, and the reason that status was correct, but a reference file rather
+    than a filing anyone read. It was the second and last such mapping, after
+    GM's ``new_gm``. The identity it records is unchanged by the promotion: same
+    CIK, same ticker, same single mapping, same null validity window.
+    """
     aapl = load_control_evidence(DEFAULT_EVIDENCE_PATH).controls["AAPL"]
     assert aapl.identity_break is False
     assert len(aapl.mappings) == 1
     mapping = aapl.mappings[0]
     assert mapping.cik == 320193
     assert mapping.ticker == "AAPL"
-    assert mapping.status is MappingStatus.RESOLVED
-    assert mapping.status is not MappingStatus.MANUAL_VERIFIED
-    assert mapping.evidence is MappingEvidence.SEC_COMPANY_TICKERS
-    assert "company_tickers.json" in mapping.citation
-    assert mapping.verified_on == dt.date(2026, 8, 14)
+    assert mapping.status is MappingStatus.MANUAL_VERIFIED
+    assert mapping.evidence is MappingEvidence.MANUAL_FILING_CITATION
+    assert "0000320193-25-000079" in mapping.citation
+    assert mapping.verified_on == dt.date(2026, 8, 26)
+    assert mapping.valid_from is None and mapping.valid_to is None
+    assert mapping.lifecycle_facts == ()
 
 
 def test_shipped_aapl_invents_no_ticker_validity_dates() -> None:
@@ -1634,6 +1641,17 @@ def test_a_mixed_status_control_aggregates_to_its_weakest_issuer(
     assert control.is_manually_verified is (expected is MappingStatus.MANUAL_VERIFIED)
 
 
+def _ticker_file_promotions(evidence: Any) -> list[str]:
+    """Mappings claiming a human read a filing while citing the ticker file."""
+    return [
+        f"{control.control_id}/{mapping.issuer_label}"
+        for control in evidence.controls.values()
+        for mapping in control.mappings
+        if mapping.evidence is MappingEvidence.SEC_COMPANY_TICKERS
+        and mapping.status is MappingStatus.MANUAL_VERIFIED
+    ]
+
+
 def test_no_shipped_mapping_claims_manual_verification_on_the_ticker_file() -> None:
     """A curatorial rule with no code behind it, so it needs a corpus guard.
 
@@ -1643,18 +1661,32 @@ def test_no_shipped_mapping_claims_manual_verification_on_the_ticker_file() -> N
     than mechanical -- ``MANUAL_VERIFIED`` means a person read a filing, and a
     current-listings file is not a filing however authoritative it is.
 
-    GM's ``new_gm`` mapping used to pin this alongside AAPL and no longer can,
-    having been promoted to a filing citation. Stated over the whole corpus, the
-    rule survives AAPL being promoted too, which is the point: it guards the
-    convention rather than any one control's current state.
+    **This check is currently vacuous and is kept anyway.** GM's ``new_gm`` and
+    then AAPL were its only two subjects, and both have since been promoted to
+    filing citations, so no shipped mapping cites the ticker file at all. It
+    stays as the guard that fires if one ever reappears; the companion test
+    below is what keeps it honest in the meantime.
     """
-    for control in load_control_evidence(DEFAULT_EVIDENCE_PATH).controls.values():
-        for mapping in control.mappings:
-            if mapping.evidence is MappingEvidence.SEC_COMPANY_TICKERS:
-                assert mapping.status is not MappingStatus.MANUAL_VERIFIED, (
-                    f"{control.control_id}/{mapping.issuer_label} claims a human read a "
-                    "filing while citing the ticker file"
-                )
+    assert _ticker_file_promotions(load_control_evidence(DEFAULT_EVIDENCE_PATH)) == []
+
+
+def test_the_ticker_file_guard_detects_a_violation(tmp_path: Path) -> None:
+    """The guard above must be able to fail, which the corpus can no longer show.
+
+    With every ticker-file mapping now promoted, a corpus-only check passes
+    whether or not the rule is enforced -- it would pass just as happily if the
+    predicate were inverted. Constructing the violation is the only way to prove
+    the guard still detects one.
+    """
+    offender = _verified_mapping(evidence="sec_company_tickers", status="manual_verified")
+    path = _write(tmp_path, [{"control_id": "AAPL", "mappings": [offender]}])
+
+    loaded = load_control_evidence(path)
+    assert loaded.controls["AAPL"].mappings[0].status is MappingStatus.MANUAL_VERIFIED, (
+        "the loader permits this pairing -- the rule is curatorial, which is why "
+        "the guard exists at all"
+    )
+    assert _ticker_file_promotions(loaded) == ["AAPL/primary"]
 
 
 def test_a_control_status_is_always_its_weakest_issuer() -> None:
