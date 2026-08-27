@@ -633,7 +633,7 @@ def test_the_shipped_measurements_agree_with_the_resolution() -> None:
     )
 
 
-def test_the_shipped_state_measures_6_unresolved_and_8_awaiting_verification() -> None:
+def test_the_shipped_state_measures_6_unresolved_and_7_awaiting_verification() -> None:
     """The current shipped snapshot, deliberately hard-coded.
 
     Every other test here is written as a relationship so it survives the next
@@ -641,20 +641,20 @@ def test_the_shipped_state_measures_6_unresolved_and_8_awaiting_verification() -
     roadmap's status line quotes, so the two are pinned together and verifying a
     control fails this test until the roadmap is updated with it. It has now done
     exactly that for MSFT, CSCO, AMZN, SPY, QQQ, ETYS, WBVN, KOOP, MPPP, WCOM,
-    EXDS, PSIX, GCTY, BCST, CPQ, BBBY and AOL in turn, which is the behaviour
-    rather than a nuisance.
+    EXDS, PSIX, GCTY, BCST, CPQ, BBBY, AOL and GM in turn, which is the
+    behaviour rather than a nuisance.
     """
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     resolved = resolve_controls(evidence)
 
     assert len(resolved) == 30
     assert len(unresolved_controls(evidence)) == 6
-    assert len(controls_awaiting_manual_verification(evidence)) == 8
-    assert len(controls_awaiting_adjudication(evidence)) == 8
+    assert len(controls_awaiting_manual_verification(evidence)) == 7
+    assert len(controls_awaiting_adjudication(evidence)) == 7
     assert sum(1 for r in resolved if r.counts_in_numerator) == 24
-    assert sum(1 for r in resolved if r.is_manually_verified) == 22
-    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 22
-    assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 2
+    assert sum(1 for r in resolved if r.is_manually_verified) == 23
+    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 23
+    assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -816,15 +816,36 @@ def test_a_complete_adjudication_without_its_support_is_refused(
         load_control_evidence(path)
 
 
-def test_gm_discharges_its_obligation_by_count_but_is_not_fully_adjudicated() -> None:
-    """The two conditions are independent, and GM is the proof.
+def test_a_discharged_obligation_does_not_excuse_a_weak_mapping(tmp_path: Path) -> None:
+    """The two conditions are independent, and this is the direction GM showed.
 
-    GM has both issuers recorded, so its issuer question is settled -- and its
-    weakest mapping is only RESOLVED, so it fails on quality. BBBY is the mirror
-    image. Collapsing the two conditions would let either gap hide behind the
-    other.
+    Both issuers recorded, so the issuer question is settled -- and the weakest
+    mapping only ``RESOLVED``, so the control still fails on quality. The other
+    direction is the reuse control with one impeccable mapping and an open
+    obligation. Collapsing the two conditions would let either gap hide behind
+    the other.
+
+    Written synthetically because the shipped corpus no longer contains this
+    shape: GM held it until ``new_gm`` was promoted to a filing citation. A test
+    anchored to a real control's transient state is one that will eventually be
+    edited without being read.
     """
-    control = _shipped("GM")
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": "GM",
+                "identity_break": True,
+                "mappings": [
+                    _verified_mapping(issuer_label="old", cik=40730, ticker="GM"),
+                    _verified_mapping(
+                        issuer_label="new", cik=1467858, ticker="GM", status="resolved"
+                    ),
+                ],
+            }
+        ],
+    )
+    control = _resolved(path, "GM")
     assert control.control.required_issuer_investigations == 2
     assert len(control.mappings) == 2
     assert control.issuer_obligation_discharged, "both issuers are recorded"
@@ -1507,13 +1528,23 @@ def test_shipped_old_gm_is_manual_verified_from_a_filing_citation() -> None:
     assert old.verified_on == dt.date(2026, 8, 14)
 
 
-def test_shipped_new_gm_is_resolved_from_the_sec_ticker_file() -> None:
-    """Same precedent as AAPL: viewing the JSON by hand is not a filing citation."""
+def test_shipped_new_gm_was_promoted_from_the_ticker_file_to_a_filing() -> None:
+    """The upgrade that closed GM, and what it replaced.
+
+    This mapping rested on ``company_tickers.json`` -- a dated primary source,
+    and the reason ``RESOLVED`` was correct, but a reference file rather than a
+    filing anyone read. That gap was categorical, not a matter of confidence,
+    and only a filing could close it. AAPL still sits at ``RESOLVED`` on exactly
+    the same footing, and its own test carries that precedent now.
+    """
     new = _shipped_gm()["new_gm"]
-    assert new.status is MappingStatus.RESOLVED
-    assert new.status is not MappingStatus.MANUAL_VERIFIED
-    assert new.evidence is MappingEvidence.SEC_COMPANY_TICKERS
-    assert "company_tickers.json" in new.citation
+    assert new.status is MappingStatus.MANUAL_VERIFIED
+    assert new.evidence is MappingEvidence.MANUAL_FILING_CITATION
+    assert "0001467858-26-000013" in new.citation
+    assert "company_tickers.json" not in new.citation.split("WHAT THIS CITATION REPLACED")[0]
+    assert new.verified_on == dt.date(2026, 8, 26)
+    assert new.valid_from is None and new.valid_to is None
+    assert new.lifecycle_facts == ()
 
 
 def test_shipped_gm_invents_no_ticker_validity_dates() -> None:
@@ -1558,12 +1589,23 @@ def test_the_debenture_form_25_is_never_cited_as_common_stock_evidence() -> None
         assert debenture not in fact.citation
 
 
-def test_gm_control_status_is_its_weakest_issuer() -> None:
-    """MANUAL_VERIFIED + RESOLVED aggregates to RESOLVED, which is correct."""
-    resolved = {
-        r.control.ticker: r for r in resolve_controls(load_control_evidence(DEFAULT_EVIDENCE_PATH))
-    }
-    assert resolved["GM"].status is MappingStatus.RESOLVED
+def test_a_control_status_is_always_its_weakest_issuer() -> None:
+    """The aggregation rule, asserted as a rule rather than as one value.
+
+    This once pinned GM at ``RESOLVED``, which was right until ``new_gm`` was
+    promoted from the ticker file to a filing. The durable statement is the rule
+    itself: a control is only as verified as its least verified issuer, because
+    a half-mapped identity break is what produces a spliced series.
+    """
+    order = [
+        MappingStatus.UNRESOLVED,
+        MappingStatus.AMBIGUOUS,
+        MappingStatus.RESOLVED,
+        MappingStatus.MANUAL_VERIFIED,
+    ]
+    for control in resolve_controls(load_control_evidence(DEFAULT_EVIDENCE_PATH)):
+        weakest = min(control.mappings, key=lambda m: order.index(m.status)).status
+        assert control.status is weakest, control.control.ticker
 
 
 # ---------------------------------------------------------------------------
