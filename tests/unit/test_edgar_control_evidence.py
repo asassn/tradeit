@@ -1589,6 +1589,74 @@ def test_the_debenture_form_25_is_never_cited_as_common_stock_evidence() -> None
         assert debenture not in fact.citation
 
 
+@pytest.mark.parametrize(
+    ("weaker", "expected"),
+    [
+        ("unresolved", MappingStatus.UNRESOLVED),
+        ("ambiguous", MappingStatus.AMBIGUOUS),
+        ("resolved", MappingStatus.RESOLVED),
+        ("manual_verified", MappingStatus.MANUAL_VERIFIED),
+    ],
+)
+def test_a_mixed_status_control_aggregates_to_its_weakest_issuer(
+    tmp_path: Path, weaker: str, expected: MappingStatus
+) -> None:
+    """The aggregation ordering itself, exercised on every rung.
+
+    Written synthetically because the shipped corpus no longer contains a
+    mixed-status control: GM was the last one, and promoting ``new_gm`` made
+    every recorded control uniform. A corpus-wide consistency check therefore
+    passes *vacuously* on the interesting case, so the ordering has to be
+    demonstrated against inputs that are constructed rather than found.
+
+    A control paired with a ``MANUAL_VERIFIED`` issuer takes the weaker
+    status every time, because a half-mapped identity break is exactly what
+    produces a spliced series.
+    """
+    weak = _verified_mapping(issuer_label="weak", cik=40730, ticker="GM", status=weaker)
+    if weaker in {"unresolved", "ambiguous"}:
+        weak["unresolved_reason"] = "second issuer not yet established"
+    path = _write(
+        tmp_path,
+        [
+            {
+                "control_id": "GM",
+                "identity_break": True,
+                "mappings": [
+                    _verified_mapping(issuer_label="strong", cik=1467858, ticker="GM"),
+                    weak,
+                ],
+            }
+        ],
+    )
+    control = _resolved(path, "GM")
+    assert control.status is expected
+    assert control.is_manually_verified is (expected is MappingStatus.MANUAL_VERIFIED)
+
+
+def test_no_shipped_mapping_claims_manual_verification_on_the_ticker_file() -> None:
+    """A curatorial rule with no code behind it, so it needs a corpus guard.
+
+    The loader refuses to promote only ``name_match`` and ``full_text_search``;
+    ``sec_company_tickers`` is *not* in that set, so nothing in code stops a
+    record pairing it with ``MANUAL_VERIFIED``. The bar is definitional rather
+    than mechanical -- ``MANUAL_VERIFIED`` means a person read a filing, and a
+    current-listings file is not a filing however authoritative it is.
+
+    GM's ``new_gm`` mapping used to pin this alongside AAPL and no longer can,
+    having been promoted to a filing citation. Stated over the whole corpus, the
+    rule survives AAPL being promoted too, which is the point: it guards the
+    convention rather than any one control's current state.
+    """
+    for control in load_control_evidence(DEFAULT_EVIDENCE_PATH).controls.values():
+        for mapping in control.mappings:
+            if mapping.evidence is MappingEvidence.SEC_COMPANY_TICKERS:
+                assert mapping.status is not MappingStatus.MANUAL_VERIFIED, (
+                    f"{control.control_id}/{mapping.issuer_label} claims a human read a "
+                    "filing while citing the ticker file"
+                )
+
+
 def test_a_control_status_is_always_its_weakest_issuer() -> None:
     """The aggregation rule, asserted as a rule rather than as one value.
 
@@ -1596,6 +1664,11 @@ def test_a_control_status_is_always_its_weakest_issuer() -> None:
     promoted from the ticker file to a filing. The durable statement is the rule
     itself: a control is only as verified as its least verified issuer, because
     a half-mapped identity break is what produces a spliced series.
+
+    Kept as a corpus-wide consistency check, but it is **not** where the
+    ordering is proven -- with every shipped control now uniform in status it
+    would pass vacuously on the case that matters. See
+    :func:`test_a_mixed_status_control_aggregates_to_its_weakest_issuer`.
     """
     order = [
         MappingStatus.UNRESOLVED,
