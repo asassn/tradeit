@@ -28,6 +28,7 @@ from tradeit.edgar.control_evidence import (
     ControlEvidence,
     FactDateSource,
     IdentifierNamespace,
+    IdentityRelation,
     IssuerMapping,
     authority_of,
     controls_awaiting_adjudication,
@@ -642,7 +643,7 @@ def test_the_shipped_measurements_agree_with_the_resolution() -> None:
     )
 
 
-def test_the_shipped_state_measures_2_unresolved_and_2_awaiting_verification() -> None:
+def test_the_shipped_state_measures_1_unresolved_and_1_awaiting_verification() -> None:
     """The current shipped snapshot, deliberately hard-coded.
 
     Every other test here is written as a relationship so it survives the next
@@ -650,19 +651,19 @@ def test_the_shipped_state_measures_2_unresolved_and_2_awaiting_verification() -
     roadmap's status line quotes, so the two are pinned together and verifying a
     control fails this test until the roadmap is updated with it. It has now done
     exactly that for MSFT, CSCO, AMZN, SPY, QQQ, ETYS, WBVN, KOOP, MPPP, WCOM,
-    EXDS, PSIX, GCTY, BCST, CPQ, BBBY, AOL, GM, AAPL, JDSU, PCLN, QCOM and CC
-    in turn, which is the behaviour rather than a nuisance.
+    EXDS, PSIX, GCTY, BCST, CPQ, BBBY, AOL, GM, AAPL, JDSU, PCLN, QCOM, CC and
+    FRC in turn, which is the behaviour rather than a nuisance.
     """
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     resolved = resolve_controls(evidence)
 
     assert len(resolved) == 30
-    assert len(unresolved_controls(evidence)) == 2
-    assert len(controls_awaiting_manual_verification(evidence)) == 2
-    assert len(controls_awaiting_adjudication(evidence)) == 2
-    assert sum(1 for r in resolved if r.counts_in_numerator) == 28
-    assert sum(1 for r in resolved if r.is_manually_verified) == 28
-    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 28
+    assert len(unresolved_controls(evidence)) == 1
+    assert len(controls_awaiting_manual_verification(evidence)) == 1
+    assert len(controls_awaiting_adjudication(evidence)) == 1
+    assert sum(1 for r in resolved if r.counts_in_numerator) == 29
+    assert sum(1 for r in resolved if r.is_manually_verified) == 29
+    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 29
     assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 0
 
 
@@ -1372,23 +1373,35 @@ def test_shipped_tglo_quotes_the_filing_without_escape_artifacts() -> None:
     assert mapping.status is MappingStatus.MANUAL_VERIFIED
 
 
-def test_every_shipped_cik_carries_a_citation() -> None:
-    """A CIK without a citation is a CIK someone remembered.
+def test_every_shipped_issuer_key_carries_a_citation() -> None:
+    """An issuer key without a citation is an identifier someone remembered.
 
-    This replaces an earlier blanket "no CIK anywhere" assertion, which was true
-    only until the first control was verified. The durable rule is not that CIKs
-    are absent -- it is that no CIK exists without primary-source provenance.
+    This has been generalized twice, each time because the corpus outgrew the
+    assertion rather than because the rule changed. It began as a blanket "no
+    CIK anywhere", true only until the first control was verified; it became
+    "no CIK without provenance"; and it is now stated over the *issuer key*,
+    because FRC has no SEC filer account and is discriminated by an FDIC
+    certificate. The durable rule was always the same one: no identifier exists
+    here without primary-source provenance behind it.
+
+    Note what the middle version would have done to FRC. It read ``cik is None``
+    as proof of ``UNRESOLVED`` -- so a fully evidenced identity keyed on another
+    federal registry would have failed a test whose real subject is provenance.
     """
     loaded = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     for control in loaded.controls.values():
         for mapping in control.mappings:
-            if mapping.cik is None:
+            if primary_issuer_key(mapping) is None:
                 assert mapping.status is MappingStatus.UNRESOLVED
                 assert mapping.unresolved_reason
             else:
                 assert mapping.counts_in_numerator
                 assert mapping.citation
                 assert mapping.verified_on is not None
+                # Every asserted identifier carries its own provenance, not the
+                # mapping citation's by association.
+                for identifier in mapping.identifiers:
+                    assert identifier.ref.citation
 
 
 def test_shipped_aapl_was_promoted_from_the_ticker_file_to_a_filing() -> None:
@@ -2706,15 +2719,25 @@ def test_every_shipped_mapping_migrates_to_the_same_sec_cik_key(tmp_path: Path) 
     del tmp_path
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     mappings = [m for record in evidence.controls.values() for m in record.mappings]
-    assert mappings, "a vacuous pass here would hide a total migration failure"
+    legacy = [m for m in mappings if m.cik is not None]
+    assert len(legacy) >= 32, "a vacuous pass here would hide a total migration failure"
 
-    for mapping in mappings:
+    for mapping in legacy:
+        # A legacy record carries no explicit identifiers at all, and its cik
+        # alone resolves to the same key the old duplicate-check compared.
         assert mapping.identifiers == ()
-        assert mapping.related_identities == ()
         assert primary_issuer_key(mapping) == (
             str(IdentifierNamespace.SEC_CIK),
             str(mapping.cik),
         )
+
+    # The complement, so this test cannot quietly become a claim that every
+    # shipped mapping is legacy: a mapping without a cik must be keyed by an
+    # explicit primary identifier rather than by nothing.
+    for mapping in [m for m in mappings if m.cik is None]:
+        key = primary_issuer_key(mapping)
+        assert key is not None
+        assert key[0] != str(IdentifierNamespace.SEC_CIK)
 
 
 def test_a_non_sec_identifier_can_be_the_primary_issuer_key(tmp_path: Path) -> None:
@@ -3141,3 +3164,49 @@ def test_identifier_values_must_be_positive_integers(
     )
     with pytest.raises(ConfigError):
         load_control_evidence(path)
+
+
+def test_frc_is_the_shipped_exercise_of_regulator_neutral_identity() -> None:
+    """The first shipped record whose issuer key is not an SEC CIK.
+
+    The architecture suite above is synthetic on purpose -- it must keep working
+    when no shipped control demonstrates a shape. This one is the complement:
+    it pins that the shipped corpus actually exercises the generalization, so a
+    regression that quietly reverted FRC to a CIK, or promoted its unresolved
+    SEC subject identity into an asserted identifier, fails here.
+    """
+    control = _shipped("FRC")
+    assert len(control.mappings) == 1
+    assert control.identity_break is False
+    mapping = control.mappings[0]
+
+    # The issuer has no SEC filer account, and the key says so without a null.
+    assert mapping.cik is None
+    assert primary_issuer_key(mapping) == ("fdic_cert", "59017")
+
+    roles = {(str(i.ref.namespace), str(i.role)) for i in mapping.identifiers}
+    assert roles == {("fdic_cert", "primary"), ("frb_rssd", "corroborating")}
+    assert all(i.ref.citation for i in mapping.identifiers)
+
+    # CIK 1132979 is recorded, and recorded as *not* this issuer's.
+    related = mapping.related_identities
+    assert [r.ref.key for r in related] == [("sec_cik", "1132979")]
+    assert related[0].relation is IdentityRelation.UNRESOLVED
+    assert ("sec_cik", "1132979") not in mapping.asserted_keys
+    assert "not established in either direction" in related[0].finding.lower()
+    # Both EINs are named, so the conflict is legible rather than smoothed over.
+    assert "88-0157485" in related[0].finding
+    assert "80-0513856" in related[0].finding
+
+    # Identity only: the fixture's delisting is nowhere in the record.
+    assert mapping.lifecycle_facts == ()
+    assert mapping.valid_from is None and mapping.valid_to is None
+    assert control.adjudication is None
+    assert control.is_manually_verified and control.is_fully_adjudicated
+
+    # Regulator-neutral evidence: an FDIC-filed 10-K is not a lesser citation.
+    assert mapping.evidence is MappingEvidence.MANUAL_FILING_CITATION
+    assert "FEDERAL DEPOSIT INSURANCE CORPORATION" in mapping.citation
+    # The FDIC page is the locator; the corporate mirror is not the source.
+    assert "fdic.gov/news/speeches/2023/spmay1523.html" in mapping.citation
+    assert "THE FDIC PAGE IS THE REGULATORY SOURCE" in mapping.citation
