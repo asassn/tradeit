@@ -36,7 +36,12 @@ from tradeit.edgar.acquire import (
     Outcome,
     acquire_control_evidence,
 )
-from tradeit.edgar.control_evidence import load_control_evidence, resolve_controls
+from tradeit.edgar.control_evidence import (
+    authority_of,
+    load_control_evidence,
+    primary_issuer_key,
+    resolve_controls,
+)
 from tradeit.edgar.controls import CONTROL_UNIVERSE
 from tradeit.edgar.evidence import classify_form
 from tradeit.edgar.index import (
@@ -846,13 +851,17 @@ def cmd_controls(args: argparse.Namespace) -> int:
     print()
 
     if not args.diagnose:
-        print(f"{'control':8s} {'status':16s} {'cik':>10s} {'ticker':8s}  class")
+        print(f"{'control':8s} {'status':16s} {'issuer key':>22s} {'ticker':8s}  class")
         for r in resolved:
             first = r.mappings[0]
-            cik = "-" if first.cik is None else str(first.cik)
+            # The primary key, not the cik: an issuer that reports to another
+            # federal regulator has no SEC filer account, and a column that can
+            # only show a cik would print "-" for a fully evidenced identity.
+            key = primary_issuer_key(first)
+            shown = "-" if key is None else f"{key[0]}:{key[1]}"
             extra = f"  (+{len(r.mappings) - 1} more issuer)" if len(r.mappings) > 1 else ""
             print(
-                f"{r.control.ticker:8s} {r.status!s:16s} {cik:>10s} "
+                f"{r.control.ticker:8s} {r.status!s:16s} {shown:>22s} "
                 f"{first.ticker or '-':8s}  {r.control.control_class}{extra}"
             )
     else:
@@ -863,7 +872,18 @@ def cmd_controls(args: argparse.Namespace) -> int:
                 print("   IDENTITY BREAK: several issuers shared this ticker; never merged")
             for m in r.mappings:
                 print(f"   · issuer   : {m.issuer_label}")
-                print(f"     cik      : {m.cik if m.cik is not None else '-'}")
+                key = primary_issuer_key(m)
+                print(f"     key      : {key[0]}:{key[1]}" if key else "     key      : -")
+                for ident in m.identifiers:
+                    print(
+                        f"     id       : {ident.ref.namespace}:{ident.ref.value} "
+                        f"[{ident.role}] {authority_of(ident.ref.namespace)}"
+                    )
+                for rel in m.related_identities:
+                    print(
+                        f"     related  : {rel.ref.namespace}:{rel.ref.value} "
+                        f"[{rel.relation}] NOT this issuer's identifier"
+                    )
                 print(f"     ticker   : {m.ticker or '-'}")
                 print(f"     evidence : {m.evidence or '-'}")
                 print(f"     citation : {m.citation or '-'}")

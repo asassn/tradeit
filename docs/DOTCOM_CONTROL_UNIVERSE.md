@@ -190,10 +190,21 @@ fixture the probe runs against.** Thirty securities, sized so every control can 
 checked by hand if necessary.
 
 **Every ticker, name and date below is UNVERIFIED and must reach
-`MANUAL_VERIFIED` state against EDGAR before the probe relies on it**
-(`EDGAR_DELISTING_DENOMINATOR.md` §4). A candidate that cannot be confirmed is
-**replaced, not guessed at** — and replacement happens *before* vendor data is
-seen, never after.
+`MANUAL_VERIFIED` state against primary regulatory evidence before the probe
+relies on it** (`EDGAR_DELISTING_DENOMINATOR.md` §4). A candidate that cannot be
+confirmed is **replaced, not guessed at** — and replacement happens *before*
+vendor data is seen, never after.
+
+**EDGAR is the normal source and the only one for an SEC-reporting issuer.** The
+exception is narrow and structural: an issuer may legally file its Exchange Act
+reports with another federal regulator instead — a bank with no holding company
+files its 10-K, 10-Q, 8-K and proxy statements with the FDIC — and such an
+issuer has no SEC filer CIK to find, so requiring EDGAR would make it
+unverifiable for a reason that has nothing to do with the strength of its
+evidence. Its own direct filing is the same document filed where the statute
+directs, and is admissible on the same terms. **Nothing else is.** A corporate
+website, an investor-relations page, an aggregator, a press release or a search
+result is not primary regulatory evidence, whatever it appears to confirm.
 
 | # | ticker | security | class | what its failure would prove |
 |---|---|---|---|---|

@@ -27,10 +27,13 @@ from tradeit.edgar.control_evidence import (
     SCHEMA_VERSION,
     ControlEvidence,
     FactDateSource,
+    IdentifierNamespace,
     IssuerMapping,
+    authority_of,
     controls_awaiting_adjudication,
     controls_awaiting_manual_verification,
     load_control_evidence,
+    primary_issuer_key,
     resolve_controls,
     unresolved_controls,
 )
@@ -153,12 +156,18 @@ def test_resolved_without_ticker_is_refused(tmp_path: Path) -> None:
         load_control_evidence(path)
 
 
-def test_resolved_without_cik_is_refused(tmp_path: Path) -> None:
+def test_resolved_without_any_primary_issuer_key_is_refused(tmp_path: Path) -> None:
+    """A cik was once the only key; now it is one of several namespaces.
+
+    The requirement is unchanged in force -- a numerator-counting mapping must
+    name the issuer -- but it is stated over the key rather than over ``cik``,
+    so an issuer that reports to another federal regulator can satisfy it.
+    """
     path = _write(
         tmp_path,
         [{"control_id": "AAPL", "mappings": [_verified_mapping(status="resolved", cik=None)]}],
     )
-    with pytest.raises(ConfigError, match="requires a cik"):
+    with pytest.raises(ConfigError, match="requires a primary issuer key"):
         load_control_evidence(path)
 
 
@@ -241,7 +250,7 @@ def test_two_issuers_sharing_a_cik_is_refused(tmp_path: Path) -> None:
             }
         ],
     )
-    with pytest.raises(ConfigError, match="same cik appears on two issuers"):
+    with pytest.raises(ConfigError, match="same primary issuer key appears on two issuers"):
         load_control_evidence(path)
 
 
@@ -1807,7 +1816,7 @@ def test_a_second_ipet_mapping_on_the_same_cik_is_refused(tmp_path: Path) -> Non
             }
         ],
     )
-    with pytest.raises(ConfigError, match="the same cik appears on two issuers"):
+    with pytest.raises(ConfigError, match="same primary issuer key appears on two issuers"):
         load_control_evidence(path)
 
 
@@ -2634,3 +2643,501 @@ def test_ene_8k_citation_uses_the_filed_as_of_date() -> None:
         if "0001024401-97-000002" in f.citation
     }
     assert merger_dates == {dt.date(1997, 7, 1)}
+
+
+# ---------------------------------------------------------------------------
+# regulator-neutral issuer identity
+#
+# FRC is why this exists: an NYSE-listed bank with no holding company reports
+# under the Exchange Act to the FDIC rather than the SEC, so it has no SEC filer
+# CIK to be the permanent issuer key. The generalization must therefore let
+# another registry's identifier discriminate an issuer -- WITHOUT weakening the
+# property the CIK was carrying, which is that two issuers sharing a ticker can
+# never be merged into one series.
+#
+# Every test below runs on constructed inputs. The shipped file carries no
+# identifiers at all today, so a suite written against it would pass while
+# testing nothing -- the exact vacuity this project has hit twice before, once
+# when GM's promotion removed the last mixed-status control and once when
+# AAPL's removed the last ticker-file mapping.
+# ---------------------------------------------------------------------------
+
+
+def _ident(namespace: str, value: str, role: str = "primary", **extra: Any) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "namespace": namespace,
+        "value": value,
+        "role": role,
+        "citation": f"primary source for {namespace} {value}",
+    }
+    record.update(extra)
+    return record
+
+
+def _bank_mapping(**overrides: Any) -> dict[str, Any]:
+    """A mapping keyed by an FDIC certificate rather than a CIK."""
+    record = {
+        "issuer_label": "primary",
+        "cik": None,
+        "ticker": "ZZZZ",
+        "status": "manual_verified",
+        "evidence": "manual_filing_citation",
+        "citation": "FDIC-filed Form 10-K, cover page trading-symbol row",
+        "verified_on": "2026-08-27",
+        "identifiers": [_ident("fdic_cert", "59017")],
+    }
+    record.update(overrides)
+    return record
+
+
+def _control(mappings: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+    record: dict[str, Any] = {"control_id": "CC", "mappings": mappings}
+    record.update(extra)
+    return record
+
+
+def test_every_shipped_mapping_migrates_to_the_same_sec_cik_key(tmp_path: Path) -> None:
+    """The generalization is a no-op for all 32 shipped mappings.
+
+    This is the one test here that *should* read shipped state, because what it
+    asserts is precisely that the migration changed nothing. ``cik`` is legacy
+    shorthand for a primary ``SEC_CIK`` and must resolve identically.
+    """
+    del tmp_path
+    evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
+    mappings = [m for record in evidence.controls.values() for m in record.mappings]
+    assert mappings, "a vacuous pass here would hide a total migration failure"
+
+    for mapping in mappings:
+        assert mapping.identifiers == ()
+        assert mapping.related_identities == ()
+        assert primary_issuer_key(mapping) == (
+            str(IdentifierNamespace.SEC_CIK),
+            str(mapping.cik),
+        )
+
+
+def test_a_non_sec_identifier_can_be_the_primary_issuer_key(tmp_path: Path) -> None:
+    """The whole point: an issuer with no SEC filer account is representable."""
+    path = _write(tmp_path, [_control([_bank_mapping()])])
+    control = _resolved(path, "CC")
+
+    mapping = control.mappings[0]
+    assert mapping.cik is None
+    assert primary_issuer_key(mapping) == ("fdic_cert", "59017")
+    assert control.is_manually_verified
+    assert control.counts_in_numerator
+
+
+def test_the_namespace_determines_the_authority_and_cannot_be_stored(tmp_path: Path) -> None:
+    """A free-text authority would drift, and a drifting field cannot compare."""
+    assert authority_of(IdentifierNamespace.FDIC_CERT) == "Federal Deposit Insurance Corporation"
+    assert authority_of(IdentifierNamespace.FRB_RSSD).startswith("Board of Governors")
+
+    path = _write(
+        tmp_path,
+        [_control([_bank_mapping(identifiers=[_ident("fdic_cert", "59017", authority="FDIC")])])],
+    )
+    with pytest.raises(ConfigError, match="authority is derived"):
+        load_control_evidence(path)
+
+
+def test_no_primary_identifier_cannot_reach_a_numerator_status(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [_bank_mapping(identifiers=[_ident("fdic_cert", "59017", role="corroborating")])]
+            )
+        ],
+    )
+    with pytest.raises(ConfigError, match="requires a primary issuer key"):
+        load_control_evidence(path)
+
+
+def test_two_primary_identifiers_are_refused(tmp_path: Path) -> None:
+    """An issuer with two discriminators has none."""
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _bank_mapping(
+                        identifiers=[
+                            _ident("fdic_cert", "59017"),
+                            _ident("frb_rssd", "4114567"),
+                        ]
+                    )
+                ]
+            )
+        ],
+    )
+    with pytest.raises(ConfigError, match="primary issuer keys offered"):
+        load_control_evidence(path)
+
+
+def test_legacy_cik_plus_a_non_sec_primary_is_refused(tmp_path: Path) -> None:
+    """The dual representation may never produce two primary keys."""
+    path = _write(
+        tmp_path,
+        [_control([_bank_mapping(cik=1132979, identifiers=[_ident("fdic_cert", "59017")])])],
+    )
+    with pytest.raises(ConfigError, match="primary issuer keys offered"):
+        load_control_evidence(path)
+
+
+def test_legacy_cik_and_an_agreeing_sec_cik_identifier_are_one_key(tmp_path: Path) -> None:
+    """Leading zeros are the same identifier written two ways, not two issuers."""
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _bank_mapping(
+                        cik=320193,
+                        identifiers=[_ident("sec_cik", "0000320193")],
+                    )
+                ]
+            )
+        ],
+    )
+    mapping = _resolved(path, "CC").mappings[0]
+    assert primary_issuer_key(mapping) == ("sec_cik", "320193")
+    # The verbatim rendering is preserved; only comparison normalizes.
+    assert mapping.identifiers[0].ref.value == "0000320193"
+
+
+def test_legacy_cik_and_a_disagreeing_sec_cik_identifier_are_refused(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        [_control([_bank_mapping(cik=320193, identifiers=[_ident("sec_cik", "789019")])])],
+    )
+    with pytest.raises(ConfigError, match="primary issuer keys offered"):
+        load_control_evidence(path)
+
+
+def test_the_same_number_in_two_namespaces_does_not_collide(tmp_path: Path) -> None:
+    """``SEC_CIK:59017`` and ``FDIC_CERT:59017`` are different institutions.
+
+    The namespace is part of the key. A bare integer comparison would merge two
+    issuers that merely share a number, which is the splice in miniature.
+    """
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _verified_mapping(issuer_label="old", cik=59017, ticker="CC"),
+                    _bank_mapping(issuer_label="new", ticker="CC"),
+                ],
+                identity_break=True,
+            )
+        ],
+    )
+    control = _resolved(path, "CC")
+    keys = {primary_issuer_key(m) for m in control.mappings}
+    assert keys == {("sec_cik", "59017"), ("fdic_cert", "59017")}
+    assert len(control.mappings) == 2
+
+
+def test_identical_issuer_names_with_different_keys_stay_distinct(tmp_path: Path) -> None:
+    """Name equality never merges. This is the load-bearing anti-splice test.
+
+    Both issuers carry a byte-identical ``expected_company``, byte-identical
+    tickers and near-identical citations. Only the keys differ. If anything ever
+    starts merging on name, this fails.
+    """
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _verified_mapping(issuer_label="first", cik=886158, ticker="CC"),
+                    _verified_mapping(issuer_label="second", cik=1130713, ticker="CC"),
+                ],
+                expected_company="Identical Name Corporation",
+                identity_break=True,
+            )
+        ],
+    )
+    control = _resolved(path, "CC")
+    assert len(control.mappings) == 2
+    assert {primary_issuer_key(m) for m in control.mappings} == {
+        ("sec_cik", "886158"),
+        ("sec_cik", "1130713"),
+    }
+
+
+def test_a_duplicate_primary_key_across_mappings_is_refused(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _bank_mapping(issuer_label="first"),
+                    _bank_mapping(issuer_label="second"),
+                ],
+                identity_break=True,
+            )
+        ],
+    )
+    with pytest.raises(ConfigError, match="same primary issuer key"):
+        load_control_evidence(path)
+
+
+def test_a_duplicate_key_across_legacy_cik_and_explicit_identifier_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The two representations are compared against each other, not siloed."""
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _verified_mapping(issuer_label="legacy", cik=320193, ticker="CC"),
+                    _bank_mapping(
+                        issuer_label="explicit",
+                        ticker="CC",
+                        identifiers=[_ident("sec_cik", "0000320193")],
+                    ),
+                ],
+                identity_break=True,
+            )
+        ],
+    )
+    with pytest.raises(ConfigError, match="same primary issuer key"):
+        load_control_evidence(path)
+
+
+def test_a_corroborating_identifier_colliding_across_mappings_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Two records claiming one institution, arriving by the quieter route.
+
+    The old cik-only check could not see this: the primary keys differ, so
+    nothing collided, yet both mappings claim the same RSSD -- which means one
+    institution has been recorded as two issuers.
+    """
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _bank_mapping(
+                        issuer_label="first",
+                        identifiers=[
+                            _ident("fdic_cert", "59017"),
+                            _ident("frb_rssd", "4114567", role="corroborating"),
+                        ],
+                    ),
+                    _bank_mapping(
+                        issuer_label="second",
+                        identifiers=[
+                            _ident("fdic_cert", "12345"),
+                            _ident("frb_rssd", "4114567", role="corroborating"),
+                        ],
+                    ),
+                ],
+                identity_break=True,
+            )
+        ],
+    )
+    with pytest.raises(ConfigError, match="claimed by both"):
+        load_control_evidence(path)
+
+
+def test_an_unresolved_related_identity_cannot_satisfy_the_primary_key(tmp_path: Path) -> None:
+    """CIK 1132979 is the motivating case: it must not become the issuer key."""
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _bank_mapping(
+                        identifiers=[],
+                        related_identities=[
+                            {
+                                "namespace": "sec_cik",
+                                "value": "1132979",
+                                "relation": "unresolved",
+                                "finding": "EDGAR associates this subject CIK with a "
+                                "same-named institution carrying a different EIN; whether "
+                                "it is the same legal person is not established",
+                                "citation": "SC 13G/A accession 0001104659-22-017558",
+                            }
+                        ],
+                    )
+                ]
+            )
+        ],
+    )
+    with pytest.raises(ConfigError, match="requires a primary issuer key"):
+        load_control_evidence(path)
+
+
+def test_a_related_identity_never_collides_and_changes_no_count(tmp_path: Path) -> None:
+    """The same value that would collide as an identifier is inert as a relation.
+
+    Deliberately paired with the corroborating-collision test above: identical
+    values, identical namespaces, opposite outcomes. That contrast is the proof
+    the separation is real rather than decorative.
+    """
+    related = {
+        "namespace": "sec_cik",
+        "value": "1132979",
+        "relation": "unresolved",
+        "finding": "not established in either direction",
+        "citation": "SC 13G/A accession 0001104659-22-017558",
+    }
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _bank_mapping(issuer_label="first", related_identities=[related]),
+                    _bank_mapping(
+                        issuer_label="second",
+                        identifiers=[_ident("fdic_cert", "12345")],
+                        related_identities=[related],
+                    ),
+                ],
+                identity_break=True,
+            )
+        ],
+    )
+    control = _resolved(path, "CC")
+    assert len(control.mappings) == 2
+    assert control.counts_in_numerator
+    for mapping in control.mappings:
+        assert mapping.related_identities[0].ref.key == ("sec_cik", "1132979")
+        assert mapping.asserted_keys == (primary_issuer_key(mapping),)
+
+
+def test_a_related_identity_may_not_carry_a_role(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _bank_mapping(
+                        related_identities=[
+                            {
+                                "namespace": "sec_cik",
+                                "value": "1132979",
+                                "relation": "unresolved",
+                                "role": "corroborating",
+                                "finding": "x",
+                                "citation": "y",
+                            }
+                        ]
+                    )
+                ]
+            )
+        ],
+    )
+    with pytest.raises(ConfigError, match="has no role"):
+        load_control_evidence(path)
+
+
+def test_an_unresolved_relation_requires_a_finding(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _bank_mapping(
+                        related_identities=[
+                            {
+                                "namespace": "sec_cik",
+                                "value": "1132979",
+                                "relation": "unresolved",
+                                "finding": "   ",
+                                "citation": "y",
+                            }
+                        ]
+                    )
+                ]
+            )
+        ],
+    )
+    with pytest.raises(ConfigError, match="finding is required"):
+        load_control_evidence(path)
+
+
+def test_every_asserted_identifier_requires_a_citation(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        [_control([_bank_mapping(identifiers=[_ident("fdic_cert", "59017", citation="")])])],
+    )
+    with pytest.raises(ConfigError, match="citation is required"):
+        load_control_evidence(path)
+
+
+def test_an_unknown_namespace_is_refused(tmp_path: Path) -> None:
+    """CUSIP is the case this forbids, and it must stay forbidden.
+
+    A CUSIP identifies a *security*. One issuer can have several, so admitting
+    one as an issuer key would make the uniqueness check compare instruments
+    while claiming to compare issuers. Security identity is a separate
+    proposition with its own structure.
+    """
+    path = _write(
+        tmp_path,
+        [_control([_bank_mapping(identifiers=[_ident("cusip", "33616C100")])])],
+    )
+    with pytest.raises(ConfigError):
+        load_control_evidence(path)
+
+    assert "cusip" not in {str(n) for n in IdentifierNamespace}
+    assert {str(n) for n in IdentifierNamespace} == {"sec_cik", "fdic_cert", "frb_rssd"}
+
+
+def test_identity_break_is_still_required_for_several_issuers(tmp_path: Path) -> None:
+    """The generalization does not create a way around the break declaration."""
+    path = _write(
+        tmp_path,
+        [
+            _control(
+                [
+                    _bank_mapping(issuer_label="first"),
+                    _bank_mapping(
+                        issuer_label="second", identifiers=[_ident("frb_rssd", "4114567")]
+                    ),
+                ]
+            )
+        ],
+    )
+    with pytest.raises(ConfigError, match="identity_break is false"):
+        load_control_evidence(path)
+
+
+def test_manual_filing_citation_stays_regulator_neutral() -> None:
+    """No SEC/FDIC split, and therefore no invented quality ordering.
+
+    ``MANUAL_VERIFIED`` means a human read primary evidence and cited it. An
+    Exchange Act Form 10-K filed with the FDIC under section 12(i) is the same
+    document filed where the statute directs, not a weaker one -- and a ranked
+    enum would have to assert an ordering that has no defensible answer.
+    """
+    assert {str(e) for e in MappingEvidence} == {
+        "manual_filing_citation",
+        "sec_company_tickers",
+        "filing_document_text",
+        "submissions_former_names",
+        "full_text_search",
+        "name_match",
+    }
+
+
+@pytest.mark.parametrize(
+    ("namespace", "value"),
+    [("fdic_cert", ""), ("fdic_cert", "59017A"), ("fdic_cert", "0"), ("sec_cik", "abc")],
+)
+def test_identifier_values_must_be_positive_integers(
+    tmp_path: Path, namespace: str, value: str
+) -> None:
+    path = _write(
+        tmp_path, [_control([_bank_mapping(identifiers=[_ident(namespace, value)])])]
+    )
+    with pytest.raises(ConfigError):
+        load_control_evidence(path)

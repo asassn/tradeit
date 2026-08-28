@@ -44,15 +44,24 @@ __all__ = [
     "DEFAULT_EVIDENCE_PATH",
     "SCHEMA_VERSION",
     "Adjudication",
+    "AmbiguousIssuerKey",
     "ControlEvidence",
     "ControlEvidenceFile",
     "FactDateSource",
+    "IdentifierNamespace",
+    "IdentifierRef",
+    "IdentifierRole",
+    "IdentityRelation",
+    "IssuerIdentifier",
     "IssuerMapping",
     "LifecycleFact",
+    "RelatedIdentity",
     "ResolvedControl",
+    "authority_of",
     "controls_awaiting_adjudication",
     "controls_awaiting_manual_verification",
     "load_control_evidence",
+    "primary_issuer_key",
     "resolve_controls",
     "unresolved_controls",
 ]
@@ -68,7 +77,18 @@ __all__ = [
 #: reassuring number computed from a rule it does not have. The loader refuses a
 #: version mismatch outright, so the bump converts that quiet wrong answer into
 #: a loud refusal -- which is the whole point of versioning this file.
-SCHEMA_VERSION = 3
+#:
+#: Bumped to 4 when regulator-neutral issuer identity was added, and the reason
+#: is the uniqueness rule rather than the new fields. A version-3 reader decides
+#: "is this one issuer or two?" on ``cik`` alone. Handed a file where two
+#: mappings are discriminated by ``FDIC_CERT`` keys and both carry ``cik: null``,
+#: it finds no duplicate cik, reports the file valid, and thereby permits
+#: exactly the splice the check exists to prevent -- a reassuring number
+#: computed from a rule it does not have, in the most load-bearing invariant in
+#: this module. That a v3 reader *would* reject a MANUAL_VERIFIED mapping with a
+#: null cik is true and beside the point: the dangerous case is the one it
+#: accepts, not the one it refuses.
+SCHEMA_VERSION = 4
 
 # Why the version-3 discussion below is kept.
 #
@@ -183,6 +203,158 @@ class LifecycleFact:
         }
 
 
+class IdentifierNamespace(StrEnum):
+    """Which registry issued an identifier, and therefore what it identifies.
+
+    **Every member here identifies a legal issuer.** A namespace for a
+    *security* -- CUSIP, ISIN, FIGI -- must NEVER be added to this enum or
+    placed in :attr:`IssuerMapping.identifiers`. A CUSIP identifies an
+    instrument, and one issuer can have several while one instrument has one
+    issuer, so admitting it as an issuer key would make the anti-splicing
+    uniqueness check compare the wrong things and quietly stop working. Security
+    identity is a separate proposition with its own structure; when it is built,
+    it gets its own enum and its own field.
+
+    The namespace **determines** the issuing authority (:func:`authority_of`)
+    rather than storing it beside the value. A free-text authority drifts --
+    "FDIC", "F.D.I.C.", "Federal Deposit Insurance Corporation" -- and a
+    drifting field cannot be compared, which is exactly what an identifier is
+    for.
+    """
+
+    SEC_CIK = "sec_cik"
+    FDIC_CERT = "fdic_cert"
+    FRB_RSSD = "frb_rssd"
+
+
+#: The authority each namespace belongs to. Derived, never stored.
+_AUTHORITY: dict[IdentifierNamespace, str] = {
+    IdentifierNamespace.SEC_CIK: "U.S. Securities and Exchange Commission",
+    IdentifierNamespace.FDIC_CERT: "Federal Deposit Insurance Corporation",
+    IdentifierNamespace.FRB_RSSD: "Board of Governors of the Federal Reserve System",
+}
+
+
+def authority_of(namespace: IdentifierNamespace) -> str:
+    """The body that issues identifiers in this namespace."""
+    return _AUTHORITY[namespace]
+
+
+class IdentifierRole(StrEnum):
+    """Whether an identifier *is* this issuer's key, or merely agrees with it.
+
+    Exactly one ``PRIMARY`` key discriminates an issuer, because uniqueness must
+    be decided on one deterministic value. Two co-equal primaries would let two
+    records each fail to collide by being compared on *different* keys, and the
+    splice slips through the gap between them.
+
+    ``CORROBORATING`` identifiers are first-class evidence -- two independent
+    registries naming one institution is stronger than either alone -- but they
+    do not decide identity. They are still checked for collisions, because the
+    same value appearing on two issuers means one entity was recorded twice.
+    """
+
+    PRIMARY = "primary"
+    CORROBORATING = "corroborating"
+
+
+class IdentityRelation(StrEnum):
+    """How an *external* identifier stands to this issuer.
+
+    Only one member today, and deliberately so: ``UNRESOLVED`` is the honest
+    state for an identifier that appears to describe the same institution and
+    has not been shown to. Members asserting sameness or succession are not
+    added speculatively -- each would be a claim needing its own evidence rules.
+    """
+
+    UNRESOLVED = "unresolved"
+
+
+@dataclass(frozen=True, slots=True)
+class IdentifierRef:
+    """A registry identifier and where it was read. Asserts nothing by itself.
+
+    Shared by :class:`IssuerIdentifier` and :class:`RelatedIdentity` so the two
+    cannot drift apart -- but deliberately carrying no role and no relation, so
+    that holding a reference never implies what it means. What it means is the
+    wrapper's job.
+    """
+
+    namespace: IdentifierNamespace
+    #: **Verbatim, exactly as the source rendered it**, leading zeros and all.
+    #: Comparison normalizes (:meth:`key`); storage never does. The same
+    #: discipline the venue strings follow: a record shows what it read.
+    value: str
+    #: Required. An uncited identifier is the same failure class as an uncited
+    #: mapping -- a number nobody can check is not provenance.
+    citation: str
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """The namespaced, normalized comparison key.
+
+        The namespace is **part of the key**, not decoration: ``SEC_CIK:59017``
+        and ``FDIC_CERT:59017`` are different institutions that happen to share
+        a number, and a bare integer comparison would merge them.
+
+        All three namespaces are numeric registries, so the value normalizes
+        through ``int`` -- ``0001132979`` and ``1132979`` are one identifier
+        written two ways, and treating them as two would be a splice waiting to
+        happen.
+        """
+        return (str(self.namespace), str(int(self.value)))
+
+    def summary(self) -> dict[str, object]:
+        return {
+            "namespace": str(self.namespace),
+            "value": self.value,
+            "authority": authority_of(self.namespace),
+            "citation": self.citation,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class IssuerIdentifier:
+    """An identifier **asserted to be this issuer's**, with its role."""
+
+    ref: IdentifierRef
+    role: IdentifierRole
+
+    def summary(self) -> dict[str, object]:
+        return {**self.ref.summary(), "role": str(self.role)}
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedIdentity:
+    """An external identifier whose relation to this issuer is NOT established.
+
+    **Structurally separate from :class:`IssuerIdentifier`, on purpose.** An
+    unresolved relation is neither a primary nor a corroborating identifier: it
+    can never satisfy the primary-key requirement, never participates in a
+    collision check, and never changes a count. Reusing one object for both
+    would make "is this ours?" a matter of reading a role field correctly, and
+    the whole point is that it must not be possible to get wrong.
+
+    Anything in :attr:`IssuerMapping.identifiers` asserts *this is this issuer*.
+    That is precisely the claim this class exists to avoid making, which is why
+    an "alias" member was rejected -- an alias is a sameness claim wearing a
+    modest label.
+    """
+
+    ref: IdentifierRef
+    relation: IdentityRelation
+    #: Required. What is and is not established, stated affirmatively. A bare
+    #: relation would record a shrug; this records research.
+    finding: str
+
+    def summary(self) -> dict[str, object]:
+        return {
+            **self.ref.summary(),
+            "relation": str(self.relation),
+            "finding": self.finding,
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class IssuerMapping:
     """One issuer's identity within a control, with its provenance."""
@@ -224,6 +396,14 @@ class IssuerMapping:
     unresolved_reason: str = ""
     #: Dated, cited, scope-tagged lifecycle facts. Never merged into validity.
     lifecycle_facts: tuple[LifecycleFact, ...] = ()
+    #: Registry identifiers **asserted to be this issuer's**. Empty for every
+    #: record written before regulator-neutral identity existed, which is not a
+    #: gap: :attr:`cik` is legacy shorthand for a primary ``SEC_CIK`` and
+    #: :func:`primary_issuer_key` reads both forms as one.
+    identifiers: tuple[IssuerIdentifier, ...] = ()
+    #: External identifiers whose relation to this issuer is NOT established.
+    #: Never an identity claim; see :class:`RelatedIdentity`.
+    related_identities: tuple[RelatedIdentity, ...] = ()
 
     def as_security_mapping(self) -> SecurityMapping:
         """Round-trip through the shared type so the approved rules apply."""
@@ -254,7 +434,69 @@ class IssuerMapping:
             "scope_notes": self.scope_notes,
             "unresolved_reason": self.unresolved_reason,
             "lifecycle_facts": [f.summary() for f in self.lifecycle_facts],
+            "identifiers": [i.summary() for i in self.identifiers],
+            "related_identities": [r.summary() for r in self.related_identities],
+            "primary_issuer_key": ":".join(primary_issuer_key(self) or ()) or None,
         }
+
+    @property
+    def asserted_keys(self) -> tuple[tuple[str, str], ...]:
+        """Every key this mapping claims as its own, primary and corroborating.
+
+        ``related_identities`` is deliberately absent: those are not claims
+        about this issuer, so they cannot collide with one and cannot be
+        compared against one.
+        """
+        keys = [i.ref.key for i in self.identifiers]
+        if self.cik is not None:
+            keys.append((str(IdentifierNamespace.SEC_CIK), str(self.cik)))
+        seen: list[tuple[str, str]] = []
+        for key in keys:
+            if key not in seen:
+                seen.append(key)
+        return tuple(seen)
+
+
+class AmbiguousIssuerKey(ConfigError):
+    """More than one primary discriminator was offered for one issuer."""
+
+
+def primary_issuer_key(mapping: IssuerMapping) -> tuple[str, str] | None:
+    """The one namespaced key that discriminates this issuer, or ``None``.
+
+    **The single normalization every identity invariant must use.** Two
+    representations of a primary key exist -- the legacy :attr:`cik` integer and
+    an explicit ``PRIMARY`` :class:`IssuerIdentifier` -- and no caller may ever
+    branch on which one a record happened to use. Branching is how the two
+    representations would drift into two different notions of identity, which is
+    the failure this function exists to make impossible.
+
+    Resolution is by **set**, so agreement collapses and disagreement is loud:
+
+    * legacy ``cik`` alone -> ``SEC_CIK:<cik>``;
+    * explicit primary alone -> that key, SEC or not;
+    * ``cik`` **and** an explicit ``SEC_CIK`` primary naming the same number ->
+      one key, because they *are* one key. ``0000320193`` and ``320193``
+      normalize together;
+    * ``cik`` and a primary in another namespace, or an ``SEC_CIK`` primary
+      naming a different number -> two keys, which is refused. An issuer with
+      two discriminators has none.
+
+    Returns ``None`` when nothing is offered. That is not an error here -- an
+    ``UNRESOLVED`` mapping legitimately has no key -- so the *requirement* for a
+    key belongs to the status check, not to this function.
+    """
+    keys = {i.ref.key for i in mapping.identifiers if i.role is IdentifierRole.PRIMARY}
+    if mapping.cik is not None:
+        keys.add((str(IdentifierNamespace.SEC_CIK), str(mapping.cik)))
+    if not keys:
+        return None
+    if len(keys) > 1:
+        raise AmbiguousIssuerKey(
+            f"{len(keys)} primary issuer keys offered: {sorted(keys)}. "
+            "Exactly one discriminates an issuer; several discriminate nothing"
+        )
+    return keys.pop()
 
 
 @dataclass(frozen=True, slots=True)
@@ -522,6 +764,70 @@ def _parse_cik(value: Any, where: str) -> int | None:
     return value
 
 
+def _parse_identifier_ref(raw: Any, where: str) -> IdentifierRef:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}: each identifier must be an object")
+
+    namespace = _as_enum(raw.get("namespace"), IdentifierNamespace, "namespace", where)
+    if namespace is None:
+        raise ConfigError(
+            f"{where}: namespace is required. An identifier without a registry is a "
+            f"bare number, and a bare number identifies nothing"
+        )
+
+    raw_value = raw.get("value")
+    value = str(raw_value).strip() if raw_value is not None else ""
+    if not value:
+        raise ConfigError(f"{where}: value is required")
+    if not value.isdigit():
+        raise ConfigError(
+            f"{where}: value {value!r} is not numeric; every namespace in "
+            f"IdentifierNamespace is a numeric registry"
+        )
+    if int(value) <= 0:
+        raise ConfigError(f"{where}: value {value!r} must be a positive integer")
+
+    citation = str(raw.get("citation", "") or "").strip()
+    if not citation:
+        raise ConfigError(
+            f"{where}: citation is required; an uncited identifier is a number nobody can check"
+        )
+
+    if "authority" in raw:
+        raise ConfigError(
+            f"{where}: authority is derived from the namespace and must not be stored. "
+            f"{namespace} is issued by {authority_of(namespace)}"
+        )
+    return IdentifierRef(namespace=namespace, value=value, citation=citation)
+
+
+def _parse_issuer_identifier(raw: Any, where: str) -> IssuerIdentifier:
+    ref = _parse_identifier_ref(raw, where)
+    role = _as_enum(raw.get("role"), IdentifierRole, "role", where)
+    if role is None:
+        raise ConfigError(f"{where}: role is required (primary or corroborating)")
+    return IssuerIdentifier(ref=ref, role=role)
+
+
+def _parse_related_identity(raw: Any, where: str) -> RelatedIdentity:
+    ref = _parse_identifier_ref(raw, where)
+    relation = _as_enum(raw.get("relation"), IdentityRelation, "relation", where)
+    if relation is None:
+        raise ConfigError(f"{where}: relation is required")
+    if "role" in raw:
+        raise ConfigError(
+            f"{where}: a related identity has no role. Primary and corroborating are "
+            f"claims that this identifier is the issuer's; a related identity is the "
+            f"refusal to make that claim"
+        )
+    finding = str(raw.get("finding", "") or "").strip()
+    if not finding:
+        raise ConfigError(
+            f"{where}: finding is required; an unresolved relation records research, not a shrug"
+        )
+    return RelatedIdentity(ref=ref, relation=relation, finding=finding)
+
+
 def _parse_lifecycle_fact(raw: Any, where: str) -> LifecycleFact:
     if not isinstance(raw, dict):
         raise ConfigError(f"{where}: each lifecycle fact must be an object")
@@ -616,6 +922,22 @@ def _parse_mapping(raw: Any, where: str) -> IssuerMapping:
         for i, item in enumerate(raw_facts)
     )
 
+    raw_ids = raw.get("identifiers", [])
+    if not isinstance(raw_ids, list):
+        raise ConfigError(f"{where}: identifiers must be a list")
+    identifiers = tuple(
+        _parse_issuer_identifier(item, f"{where}.identifiers[{i}]")
+        for i, item in enumerate(raw_ids)
+    )
+
+    raw_related = raw.get("related_identities", [])
+    if not isinstance(raw_related, list):
+        raise ConfigError(f"{where}: related_identities must be a list")
+    related = tuple(
+        _parse_related_identity(item, f"{where}.related_identities[{i}]")
+        for i, item in enumerate(raw_related)
+    )
+
     mapping = IssuerMapping(
         issuer_label=label,
         cik=_parse_cik(raw.get("cik"), where),
@@ -629,6 +951,8 @@ def _parse_mapping(raw: Any, where: str) -> IssuerMapping:
         scope_notes=str(raw.get("scope_notes", "") or "").strip(),
         unresolved_reason=unresolved_reason,
         lifecycle_facts=facts,
+        identifiers=identifiers,
+        related_identities=related,
     )
 
     # The approved identity rules, enforced by the shared type rather than
@@ -638,9 +962,19 @@ def _parse_mapping(raw: Any, where: str) -> IssuerMapping:
     except ConfigError as exc:
         raise ConfigError(f"{where}: {exc}") from exc
 
+    # Two primary discriminators is malformed whatever the status, so this is
+    # checked before the numerator gate rather than inside it.
+    try:
+        key = primary_issuer_key(mapping)
+    except AmbiguousIssuerKey as exc:
+        raise ConfigError(f"{where}: {exc}") from exc
+
     if mapping.counts_in_numerator:
-        if mapping.cik is None:
-            raise ConfigError(f"{where}: status {status} requires a cik")
+        if key is None:
+            raise ConfigError(
+                f"{where}: status {status} requires a primary issuer key -- a cik, or "
+                f"exactly one identifier with role {IdentifierRole.PRIMARY}"
+            )
         if evidence is None:
             raise ConfigError(f"{where}: status {status} requires an evidence type")
         if evidence in _INSUFFICIENT_ALONE:
@@ -682,9 +1016,32 @@ def _parse_control(raw: Any, where: str) -> ControlEvidence:
     if len(set(labels)) != len(labels):
         raise ConfigError(f"{where}: duplicate issuer_label among mappings: {sorted(labels)}")
 
-    ciks = [m.cik for m in mappings if m.cik is not None]
-    if len(set(ciks)) != len(ciks):
-        raise ConfigError(f"{where}: the same cik appears on two issuers: {sorted(ciks)}")
+    # ANTI-SPLICE. Uniqueness is decided on the namespaced normalized key and
+    # never on a raw cik, and never, ever on an issuer name -- two registrants
+    # thirty years apart may share a name, and merging them is precisely the
+    # fabrication these controls exist to detect.
+    primary_keys = [k for m in mappings if (k := primary_issuer_key(m)) is not None]
+    if len(set(primary_keys)) != len(primary_keys):
+        raise ConfigError(
+            f"{where}: the same primary issuer key appears on two issuers: "
+            f"{sorted(primary_keys)}. One issuer recorded twice is a splice"
+        )
+
+    # A corroborating identifier colliding with anything another mapping claims
+    # is the same finding arriving by a quieter route: two records describing
+    # one institution. The old cik-only check could not see this at all.
+    claimed: dict[tuple[str, str], str] = {}
+    for mapping in mappings:
+        for asserted in mapping.asserted_keys:
+            owner = claimed.get(asserted)
+            if owner is not None and owner != mapping.issuer_label:
+                raise ConfigError(
+                    f"{where}: identifier {asserted[0]}:{asserted[1]} is claimed by both "
+                    f"{owner!r} and {mapping.issuer_label!r}. An identifier belongs to one "
+                    f"issuer; if the relation is not established it belongs in "
+                    f"related_identities instead"
+                )
+            claimed[asserted] = mapping.issuer_label
 
     identity_break = bool(raw.get("identity_break", False))
     if len(mappings) > 1 and not identity_break:

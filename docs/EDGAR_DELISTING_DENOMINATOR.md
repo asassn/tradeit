@@ -226,6 +226,13 @@ pretending otherwise would fabricate the very thing being measured.**
 | `UNRESOLVED` | no defensible mapping found | **counts toward the denominator, excluded from the matched numerator** |
 | `MANUAL_VERIFIED` | a human checked primary evidence and recorded it with a citation | highest confidence; used for the control universe |
 
+**`MANUAL_VERIFIED` is regulator-neutral, and there is no SEC/FDIC quality
+ordering.** It means *a person read primary evidence and cited it*. An Exchange
+Act Form 10-K filed with the FDIC under §12(i) is the same document filed where
+the statute directs, not a weaker one, so the evidence hierarchy below ranks
+*kinds* of evidence and never the regulator a filing was made to. Which
+regulator is **provenance**, carried by the identifier's namespace.
+
 ### Evidence hierarchy for a mapping — strongest first
 
 1. `MANUAL_VERIFIED` with a cited filing.
@@ -241,6 +248,26 @@ pretending otherwise would fabricate the very thing being measured.**
 ### The rules
 
 - **Never fabricate a ticker mapping.** Not for coverage, not for tidiness.
+- **An issuer is discriminated by exactly one namespaced identifier, and never
+  by its name.** The key is `<namespace>:<value>` — `SEC_CIK`, `FDIC_CERT` or
+  `FRB_RSSD` — and the namespace is *part of* the key, so `SEC_CIK:59017` and
+  `FDIC_CERT:59017` are two institutions that happen to share a number. Values
+  are stored **verbatim** and normalized only for comparison, so `0001132979`
+  and `1132979` are one identifier rather than two. A record's legacy `cik` is
+  shorthand for a primary `SEC_CIK` and resolves through the same function as
+  everything else; **one primary key per issuer, always** — two discriminators
+  discriminate nothing. Every asserted identifier needs its own primary-source
+  citation, and an identifier claimed by two issuers in one control is refused,
+  because one institution recorded twice is a splice.
+  **A security identifier is not an issuer identifier.** CUSIP, ISIN and FIGI
+  name an *instrument*; one issuer may have several, so admitting one as an
+  issuer key would make the uniqueness check compare instruments while claiming
+  to compare issuers. They may never enter the issuer-identifier structure.
+- **An identifier whose relation to the issuer is not established is recorded as
+  unresolved, never as an alias.** It carries a cited finding stating what is and
+  is not established, it can never satisfy the primary-key requirement, and it
+  changes no count. An alias would be a sameness claim wearing a modest label —
+  and shared names, shared addresses and shared officers are not identifiers.
 - **`UNRESOLVED` is not a failure of the denominator — it is a measurement.** A
   denominator with 30% unresolved identity is still a valid denominator; it just
   reports two numbers instead of one (§5).
