@@ -173,19 +173,15 @@ registry accumulates permanently, so the survivorship-safe universe of 2035 is
 built from the 1998 archive plus every daily observation since — never
 re-purchased.
 
-That is the entire argument for the one-time-download model, and it is exactly
-why the retention-rights question in `PHASE_06_VENDOR_MATRIX.md` §1 had to be
-answered in writing first. It has been, for the historical vendors: Sharadar and
-EODHD are eliminated because their licences require deleting derived datasets on
-termination, and Kibot is the only candidate whose licence permits permanent
-retention.
+That is the entire argument for the one-time-download model: the archive is
+bought once and the forward observations are free, so the corpus compounds
+rather than being re-purchased.
 
-**The same question now applies to this document's own forward sources, and has
-not been answered.** Twelve Data and FMP retention terms are **UNVERIFIED**
-(`PHASE_06_VENDOR_MATRIX.md` §1.4). If either requires deletion on termination,
-then §8's claim — that today's bars accumulate into permanent history — does not
-hold for that source, and the registry would have to treat its prices as
-operational data to be re-acquired rather than as archive. The *event log* and
+**What the forward model does depend on is the vendor staying capable, not the
+vendor staying subscribed.** If a forward price source is replaced, the switch
+costs a security-master reconciliation and a documented seam in the series —
+which is why `ohlcv_bars.source` is recorded per row (`RESEARCH_01_DATA_CONTRACT.md`
+§8) and why a source change is a declared event rather than a silent one. The *event log* and
 the *security master* are TradeIt's own and are unaffected either way; it is the
 price series that is at risk.
 

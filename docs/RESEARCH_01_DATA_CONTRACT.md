@@ -220,23 +220,22 @@ case.
 and different start dates, and conflating them is what previously made the whole
 corpus hostage to a fundamentals vendor.
 
-| requirement | 1998–2008 | 2009– | source | licence |
-|---|---|---|---|---|
-| daily prices, active **and** delisted | **candidate: Kibot** — UNTESTED | same | commercial, one-time | **permanent retention permitted** — USER-VERIFIED |
-| corporate actions | derivable from Kibot's three adjustment bases — UNTESTED | same + 8-K | commercial + EDGAR | as above |
-| filing dates, accessions, form types | **yes** — EDGAR full-index | yes | SEC EDGAR | public domain |
-| machine-readable statement **values** | **no** — pre-XBRL | **yes** — XBRL/FSDS | SEC EDGAR | public domain |
-| as-reported vs restated | n/a while values are absent | yes — amendment chain | SEC EDGAR | public domain |
-| delisting **reasons** | Forms 25 / 15 / 8-K 1.03 | same | SEC EDGAR | public domain |
+| requirement | 1998–2008 | 2009– | source |
+|---|---|---|---|
+| daily prices, active **and** delisted | **no vendor selected or probed** | same | commercial |
+| corporate actions | derivable from a vendor's adjustment bases — UNTESTED | same + 8-K | commercial + EDGAR |
+| filing dates, accessions, form types | **yes** — EDGAR full-index | yes | SEC EDGAR |
+| machine-readable statement **values** | **no** — pre-XBRL | **yes** — XBRL/FSDS | SEC EDGAR |
+| as-reported vs restated | n/a while values are absent | yes — amendment chain | SEC EDGAR |
+| delisting **reasons** | Forms 25 / 15 / 8-K 1.03 | same | SEC EDGAR |
 
-### 7.1 The price corpus reaches 1998 without any encumbered vendor
+### 7.1 The price corpus reaches 1998 or it does not ship
 
-If the Kibot probe passes, `research-01`'s price spine runs from 1998-01-01 under
-a licence that permits keeping it forever. **No retention-prohibited source
-enters the corpus.** That is the whole reason the start date is no longer
-conditional.
-
-If the probe fails, we are back to sourcing prices — not to moving the date.
+The start date is a **coverage** requirement, not a sourcing convenience: a
+corpus that begins in 2003 cannot show the dot-com build-up and collapse, which
+is the entire objective. If a probed vendor reaches 1998-01-01 with universe
+breadth, the price spine ships; if none does, we are back to sourcing prices —
+not to moving the date.
 
 ### 7.2 Pre-2009 fundamental *values* — three options, evaluated
 
@@ -255,13 +254,13 @@ total assets, shares outstanding) is good; anything deeper degrades fast.
 **Verdict: viable but a project in itself**, and not a fallback that can be
 casually invoked.
 
-**Option 2 — a one-time or perpetually licensed historical fundamentals dataset.**
-The right shape, but **no qualifying candidate has been found.** Every source
-examined so far requires deletion on termination. Academic sources (Compustat via
-WRDS and similar) carry stricter redistribution and retention terms, not looser.
-**Verdict: keep looking, retention-first — filter on the licence before
-evaluating the data**, which is the inverse of how vendors are normally assessed
-and the lesson of this milestone.
+**Option 2 — a historical fundamentals dataset from a vendor.**
+The right shape, and **no candidate has been tested.** Sharadar and EODHD both
+claim pre-2009 fundamentals; neither has been probed, and the point-in-time
+acceptance rule in `PHASE_06_VENDOR_MATRIX.md` §4 is the test that decides them.
+**Verdict: keep looking, and test before buying** — the failure mode here is a
+`filed_at` reconstructed from a period-end, which is invisible in aggregate and
+contaminates exactly the dot-com results the corpus exists to produce.
 
 **Option 3 — defer pre-2009 fundamental values entirely.**
 `research-01` v1 ships as: **prices 1998+**, **filing metadata and knowledge-time
@@ -269,8 +268,7 @@ and the lesson of this milestone.
 company filed, *when* it filed, and *what form* — the full causal spine — but not
 the numbers inside.
 
-**Recommended: Option 3 now, Option 1 narrowly, Option 2 only if a
-retention-permitting source appears.**
+**Recommended: Option 3 now, Option 1 narrowly, Option 2 only after a probe.**
 
 The justification is specific rather than convenient: this platform detects and
 validates **price and volume structure**. Every detector in Phase 4/5 is
@@ -294,27 +292,21 @@ supplies authoritative dates from 1994 Q3 — four years before the research-01
 start. Moving the corpus to 2009 would discard the dot-com window to solve a
 problem the dot-com window does not have.
 
-## 8. Retention is a contract condition, not a procurement detail
+## 8. Source provenance is a contract condition
 
-**No dataset may enter `research-01` unless its licence permits retaining it —
-and datasets derived from it — indefinitely after any subscription ends.**
+**Every source in `ohlcv_bars.source`, `fundamental_facts.source` and
+`corporate_actions.source` must be recorded before its first row is written**,
+so that any published number can be traced to the vendor that supplied it and
+re-derived if that vendor is ever replaced.
 
-This is now a rule of the data contract, at the same level as the three-date rule
-and the no-splicing rule, because it has the same failure mode: violate it and
-the corpus must be destroyed rather than corrected.
+This is a rule of the data contract at the same level as the three-date rule and
+the no-splicing rule. It exists for reproducibility: a corpus whose rows cannot
+say where they came from cannot be audited, corrected, or rebuilt from a
+different source.
 
-Consequences already in force:
-
-1. Sharadar and EODHD are **excluded from `research-01`** on licence grounds
-   alone, regardless of data quality.
-2. Every source in `price_facts.source`, `fundamental_facts.source` and
-   `corporate_action_facts.source` must have a recorded retention determination
-   before its first row is written.
-3. **Twelve Data and FMP retention terms are UNVERIFIED** and must be established
-   before either becomes part of the permanent corpus — this affects the forward
-   accumulation model in `FORWARD_SURVIVORSHIP_SYSTEM.md`, not just the
-   historical backfill.
-4. SEC EDGAR is public domain: no licence, no termination, nothing to fail.
+SEC EDGAR is public domain and free, which is why it carries the *spine* —
+filing dates, accessions, form types and delisting events — under every outcome
+and independent of any vendor decision.
 
 ## 9. Coverage and capability reporting
 

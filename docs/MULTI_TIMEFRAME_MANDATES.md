@@ -498,8 +498,7 @@ continuous pulling; at a free tier's 8/minute it is over a year.
 backfill of a 1-minute archive is not a viable acquisition strategy at any
 universe size worth having, which makes bulk file delivery a hard requirement of
 any intraday vendor — and reframes the intraday vendor question as *"who sells
-1-minute history in bulk files, with retention rights?"* rather than *"whose API
-is fastest?"*
+1-minute history in bulk files?"* rather than *"whose API is fastest?"*
 
 **Forward maintenance is trivial by comparison:** 1,500 instruments × 390
 bars/day ≈ 585,000 bars/day ≈ 9 MB/day columnar, ~2 GB/year. The archive is
@@ -588,7 +587,7 @@ the way in. That was a good decision and it holds.
 ## 10. What this changes about the Kibot / Phase 6 probe
 
 **It does not derail it.** The EOD investigation continues exactly as specified:
-1998-01-01, survivorship-safe, active and delisted, retention rights confirmed.
+1998-01-01, survivorship-safe, active and delisted.
 That corpus serves two of three mandates and remains the priority.
 
 What is added is a **separate, later, non-blocking intraday probe** —

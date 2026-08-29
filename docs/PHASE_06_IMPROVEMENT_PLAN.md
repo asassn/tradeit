@@ -14,7 +14,6 @@ and untouched.
 
 Companion documents: [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md) ·
 [`EDGAR_DELISTING_DENOMINATOR.md`](EDGAR_DELISTING_DENOMINATOR.md) ·
-[`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) ·
 [`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) ·
 [`KIBOT_DATA_PROBE.md`](KIBOT_DATA_PROBE.md) ·
 [`MULTI_TIMEFRAME_MANDATES.md`](MULTI_TIMEFRAME_MANDATES.md) ·
@@ -24,53 +23,32 @@ Companion documents: [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md) ·
 
 ---
 
-## 1. Status — the retention question is answered, and it reshaped the plan
-
-The blocker that dominated the previous revision — *are retention rights
-permitted?* — has been resolved from primary sources by the project owner. The
-answer eliminated the leading candidate and replaced it.
+## 1. Status — no vendor is selected, and none has been probed
 
 | finding | effect |
 |---|---|
-| **Sharadar Personal Use License**: on termination, discontinue use, delete all copies within 30 days, **and delete datasets derived from Services Data within 30 days** | **Sharadar eliminated.** `research-01` and every scan run over it *are* derived datasets. The one-month-download-and-keep model is prohibited |
-| **EODHD**: deletion of stored provider data within one month after termination | **EODHD eliminated**, same reason |
-| **Kibot**: licence explicitly permits keeping delivered data permanently; cancellation does not require deletion | **licence correct, but ELIMINATED ON PRICE.** The archive is a one-time purchase of $990–$2,400, not the ~$14/month this plan assumed — that figure is the *subscription* that refreshes already-purchased data. See `PHASE_06_VENDOR_MATRIX.md` §1.3 |
-| **Twelve Data** (asked 2026-08-29, answered same day, clause supplied on a follow-up): Terms of Use **§16.2** — *"Upon termination or expiration: All Data must be deleted within 30 days. Certification of deletion may be requested."* No distinction by data category, free tier or licence tier | **Twelve Data eliminated** for any permanent corpus — the raw prices are "Data" on any reading. Two further consequences: **`full-01` carries a termination-triggered deletion obligation** whose *reach* is unsettled (whether it takes the derived patterns and breakouts turns on how the Terms define "Data", which the vendor's agent addressed by interpretation, not citation), and **the forward accumulation model cannot use Twelve Data prices**. See `DATA_RETENTION_RIGHTS.md` §2.0, §2.0a |
+| **Kibot**: the archive is a one-time purchase of $990–$2,400, not the ~$14/month this plan assumed — that figure is the *subscription* that refreshes already-purchased data. *USER-VERIFIED from the vendor's own pricing page* | **eliminated on price.** See `PHASE_06_VENDOR_MATRIX.md` §1.1 |
+| **Sharadar, EODHD**: never capability-tested for the archive role | **candidates, unprobed.** Sharadar has the strongest claimed feature set for the fundamentals spine — `permaticker`, as-reported/restated split, `DATEKEY` |
+| **Twelve Data**: 5 years of fundamentals | ruled out for historical fundamentals on depth alone; retained for forward daily prices |
+
+**Vendor selection is decided on coverage, data quality and price.** Licence
+retention and deletion terms are the operator's concern, managed at the
+operator's discretion, and are not a criterion here.
 
 ### The blockers as they now stand
 
-1. **~~Retention rights unresolved~~ → resolved for four of six vendors, and
-   every resolution so far has been an elimination.** Sharadar, EODHD and Twelve
-   Data fail on licence; Kibot passed on licence and fails on price. **No vendor
-   has yet both qualified and remained affordable**, which is a finding about
-   the market rather than about the search. FMP and Tiingo are outstanding.
-2. **No price vendor is selected.** Kibot was the only candidate whose licence
-   permitted permanent retention, and it is eliminated on price: the archive
-   costs $990–$2,400, not the ~$14/month this plan was built on. **The
-   requirement it satisfied has not gone away** — permanent retention is
-   reaffirmed as a hard rule, which keeps every deletion-on-termination
-   subscription disqualified however cheap it is. A replacement must clear both
-   bars at once, and none has been identified. `KIBOT_DATA_PROBE.md` is retained
-   as the acceptance standard: its rules were written before any data was seen,
-   and the item most likely to fail is survivorship *completeness* (§G), which
-   can fail while everything else passes.
-3. **Our own subscriptions' retention terms were unverified. One is now
-   verified, and it failed.** Twelve Data answered on 2026-08-29, citing Terms
-   of Use §16.2: all Data deleted within 30 days of termination — so the vendor
-   that built `full-01` is eliminated for permanent use on the defect that
-   eliminated Sharadar. The one part still open is whether "Data" reaches
-   *derived* datasets: Sharadar's licence named that category outright, §16.2
-   does not, and the vendor's agent got there by interpretation. **FMP and
-   Tiingo are sent and unanswered.** `full-01` remains frozen, usable and never
-   cited for economic claims, so nothing published is at risk and nothing about
-   its current use changes; what it now carries is a deletion obligation that
-   fires on termination, which is a reason to settle its disposition before that
-   decision rather than after (`DATA_RETENTION_RIGHTS.md` §2.0, §5.5).
-4. **Pre-2009 point-in-time fidelity** is no longer a blocker — it is moot,
-   because both vendors that could have supplied pre-2009 fundamental *values*
-   are eliminated. The test is retained verbatim for any future candidate.
-   Pre-2009 values are now a **deferred enhancement**, not a dependency
-   (`RESEARCH_01_DATA_CONTRACT.md` §7.2).
+1. **No price vendor is selected and none has been probed.** Kibot is out on
+   price; Sharadar and EODHD have never been tested. `KIBOT_DATA_PROBE.md` is
+   retained as the acceptance standard — its rules were written before any data
+   was seen, and the item most likely to fail is survivorship *completeness*
+   (§G), which can fail while everything else passes.
+2. **The denominator has never been run against real EDGAR data.** This is the
+   largest unrealised item in the plan and the thing that would *evaluate* any
+   vendor. It costs nothing. See milestone 0a.
+3. **Pre-2009 point-in-time fidelity is untested.** Sharadar and EODHD both claim
+   pre-2009 fundamentals; the acceptance rule is stated in advance in
+   `PHASE_06_VENDOR_MATRIX.md` §4. Pre-2009 values are a **deferred enhancement**,
+   not a dependency (`RESEARCH_01_DATA_CONTRACT.md` §7.2).
 
 ## 2. What was and was not verifiable here
 
@@ -188,41 +166,40 @@ config versions — the mechanism `scan_runs` already implements and
 
 ## 5. Task 8 — the revised decomposition, and the gaps
 
-The licence findings force a cleaner split than the previous revision had. Prices
-and fundamentals are now **separate problems with separate sources, separate
-licences and separate start dates**, and the corpus no longer depends on any
-single vendor for both.
+Prices and fundamentals are **separate problems with separate sources and
+separate start dates**, and the corpus does not depend on any single vendor for
+both.
 
-| need | source | licence | recurring cost |
-|---|---|---|---|
-| historical prices 1998–present, active + delisted | **Kibot, one-time** — *pending probe* | **permanent retention permitted** | ~$14/month for as long as the backfill takes |
-| historical corporate actions | **derived from Kibot's three adjustment bases** — *pending probe* | as above | included |
-| historical filing dates / accessions / form types 1994 Q3–present | **SEC EDGAR full-index** | public domain | **free** |
-| historical fundamental **values** 2009–present | **SEC EDGAR XBRL / FSDS** | public domain | **free** |
-| historical fundamental **values** 1998–2008 | **deferred** — see gap 2 | — | **none** |
-| delisting **reasons**, all eras | **SEC EDGAR** Forms 25 / 15 / 8-K 1.03 | public domain | **free** |
-| the independent survivorship denominator | **SEC EDGAR** Form 25/15 counts | public domain | **free** |
-| forward daily prices | **Twelve Data** | **UNVERIFIED — §1 blocker 3** | existing subscription |
-| forward filings and fundamentals | **SEC EDGAR** | public domain | **free** |
-| forward corporate actions | **FMP + Twelve Data** | **UNVERIFIED — §1 blocker 3** | existing subscriptions |
-| the accumulating security master | **TradeIt** | ours | none |
+| need | source | recurring cost |
+|---|---|---|
+| historical prices 1998–present, active + delisted | **no vendor selected** — see §1 | to be established |
+| historical corporate actions | derivable from a vendor's adjustment bases — *pending probe* | included |
+| historical filing dates / accessions / form types 1994 Q3–present | **SEC EDGAR full-index** | **free** |
+| historical fundamental **values** 2009–present | **SEC EDGAR XBRL / FSDS** | **free** |
+| historical fundamental **values** 1998–2008 | **deferred** — see gap 2 | **none** |
+| delisting **reasons**, all eras | **SEC EDGAR** Forms 25 / 15 / 8-K 1.03 | **free** |
+| the independent survivorship denominator | **SEC EDGAR** Form 25/15 counts | **free** |
+| forward daily prices | **Twelve Data** | existing subscription |
+| forward filings and fundamentals | **SEC EDGAR** | **free** |
+| forward corporate actions | **FMP + Twelve Data** | existing subscriptions |
+| the accumulating security master | **TradeIt** | none |
 
-**The shape of this table is the finding.** Everything permanent is either
-public domain or under a licence that permits permanent retention. The only
-recurring-subscription rows are *forward* data, which is re-acquirable and not
-archival — except that its retention terms are unverified, which is why blocker 3
-exists.
+**The shape of this table is the finding.** Almost everything the corpus needs is
+public domain and free. **Prices are the only row that costs money** — which is
+why the vendor question, though unresolved, blocks far less than it appears to.
 
 ### Gaps, stated plainly rather than hidden
 
-1. **Kibot is unproven.** Every capability in row 1 and row 2 above is a vendor
-   claim. If the probe fails on survivorship completeness (`KIBOT_DATA_PROBE.md`
-   §G), there is currently **no remaining candidate** for a retention-permitting
-   1998 price spine, and the plan returns to sourcing — not to moving the date.
-2. **Pre-2009 statement values have no free source and no qualifying paid one.**
-   Both candidates are eliminated on licence. The recommendation is to **defer**
-   them (`RESEARCH_01_DATA_CONTRACT.md` §7.2), because this platform's detectors
-   are geometric and the dot-com objective is a price-and-survivorship problem.
+1. **No price vendor has been proven, or even probed.** Every capability claim
+   in rows 1 and 2 above belongs to a vendor not yet selected. The failure mode
+   to test for is survivorship *completeness* (`KIBOT_DATA_PROBE.md` §G) — a
+   delisted roster that exists but is thin, heavy on large well-known failures
+   and light on exactly the short-lived 1999–2002 listings whose absence *is* the
+   bias.
+2. **Pre-2009 statement values have no free source and no tested paid one.**
+   The recommendation is to **defer** them (`RESEARCH_01_DATA_CONTRACT.md` §7.2),
+   because this platform's detectors are geometric and the dot-com objective is a
+   price-and-survivorship problem.
    Narrow in-house parsing of EDGAR filing text is worth doing **for the control
    universe only**, where it is a few hundred documents and hand-checkable.
 3. **Ticker↔CIK mapping before ~2009 is genuinely hard, and Kibot probably does
@@ -243,7 +220,6 @@ exists.
    `CORPUS_REGISTRY.md`. A security that delisted from an exchange and continued
    trading OTC has, for our purposes, ended — a recorded modelling decision, not
    a silent gap.
-8. **Our own forward vendors' retention terms are unverified** (§1 blocker 3).
 
 ## 6. Task 6 — dot-com reconstruction
 
@@ -310,8 +286,7 @@ otherwise be invisible.
 | **0a** | **EDGAR full-index ingestion + the delisting denominator** — design complete in [`EDGAR_DELISTING_DENOMINATOR.md`](EDGAR_DELISTING_DENOMINATOR.md) | per-year termination counts by evidence strength; EDGAR-only cohort survival curves | **free** |
 | **0b** | **Confirm the 30 control securities against primary regulatory evidence** to `MANUAL_VERIFIED` — names, issuer identifiers, dates ([`DOTCOM_CONTROL_UNIVERSE.md`](DOTCOM_CONTROL_UNIVERSE.md) §2c). **EDGAR is the normal source**, and is the only one for an SEC-reporting issuer; where an issuer legally reports its Exchange Act filings to a different federal regulator, that regulator's **direct** filing is equally admissible. **This is not a general widening**: it covers direct primary regulatory filings only — never a corporate website, an aggregator, a press release, or a search result, however official-looking | 30/30 confirmed or replaced **before** any vendor data is seen | **free** |
 | **0c** | ~~**Send Kibot pre-sales questions Q1–Q26**~~ **MOOT — vendor eliminated on price.** The questions themselves remain the model for interrogating any replacement | not applicable to a vendor that is out | **free** |
-| **0d** | **Verify retention terms in writing for every vendor with a working adapter** — Twelve Data, FMP **and Tiingo** ([`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §3.1). Tiingo was outside the milestone's original wording and should not have been: its adapter is functional, not a stub, so it can write vendor facts into a permanent corpus today under terms nobody has read | a classification per source, `UNCLEAR` treated as prohibited | **free** |
-| 1 | ~~Kibot probe on a trial or single month~~ **VOID — vendor eliminated on price.** Replaced by: **select a price vendor that permits permanent retention and covers delisted securities**, held to the same acceptance rules | **your approval**, measured against [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md). A failed item G is still not overridden by a passed item A | **deferred to Phase 9** |
+| 1 | ~~Kibot probe on a trial or single month~~ **VOID — vendor eliminated on price.** Replaced by: **select and probe a price vendor covering delisted securities**, held to the same acceptance rules | **your approval**, measured against [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md). A failed item G is still not overridden by a passed item A | **deferred to Phase 9** |
 | 2 | Schema: securities, symbol_aliases, security_relationships, price_facts, corporate_action_facts, filings, fundamental_facts + migration | migration/ORM drift green | none |
 | 3 | Importer + point-in-time policy for the new datasets | round-trip tests | none |
 | 4 | Bulk price backfill → `research-01` | control universe reconstructed; §G acceptance rules evaluated and *reported*, pass or fail | within the same billing month |
@@ -325,7 +300,7 @@ Milestone **I** is deliberately unnumbered and off the critical path. Its writte
 questions are free and can ride along with 0b to save a round trip, but no EOD
 decision waits on its answers.
 
-**Milestones 0a–0d can start now and cost nothing.** 0a and 0b are not merely
+**Milestones 0a–0c can start now and cost nothing.** 0a and 0b are not merely
 preparation: they build the instrument that *measures* the vendor, so they must
 precede the probe rather than follow it.
 
@@ -335,8 +310,7 @@ precede the probe rather than follow it.
 |---|---|
 | **0a** — denominator | **implemented** in `src/tradeit/edgar/`, CLI (`tradeit edgar denominator`), ruff and mypy clean; measure the test count with `pytest tests/unit/test_edgar_*.py --collect-only -q` rather than reading it here — the number written in this row was stale for several milestones. **The curated control identity is now supplied to the build by default** (`security_mappings_by_cik`); until that wiring existed `BuildOptions.mappings` was accepted and never passed, so the identity section reported every registrant `UNRESOLVED` on a corpus whose thirty control identities had been verified against filings. `--no-control-mappings` reproduces the old behaviour deliberately. **Not yet run against real EDGAR data**: `sec.gov` returns `EGRESS_BLOCKED` here. Requires an operator to run `tradeit edgar fetch-recipe` in an unrestricted environment |
 | **0b** — 30 controls to `MANUAL_VERIFIED` | **COMPLETE. 30 of 30 fully adjudicated.** All three measurements now read **30/30**: **identity** — every control has an evidence-backed resolution, **0 `UNRESOLVED`** and **0 at `RESOLVED`**; **mapping quality** — every *recorded* mapping is `MANUAL_VERIFIED`; **milestone completion** — every control's issuer question is settled as well as cited. That they coincide is the *result* here rather than a coincidence, but the three remain distinct questions and a single control regressing on either condition reopens the milestone. Each of the 30 cites a primary regulatory source and **no identifier was guessed**; the fixture in `controls.py` still carries none. **`FRC` is the first control whose issuer key is not an SEC CIK**: a bank with no holding company files its Exchange Act reports with the FDIC, so it has no SEC filer account, and it is discriminated by `FDIC_CERT:59017` (primary) with `FRB_RSSD:4114567` corroborating — the regulator-neutral identity architecture exercised on shipped evidence rather than only in tests. Its SEC subject-company CIK `1132979` is recorded as an **unresolved related identity**, not as an identifier: that record carries EIN `88-0157485` while the FDIC registrant reports `80-0513856`, and sameness is not established in either direction. The distinctions are held open by synthetic tests rather than by any shipped control demonstrating them, which is what keeps them from collapsing into one number now that all three read the same. A control is fully adjudicated when every recorded mapping is `MANUAL_VERIFIED` **and** its issuer question is settled — three controls (BBBY, GM, AOL) must adjudicate whether a *second* issuer held their ticker, discharged either by evidencing one or by a cited finding that none was established. **All three are now discharged by evidence**, each with two independently cited issuers and `identity_break: true`: BBBY (CIK 886158 on Nasdaq, `$.01` par; CIK 1130713 on the NYSE, `$0.0001` par), AOL (CIK 883780; CIK 1468516), GM (CIK 40730; CIK 1467858). AOL is the strictest: both its filings name the New York Stock Exchange and the same symbol and the registrant names are close, so **the CIK is the only discriminator** — which is why no series may run across the two. **No recorded mapping now rests on `company_tickers.json`** — a dated primary source, but a reference file rather than a filing someone read, which is a categorical gap from `MANUAL_VERIFIED` rather than a matter of confidence. AAPL and GM's second issuer were the last two to rest on it and both now cite filings, so **no control remains at `RESOLVED`**; the rule that a ticker file cannot by itself carry a mapping to `MANUAL_VERIFIED` is curatorial and is held open by test rather than by the loader. All three counts come from `tradeit edgar controls`, which prints them separately; do not restate any from memory |
-| **0c** — Kibot Q1–Q26 | **MOOT — the vendor is eliminated on price.** The questions were first not sent because the owner elected to buy and measure instead; that purchase is now off, so there is nothing to ask this vendor. They are kept in [`VENDOR_QUESTIONS_READY_TO_SEND.md`](VENDOR_QUESTIONS_READY_TO_SEND.md) §1 as the **model for interrogating a replacement** — question 1, whether "tradable" includes delisted securities, is the one that decides any price vendor and was never answered for Kibot either |
-| **0d** — vendor retention terms | **PARTLY ANSWERED, and the first answer is adverse. Sent 2026-08-29.** **Twelve Data: `DELETION REQUIRED AFTER TERMINATION`** — on termination all access ends and all data must be deleted within 30 days, stated to cover raw responses, normalised rows, **derived datasets** and **research corpora or analytical results**, with no distinction by data category, free tier or licence tier. That is the Sharadar shape, and it is exactly what questions 2(c) and 2(e) were written to surface. **Twelve Data is therefore excluded from any permanent corpus**, on licence grounds and independent of data quality. Two consequences beyond the vendor list: **`full-01` now carries a termination-triggered deletion obligation** — it is derived from `twelve_data-daily-…` and its current use is unaffected, but its disposition must be settled *before* any decision to end that subscription rather than after; and **the forward survivorship accumulation model cannot use Twelve Data prices**, which is the conditional `DATA_RETENTION_RIGHTS.md` §2.1 wrote down before the question was asked. The reply was **composed by the vendor's AI agent**, disclosed, with a footnote marker whose clause target was not captured — accepted because it is *adverse* and §1.1 sets a lower bar for disqualifying than for qualifying; the identical message granting retention would not have been enough to admit the vendor. A follow-up asking for the clause and a human confirmation is drafted (§5.2) and is option value, not diligence. **FMP and Tiingo are sent and awaiting reply**, and between them they now decide whether any examined vendor satisfies the rule at all |
+| **0c** — vendor capability questions | **NOT SENT.** Kibot is eliminated on price, so the questions now belong to whichever candidate is evaluated next; Sharadar and EODHD are untested. The 22 questions are vendor-neutral and sendable verbatim ([`VENDOR_QUESTIONS_READY_TO_SEND.md`](VENDOR_QUESTIONS_READY_TO_SEND.md)). **Question 1 decides any price vendor** — whether "delisted" securities are actually included, or only currently active ones — and it has never been answered by anybody |
 
 > **Do not pay for access before the instrument that measures it exists.**
 
@@ -354,33 +328,22 @@ precede the probe rather than follow it.
    to a purchase on a misread price, and the correction came from the vendor's
    own pricing page.
 
-   **Two constraints now govern the vendor question, and they are decided:**
+   **One constraint now governs the vendor question, and it is decided:**
 
-   - **Permanent retention is a hard requirement**, reaffirmed by the owner. A
-     licence that requires deleting the data — or anything derived from it — on
-     cancellation is disqualifying, whatever it costs. This keeps Sharadar and
-     EODHD eliminated and applies equally to any subscription-model replacement.
    - **Nothing is bought until Phase 9 needs it.** Prices are the *only* dataset
      in this plan that costs money: filing dates, delisting events, fundamentals
      from 2009 and macro are all free (EDGAR and FRED), and issuer identity is
      already done. The corpus gates honest *backtesting*, not the construction
      of Phases 7 and 8, so the spend moves to the point of use.
-2. **Sharadar and EODHD are eliminated** for `research-01` on licence grounds,
-   independent of data quality. Reconsider only under a different written licence
-   that explicitly grants post-termination retention.
-3. **Milestones 0a–0d: 0b is complete, 0a is implemented but has never been run
-   against real EDGAR data, 0c is moot now that its vendor is eliminated, and 0d
-   is still outstanding.** 0d matters more than before, not less: `full-01` was
-   built from Twelve Data prices whose retention terms remain `UNVERIFIED`, and
-   with the permanent-retention rule reaffirmed it is now the *governing*
-   question about the one real corpus this project already holds. It is also the
-   **last** licence question — Sharadar and EODHD are out on licence, Kibot on
-   price — so there is no vendor left whose terms are both acceptable and known.
-   Its scope now includes **Tiingo**, which has a working adapter and unread
-   terms; that was an omission in the original wording rather than a decision.
-   Nothing about it can be settled from inside a session: all three vendor
-   domains are `EGRESS_BLOCKED`, re-measured rather than assumed, so it needs a
-   browser or an email and costs nothing but a reply.
+2. **Sharadar and EODHD are untested candidates**, not eliminations. Neither has
+   been probed for the archive role, and Sharadar has the strongest claimed
+   feature set for the fundamentals spine. Probe before buying, on the rules in
+   `KIBOT_DATA_PROBE.md`.
+3. **Milestones: 0b is complete, 0a has never been run against real EDGAR
+   data, and 0c is moot now that its vendor is eliminated.** 0a is the live
+   thread: it is implemented, wired to the curated control identity, costs
+   nothing, and produces the per-year termination denominator — which is also
+   the instrument that would *evaluate* any replacement vendor.
 4. ~~**Run the Kibot probe.**~~ **Void — its vendor is eliminated on price.**
    The free work is what proceeds: **0a against a real EDGAR archive** is the
    largest unrealised item in this plan. It has been implemented with 41 tests

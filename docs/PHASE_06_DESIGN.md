@@ -153,12 +153,12 @@ Prices come from the existing Tiingo path.
 >    cross-check across the whole span; the Financial Statement Data Sets remain a
 >    value-level check from 2009.
 
-**Current recommendation, replacing the one below:** prices 1998+ from **Kibot**
-(the only candidate whose licence permits permanent retention — *pending the data
-probe in `KIBOT_DATA_PROBE.md`*), filing metadata from **EDGAR full-index 1994
-Q3+**, fundamental values from **EDGAR XBRL/FSDS 2009+**, and pre-2009
-fundamental *values* deferred rather than sourced from a retention-encumbered
-vendor.
+**Current recommendation, replacing the one below:** prices 1998+ from a
+commercial vendor **not yet selected and not yet probed** (Kibot is eliminated on
+price; Sharadar and EODHD are untested candidates — `PHASE_06_VENDOR_MATRIX.md`
+§1), filing metadata from **EDGAR full-index 1994 Q3+**, fundamental values from
+**EDGAR XBRL/FSDS 2009+**, and pre-2009 fundamental *values* deferred until a
+candidate passes the point-in-time acceptance rule.
 
 The reasoning that pointed at Sharadar remains sound and is worth keeping: an
 as-reported/restated split with a real filing date, alongside delisted coverage,

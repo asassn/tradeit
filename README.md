@@ -38,8 +38,9 @@ evidence of profitability of any kind. See
 **Real bars have been through it once.** `full-01` drove the Phase 4 and Phase 5
 engines causally across a full imported universe — 272,537 pattern identities
 over 87,704 distinct structures. It is frozen and is never cited for economic
-claims, because the retention terms of the vendor it was built from have not been
-verified ([`docs/PHASE_06_VENDOR_MATRIX.md`](docs/PHASE_06_VENDOR_MATRIX.md) §1.4).
+claims, because its universe is not survivorship-safe — every cross-sectional
+number over it would inherit a bias toward the securities that survived to be in
+it ([`docs/CORPUS_REGISTRY.md`](docs/CORPUS_REGISTRY.md)).
 
 Live trading is disabled and stays disabled until separately authorised
 ([ADR-0004](docs/adr/0004-live-trading-safety-interlock.md)).

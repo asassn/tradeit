@@ -25,22 +25,6 @@ about how often a pattern works, any threshold. The universe is not
 survivorship-safe (`data.survivorship_coverage` FAIL), so every cross-sectional
 number over it inherits a bias toward securities that survived to be in it.
 
-**It carries a termination-triggered deletion obligation, of unsettled reach.**
-Its snapshot is `twelve_data-daily-…`, and Twelve Data's Terms of Use §16.2
-require that on termination or expiration **all Data be deleted within 30 days**,
-with certification of deletion available on request. Whether that reaches only
-the underlying bars or also the patterns and breakout observations derived from
-them turns on how the Terms define "Data" — which has not been read, and which
-the vendor's own agent addressed by interpretation rather than by citation.
-**Plan for the broad reading.**
-
-**Nothing about its current use changes**: it may be cited for everything below
-exactly as before, because the obligation attaches on termination and the
-subscription is live. What changes is that "permanent" is a statement about this
-project's intentions and not about its rights. **Settle what happens to this
-corpus before ending that subscription, not after.** See
-[`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §2.0 and §2.0a.
-
 **Frozen means:** no further scan writes into it, and no new scan re-uses the
 scan id. A re-derivation under changed code gets its own run id and its own
 corpus, which the run-scoping in `0012_run_scoped_derivation` enforces at the
@@ -67,7 +51,7 @@ Each must be stated in this entry with its measured value at build time:
 | **cohort-survival differential**, 1999–2000 vs 2015–2016 listings | to be filled in — the strongest internal survivorship evidence |
 | **exchange coverage** (NYSE / AMEX / Nasdaq NMS / Nasdaq SmallCap) | to be filled in |
 | **CIK unmapped fraction, 1998–2008** | to be filled in; unmapped stays `NULL`, never guessed |
-| **retention determination per source** | required before the first row from any source is written |
+| **source recorded per row** | required before the first row from any source is written, so any published number can be traced back and re-derived (`RESEARCH_01_DATA_CONTRACT.md` §8) |
 
 **`research-01` may not be described as survivorship-safe until the control
 universe passes** (`DOTCOM_CONTROL_UNIVERSE.md`). If it does not, the corpus is

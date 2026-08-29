@@ -11,19 +11,18 @@ until §1 is satisfied.
 
 ## 1. What must be known before spending even $1
 
-Six items. All are **free** to establish, and all but the last are answerable
+Five items. All are **free** to establish, and all but the last are answerable
 before any account exists.
 
 | # | must know | how | status |
 |---|---|---|---|
-| 1 | **Post-cancellation retention, in writing, including derived datasets** | Kibot Q23–Q26 (`DATA_RETENTION_RIGHTS.md` §3.2) | licence text says permanent retention is permitted — **USER-VERIFIED**; the *scope* (derived data, research corpora) is **unconfirmed** |
-| 2 | **Does the cheap tier actually expose delisted history, and by what mechanism** | Kibot Q1–Q5 | **unknown** |
-| 3 | **Total cost of the minimum sufficient product**, including any separate delisted package | Kibot Q2, Q5 | **unknown** — ~$14/mo is the advertised EOD price, not established as sufficient |
-| 4 | **Can the full archive be downloaded inside one billing month** | Kibot Q4 | **unknown**. If not, the funding model is *N* months, not one — still cheap, but it must be known on day 1 |
-| 5 | **The denominator exists**, so delisted coverage can be *measured* rather than asserted | `EDGAR_DELISTING_DENOMINATOR.md` steps 1–5 | **not built.** Free. This is the blocking work |
-| 6 | **The control universe is confirmed against EDGAR** — names, CIKs, dates | `DOTCOM_CONTROL_UNIVERSE.md` §3 | **not done.** Free |
+| 1 | **Does the cheap tier actually expose delisted history, and by what mechanism** | Kibot Q1–Q5 | **unknown** |
+| 2 | **Total cost of the minimum sufficient product**, including any separate delisted package | Kibot Q2, Q5 | **unknown** — ~$14/mo is the advertised EOD price, not established as sufficient |
+| 3 | **Can the full archive be downloaded inside one billing month** | Kibot Q4 | **unknown**. If not, the funding model is *N* months, not one — still cheap, but it must be known on day 1 |
+| 4 | **The denominator exists**, so delisted coverage can be *measured* rather than asserted | `EDGAR_DELISTING_DENOMINATOR.md` steps 1–5 | **not built.** Free. This is the blocking work |
+| 5 | **The control universe is confirmed against EDGAR** — names, CIKs, dates | `DOTCOM_CONTROL_UNIVERSE.md` §3 | **not done.** Free |
 
-**Items 5 and 6 are the ones that gate everything else**, because without them a
+**Items 4 and 5 are the ones that gate everything else**, because without them a
 probe cannot distinguish "the vendor has delisted data" from "the vendor has
 enough delisted data". They cost nothing but time and depend on no vendor.
 
@@ -35,7 +34,6 @@ enough delisted data". They cost nothing but time and depend on no vendor.
 
 | # | criterion | how measured | threshold |
 |---|---|---|---|
-| G1 | permanent post-cancellation retention **explicitly** allowed, covering raw files, normalised rows, derived bars, security-master mappings and frozen research corpora | Kibot Q23–Q26, in writing | all five confirmed |
 | G2 | daily history reaches **1998-01-01** with universe breadth, not a handful of names | probe B3/B4 | ≥ 80% of securities known to be listed on 1998-01-02 have a bar on or before 1998-01-31 |
 | G3 | delisted securities **materially represented** | probe B2 vs the denominator | `bounded_coverage` ≥ 0.45 **and** `matched_coverage` ≥ 0.60 |
 | G4 | dot-com failure controls represented | probe C, 30 controls | ≥ 26 of 30 reconstructed; **all 6 short-lived controls present** |
@@ -52,14 +50,14 @@ enough delisted data". They cost nothing but time and depend on no vendor.
 
 | # | condition | why it is fatal |
 |---|---|---|
-| N1 | retention after cancellation prohibited, **or** silent on derived datasets | the corpus would have to be deleted. This eliminated Sharadar and EODHD |
 | N2 | delisted data requires a separate product at an unaffordable price | delisted coverage *is* the problem being solved; without it the purchase buys nothing we do not already have |
 | N3 | historical universe **materially survivor-biased** — `bounded_coverage` < 0.25, or vendor cohort-survival curves indistinguishable from a survivors-only roster | the corpus cannot support the research it exists for, and would be actively misleading |
 | N4 | ticker reuse cannot be separated — reused tickers delivered as one concatenated series with no date boundary | one series, two companies. `full-01` already failed on exactly this |
 | N5 | the archive cannot be downloaded in a reasonable, affordable window | the one-time model collapses into an indefinite subscription |
 | N6 | terms prohibit internal research use, or require attribution/disclosure we cannot give | the intended use is not licensed |
 
-**N1 and N4 are absolute.** No amount of data quality compensates for either.
+**N4 is absolute.** No amount of data quality compensates for a reused ticker
+delivered as one concatenated series — one series, two companies.
 
 ---
 
@@ -69,7 +67,7 @@ The realistic middle, and the outcome to plan for.
 
 | case | corpus classification | limitation recorded | prohibited conclusions |
 |---|---|---|---|
-| **C1** — retention confirmed; coverage `bounded` 0.25–0.45 | `partially survivorship-corrected` | measured coverage, by year and lifespan | no unconditional base rates; no cross-era comparison; no failure-tail claims |
+| **C1** — coverage `bounded` 0.25–0.45 | `partially survivorship-corrected` | measured coverage, by year and lifespan | no unconditional base rates; no cross-era comparison; no failure-tail claims |
 | **C2** — coverage good overall but **short-lived names thin** (< 1y lifespan bucket under-covered) | `materially survivorship-corrected` | short-lived deficit quantified | no claims about newly-listed or speculative-cohort behaviour; dot-com conclusions carry the deficit explicitly |
 | **C3** — good coverage, but **AMEX / Nasdaq SmallCap thin** | `materially survivorship-corrected` | exchange skew quantified | no small-cap cross-sectional claims; the corpus is large- and mid-cap in substance |
 | **C4** — good coverage, but **identity mapping leaves > 30% `UNRESOLVED`** | `materially survivorship-corrected` | both coverage bounds published | the gap between bounds must appear beside any coverage figure |
@@ -113,8 +111,8 @@ cross-sectional or economic statistic.**
 
 ```
 1  build the EDGAR denominator + verify the controls        free, no vendor
-2  send Kibot Q1–Q26 and the TD/FMP retention questions     free, no purchase
-3  evaluate answers against §1 and N1/N2/N6                 ── NO-GO exits here
+2  send the vendor's capability questions                    free, no purchase
+3  evaluate answers against §1 and N2/N6                     ── NO-GO exits here
 4  one month's access; run the probe on a SAMPLE            ~$14
 5  measure §2 G2–G8 and §5 classification                   before any bulk pull
 6  ★ report back for approval                               ── the gate
@@ -133,7 +131,6 @@ downstream.
 - **Intraday.** `intraday-01` is a separate corpus, a separate probe
   (`KIBOT_DATA_PROBE.md` §H) and a separate purchase decision. Non-blocking.
 - **Pre-2009 fundamental values.** Deferred by recommendation
-  (`RESEARCH_01_DATA_CONTRACT.md` §7.2). No vendor currently qualifies on
-  retention, and the standing rule is that none may be accepted if cancellation
-  would force deleting `research-01`.
+  (`RESEARCH_01_DATA_CONTRACT.md` §7.2). No candidate has been tested against the
+  point-in-time acceptance rule in `PHASE_06_VENDOR_MATRIX.md` §4.
 - **Anything about profitability.** Not in scope, not in this phase.

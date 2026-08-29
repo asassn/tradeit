@@ -13,10 +13,8 @@ relayed via the project owner's reading of Kibot's own pages — USER-VERIFIED a
 
 ## 0. Why this probe exists, in one paragraph
 
-Kibot is the only candidate whose licence permits permanent retention of
-downloaded data after cancellation (`PHASE_06_VENDOR_MATRIX.md` §1.3), which is
-the requirement that eliminated Sharadar and EODHD. That makes it the only live
-candidate for `research-01`'s price spine. It also makes it the *only* candidate,
+Kibot was the cheapest candidate for `research-01`'s price spine on the pricing
+this plan originally assumed, and for a while it was treated as the only one —
 which is precisely when confirmation bias is most dangerous. A ~$14/month product
 claiming 64 years of history including delisted securities is making a claim no
 competitor at any price makes in this matrix. **The probe's job is to try to
@@ -113,22 +111,6 @@ Record each answer as `VERIFIED` (stated by the vendor in writing, specific),
 > **22.** Are historical **volumes** adjusted under any of the adjusted products,
 > or do volumes remain as printed?
 
-### Licensing
-
-Questions 23–26 are held in `DATA_RETENTION_RIGHTS.md` §3.2 alongside the
-equivalent Twelve Data and FMP questions, so all retention determinations live in
-one register. In summary they ask for written confirmation that data already
-delivered may be retained indefinitely after cancellation; that the right extends
-to raw files, normalised database rows, **derived bars**, security-master
-mappings and **frozen internal research corpora**; that continued private
-internal analysis after cancellation is permitted; and whether a future
-commercial version of TradeIt would require a different licence.
-
-**24(c) and 24(e) are the decisive ones.** Sharadar's licence permits keeping
-nothing *and* requires deleting derived datasets — a licence that permits keeping
-the files while staying silent on derived data would leave `research-01` itself
-in an undetermined state, which is treated as prohibited.
-
 ### Answer register
 
 | Q | topic | answer | grade | date |
@@ -137,7 +119,6 @@ in an undetermined state, which is treated as prohibited.
 | 6–8 | historical depth | — | `UNVERIFIED` | — |
 | 9–14 | identity & lifecycle | — | `UNVERIFIED` | — |
 | 15–22 | corporate actions | — | `UNVERIFIED` | — |
-| 23–26 | licensing | licence text permits permanent retention (**USER-VERIFIED**); **scope unconfirmed** | `CORROBORATED` | — |
 
 **Do not infer any of these from marketing language.** Every row above is
 `UNVERIFIED` until a written reply fills it in.
@@ -163,8 +144,9 @@ everything, cancel, keep it". If the throughput cap makes a full backfill take
 three months, the model silently becomes a three-month subscription — still fine
 at $14, but it must be *known* rather than discovered on day 28.
 
-**Ask in writing before paying** (A1/A3 especially). The retention question in
-`PHASE_06_VENDOR_MATRIX.md` §6 is the template.
+**Ask in writing before paying** (A1/A3 especially). Every question in this
+document is written to demand a specific answer or a clause rather than
+reassurance, which is the property worth reusing for any vendor.
 
 ---
 
@@ -521,8 +503,7 @@ Target: **`intraday-01`** — 1-minute base, regular trading hours, ~2015–pres
 | H3 | earliest intraday history, per instrument and overall | 2015 target, 2018 floor |
 | H4 | **are delisted securities included in intraday history?** | expected **no**. This is the answer that determines whether `intraday-01` is labelled survivorship-biased — see §G's philosophy applied to a corpus that will probably fail it |
 | H5 | **bulk file delivery, or per-symbol API only?** | ~295,000 REST requests for 1,500 names × 10 years. **Per-symbol REST backfill is not a viable acquisition strategy at any useful universe size** — bulk delivery is a hard requirement, not a preference |
-| H6 | download/API limits, and time to acquire the target universe | must complete inside a retention-safe window |
-| H7 | **retention rights after cancellation** | the same absolute filter as §1. Permanent retention or the source is ineligible, whatever the data quality |
+| H6 | download/API limits, and time to acquire the target universe | must complete inside a single billing period, or the funding model silently changes |
 | H8 | regular-hours vs extended-hours semantics — are they separable? | if the vendor silently merges pre/post-market minutes into the session, every session-anchored bucket boundary is wrong and the data cannot be used as a base |
 | H9 | timestamp and time-zone convention — UTC or local? bar stamped at **open** or **close**? | a bar stamped at its open versus its close differs by the bar width. Getting this wrong shifts every signal by one bar and is invisible in aggregate |
 | H10 | corporate-action treatment intraday — adjusted, unadjusted, or both? | a split applied to a 1-minute archive retroactively rewrites millions of rows; we need the unadjusted base and our own derivation, as with EOD |
@@ -567,7 +548,7 @@ In order, cheapest first:
    remaining items. Run the probe **before** the bulk download, on a sample —
    items B, C, F and G2 need only the rosters plus a few hundred symbol files.
 4. **Bulk download only after the probe passes**, inside the same billing month
-   (A6), with the retention licence text saved alongside the data.
+   (A6).
 5. **Item H (intraday) only after step 4 is settled.** It is a separate corpus, a
    separate purchase decision, and it must not delay the EOD one. Its written
    questions (H1–H12) are free and may be asked alongside step 2 to save a round
