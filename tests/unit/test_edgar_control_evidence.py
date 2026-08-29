@@ -620,9 +620,20 @@ def test_an_evidence_file_that_is_not_json_cannot_satisfy_either_measurement(
 def test_the_shipped_measurements_agree_with_the_resolution() -> None:
     """Relationships rather than constants, so this needs no edit per control.
 
-    The counts themselves move every time a control is verified; what must hold
+    The counts themselves moved every time a control was verified; what holds
     whatever they are is that each measurement equals its own predicate over the
-    resolution, and that neither has reached zero.
+    resolution, and that the subset relation between them survives.
+
+    **Two tripwires used to live here and have been retired, having fired.**
+    They asserted that ``unresolved`` and ``awaiting`` were both non-empty, with
+    the failure messages "every identity is resolved; the roadmap needs
+    updating" and "Milestone 0b is complete; the roadmap needs updating". They
+    were never claims about the world -- they were alarms set to go off at
+    completion so that reaching 30/30 could not pass silently while the roadmap
+    still described work in progress. RDDT set them off, the roadmap was
+    updated, and an alarm that has rung is removed rather than left ringing.
+    Regression away from 30/30 is guarded by the pinned snapshot below, which is
+    the assertion that now carries that duty.
     """
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     resolved = resolve_controls(evidence)
@@ -633,8 +644,6 @@ def test_the_shipped_measurements_agree_with_the_resolution() -> None:
     assert len(unresolved) == sum(1 for r in resolved if not r.counts_in_numerator)
     assert len(awaiting) == sum(1 for r in resolved if not r.is_manually_verified)
     assert {c.control.ticker for c in unresolved} <= {c.control.ticker for c in awaiting}
-    assert unresolved, "every identity is resolved; the roadmap needs updating"
-    assert awaiting, "Milestone 0b is complete; the roadmap needs updating"
 
     identified = {r.control.ticker for r in resolved if r.counts_in_numerator}
     assert identified == set(evidence.controls), (
@@ -643,27 +652,33 @@ def test_the_shipped_measurements_agree_with_the_resolution() -> None:
     )
 
 
-def test_the_shipped_state_measures_1_unresolved_and_1_awaiting_verification() -> None:
-    """The current shipped snapshot, deliberately hard-coded.
+def test_the_shipped_state_measures_milestone_0b_complete_at_30_of_30() -> None:
+    """The shipped snapshot, deliberately hard-coded -- now at completion.
 
     Every other test here is written as a relationship so it survives the next
     control being verified. This one is the exception on purpose: it is what the
     roadmap's status line quotes, so the two are pinned together and verifying a
-    control fails this test until the roadmap is updated with it. It has now done
+    control failed this test until the roadmap was updated with it. It did
     exactly that for MSFT, CSCO, AMZN, SPY, QQQ, ETYS, WBVN, KOOP, MPPP, WCOM,
-    EXDS, PSIX, GCTY, BCST, CPQ, BBBY, AOL, GM, AAPL, JDSU, PCLN, QCOM, CC and
-    FRC in turn, which is the behaviour rather than a nuisance.
+    EXDS, PSIX, GCTY, BCST, CPQ, BBBY, AOL, GM, AAPL, JDSU, PCLN, QCOM, CC, FRC
+    and RDDT in turn, which was the behaviour rather than a nuisance.
+
+    **Its job changes here.** Until now it tracked progress toward 30/30; from
+    now on it guards against regression away from it. A control dropping below
+    MANUAL_VERIFIED, or acquiring an unsettled issuer obligation, reopens
+    Milestone 0b -- and this assertion is where that shows up rather than in a
+    roadmap sentence someone forgot to update.
     """
     evidence = load_control_evidence(DEFAULT_EVIDENCE_PATH)
     resolved = resolve_controls(evidence)
 
     assert len(resolved) == 30
-    assert len(unresolved_controls(evidence)) == 1
-    assert len(controls_awaiting_manual_verification(evidence)) == 1
-    assert len(controls_awaiting_adjudication(evidence)) == 1
-    assert sum(1 for r in resolved if r.counts_in_numerator) == 29
-    assert sum(1 for r in resolved if r.is_manually_verified) == 29
-    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 29
+    assert len(unresolved_controls(evidence)) == 0
+    assert len(controls_awaiting_manual_verification(evidence)) == 0
+    assert len(controls_awaiting_adjudication(evidence)) == 0
+    assert sum(1 for r in resolved if r.counts_in_numerator) == 30
+    assert sum(1 for r in resolved if r.is_manually_verified) == 30
+    assert sum(1 for r in resolved if r.is_fully_adjudicated) == 30
     assert sum(1 for r in resolved if r.status is MappingStatus.RESOLVED) == 0
 
 

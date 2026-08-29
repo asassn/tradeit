@@ -907,6 +907,18 @@ def cmd_controls(args: argparse.Namespace) -> int:
             f"\n{len(pending)} of {len(resolved)} controls are not fully adjudicated. "
             "Milestone 0b is not complete. No CIK is guessed."
         )
+    else:
+        # Silence at 30/30 was a gap: this command is what the roadmap tells a
+        # reader to trust over any restated number, so it must say the milestone
+        # closed rather than merely stop warning that it had not.
+        print(
+            f"\nAll {len(resolved)} controls are fully adjudicated: every recorded "
+            "mapping is MANUAL_VERIFIED and every issuer question is settled. "
+            "Milestone 0b is COMPLETE. No identifier was guessed -- each cites a "
+            "primary regulatory source.\n"
+            "This verifies the control universe's identity. It says nothing about "
+            "any vendor's data, which is what these controls exist to test."
+        )
     return 0
 
 

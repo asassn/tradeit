@@ -937,24 +937,33 @@ def test_no_control_carries_a_fabricated_cik() -> None:
     assert all(c.mapping.status is not MappingStatus.MANUAL_VERIFIED for c in CONTROL_UNIVERSE)
 
 
-def test_milestone_0b_reports_itself_incomplete() -> None:
-    """Incomplete, and measured rather than assumed.
+def test_milestone_0b_reports_itself_complete() -> None:
+    """Complete, and measured rather than assumed.
 
-    This used to read `len(unverified()) == 30`, which passed because the check
-    could not return anything else: it read the fixture's placeholder mapping and
-    never opened the evidence file. Both measurements now read the evidence, so
-    the numbers move as controls are verified -- and the assertion is that work
-    remains, not that none has been done.
+    This assertion has been rewritten twice for the same underlying reason: it
+    kept outliving the state it described. It began as `len(unverified()) == 30`,
+    which passed because the check could not return anything else -- it read the
+    fixture's placeholder mapping and never opened the evidence file. It became
+    `0 < len(unresolved) < 30`, asserting that work remained, which was true
+    until RDDT and then fired as the tripwire it was.
 
-    The milestone gate is the stricter of the two: it asks for MANUAL_VERIFIED,
-    which a RESOLVED control does not supply, so it can never report fewer
-    outstanding than the identity measurement.
+    What survives both rewrites is the **ordering relation**, which is a property
+    of the two measurements rather than of any particular corpus state: the
+    milestone gate asks for MANUAL_VERIFIED, which a RESOLVED control does not
+    supply, so it can never report fewer outstanding than the identity
+    measurement. That holds at 0 and would hold again at any number.
+
+    The zero is asserted separately and deliberately. Milestone 0b closing is a
+    measured fact about the shipped evidence, and a regression -- a control
+    dropping below MANUAL_VERIFIED, or acquiring an unsettled issuer obligation
+    -- reopens it. This is where that shows up.
     """
     unresolved = unresolved_controls()
     awaiting = controls_awaiting_manual_verification()
-    assert 0 < len(unresolved) < len(CONTROL_UNIVERSE)
-    assert 0 < len(awaiting) <= len(CONTROL_UNIVERSE)
     assert len(awaiting) >= len(unresolved)
+    assert len(unresolved) == 0
+    assert len(awaiting) == 0
+    assert len(CONTROL_UNIVERSE) == 30
 
 
 def test_the_fixture_covers_the_failure_modes_it_claims_to() -> None:
