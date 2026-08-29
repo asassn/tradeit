@@ -37,7 +37,7 @@ discovered now.
 | **Kibot** | `PERMANENT RETENTION ALLOWED` *(claimed)* | licence states delivered data may be kept permanently; cancellation does not require deletion | **USER-VERIFIED** as licence text. **The scope of "delivered data" — raw files vs normalised rows vs derived bars vs a frozen research corpus — is not established.** See §3 Q23–Q26 |
 | **Twelve Data** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** `twelvedata.com` returns `EGRESS_BLOCKED`; re-measured, still blocked | **UNVERIFIED** |
 | **FMP** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** `site.financialmodelingprep.com` and `financialmodelingprep.com` both return `EGRESS_BLOCKED`; re-measured, still blocked | **UNVERIFIED** |
-| **Tiingo** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** Working acquisition adapter (`acquisition/tiingo.py`, not a stub); terms never examined | **UNVERIFIED** |
+| **Tiingo** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** Working acquisition adapter (`acquisition/tiingo.py`, not a stub); `app.tiingo.com` returns `EGRESS_BLOCKED`, terms never examined | **UNVERIFIED** |
 
 **The three `UNVERIFIED` rows are the three vendors with a functional adapter.**
 That is not a coincidence and it is the reason milestone 0d exists: every vendor

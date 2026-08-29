@@ -1,8 +1,43 @@
 # Vendor questions — ready to send
 
-Three messages, complete and sendable as written. **No purchase, no account, no
+Four messages, complete and sendable as written. **No purchase, no account, no
 commitment is implied by any of them.** Each asks for clause citations rather
 than reassurance, because the whole point is a record that can be checked later.
+
+## 0. Sending them — this is an operator action and cannot be delegated
+
+**These have to be sent by a person, from the account holder's own address.**
+The assistant has no mail channel — no email tool and no connector — so it
+cannot send them, and it should not: a licence enquiry is a communication in the
+account holder's name that a vendor will answer, quote back, and treat as the
+customer's position. It also cannot read the vendors' published terms from its
+own environment; `twelvedata.com`, `support.twelvedata.com`,
+`site.financialmodelingprep.com`, `financialmodelingprep.com` and
+`app.tiingo.com` all return `EGRESS_BLOCKED`.
+
+| vendor | route | status of this address |
+|---|---|---|
+| Twelve Data | `support@twelvedata.com`, or the licensing address `api@twelvedata.com` for the retention/attribution question specifically | **UNCONFIRMED** — from a web search, not from the vendor's own page, which is unreachable here. Confirm at `twelvedata.com/contact` before sending |
+| FMP | `info@financialmodelingprep.com` | **UNCONFIRMED** — same basis. Confirm at `site.financialmodelingprep.com/contact` |
+| Tiingo | the support form linked from `tiingo.com/kb/contact-support/` | **UNCONFIRMED** — no public support address was established; the knowledge base points at a form |
+
+**Do not treat these addresses as verified.** They came from search results
+describing the vendors' pages rather than from the pages themselves, which is
+the difference between a lead and a source. Open each vendor's own contact page
+and use what it says. If a vendor routes support through an in-app ticket form
+rather than mail, paste the message body into the form — the text below is
+written to work either way, and none of it depends on being an email.
+
+**Sign it yourself.** The bodies deliberately carry no name, company or
+signature, because the assistant must not sign a communication as anyone. Add
+your own sign-off before sending.
+
+One second-hand signal, recorded as a reason to ask rather than as an answer: a
+search summary of FMP's terms describes the licence as granting access "during
+the Subscription Period", which is the shape of a right that ends with the
+subscription. **That page was not read**, the summary is a secondary source, and
+FMP's classification stays `UNCLEAR` exactly as before — but it is the wording
+question 1 below is aimed at, so put FMP first if you send them one at a time.
 
 **File every reply** with the date, the responder's name and role, the clause
 cited (or its absence), and a grade. Update
@@ -230,14 +265,97 @@ optional.
 
 ---
 
-## 4. Current status
+## 4. Tiingo — retention
+
+**Send to:** Tiingo support (see §0 — this may be a form rather than an address).
+**Subject:** Data retention rights after subscription termination
+
+> Hello,
+>
+> We use your API to collect market data for an internal, non-public research and
+> development project. We do not redistribute, resell, publish or expose your
+> data to third parties, and we do not display it to any external user.
+>
+> We need to understand our retention rights before we build a permanent archive.
+> Where possible, please cite the governing clause.
+>
+> **1. Retention after termination.** If our subscription or account later
+> terminates — by cancellation, non-renewal, or a change to your plans — may we
+> **permanently retain and continue to use internally** the data we collected
+> while our access was valid?
+>
+> **2. Scope of retention.** Specifically, may we retain indefinitely after
+> termination:
+> (a) raw API responses as delivered;
+> (b) normalised rows in our internal database;
+> (c) bars and series **derived** from your data (resampled, adjusted, or
+>     otherwise transformed);
+> (d) a security master and identifier mappings built partly from your reference
+>     data;
+> (e) frozen internal research corpora and the analytical results computed from
+>     them?
+>
+> **3. Data categories.** Does the answer differ for historical end-of-day
+> prices, the `splitFactor` and `divCash` corporate-action fields delivered on
+> those rows, or reference/security data? If any category is treated
+> differently, please say which and how.
+>
+> **4. Free tier.** If any data was collected under a free tier or trial rather
+> than a paid plan, does that change the answer?
+>
+> **5. Licensing tier.** Our use is internal research and development for a
+> non-public software product. If it later became a commercial or professional
+> product, which licence tier would apply, and would it change the retention
+> answer for data already collected?
+>
+> Thank you.
+
+**Why Tiingo is on this list at all.** It was not in milestone 0d's original
+wording, and that was an omission rather than a decision: its acquisition
+adapter is functional — `acquisition/tiingo.py`, not a stub like EODHD — so it
+can write vendor facts into a permanent corpus today under terms nobody has
+read. Question 3 is narrowed to the fields this adapter actually takes: Tiingo
+delivers splits and dividends inline on the daily price rows as `splitFactor`
+and `divCash`, and those are corporate-action facts whatever table they arrive
+in.
+
+---
+
+## 5. Recording the replies
+
+**A reply is evidence only once it is filed.** Copy this row into
+[`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §2 as each answer lands,
+and keep the original message — a summary of a licence answer is not a licence
+answer.
+
+| field | what goes in it |
+|---|---|
+| date | the day the reply arrived, operator-local |
+| responder | name **and role**; "support" alone does not establish who committed the vendor |
+| channel | email, ticket, or chat transcript — and where the original is kept |
+| clause cited | the clause reference, or **explicitly** that none was given |
+| answer to Q1 | retention after termination: yes / no / not addressed |
+| answer to Q2(c) and Q2(e) | derived data and research corpora, **separately** |
+| grade | `VERIFIED`, `CORROBORATED` or `UNVERIFIED` per the table above |
+| classification | one of the four in `DATA_RETENTION_RIGHTS.md` §1 |
+
+**Q2(c) and Q2(e) decide it, and a partial answer does not upgrade a
+classification.** Sharadar is the worked example: its licence permits retaining
+nothing *and* requires deleting datasets derived from its data within 30 days,
+which would oblige deletion of the research corpus rather than merely the files.
+A vendor that says "yes, keep the files" and says nothing about derived data
+leaves `research-01` undetermined, and undetermined is treated as prohibited.
+
+---
+
+## 6. Current status
 
 | vendor | classification | basis |
 |---|---|---|
 | Kibot | licence text permits permanent retention (**USER-VERIFIED**); **scope over derived data unconfirmed** | Q23–Q26 unanswered, and now moot — the vendor is eliminated on price |
 | Twelve Data | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `twelvedata.com` returned `EGRESS_BLOCKED`, re-measured and still blocked; question unsent |
 | FMP | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `site.financialmodelingprep.com` and `financialmodelingprep.com` both returned `EGRESS_BLOCKED`, re-measured; question unsent |
-| Tiingo | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | working acquisition adapter, terms never examined; question unsent. Send §2's text — it is vendor-neutral |
+| Tiingo | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `app.tiingo.com` returned `EGRESS_BLOCKED`; working acquisition adapter, terms never examined; question unsent (§4) |
 
 **No retention determination is inferred from the fact that our API access
 currently works.** Access and retention are different grants, and it is common
