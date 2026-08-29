@@ -9,23 +9,37 @@ The distinction it is organised around:
 > **"A great stock"** and **"a great trade for this portfolio right now"** are
 > not the same thing.
 
-**Status: Phase 4 complete.** The point-in-time data layer, the system
-architecture, the causal analytics foundation and twelve chart-pattern detectors
-are built and tested. Phase 4 adds pattern identity that survives across
-sessions, an append-only observation history, a six-edge relationship taxonomy,
-human-labelling infrastructure, multi-timeframe detection and an integrated
-scanner — characterised against a seeded synthetic corpus of 174,000 detections. See [`docs/PHASE_04.md`](docs/PHASE_04.md).
+**Status: Phases 1–5 complete, the empirical gate closed at Outcome B, and
+Phase 6 in progress.** The point-in-time data layer, the system architecture, the
+causal analytics foundation, twelve chart-pattern detectors and the thirteen-state
+breakout engine are built and tested. See the phase reports below.
 
-**Two gates remain open, and both matter.** Phase 3's acceptance gate is a
-conditional pass: the mathematics was validated against two independent
-libraries and four real defects were found in the regime model, but it could not
-be validated against real market data because this environment's network policy
-refuses every market-data vendor ([`docs/PHASE_03_GATE.md`](docs/PHASE_03_GATE.md)).
-Phase 4 inherits that limit — synthetic corpora establish code properties, never
-market accuracy ([ADR-0018](docs/adr/0018-synthetic-data-limits.md)) — so no
-claim about real-world pattern precision or recall has been made. Breakout
-confirmation, scoring, portfolio construction and backtesting are Phases 5–9.
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the canonical twelve-phase plan.
+**Phase 6 milestone 0b is complete: 30 of 30 control securities are fully
+adjudicated.** Every control's identity rests on a cited primary regulatory
+filing, no identifier was guessed, and the fixture in `controls.py` still carries
+none. This is the *measuring instrument* for vendor validation, not a claim about
+any vendor's coverage — run `tradeit edgar controls` for the measured state
+rather than quoting a number from here.
+
+**Three limits remain open, and each matters.** Phase 3's acceptance gate is a
+conditional pass: the mathematics was validated against two independent libraries
+and four real defects were found in the regime model, but it could not be
+validated against real market data because this environment's network policy
+refuses every market-data vendor
+([`docs/PHASE_03_GATE.md`](docs/PHASE_03_GATE.md)). Phases 4 and 5 inherit that
+limit — synthetic corpora establish code properties, never market accuracy
+([ADR-0018](docs/adr/0018-synthetic-data-limits.md)) — so no claim about
+real-world pattern precision or recall has been made. And **no strategy, backtest
+or trade exists yet**: opportunity scoring, portfolio construction, backtesting,
+the dashboard and paper trading are Phases 7–11, so the platform currently has no
+evidence of profitability of any kind. See
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for the canonical twelve-phase plan.
+
+**Real bars have been through it once.** `full-01` drove the Phase 4 and Phase 5
+engines causally across a full imported universe — 272,537 pattern identities
+over 87,704 distinct structures. It is frozen and is never cited for economic
+claims, because the retention terms of the vendor it was built from have not been
+verified ([`docs/PHASE_06_VENDOR_MATRIX.md`](docs/PHASE_06_VENDOR_MATRIX.md) §1.4).
 
 Live trading is disabled and stays disabled until separately authorised
 ([ADR-0004](docs/adr/0004-live-trading-safety-interlock.md)).
@@ -124,7 +138,13 @@ src/tradeit/
   ingest/           append-only ingestion with quarantine and run audit
   storage/          schema, sessions, point-in-time repositories
   reproducibility/  content hashing and run manifests
-  analytics/        58 causal indicators, RS, sectors, breadth, regimes
+  analytics/        causal indicators, RS, sectors, breadth, regimes
+  patterns/         twelve detector families, identity, lifecycle, relationships
+  breakouts/        thirteen-state engine, quality and confirmation scoring
+  scanning/         causal feed and the scan runner over a snapshot
+  edgar/            SEC index, denominator, lifecycle, control identity evidence
+  acquisition/      vendor adapters, cache, journal, normalisation
+  validation/       the empirical check harness and survivorship checks
   strategy/         screening, patterns, scoring   (interfaces + config)
   portfolio/        state, sizing, allocation      (interfaces only)
   risk/             limits and the veto gate       (interfaces only)
@@ -143,9 +163,15 @@ docs/               architecture, data model, API, roadmap, ADRs, phase reports
 - [Data model](docs/DATA_MODEL.md) — 49 tables, ERDs, partitioning, indexes
 - [API specification](docs/API.md) — the endpoints Phase 10 will implement
 - [Vendor evaluation](docs/VENDOR_EVALUATION.md) — options and an acceptance test
-- [Roadmap](docs/ROADMAP.md) — the canonical twelve phases
-- Phase reports — [1](docs/PHASE_01.md) · [2](docs/PHASE_02.md) · [3](docs/PHASE_03.md) · [4](docs/PHASE_04.md)
-- [Phase 3 acceptance gate](docs/PHASE_03_GATE.md) — what was validated, what could not be, and why
+- [Roadmap](docs/ROADMAP.md) — the canonical twelve phases and the three non-numbered gates
+- Phase reports — [1](docs/PHASE_01.md) · [2](docs/PHASE_02.md) · [3](docs/PHASE_03.md) · [4](docs/PHASE_04.md) · [5](docs/PHASE_05.md)
+- Acceptance gates — [Phase 3](docs/PHASE_03_GATE.md) · [Phase 5 / empirical](docs/PHASE_05_GATE.md) — what was validated, what could not be, and why
+- Breakouts — [architecture](docs/BREAKOUT_ARCHITECTURE.md) · [lifecycle](docs/BREAKOUT_LIFECYCLE.md) · [scoring](docs/BREAKOUT_SCORING.md) · [validation](docs/BREAKOUT_VALIDATION.md)
+- Phase 6 — [improvement plan and milestones](docs/PHASE_06_IMPROVEMENT_PLAN.md) · [vendor matrix](docs/PHASE_06_VENDOR_MATRIX.md) · [purchase gate](docs/PHASE_06_PURCHASE_GATE.md)
+- Identity and survivorship — [EDGAR delisting denominator](docs/EDGAR_DELISTING_DENOMINATOR.md) · [control universe](docs/DOTCOM_CONTROL_UNIVERSE.md) · [forward survivorship](docs/FORWARD_SURVIVORSHIP_SYSTEM.md)
+- Future architecture — [multi-timeframe mandates](docs/MULTI_TIMEFRAME_MANDATES.md) · [strategy builder](docs/STRATEGY_BUILDER.md)
+- [Getting real data](docs/LOCAL_DATA_ACQUISITION.md) — the step-by-step download procedure
+- [What to supply](DATA_REQUIRED.md) — the shopping list, and what each file buys
 - Pattern recognition — [architecture](docs/PATTERN_ARCHITECTURE.md) · [methodology](docs/PATTERN_METHODOLOGY.md) · [lifecycle](docs/PATTERN_LIFECYCLE.md) · [relationships](docs/PATTERN_RELATIONSHIPS.md)
 - [Pattern validation report](docs/PATTERN_VALIDATION.md) — generated distributions, competing-pattern matrix, known weaknesses
 - [Pattern labelling protocol](docs/PATTERN_LABELING.md) — the real-market corpus design, and the sampling rules that keep future returns out of it
@@ -162,7 +188,7 @@ make test-pg   # additionally runs the PostgreSQL-specific tests
 The tests in `tests/unit/test_point_in_time.py` are the ones that matter most:
 if they regress, every backtest this platform produces is fiction.
 
-782 tests today. The 274 in `tests/unit/test_causality.py` are the analytics
+2,892 tests today. The 274 in `tests/unit/test_causality.py` are the analytics
 layer's equivalent: they assert that computing an indicator over a prefix of the
 data reproduces the prefix of computing it over everything, which is the formal
 statement of "no look-ahead". Verified to catch centred windows, full-sample

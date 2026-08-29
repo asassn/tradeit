@@ -13,15 +13,16 @@ authorisation.
 | 4 | Pattern recognition | ✅ Complete |
 | 5 | Breakout detection & confirmation | ✅ Complete |
 | — | Empirical data access & validation gate | ✅ Complete (Outcome B) |
-| 6 | Fundamentals & earnings quality | In progress — data architecture |
+| 6 | Fundamentals & earnings quality | In progress. **Milestone 0b complete — 30/30 controls fully adjudicated.** 0a implemented but never run against real EDGAR data; **0c and 0d are written and waiting to be sent**, and 6.1 onward is blocked on their replies |
 | — | **Multi-Timeframe & Portfolio Mandate Architecture** | **Not started.** May overlap Phase 6; **must complete before Phase 7** |
 | — | **Strategy Definition / Builder Architecture** | **Not started.** Follows the multi-timeframe gate; **must complete before Phase 7** |
 | 7 | Opportunity scoring | Not started |
 | 8 | Portfolio construction, risk & compounding | Not started |
-| 9 | Portfolio backtesting & Monte Carlo analysis | Not started |
-| 10 | Dashboard / research interface | Not started |
+| 9 | Portfolio backtesting & Monte Carlo analysis — **includes signal research and indicator ranking** | Not started |
+| 10 | Dashboard / research interface — **includes valuation callout, multi-horizon ticker panel, live news & attention, onboard AI assistant** | Not started |
 | 11 | Paper trading execution | Not started |
-| 12 | End-to-end validation & production readiness | Not started |
+| 12 | End-to-end validation & production readiness — **includes the Profitability & Readiness framework and the governed research loop** | Not started |
+| — | **News-driven signals** | **Not started, and separately gated.** Requires `research-01`, a backtester, and a news source with honest publication timestamps. Distinct from the *observational* news dashboard in Phase 10 |
 | — | **Live trading** | **Outside the roadmap.** Disabled until separately and explicitly authorised after successful paper trading and validation |
 
 Phases are gated: each ends with a written report, and the next does not start
@@ -240,9 +241,76 @@ Event-driven backtester that advances a clock and calls the same components as
 live. Walk-forward, Monte Carlo on trade sequence and parameter perturbation,
 attribution by factor, sector and regime. Needs its own overfitting controls.
 
+### Signal research and indicator ranking
+
+**Which indicators actually predict anything, at which horizon, in which
+regime.** Not a display feature — a measurement. It lives here rather than in
+Phase 7 because it needs exactly the machinery Phase 9 builds: out-of-sample
+separation, walk-forward windows, realistic costs and a baseline to beat.
+
+Every study must state its **target** before it runs — next-day return, 5-day
+excess return, breakout success, probability of stop before target, 3-month
+return. "Will the stock go up" is not a target, and on a multi-timeframe platform
+it is not even a question.
+
+Two results are wanted and are different: whether a signal is *statistically*
+detectable, and whether it survives spread, slippage, fees and turnover to be
+*economically* useful. A signal can pass the first and fail the second, and only
+the second matters. Every candidate is compared against simple baselines — buy
+and hold, the benchmark, a moving-average rule, a naive classifier — and a
+sophisticated model that cannot beat them robustly is not promoted for being
+sophisticated.
+
+*Feeds:* Phase 7's scoring weights. Those weights are config-driven and
+content-hashed (ADR-0008), so Phase 7 can ship with declared, transparent,
+**unvalidated** weights and have them replaced by measured ones later without a
+code change. **This ordering is deliberate and the tension is real:** ranking
+before the research exists means the first weights are judgement, not evidence,
+and they must be labelled as such wherever they appear.
+
+*Deliberately excluded:* machine learning, per the standing position below.
+
 ## Phase 10 — Dashboard / research interface
 
 FastAPI service and dashboard over produced results. See [`API.md`](API.md).
+
+Four capabilities belong here and are recorded so they are not forgotten:
+
+**Multi-horizon per-ticker panel.** One security, three independent
+conclusions — Day, Swing, Retirement — each with its own supporting and
+contradicting factors. A stock may be attractive long-term and unattractive as a
+swing; that is information, not a contradiction. **There is no global buy/sell
+score**, and the panel must not compute one. This depends on the multi-timeframe
+gate above, which is what makes the three horizons separate populations rather
+than three labels.
+
+**Valuation and the undervalued / fairly valued / overvalued callout.** A short
+human-readable verdict when browsing or selecting a name, backed by multiples,
+the security's own valuation history, and sector-relative comparison. **The
+callout is never shipped without the reasoning that produced it** — a one-word
+label with no visible methodology is an opinion wearing a badge, and it would be
+acted on far more confidently than its evidence deserves. Depends on Phase 6
+fundamentals.
+
+**Live news, sentiment and attention.** Which names are being mentioned most
+right now, with what sentiment, across news and social feeds; and tracked
+coverage for names a strategy has selected. This is *observational* and
+present-tense: it makes no historical claim, so it carries none of the
+look-ahead risk that gates news-driven signals below. Engagement — reposts,
+views, velocity — is displayed as **attention, never as truth**: it is
+purchasable and adversarial, and popularity is not evidence about a company.
+**This surface has no trading authority.**
+
+**Onboard AI assistant.** An assistant inside the platform that answers *why*:
+why this ticker scored as it did, what supports the swing signal, what
+contradicts the long-term thesis, which indicators mattered, what changed since
+yesterday, why a trade was entered or rejected, what regime was active, which
+portfolio constraint applied. It **operates over the platform's own structured
+data and provenance and explains decisions the system actually made** — it never
+invents a reason. If the system cannot reconstruct why something happened, the
+correct answer is that it cannot, and the assistant says so. This is why the
+explainability requirements in Phases 4, 5, 7 and 8 are load-bearing rather than
+decorative: the assistant is only as honest as the record beneath it.
 
 ## Phase 11 — Paper trading execution
 
@@ -254,6 +322,90 @@ trade journal, running on the live code path with a simulated venue.
 Full-pipeline validation, operational runbooks, monitoring, incident response,
 strategy-decay detection, and the evidence required before live trading could
 even be discussed.
+
+### The Profitability & Readiness framework
+
+The question this phase exists to answer is not "did the backtest work". It is
+**"is this good enough to trust with money, and how would we know if it stopped
+being?"**
+
+The measurement contracts already exist: `tradeit.backtesting.base.PerformanceMetrics`
+declares total return, CAGR, max drawdown and its duration, Sharpe, Sortino,
+Calmar, win rate, profit factor, expectancy in R, average win and loss in R,
+trade count, exposure, turnover and benchmark return — with
+`statistically_meaningful` (at least thirty trades) and `trustworthy` (completed,
+no data caveats, and meaningful) as explicit guards. **What does not exist is the
+framework that turns those numbers into a decision**, and it is the deliverable
+here.
+
+**No single metric decides readiness**, and no threshold in this framework may be
+chosen after seeing the result it would judge. Beyond the headline ratios it must
+consider performance by regime, by year and by sector; out-of-sample degradation;
+walk-forward consistency; slippage and transaction-cost sensitivity; capacity and
+liquidity; concentration; correlation with strategies already running; and
+paper-versus-backtest divergence.
+
+Promotion runs `DRAFT → RESEARCHED → VALIDATED → PAPER → LIMITED_LIVE → LIVE`
+with explicit criteria at each step and **explicit demotion criteria too** —
+`DEGRADED`, `SUSPENDED`, `RETIRED`. A strategy that decays comes back down. The
+exact state names are the strategy builder's to settle; the governed promotion
+*and demotion* is the requirement.
+
+**Risk controls sit outside a strategy's reach.** Maximum position, portfolio
+exposure, daily loss, drawdown, per-strategy allocation, sector concentration,
+correlation limits, kill switch, stale-data protection, duplicate-order
+protection and execution reconciliation are enforced above the strategy, not
+configured by it. Their values need approval and are not inferred.
+
+### The governed research loop
+
+Research continues after deployment, and must not be allowed to quietly rewrite
+what is running. The loop is: hypothesis → backtest → out-of-sample validation →
+failure-mode analysis → comparison against baselines → logged result → reject or
+promote → paper → live-forward evaluation → only then consider promotion.
+
+**The production strategy never mutates automatically because a fresh backtest
+looked better.** Every candidate carries its reproducibility metadata — strategy
+version, feature version, dataset version, universe definition, date range,
+parameters, execution and cost assumptions, code version, result metrics — so no
+result of the form "this made 42%" can exist without the means to reproduce it.
+
+### Observability
+
+The system must be able to reconstruct its own decisions: what data arrived,
+which signal fired, which strategy version acted, which risk gate approved or
+rejected, what order was submitted, what execution occurred, what P&L resulted.
+**A live trading system that cannot explain what it did is not acceptable**, and
+this is also the substrate the Phase 10 assistant answers from.
+
+---
+
+## News-driven signals
+
+**Not a numbered phase, and separately gated.** Distinct from the observational
+news and attention surface in Phase 10, which has no trading authority and can be
+built with the dashboard.
+
+A rule of the form "positive news triggers a trade" is not hard to write. Knowing
+whether it works is the hard part, and it requires historical news carrying **the
+instant each item genuinely became public**. News archives routinely serve
+revised timestamps, backfilled articles, and sentiment scored later by models
+that did not exist at the time. Backtested against that, a strategy appears to
+react minutes before anyone could have read the story, and the resulting equity
+curve describes a different universe — the same failure the importer already
+refuses for fundamentals, where a row timestamped within a day of its own period
+end is rejected outright and no flag relaxes it.
+
+*Unblocked when all three hold:* `research-01` exists as a price spine to measure
+reactions against; a backtester exists so a news rule can be tested rather than
+asserted; and a news source with honest publication timestamps has been
+identified and verified to the standard the fundamentals importer already
+enforces.
+
+*Engagement signals* — reposts, views, attention velocity — carry an additional
+problem the price and fundamental data do not: they are **purchasable and
+adversarial**. They are admissible as a measure of attention and never as
+evidence about a company.
 
 ---
 
@@ -271,6 +423,10 @@ edge across several hundred out-of-sample trades. Introduced earlier it mostly
 launders look-ahead bias into a plausible score. The schema is ready
 (`model_metadata` with training-window constraints); nothing else is.
 
-**News and sentiment.** Interfaces and storage exist; nothing consumes them.
-News is the most leak-prone dataset in the system and should wait until
-something specific needs it.
+**News and sentiment** were listed here until the requirement was separated into
+its two halves, which turned out to be a scheduling question rather than a
+capability question. The *observational* surface — what is being mentioned, with
+what sentiment, right now — makes no historical claim and is scheduled in
+Phase 10. The *signal* half is scheduled above under News-driven signals, behind
+three explicit conditions. Interfaces and storage exist; nothing consumes them
+yet, and the `NewsProvider` protocol is still unimplemented by any adapter.
