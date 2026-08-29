@@ -41,7 +41,12 @@ class BuildOptions:
     #: it was run, which is fine for exploration and not for a published number.
     as_of: dt.date | None = None
     quiet_quarters: int = CESSATION_QUIET_QUARTERS
-    #: Manually verified CIK->ticker mappings, keyed by CIK.
+    #: Curated CIK->ticker identity, keyed by CIK. Built from the control
+    #: evidence file by
+    #: :func:`~tradeit.edgar.control_evidence.security_mappings_by_cik`, which
+    #: also reports the issuers a CIK-keyed dict cannot carry. Leaving this None
+    #: is a valid measurement -- the corpus without curated identity -- and is
+    #: not the same statement as "no identity has been established".
     mappings: dict[int, SecurityMapping] | None = None
 
 

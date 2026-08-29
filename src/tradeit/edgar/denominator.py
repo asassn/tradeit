@@ -178,6 +178,28 @@ class Denominator:
                 counts[str(mapping.status)] += 1
         return counts
 
+    def supplied_mapping_reach(self) -> dict[str, int]:
+        """How far the supplied identity evidence actually reaches into *this* corpus.
+
+        **Supplying a mapping is not the same as identifying a registrant**, and
+        the difference is invisible in :meth:`mapping_counts`, which iterates
+        resolutions rather than mappings. A mapping whose CIK never appears in
+        the index range being built contributes to no count above and no
+        coverage bound below; it is simply inert. Without this, a reader who
+        knows thirty controls were supplied has no way to see that some of them
+        landed nowhere, and would reasonably assume otherwise.
+
+        ``matched`` is therefore the only one of these three numbers that has
+        affected anything the denominator publishes.
+        """
+        present = {r.cik for r in self.resolutions}
+        matched = sum(1 for cik in self.mappings if cik in present)
+        return {
+            "supplied": len(self.mappings),
+            "matched": matched,
+            "unmatched": len(self.mappings) - matched,
+        }
+
     def lifespan_buckets(self) -> dict[str, int]:
         """Registrant lifespans, first filing to last, for dated exits only."""
         counts = {label: 0 for label, _ in LIFESPAN_BUCKETS}
@@ -224,7 +246,24 @@ class Denominator:
     # -- coverage ----------------------------------------------------------
 
     def coverage(self, vendor_tickers: Sequence[str]) -> CoverageBounds:
-        """Match a vendor roster against the denominator. Both bounds, always."""
+        """Match a vendor roster against the denominator. Both bounds, always.
+
+        **Known and unaddressed: an identity break flatters this measurement.**
+        Matching is by ticker, and both registrants behind a broken identity
+        carry the same one -- ``GM`` names two CIKs, ``ENE`` names two, ``AOL``
+        and ``BBBY`` likewise. One roster entry therefore matches both, and
+        ``matched_numerator`` counts two registrants covered where the vendor
+        can hold at most one series. The overstatement is exactly the size of
+        the identity breaks in the corpus, which is the population these
+        controls were selected to expose.
+
+        Left as it is deliberately: correcting it means deciding *which* issuer
+        a roster ticker refers to, which is a validity-window question against
+        vendor metadata this code has not been given, and guessing would
+        manufacture the attribution rather than measure it. Anyone reading a
+        coverage figure computed over identity-break controls should read it as
+        an upper bound on both ends.
+        """
         roster = {t.strip().upper() for t in vendor_tickers}
         resolved = 0
         matched = 0
@@ -249,6 +288,7 @@ class Denominator:
             "counts_by_year_confirmed": self.counts_by_year(),
             "undated_exits": self.undated_exits(),
             "mapping_counts": self.mapping_counts(),
+            "supplied_mappings": self.supplied_mapping_reach(),
             "lifespan_buckets": self.lifespan_buckets(),
             "missing_quarters": list(self.missing_quarters),
         }

@@ -201,6 +201,9 @@ tradeit edgar denominator --index-root DIR --as-of 2026-01-01
 tradeit edgar controls                        # the 30-control verification table
 ```
 
+The curated control identity is supplied to the build by default and its reach
+is reported; see §4, *Handing the curated identity to the denominator*.
+
 **Every count is published with its evidence strength attached.** A 2001
 termination count of *N* where 80% is `cessation_only` is a different claim from
 one where 80% is `form_direct`, and collapsing them into one number is the
@@ -299,6 +302,30 @@ regulator is **provenance**, carried by the identifier's namespace.
   this rule existed are left as they stand; none is defective under a convention
   that did not exist, and rewriting them for cosmetic consistency would edit
   evidence to match a clock.
+
+### Handing the curated identity to the denominator
+
+`tradeit edgar denominator` supplies the control evidence file by default;
+`--no-control-mappings` builds without it, which measures the corpus *without*
+curated identity and is not the same statement as "no identity is established".
+The projection is `security_mappings_by_cik`, and it is lossy in exactly two
+ways, both of which are reported rather than absorbed:
+
+- **The denominator is keyed by SEC CIK**, because it is built from EDGAR
+  full-index rows. An issuer whose primary key is in another namespace has no
+  registrant row to attach to and is returned as *not handed over*, with its
+  namespace and that namespace's authority stated. `FRC` is the shipped case:
+  it is the best-evidenced control there is, and it is absent from the identity
+  section for a reason that is about the corpus and nothing about the evidence.
+  **Omitting it silently would make an architectural boundary look like a gap.**
+- **A dict holds one mapping per CIK**, so two issuers claiming one CIK would
+  leave one silently overwritten — a splice produced by the handoff itself. It
+  raises instead.
+
+**Supplying a mapping is not identifying a registrant.** A mapping whose CIK
+never appears in the index range being built affects no count; the report states
+how many were handed over and how many actually attached, because those are
+different numbers and only the second one did anything.
 
 ---
 

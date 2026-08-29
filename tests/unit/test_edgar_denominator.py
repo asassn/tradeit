@@ -1518,3 +1518,159 @@ def test_injecting_both_refused_rows_leaves_the_published_report_identical() -> 
     before, after = report(corpus), report([*corpus, *injected])
     assert before == after
     assert before["registrants"] == after["registrants"] == 3
+
+
+# ---------------------------------------------------------------------------
+# curated identity reaching the denominator
+#
+# BuildOptions has accepted a CIK->SecurityMapping dict since the pipeline was
+# written and the CLI never passed one, so `tradeit edgar denominator` reported
+# every registrant UNRESOLVED on a corpus whose control identities had in fact
+# been verified against filings. These tests pin the wiring and, more
+# importantly, pin the two things it must not let a reader conclude: that
+# supplying a mapping identifies a registrant, and that a mapping the handoff
+# could not carry was never recorded.
+# ---------------------------------------------------------------------------
+
+
+def _denominator_args(root: Path, **overrides: Any) -> argparse.Namespace:
+    args = {
+        "index_root": str(root),
+        "start": "2001Q1",
+        "end": "2001Q1",
+        "as_of": "2010-01-01",
+        "quiet_quarters": 8,
+        "evidence": None,
+        "control_mappings": True,
+        "json": False,
+    }
+    args.update(overrides)
+    return argparse.Namespace(**args)
+
+
+def _control_corpus(root: Path) -> None:
+    """Two shipped control CIKs and one registrant no control names."""
+    _write_index(
+        root,
+        "2001-QTR1",
+        [
+            "10-K        APPLE COMPUTER INC" + " " * 33 + "320193      2001-03-01  "
+            "edgar/data/320193/0000320193-01-000001.txt",
+            "15-12G      IPET HOLDINGS INC" + " " * 34 + "1100683     2001-02-01  "
+            "edgar/data/1100683/0001100683-01-000002.txt",
+            "10-K        SOME OTHER CO" + " " * 38 + "999999      2001-03-04  "
+            "edgar/data/999999/0000999999-01-000003.txt",
+        ],
+    )
+
+
+def test_the_denominator_reports_curated_identity_by_default(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The wiring itself: two of three registrants stop reading as unresolved."""
+    _control_corpus(tmp_path)
+    assert cli_edgar.cmd_denominator(_denominator_args(tmp_path)) == 0
+    out = capsys.readouterr().out
+
+    assert "manual_verified                                    2" in out
+    assert "unresolved                                         1" in out
+    # The unnamed registrant is the control: it must still count in the
+    # denominator, because an unidentified issuer is not an absent one.
+    assert "registrants           : 3" in out
+
+
+def test_withholding_the_curated_identity_says_so_rather_than_reporting_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--no-control-mappings`` must not be indistinguishable from no evidence.
+
+    Without the printed notice the two runs differ only in a count that reads
+    the same either way -- three registrants UNRESOLVED -- which is precisely
+    the confusion that made the unwired default survive as long as it did.
+    """
+    _control_corpus(tmp_path)
+    args = _denominator_args(tmp_path, control_mappings=False)
+    assert cli_edgar.cmd_denominator(args) == 0
+    out = capsys.readouterr().out
+
+    assert "unresolved                                         3" in out
+    assert "NOT SUPPLIED" in out
+    assert "not the" in out and "state of the evidence" in out
+
+
+def test_a_supplied_mapping_that_matches_no_registrant_is_reported_as_inert(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Supplying a mapping is not identifying a registrant.
+
+    Thirty-three mappings are handed in and two attach to anything in a
+    one-quarter corpus. A reader told only the first number would conclude the
+    identity work had reached thirty-three registrants here; it reached two.
+    """
+    _control_corpus(tmp_path)
+    assert cli_edgar.cmd_denominator(_denominator_args(tmp_path)) == 0
+    out = capsys.readouterr().out
+
+    assert "2 attached to a registrant in this corpus" in out
+    assert "did not appear" in out
+    assert "inert, not identified" in out
+
+
+def test_an_issuer_the_handoff_cannot_carry_is_named_in_the_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """FRC must not vanish between the evidence file and the report.
+
+    It is the best-evidenced control in the corpus and the only one absent from
+    the denominator's identity section, for a reason that is about the
+    denominator's SEC-only keying and nothing about FRC.
+    """
+    _control_corpus(tmp_path)
+    assert cli_edgar.cmd_denominator(_denominator_args(tmp_path)) == 0
+    out = capsys.readouterr().out
+
+    assert "NOT HANDED OVER: FRC/primary [fdic_cert:59017]" in out
+    assert "no SEC filer account" in out
+
+
+def test_supplied_mapping_reach_counts_mappings_not_registrants() -> None:
+    """The three numbers are about the handoff, and only ``matched`` acts.
+
+    Constructed rather than run through the CLI, because the property is that
+    ``supplied`` and ``matched`` measure different populations -- a distinction
+    a corpus-shaped test can accidentally satisfy by having them coincide.
+    """
+    as_of = dt.date(2010, 1, 1)
+    timelines = build_timelines(
+        evidence_from_rows([_row(320193, "10-K", "2001-03-01", "0000320193-01-000001")])
+    )
+    denominator = Denominator(
+        resolutions=[resolve_exit(t, as_of=as_of) for t in timelines.values()],
+        timelines=timelines,
+        mappings={
+            320193: SecurityMapping(
+                cik=320193,
+                ticker="AAPL",
+                status=MappingStatus.MANUAL_VERIFIED,
+                evidence=MappingEvidence.MANUAL_FILING_CITATION,
+                citation="a filing",
+            ),
+            111111: SecurityMapping(
+                cik=111111,
+                ticker="ZZZZ",
+                status=MappingStatus.MANUAL_VERIFIED,
+                evidence=MappingEvidence.MANUAL_FILING_CITATION,
+                citation="a filing",
+            ),
+        },
+    )
+
+    assert denominator.supplied_mapping_reach() == {
+        "supplied": 2,
+        "matched": 1,
+        "unmatched": 1,
+    }
+    # The unmatched mapping changed no published count. One registrant, one
+    # identity -- not two.
+    assert denominator.mapping_counts()[str(MappingStatus.MANUAL_VERIFIED)] == 1
+    assert denominator.report()["supplied_mappings"] == denominator.supplied_mapping_reach()

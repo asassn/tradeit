@@ -37,10 +37,12 @@ from tradeit.edgar.acquire import (
     acquire_control_evidence,
 )
 from tradeit.edgar.control_evidence import (
+    MappingHandoff,
     authority_of,
     load_control_evidence,
     primary_issuer_key,
     resolve_controls,
+    security_mappings_by_cik,
 )
 from tradeit.edgar.controls import CONTROL_UNIVERSE
 from tradeit.edgar.evidence import classify_form
@@ -71,18 +73,29 @@ def cmd_fetch_recipe(_: argparse.Namespace) -> int:
 
 
 def cmd_denominator(args: argparse.Namespace) -> int:
+    # The curated control evidence is the only identity the system has, so it is
+    # supplied by default. Withholding it was never a decision -- BuildOptions
+    # has accepted mappings since the pipeline was written and nothing passed
+    # any, which made the identity section read as wholly unresolved on a corpus
+    # for which thirty identities had in fact been verified against filings.
+    handoff: MappingHandoff | None = None
+    if args.control_mappings:
+        handoff = security_mappings_by_cik(resolve_controls(load_control_evidence(args.evidence)))
+
     options = BuildOptions(
         index_root=Path(args.index_root),
         start=_quarter(args.start),
         end=_quarter(args.end),
         as_of=dt.date.fromisoformat(args.as_of) if args.as_of else None,
         quiet_quarters=args.quiet_quarters,
+        mappings=handoff.by_cik if handoff else None,
     )
     denominator = build_denominator(options)
     report: dict[str, Any] = denominator.report()
     report["cohort_survival"] = {
         str(year): row for year, row in denominator.cohort_survival().items()
     }
+    report["control_mappings"] = handoff.summary() if handoff else None
     if args.json:
         print(json.dumps(report, indent=2, default=str))
         return 0
@@ -106,6 +119,41 @@ def cmd_denominator(args: argparse.Namespace) -> int:
     print("\nidentity mapping")
     for key, value in report["mapping_counts"].items():
         print(f"  {key:42s} {value:>9,}")
+
+    if handoff is None:
+        print(
+            "\ncurated control mappings: NOT SUPPLIED (--no-control-mappings)\n"
+            "  every registrant above counts as UNRESOLVED because nothing was handed\n"
+            "  in, which measures the corpus without curated identity -- not the\n"
+            "  state of the evidence"
+        )
+        return 0
+
+    reach = report["supplied_mappings"]
+    print(
+        f"\ncurated control mappings: {handoff.recorded} recorded, "
+        f"{len(handoff.by_cik)} handed over, {reach['matched']} attached to a "
+        f"registrant in this corpus"
+    )
+    print(
+        "  a handed-over mapping whose CIK is absent from the index range changes\n"
+        "  no count above; it is inert, not identified"
+    )
+    if reach["unmatched"]:
+        print(
+            f"  {reach['unmatched']} did not appear -- a coverage gap in the index "
+            "range, not in the evidence"
+        )
+    for unhanded in handoff.unhanded:
+        print(
+            f"  NOT HANDED OVER: {unhanded.control_id}/{unhanded.issuer_label} "
+            f"[{unhanded.primary_key or 'no primary key'}]"
+        )
+        print(f"    {unhanded.reason}")
+    print(
+        "\nThe control universe is a stress test against known failure modes, not a\n"
+        "sample. It says nothing about the registrants it does not name."
+    )
     return 0
 
 
@@ -1288,6 +1336,16 @@ def add_edgar_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     denom.add_argument("--end", default="2026Q2", help="last quarter")
     denom.add_argument("--as-of", default=None, help="ISO date the cessation rule measures against")
     denom.add_argument("--quiet-quarters", type=int, default=8)
+    denom.add_argument("--evidence", default=None, help="path to control_identity_evidence.json")
+    denom.add_argument(
+        "--no-control-mappings",
+        dest="control_mappings",
+        action="store_false",
+        help=(
+            "build without the curated control identity, which is supplied by default; "
+            "use this to see the corpus without it"
+        ),
+    )
     denom.add_argument("--json", action="store_true")
     denom.set_defaults(func=cmd_denominator)
 

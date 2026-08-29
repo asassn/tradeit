@@ -30,7 +30,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -55,14 +56,17 @@ __all__ = [
     "IssuerIdentifier",
     "IssuerMapping",
     "LifecycleFact",
+    "MappingHandoff",
     "RelatedIdentity",
     "ResolvedControl",
+    "UnhandedIssuer",
     "authority_of",
     "controls_awaiting_adjudication",
     "controls_awaiting_manual_verification",
     "load_control_evidence",
     "primary_issuer_key",
     "resolve_controls",
+    "security_mappings_by_cik",
     "unresolved_controls",
 ]
 
@@ -1152,6 +1156,148 @@ def resolve_controls(evidence: ControlEvidenceFile | None = None) -> list[Resolv
             )
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# handing the curated evidence to the denominator
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class UnhandedIssuer:
+    """A recorded issuer the CIK-keyed denominator cannot be told about.
+
+    **Named rather than dropped, because the two are not the same thing.** The
+    denominator is built from EDGAR full-index rows and is therefore keyed by
+    SEC CIK throughout. An issuer whose primary key is in another namespace is
+    perfectly well identified -- it simply has no registrant row in that corpus
+    to attach to. Silently omitting it would make a deliberate architectural
+    boundary look like a gap in the evidence, and would make the arithmetic
+    ``supplied == handed over`` come out right by losing the discrepancy.
+    """
+
+    control_id: str
+    issuer_label: str
+    #: ``"namespace:value"``, or ``None`` when the mapping offers no primary key.
+    primary_key: str | None
+    reason: str
+
+    def summary(self) -> dict[str, object]:
+        return {
+            "control_id": self.control_id,
+            "issuer_label": self.issuer_label,
+            "primary_key": self.primary_key,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class MappingHandoff:
+    """The curated evidence, split into what a CIK-keyed consumer can use.
+
+    Both halves are returned together and neither is optional, on the same
+    reasoning as :class:`~tradeit.edgar.denominator.CoverageBounds`: a caller
+    handed only ``by_cik`` cannot tell the difference between "every issuer was
+    handed over" and "some were quietly left behind", and that is exactly the
+    difference worth reporting.
+
+    ``len(by_cik) + len(unhanded)`` equals the number of recorded issuer
+    mappings. That conservation is the property the tests pin.
+    """
+
+    by_cik: dict[int, SecurityMapping]
+    unhanded: tuple[UnhandedIssuer, ...]
+
+    @property
+    def recorded(self) -> int:
+        """Every issuer mapping considered, handed over or not."""
+        return len(self.by_cik) + len(self.unhanded)
+
+    def summary(self) -> dict[str, object]:
+        return {
+            "recorded": self.recorded,
+            "handed_over": len(self.by_cik),
+            "unhanded": [u.summary() for u in self.unhanded],
+        }
+
+
+def security_mappings_by_cik(controls: Sequence[ResolvedControl]) -> MappingHandoff:
+    """Curated control identity, in the form :class:`BuildOptions` accepts.
+
+    **Why this is not a comprehension at the call site.** Three things have to
+    be got right and each has already been got wrong somewhere in this project:
+
+    * **Which key.** The CIK is read from :func:`primary_issuer_key`, never
+      from :attr:`IssuerMapping.cik`. A record may carry its primary as an
+      explicit ``SEC_CIK`` :class:`IssuerIdentifier` and leave the legacy field
+      null, and a caller that read the field would drop such a record while
+      reporting a total that includes it. That branching is the thing
+      :func:`primary_issuer_key` exists to make impossible, so this reads it.
+    * **What cannot be handed over.** An issuer keyed in another namespace is
+      returned in :attr:`MappingHandoff.unhanded` with the namespace and its
+      authority stated, not skipped. See :class:`UnhandedIssuer`.
+    * **Collisions.** The result is a ``dict``, so two issuers claiming one CIK
+      would leave one of them silently overwritten -- a spliced identity
+      produced by the handoff itself rather than by the evidence. It raises.
+
+    Weak mappings are handed over too. ``AMBIGUOUS`` and ``UNRESOLVED`` change
+    no count the denominator publishes -- an absent mapping already counts as
+    ``UNRESOLVED`` there -- but withholding them would mean a registrant we have
+    *investigated and declined to map* is indistinguishable from one nobody
+    looked at.
+    """
+    by_cik: dict[int, SecurityMapping] = {}
+    owner: dict[int, str] = {}
+    unhanded: list[UnhandedIssuer] = []
+    sec = str(IdentifierNamespace.SEC_CIK)
+
+    for resolved in controls:
+        control_id = resolved.control.ticker
+        for mapping in resolved.mappings:
+            key = primary_issuer_key(mapping)
+            if key is None:
+                unhanded.append(
+                    UnhandedIssuer(
+                        control_id=control_id,
+                        issuer_label=mapping.issuer_label,
+                        primary_key=None,
+                        reason=(
+                            "no primary issuer key was established, so there is no "
+                            "registrant to attach this mapping to"
+                        ),
+                    )
+                )
+                continue
+            namespace, value = key
+            if namespace != sec:
+                unhanded.append(
+                    UnhandedIssuer(
+                        control_id=control_id,
+                        issuer_label=mapping.issuer_label,
+                        primary_key=f"{namespace}:{value}",
+                        reason=(
+                            f"identified by {namespace}, whose authority is "
+                            f"{authority_of(IdentifierNamespace(namespace))}; this issuer "
+                            "has no SEC filer account, so the EDGAR-derived denominator "
+                            "contains no registrant row for it"
+                        ),
+                    )
+                )
+                continue
+
+            cik = int(value)
+            previous = owner.get(cik)
+            if previous is not None:
+                raise ConfigError(
+                    f"{sec}:{cik} is claimed by both {previous!r} and "
+                    f"{control_id}/{mapping.issuer_label!r}. A CIK-keyed handoff can "
+                    "carry one mapping per registrant, so continuing would splice two "
+                    "issuers by discarding one of them"
+                )
+            owner[cik] = f"{control_id}/{mapping.issuer_label}"
+            by_cik[cik] = replace(mapping.as_security_mapping(), cik=cik)
+
+    return MappingHandoff(by_cik=by_cik, unhanded=tuple(unhanded))
 
 
 # Two questions, two functions, one resolution.

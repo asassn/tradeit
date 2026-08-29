@@ -36,6 +36,7 @@ from tradeit.edgar.control_evidence import (
     load_control_evidence,
     primary_issuer_key,
     resolve_controls,
+    security_mappings_by_cik,
     unresolved_controls,
 )
 from tradeit.edgar.controls import CONTROL_UNIVERSE
@@ -3225,3 +3226,171 @@ def test_frc_is_the_shipped_exercise_of_regulator_neutral_identity() -> None:
     # The FDIC page is the locator; the corporate mirror is not the source.
     assert "fdic.gov/news/speeches/2023/spmay1523.html" in mapping.citation
     assert "THE FDIC PAGE IS THE REGULATORY SOURCE" in mapping.citation
+
+
+# ---------------------------------------------------------------------------
+# handing the evidence to the denominator
+#
+# The denominator has accepted a CIK->SecurityMapping dict since the pipeline
+# was written, and for just as long nothing ever passed one -- so thirty
+# verified identities sat in a file the survivorship measurement never read.
+# Closing that gap is a lossy projection: a dict keyed by CIK cannot represent
+# an issuer that has no CIK, and cannot represent two issuers that share one.
+# Every test below is about the loss being *stated* rather than taken.
+# ---------------------------------------------------------------------------
+
+
+def test_the_handoff_loses_nothing_silently(tmp_path: Path) -> None:
+    """The conservation law: every recorded issuer is handed over or named.
+
+    Deliberately asserts no particular numbers. It reads shipped state because
+    that is the population that must not develop a silent hole, and it stays
+    true as controls are added -- which is what a snapshot of ``33`` would not.
+    """
+    del tmp_path
+    resolved = resolve_controls(load_control_evidence(DEFAULT_EVIDENCE_PATH))
+    recorded = [m for control in resolved for m in control.mappings]
+    handoff = security_mappings_by_cik(resolved)
+
+    assert handoff.recorded == len(recorded)
+    assert len(handoff.by_cik) + len(handoff.unhanded) == len(recorded)
+    # An unhanded issuer without a reason would satisfy the arithmetic above and
+    # tell a reader nothing, which is the failure this pair guards together.
+    assert all(u.reason and u.control_id and u.issuer_label for u in handoff.unhanded)
+
+
+def test_the_shipped_state_hands_over_every_sec_issuer_and_names_the_one_it_cannot(
+    tmp_path: Path,
+) -> None:
+    """Measured snapshot: 34 recorded, 33 handed over, FRC named.
+
+    The complement of the test above -- that one pins the invariant, this one
+    pins that the invariant is currently non-vacuous. If a future change made
+    ``unhanded`` always empty, conservation would still hold and this fails.
+    """
+    del tmp_path
+    resolved = resolve_controls(load_control_evidence(DEFAULT_EVIDENCE_PATH))
+    handoff = security_mappings_by_cik(resolved)
+
+    assert handoff.recorded == 34
+    assert len(handoff.by_cik) == 33
+    assert len(handoff.unhanded) == 1
+
+    frc = handoff.unhanded[0]
+    assert (frc.control_id, frc.primary_key) == ("FRC", "fdic_cert:59017")
+    # The reason must attribute the omission to the denominator's SEC-only
+    # keying, never to the evidence -- FRC is the best-evidenced control there is.
+    assert "no SEC filer account" in frc.reason
+    assert authority_of(IdentifierNamespace.FDIC_CERT) in frc.reason
+
+
+def test_an_issuer_outside_the_sec_namespace_is_named_rather_than_dropped(
+    tmp_path: Path,
+) -> None:
+    """Constructed, so it holds even if FRC is one day resolved to a CIK."""
+    path = _write(tmp_path, [_control([_bank_mapping()])])
+    handoff = security_mappings_by_cik(resolve_controls(load_control_evidence(path)))
+
+    assert handoff.by_cik == {}
+    unhanded = [u for u in handoff.unhanded if u.control_id == "CC"]
+    assert len(unhanded) == 1
+    assert unhanded[0].primary_key == "fdic_cert:59017"
+
+
+def test_a_primary_sec_identifier_is_handed_over_without_a_legacy_cik(
+    tmp_path: Path,
+) -> None:
+    """The representation must not decide whether a mapping reaches the corpus.
+
+    A record may carry its primary as an explicit ``SEC_CIK`` identifier and
+    leave ``cik`` null. A handoff that read the field would drop it -- while
+    still counting it in ``recorded`` -- so the evidence would be silently
+    weaker than the file says. This is the reason the key is read through
+    :func:`primary_issuer_key` and never off the attribute.
+    """
+    mapping = _bank_mapping(identifiers=[_ident("sec_cik", "0000320193")], ticker="AAPL")
+    path = _write(tmp_path, [_control([mapping])])
+    handoff = security_mappings_by_cik(resolve_controls(load_control_evidence(path)))
+
+    # The other 29 controls have no record in this file, so they resolve to
+    # keyless UNRESOLVED placeholders and are legitimately unhanded. Only the
+    # control under test is asserted on.
+    assert [u.control_id for u in handoff.unhanded if u.control_id == "CC"] == []
+    assert set(handoff.by_cik) == {320193}
+    # The projected mapping carries the resolved cik, not the null it was
+    # written with, so a consumer reading SecurityMapping.cik agrees with the key.
+    assert handoff.by_cik[320193].cik == 320193
+    assert handoff.by_cik[320193].ticker == "AAPL"
+
+
+def test_a_mapping_with_no_primary_key_is_named_rather_than_dropped(tmp_path: Path) -> None:
+    """UNRESOLVED is a state, not an absence, and the handoff has to say so."""
+    path = _write(tmp_path, [_control([_unresolved_mapping()])])
+    handoff = security_mappings_by_cik(resolve_controls(load_control_evidence(path)))
+
+    unhanded = [u for u in handoff.unhanded if u.control_id == "CC"]
+    assert len(unhanded) == 1
+    assert unhanded[0].primary_key is None
+    assert "no primary issuer key" in unhanded[0].reason
+
+
+def test_a_weak_but_keyed_mapping_is_still_handed_over(tmp_path: Path) -> None:
+    """An investigated-and-declined registrant must not look uninvestigated.
+
+    ``AMBIGUOUS`` changes no count the denominator publishes, because an absent
+    mapping already counts as ``UNRESOLVED`` there. It is handed over anyway so
+    that "we looked and could not choose" and "nobody looked" stay distinct in
+    the data, which is the distinction the whole identity layer is built on.
+    """
+    mapping = _verified_mapping(
+        status="ambiguous",
+        ticker=None,
+        evidence="name_match",
+        citation="",
+        verified_on=None,
+        unresolved_reason="two registrants of this name; neither established",
+    )
+    path = _write(tmp_path, [_control([mapping])])
+    handoff = security_mappings_by_cik(resolve_controls(load_control_evidence(path)))
+
+    assert set(handoff.by_cik) == {320193}
+    assert handoff.by_cik[320193].status is MappingStatus.AMBIGUOUS
+    assert [u.control_id for u in handoff.unhanded if u.control_id == "CC"] == []
+
+
+def test_two_issuers_claiming_one_cik_is_refused_by_the_handoff(tmp_path: Path) -> None:
+    """A dict cannot hold both, and quietly holding one splices two issuers.
+
+    The loader already refuses this *within* a control. Across controls it
+    cannot: two controls legitimately name two different issuers, and only the
+    projection to a single CIK-keyed dict makes the collision matter. So the
+    check belongs here, where the loss would happen, and it raises rather than
+    picking a winner.
+    """
+    path = _write(
+        tmp_path,
+        [
+            _control([_verified_mapping()], control_id="AAPL"),
+            _control([_verified_mapping(ticker="MSFT")], control_id="MSFT"),
+        ],
+    )
+    resolved = resolve_controls(load_control_evidence(path))
+
+    with pytest.raises(ConfigError, match=r"claimed by both"):
+        security_mappings_by_cik(resolved)
+
+
+def test_an_identity_break_hands_over_both_issuers_separately(tmp_path: Path) -> None:
+    """Two CIKs, one ticker: the break survives the projection.
+
+    GM is the shipped case. A handoff that keyed on ticker instead of CIK would
+    collapse the two registrants into one entry and undo the single most
+    load-bearing distinction in the evidence file.
+    """
+    del tmp_path
+    resolved = resolve_controls(load_control_evidence(DEFAULT_EVIDENCE_PATH))
+    handoff = security_mappings_by_cik(resolved)
+
+    assert {40730, 1467858} <= set(handoff.by_cik)
+    assert handoff.by_cik[40730].ticker == handoff.by_cik[1467858].ticker == "GM"
+    assert handoff.by_cik[40730] != handoff.by_cik[1467858]
