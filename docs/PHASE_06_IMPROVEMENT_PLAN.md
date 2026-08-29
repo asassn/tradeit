@@ -295,7 +295,7 @@ otherwise be invisible.
 |---|---|---|---|
 | **0a** | **EDGAR full-index ingestion + the delisting denominator** — design complete in [`EDGAR_DELISTING_DENOMINATOR.md`](EDGAR_DELISTING_DENOMINATOR.md) | per-year termination counts by evidence strength; EDGAR-only cohort survival curves | **free** |
 | **0b** | **Confirm the 30 control securities against primary regulatory evidence** to `MANUAL_VERIFIED` — names, issuer identifiers, dates ([`DOTCOM_CONTROL_UNIVERSE.md`](DOTCOM_CONTROL_UNIVERSE.md) §2c). **EDGAR is the normal source**, and is the only one for an SEC-reporting issuer; where an issuer legally reports its Exchange Act filings to a different federal regulator, that regulator's **direct** filing is equally admissible. **This is not a general widening**: it covers direct primary regulatory filings only — never a corporate website, an aggregator, a press release, or a search result, however official-looking | 30/30 confirmed or replaced **before** any vendor data is seen | **free** |
-| **0c** | **Send Kibot pre-sales questions Q1–Q26** ([`KIBOT_DATA_PROBE.md`](KIBOT_DATA_PROBE.md) §Q) | replies filed and graded VERIFIED / CORROBORATED / UNVERIFIED | **free** |
+| **0c** | **Send Kibot pre-sales questions Q1–Q26** ([`KIBOT_DATA_PROBE.md`](KIBOT_DATA_PROBE.md) §Q) — **deliberately skipped; see Status** | replies filed and graded VERIFIED / CORROBORATED / UNVERIFIED. **Gate not met and will not be**: the burden it would have carried moves to Milestone 1 | **free** |
 | **0d** | **Verify Twelve Data and FMP retention terms** in writing ([`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §3.1) | a classification per source, `UNCLEAR` treated as prohibited | **free** |
 | 1 | Kibot probe on a trial or single month, **sample only** | **your approval of the probe result** — measured against [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md). A failed item G is not overridden by a passed item A | ~$14 |
 | 2 | Schema: securities, symbol_aliases, security_relationships, price_facts, corporate_action_facts, filings, fundamental_facts + migration | migration/ORM drift green | none |
@@ -321,25 +321,43 @@ precede the probe rather than follow it.
 |---|---|
 | **0a** — denominator | **implemented** in `src/tradeit/edgar/` with 41 tests, CLI (`tradeit edgar denominator`), ruff and mypy clean. **Not yet run against real EDGAR data**: `sec.gov` returns `EGRESS_BLOCKED` here. Requires an operator to run `tradeit edgar fetch-recipe` in an unrestricted environment |
 | **0b** — 30 controls to `MANUAL_VERIFIED` | **COMPLETE. 30 of 30 fully adjudicated.** All three measurements now read **30/30**: **identity** — every control has an evidence-backed resolution, **0 `UNRESOLVED`** and **0 at `RESOLVED`**; **mapping quality** — every *recorded* mapping is `MANUAL_VERIFIED`; **milestone completion** — every control's issuer question is settled as well as cited. That they coincide is the *result* here rather than a coincidence, but the three remain distinct questions and a single control regressing on either condition reopens the milestone. Each of the 30 cites a primary regulatory source and **no identifier was guessed**; the fixture in `controls.py` still carries none. **`FRC` is the first control whose issuer key is not an SEC CIK**: a bank with no holding company files its Exchange Act reports with the FDIC, so it has no SEC filer account, and it is discriminated by `FDIC_CERT:59017` (primary) with `FRB_RSSD:4114567` corroborating — the regulator-neutral identity architecture exercised on shipped evidence rather than only in tests. Its SEC subject-company CIK `1132979` is recorded as an **unresolved related identity**, not as an identifier: that record carries EIN `88-0157485` while the FDIC registrant reports `80-0513856`, and sameness is not established in either direction. The distinctions are held open by synthetic tests rather than by any shipped control demonstrating them, which is what keeps them from collapsing into one number now that all three read the same. A control is fully adjudicated when every recorded mapping is `MANUAL_VERIFIED` **and** its issuer question is settled — three controls (BBBY, GM, AOL) must adjudicate whether a *second* issuer held their ticker, discharged either by evidencing one or by a cited finding that none was established. **All three are now discharged by evidence**, each with two independently cited issuers and `identity_break: true`: BBBY (CIK 886158 on Nasdaq, `$.01` par; CIK 1130713 on the NYSE, `$0.0001` par), AOL (CIK 883780; CIK 1468516), GM (CIK 40730; CIK 1467858). AOL is the strictest: both its filings name the New York Stock Exchange and the same symbol and the registrant names are close, so **the CIK is the only discriminator** — which is why no series may run across the two. **No recorded mapping now rests on `company_tickers.json`** — a dated primary source, but a reference file rather than a filing someone read, which is a categorical gap from `MANUAL_VERIFIED` rather than a matter of confidence. AAPL and GM's second issuer were the last two to rest on it and both now cite filings, so **no control remains at `RESOLVED`**; the rule that a ticker file cannot by itself carry a mapping to `MANUAL_VERIFIED` is curatorial and is held open by test rather than by the loader. All three counts come from `tradeit edgar controls`, which prints them separately; do not restate any from memory |
-| **0c** — Kibot Q1–Q26 | **ready to send**, verbatim, in [`VENDOR_QUESTIONS_READY_TO_SEND.md`](VENDOR_QUESTIONS_READY_TO_SEND.md) §1 |
+| **0c** — Kibot Q1–Q26 | **NOT SENT, by decision — superseded by going straight to the probe.** The owner elected to buy the ~$14 month and measure the data rather than ask first. Defensible on this project's own rule, which is *do not pay before the instrument that measures it exists*: 0b now exists, and the probe measures reality where a reply would have been marketing-adjacent — `KIBOT_DATA_PROBE.md` §Q says in terms that "marketing copy is not an answer to any of them". **What the decision costs:** the questions also resolved most of the *schema* for free, so those answers now have to be inferred from the delivered data or left open, and any item the data cannot settle stays `UNVERIFIED` rather than being cheaply askable. The questions remain valid and unsent in [`VENDOR_QUESTIONS_READY_TO_SEND.md`](VENDOR_QUESTIONS_READY_TO_SEND.md) §1 and can still be sent if the probe leaves something unresolved |
 | **0d** — Twelve Data and FMP retention | **ready to send** (§2, §3). Both vendor sites returned `EGRESS_BLOCKED`; classification stays `UNCLEAR`, treated as prohibited |
 
 > **Do not pay for access before the instrument that measures it exists.**
 
 ## 9. Recommendation
 
-1. **Do not purchase anything yet**, including Kibot. The licence is right; the
-   data is unproven, and the specific claim being made is unusual enough at the
-   price to deserve scrutiny rather than relief.
+1. ~~**Do not purchase anything yet**, including Kibot.~~ **Superseded by
+   decision: the ~$14 Kibot month is authorised and Milestone 1 is live.** The
+   original reasoning was that the licence is right while the data is unproven,
+   and the specific claim is unusual enough at the price to deserve scrutiny
+   rather than relief. That reasoning is unchanged and still governs *how* the
+   month is used — the probe's job remains to try to break the claim, not to
+   confirm it, and the acceptance rules in
+   [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md) were written before
+   any data was seen precisely so they cannot be adjusted to fit the result.
+   What changed is only the *order*: the condition attached to this
+   recommendation — do not pay before the measuring instrument exists — is now
+   satisfied, because Milestone 0b is complete. The original text is struck
+   through rather than deleted so a later reader can see the position was
+   reversed by a decision and not quietly rewritten.
 2. **Sharadar and EODHD are eliminated** for `research-01` on licence grounds,
    independent of data quality. Reconsider only under a different written licence
    that explicitly grants post-termination retention.
-3. **Start Milestones 0a–0d now.** All free, all useful under every outcome, and
-   0a/0b are the instruments that verify the vendor.
-4. **Then run the Kibot probe** and bring the numbers back against
+3. **Milestones 0a–0d: 0b is complete, 0a is implemented but has never been run
+   against real EDGAR data, 0c is skipped by decision, and 0d is still
+   outstanding.** 0d is the one that has not been decided and is worth
+   revisiting: `full-01` was built from Twelve Data prices whose retention terms
+   remain `UNVERIFIED`, and buying Kibot does not answer that question.
+4. **Run the Kibot probe** and bring the numbers back against
    [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md). If it passes, one
    month at ~$14 buys a permanently retainable 1998–present price corpus, which
-   is a materially better position than the previous revision's.
+   is a materially better position than the previous revision's. With 0c skipped
+   the probe now carries the schema questions as well as the capability ones, so
+   an item the delivered data cannot settle stays `UNVERIFIED` — it is not
+   settled by absence, and absence is never evidence that a security did not
+   exist.
 5. **Defer pre-2009 fundamental values.** Do not accept a subscription source for
    them if cancellation would force us to delete `research-01`.
 6. **Plan for CONDITIONAL.** The realistic outcome is a corpus that is

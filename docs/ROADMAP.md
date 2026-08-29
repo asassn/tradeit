@@ -13,7 +13,7 @@ authorisation.
 | 4 | Pattern recognition | ✅ Complete |
 | 5 | Breakout detection & confirmation | ✅ Complete |
 | — | Empirical data access & validation gate | ✅ Complete (Outcome B) |
-| 6 | Fundamentals & earnings quality | In progress. **Milestone 0b complete — 30/30 controls fully adjudicated.** 0a implemented but never run against real EDGAR data; **0c and 0d are written and waiting to be sent**, and 6.1 onward is blocked on their replies |
+| 6 | Fundamentals & earnings quality | In progress. **Milestone 0b complete — 30/30 controls fully adjudicated.** 0a implemented but never run against real EDGAR data. **0c deliberately skipped**: the ~$14 Kibot month was authorised instead, so the probe measures the data rather than a vendor's answers about it — which moves the schema questions onto the probe too. **0d remains outstanding and undecided** (Twelve Data / FMP retention, still `UNVERIFIED`, and it governs whether `full-01` can serve as permanent history). **Milestone 1, the Kibot probe, is the live thread** |
 | — | **Multi-Timeframe & Portfolio Mandate Architecture** | **Not started.** May overlap Phase 6; **must complete before Phase 7** |
 | — | **Strategy Definition / Builder Architecture** | **Not started.** Follows the multi-timeframe gate; **must complete before Phase 7** |
 | 7 | Opportunity scoring | Not started |

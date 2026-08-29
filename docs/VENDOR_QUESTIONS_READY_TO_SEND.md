@@ -23,6 +23,14 @@ questions `UNVERIFIED` is treated as prohibited.
 
 ## 1. Kibot — 26 questions
 
+> **Status: NOT SENT, by decision.** Milestone 0c was skipped in favour of buying
+> the ~$14 month and measuring the delivered data directly
+> ([`PHASE_06_IMPROVEMENT_PLAN.md`](PHASE_06_IMPROVEMENT_PLAN.md) §8). **These
+> questions are not obsolete** — they remain sendable exactly as written, and are
+> worth sending for any item the probe cannot settle, particularly the schema
+> questions the data alone will not answer. Sections 2 and 3 below are unaffected
+> and remain outstanding.
+
 **Send to:** Kibot sales/support.
 **Subject:** Pre-sales questions — historical US equity EOD data, delisted coverage and retention
 
