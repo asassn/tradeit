@@ -234,10 +234,21 @@ optional.
 
 | vendor | classification | basis |
 |---|---|---|
-| Kibot | licence text permits permanent retention (**USER-VERIFIED**); **scope over derived data unconfirmed** | Q23–Q26 unanswered |
-| Twelve Data | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `twelvedata.com` returned `EGRESS_BLOCKED`; question unsent |
-| FMP | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `site.financialmodelingprep.com` returned `EGRESS_BLOCKED`; question unsent |
+| Kibot | licence text permits permanent retention (**USER-VERIFIED**); **scope over derived data unconfirmed** | Q23–Q26 unanswered, and now moot — the vendor is eliminated on price |
+| Twelve Data | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `twelvedata.com` returned `EGRESS_BLOCKED`, re-measured and still blocked; question unsent |
+| FMP | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `site.financialmodelingprep.com` and `financialmodelingprep.com` both returned `EGRESS_BLOCKED`, re-measured; question unsent |
+| Tiingo | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | working acquisition adapter, terms never examined; question unsent. Send §2's text — it is vendor-neutral |
 
 **No retention determination is inferred from the fact that our API access
 currently works.** Access and retention are different grants, and it is common
 for the first to be generous while the second is silent.
+
+**Nor is one inferred from a blocked fetch.** `EGRESS_BLOCKED` is a fact about
+this session's network and says nothing about a vendor's terms — it establishes
+that they were not read, which is why the classification is `UNCLEAR` rather
+than anything worse or better. Reading them needs a browser outside this
+environment; a written answer from the vendor is what would reach `VERIFIED`.
+
+**Milestone 0d is now the only licence question left open.** Sharadar and EODHD
+are excluded on licence, Kibot on price, so these three unsent questions stand
+between the project and a price spine it is permitted to keep.

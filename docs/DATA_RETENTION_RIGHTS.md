@@ -35,9 +35,17 @@ discovered now.
 | **Sharadar** (Nasdaq Data Link) | `DELETION REQUIRED AFTER TERMINATION` | Personal Use License: on termination, discontinue use, delete all copies of Services Data within 30 days, **and delete datasets derived from Services Data within 30 days** | **USER-VERIFIED** (primary source, read by the project owner) |
 | **EODHD** | `DELETION REQUIRED AFTER TERMINATION` | terms require deletion of stored provider data within one month after termination | **USER-VERIFIED** |
 | **Kibot** | `PERMANENT RETENTION ALLOWED` *(claimed)* | licence states delivered data may be kept permanently; cancellation does not require deletion | **USER-VERIFIED** as licence text. **The scope of "delivered data" — raw files vs normalised rows vs derived bars vs a frozen research corpus — is not established.** See §3 Q23–Q26 |
-| **Twelve Data** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** `twelvedata.com` returns `EGRESS_BLOCKED` in this session | **UNVERIFIED** |
-| **FMP** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** `site.financialmodelingprep.com` returns `EGRESS_BLOCKED` in this session | **UNVERIFIED** |
-| **Tiingo** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | existing acquisition adapter; terms never examined | **UNVERIFIED** |
+| **Twelve Data** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** `twelvedata.com` returns `EGRESS_BLOCKED`; re-measured, still blocked | **UNVERIFIED** |
+| **FMP** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** `site.financialmodelingprep.com` and `financialmodelingprep.com` both return `EGRESS_BLOCKED`; re-measured, still blocked | **UNVERIFIED** |
+| **Tiingo** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** Working acquisition adapter (`acquisition/tiingo.py`, not a stub); terms never examined | **UNVERIFIED** |
+
+**The three `UNVERIFIED` rows are the three vendors with a functional adapter.**
+That is not a coincidence and it is the reason milestone 0d exists: every vendor
+this system can currently collect from has unread retention terms, and the
+register treats each as prohibited until answered. `EGRESS_BLOCKED` is a
+statement about this session's network, never about the vendor — a blocked fetch
+establishes that the terms were *not read*, and nothing whatever about what they
+say.
 
 ### 2.1 Why Twelve Data and FMP now matter as much as any historical vendor
 
@@ -71,7 +79,7 @@ the second to be silent.
 Ask each vendor. Silence, deflection or "our terms speak for themselves" without
 a clause citation is recorded as `UNCLEAR`, which is treated as prohibited.
 
-### 3.1 To Twelve Data and to FMP (identical text)
+### 3.1 To Twelve Data, to FMP and to Tiingo (identical text)
 
 > We use your API to collect market data for an internal, non-public research and
 > development project. We do not redistribute, resell, publish or expose your data
@@ -159,14 +167,24 @@ writing, kept so the basis of a decision is auditable later.
    alone, independent of data quality. Either may be reconsidered only under a
    different written commercial or custom licence that explicitly grants
    post-termination retention.
-2. **Kibot is the only live candidate** for the price spine, and its licence is
-   the reason — its data remains entirely unproven (`KIBOT_DATA_PROBE.md`).
-3. **Twelve Data and FMP retention must be established before either becomes part
-   of a permanent corpus.** This blocks the forward survivorship archive, not the
-   current operating use.
-4. Every `source` value in `price_facts`, `fundamental_facts` and
-   `corporate_action_facts` must have a row in §2 before its first fact is
-   written.
+2. **There is no live candidate for the price spine.** Kibot was the only one,
+   on licence grounds, and it is now eliminated on price — the archive is
+   $990–$2,400, not the ~$14/month the plan had assumed
+   ([`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) §1.3). Its licence
+   advantage was real and is preserved as the model for interrogating a
+   replacement; its data was never proven (`KIBOT_DATA_PROBE.md`) and now never
+   will be here. **So every remaining vendor is either excluded or unread**, and
+   that is the state milestone 0d exists to change.
+3. **Twelve Data, FMP and Tiingo retention must be established before any of
+   them becomes part of a permanent corpus.** This blocks the forward
+   survivorship archive, not the current operating use. Tiingo belongs in this
+   sentence because its adapter works, which is the only property that matters
+   here — an adapter that can collect can encumber.
+4. Every `source` value in `ohlcv_bars`, `fundamental_facts` and
+   `corporate_actions` must have a row in §2 before its first fact is written.
+   (This rule named `price_facts` and `corporate_action_facts` until the schema
+   was fully inventoried; neither table exists, so as written the rule bound
+   nothing. See [`DATA_MODEL.md`](DATA_MODEL.md) Domain 2.)
 5. **Free work is unaffected.** The EDGAR denominator, the control-universe
    verification and the whole filing spine are public domain and can proceed with
    no retention question at all.
