@@ -250,7 +250,7 @@ tradeit/
 │   │       └── sec_edgar.py              ○
 │   │
 │   ├── storage/                          ✅ PERSISTENCE
-│   │   ├── tables.py                         41-table schema
+│   │   ├── tables.py                         the schema (41 tables at Phase 2; 57 now)
 │   │   ├── session.py                        engine, transaction scope
 │   │   └── repositories.py                   the only sanctioned read path
 │   │
@@ -353,9 +353,11 @@ the point-in-time guarantee hold transitively rather than by vigilance.
 
 ## 4. Database architecture
 
-Full specification in **[DATA_MODEL.md](DATA_MODEL.md)** — 41 tables across five
-domains with primary keys, foreign keys, indexes, unique constraints and
-partitioning, plus Mermaid ERDs per domain.
+Full specification in **[DATA_MODEL.md](DATA_MODEL.md)** — five domains with
+primary keys, foreign keys, indexes, unique constraints and partitioning, plus
+Mermaid ERDs per domain. It documents 26 of the 57 tables now in `tables.py`;
+the 41 below are Phase 2's schema, and DATA_MODEL.md names what it does not
+cover.
 
 Summary of what is new in Phase 2 (32 tables):
 

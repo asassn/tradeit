@@ -60,9 +60,10 @@ Live trading is disabled and stays disabled until separately authorised
   rejected rows quarantined verbatim rather than dropped.
 - **A safety interlock** that makes live trading require a deliberate,
   machine-local act rather than an environment variable.
-- **A validated 41-table schema** applied to PostgreSQL 16, with monthly
-  partitioning on the high-volume tables and a drift test that fails if the ORM
-  and the migrations disagree.
+- **A 57-table schema** applied to PostgreSQL 16, with monthly partitioning on
+  the high-volume tables and a drift test that fails if the ORM and the
+  migrations disagree. 41 of them were validated at Phase 2 and later phases
+  added the rest; the count is measured from the ORM metadata.
 - **Content-addressed reproducibility.** Strategy configs, data snapshots,
   feature sets and models are identified by content hash and pinned together in
   a run manifest, so two runs sharing a digest provably used the same rules.
@@ -76,7 +77,9 @@ Live trading is disabled and stays disabled until separately authorised
   impossible rows are quarantined, merely *unusual* ones are flagged and kept.
   Dropping everything unusual would delete precisely the market conditions a
   breakout system exists to trade.
-- **A causal analytics layer.** 58 indicators written rather than imported, so
+- **A causal analytics layer.** 58 indicators under the shipped `baseline.toml`
+  — the count comes from the feature registry and moves with the config —
+  written rather than imported, so
   their seeding, smoothing and warm-up behaviour can be tested; multi-benchmark
   relative strength ranked against the point-in-time universe; sector strength,
   breadth, and explainable regime models that record contradicting evidence as
@@ -160,7 +163,8 @@ docs/               architecture, data model, API, roadmap, ADRs, phase reports
 
 - [Architecture](docs/ARCHITECTURE.md) — the complete technical architecture
 - [Analytics methodology](docs/ANALYTICS.md) — indicator formulas, regime rules
-- [Data model](docs/DATA_MODEL.md) — 49 tables, ERDs, partitioning, indexes
+- [Data model](docs/DATA_MODEL.md) — ERDs, partitioning and indexes for 26 of the
+  57 tables; `tables.py` is the source of truth and the gap is named in the document
 - [API specification](docs/API.md) — the endpoints Phase 10 will implement
 - [Vendor evaluation](docs/VENDOR_EVALUATION.md) — options and an acceptance test
 - [Roadmap](docs/ROADMAP.md) — the canonical twelve phases and the three non-numbered gates

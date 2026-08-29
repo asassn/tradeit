@@ -42,14 +42,16 @@ See [`PHASE_01.md`](PHASE_01.md).
 
 ## Phase 2 — System architecture & data design ✅
 
-Complete technical architecture, 41-table schema validated against
-PostgreSQL 16 with partitioning, six provider interfaces, the domain interface
-set, content-addressed reproducibility, versioned configuration, 22-job
-schedule. See [`PHASE_02.md`](PHASE_02.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md).
+Complete technical architecture, the 41-table schema **as it stood at Phase 2**
+validated against PostgreSQL 16 with partitioning, six provider interfaces, the
+domain interface set, content-addressed reproducibility, versioned
+configuration, 22-job schedule. Later phases added to it: the current count is
+**57**, measured from `tables.py`. See [`PHASE_02.md`](PHASE_02.md) and
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Phase 3 — Market analytics foundation ✅
 
-The causal feature layer everything above it depends on: 26 technical
+The causal feature layer everything above it depends on: 58 causal
 indicators, causal multi-timeframe construction, multi-benchmark relative
 strength, sector strength, market breadth, a transparent market-regime
 classifier, a volatility-regime model, and a formal feature registry.

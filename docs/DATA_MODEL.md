@@ -1,9 +1,28 @@
 # Data Model
 
-49 tables in six domains. Every table is defined in `src/tradeit/storage/tables.py`
-and created by `migrations/versions/`. The schema has been applied to
-PostgreSQL 16 and is verified by `tests/integration/test_phase2_schema.py`,
-which includes a drift check asserting the ORM and the migrations still agree.
+**57 tables are defined** in `src/tradeit/storage/tables.py` and created by
+`migrations/versions/` — measured from the ORM metadata, not counted by hand.
+The schema has been applied to PostgreSQL 16 and is verified by
+`tests/integration/test_phase2_schema.py`, which includes a drift check
+asserting the ORM and the migrations still agree.
+
+> **This document names 22 of those 57, across five domains, and the remaining
+> 35 are absent from it. The gap is stated here rather than left for a reader to
+> discover.** It was written in Phase 2 and its domain sections cover that era's
+> schema. Missing entirely: everything from Phase 4 (`patterns` and its
+> observation, relationship and label tables), Phase 5 (`breakout_events` and
+> its four companions), the empirical gate (`data_packages`,
+> `data_package_files`, `import_corrections`, `scan_runs`, `scan_progress`), and
+> several Phase 2-era tables that were never written up (`portfolios`,
+> `strategies`, `watchlists`, `run_manifests` among them).
+>
+> The header previously read "49 tables in six domains", which was wrong on
+> three counts at once: the number of tables, the number of domain sections, and
+> the implication of completeness. Correcting only the count would have made it
+> worse — asserting coverage of 57 while describing 22. **`tables.py` is the
+> source of truth**; documenting the remaining 35 is its own piece of work and
+> has not been done. `tests/unit/test_documented_counts.py` fails if these
+> figures drift from the ORM again.
 
 > The five analytics tables added in Phase 3 — `relative_strength_values`,
 > `market_breadth_snapshots`, `volatility_regime_states`, `feature_definitions`
@@ -451,7 +470,7 @@ is applied where row counts justify it and nowhere else.
 
 | Table | Key | Interval | Rationale |
 |---|---|---|---|
-| `indicator_values` | `session_date` | monthly | ~40M rows/year (4,000 instruments × 40 indicators × 252 sessions). Every query is date-bounded, so pruning eliminates almost all of it. |
+| `indicator_values` | `session_date` | monthly | ~58M rows/year (4,000 instruments × 58 indicators × 252 sessions). The indicator count is measured from the feature registry under the shipped `baseline.toml`, and it is **configuration-dependent** — a config declaring more periods produces more rows, so this is a sizing estimate for that config rather than a fixed property of the schema. Every query is date-bounded, so pruning eliminates almost all of it. |
 | `relative_strength_values` | `session_date` | monthly | ~12M rows/year (4,000 × 3 benchmarks × 4 lookbacks × 252). Same query shape. |
 | `system_logs` | `logged_at` | monthly | High write volume, short useful life, retention by partition drop. |
 
