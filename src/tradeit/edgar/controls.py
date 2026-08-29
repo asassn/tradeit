@@ -54,8 +54,33 @@ class ControlSecurity:
             note="not yet checked against EDGAR",
         )
     )
-    #: What would lift this to MANUAL_VERIFIED.
-    verification_route: str = "EDGAR company search by name; confirm CIK, form, and date"
+    #: **Where to look for a filing that would establish this control's
+    #: identity.** Design intent, like ``proves`` and ``expected_event``: it is
+    #: UNVERIFIED, no gate reads it, and it is never evidence of anything. It
+    #: records what a searcher should expect to find, and it does not record
+    #: what was actually found -- that lives in the evidence file, and storing a
+    #: finding here would eventually let an expectation be read as one.
+    #:
+    #: A usable route names a document class that can join **registrant -> its
+    #: own security -> venue -> symbol**. Three kinds of route cannot, and all
+    #: three were shipped here until every control had been verified and the
+    #: mismatch became visible:
+    #:
+    #: * a **reference file** such as ``company_tickers.json`` -- a dated
+    #:   primary source, but not a filing anyone read, which is a categorical
+    #:   gap from ``MANUAL_VERIFIED`` rather than a matter of confidence;
+    #: * a **lifecycle instrument** -- Form 25, Form 15, an 8-K, a DEF 14A --
+    #:   which evidences a corporate action rather than an identity;
+    #: * a **name search**, which establishes which CIK to read and no part of
+    #:   the mapping.
+    #:
+    #: The era matters and is worth recording per control: a Section 12(b)
+    #: table only carries a ``Trading Symbol(s)`` column in recent filings, so
+    #: for older ones the narrative clause is the construction to look for.
+    verification_route: str = (
+        "the registrant's own filing joining issuer, security, venue and symbol; a name "
+        "search only narrows which CIK to read"
+    )
     #: **How many issuer identities this control must SETTLE, not how many
     #: existed.** A value of 2 says "this control cannot be declared fully
     #: adjudicated until the question of a second issuer identity has been
@@ -81,7 +106,10 @@ def _c(
     expected_event: str,
     expected_year: int | None,
     proves: str,
-    route: str = "EDGAR company search by name; confirm CIK, form, and date",
+    route: str = (
+        "the registrant's own filing joining issuer, security, venue and symbol; a name "
+        "search only narrows which CIK to read"
+    ),
     required_issuer_investigations: int = 1,
 ) -> ControlSecurity:
     return ControlSecurity(
@@ -104,7 +132,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "continuous listing",
         None,
         "baseline; four splits including 7:1 and 4:1",
-        "company_tickers.json — currently listed, mapping is direct",
+        "recent Form 10-K cover page: the Section 12(b) Trading Symbol(s) column",
     ),
     _c(
         "MSFT",
@@ -113,7 +141,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "continuous listing",
         None,
         "splits 1998, 1999, 2003",
-        "company_tickers.json — currently listed",
+        "recent Form 10-K cover page: the Section 12(b) Trading Symbol(s) column",
     ),
     _c(
         "CSCO",
@@ -122,7 +150,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "continuous listing",
         None,
         "a -85% drawdown that is not a delisting",
-        "company_tickers.json — currently listed",
+        "recent Form 10-K cover page: the Section 12(b) Trading Symbol(s) column",
     ),
     _c(
         "AMZN",
@@ -131,7 +159,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "continuous listing",
         None,
         "1997 IPO, -90% drawdown, 20:1 split 2022",
-        "company_tickers.json — currently listed",
+        "recent Form 10-K cover page: the Section 12(b) Trading Symbol(s) column",
     ),
     _c(
         "SPY",
@@ -140,7 +168,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "continuous listing",
         None,
         "non-equity control; dividends without splits",
-        "trust files under its own CIK; confirm the trust, not the sponsor",
+        "the trust's own Form 485BPOS under its own CIK; confirm the trust, not the sponsor",
     ),
     _c(
         "QQQ",
@@ -149,7 +177,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "listing 1999; 2:1 split 2000",
         1999,
         "an ETF that began inside the window",
-        "trust CIK; note the sponsor changed over time",
+        "the trust's own Form 485BPOS under its own CIK; the sponsor changed over time",
     ),
     _c(
         "IPET",
@@ -158,7 +186,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "IPO then wind-up",
         2000,
         "~9 months of sessions. The sharpest single test in the fixture",
-        "S-1/424B and a subsequent Form 15 or 8-K; Form 25 unlikely pre-2005",
+        "its IPO prospectus (Form 424B); it died long before the trading-symbol column",
     ),
     _c(
         "ETYS",
@@ -167,7 +195,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "IPO 1999, Chapter 11",
         2001,
         "IPO to bankruptcy inside the window",
-        "8-K text for the bankruptcy; Form 15 for deregistration",
+        "its IPO prospectus (Form 424B); no annual report of its own carries a symbol table",
     ),
     _c(
         "WBVN",
@@ -176,7 +204,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "IPO 1999, Chapter 11",
         2001,
         "large raise, total loss",
-        "8-K text; Form 15",
+        "its IPO prospectus (Form 424B); short-lived, so a prospectus is the likeliest join",
     ),
     _c(
         "TGLO",
@@ -185,7 +213,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "collapse",
         2001,
         "distinguishes bankruptcy from shell survival",
-        "continued filings after collapse are the evidence",
+        "an annual report of its Nasdaq era: the 'quoted on ... under the symbol' narrative",
     ),
     _c(
         "KOOP",
@@ -194,7 +222,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "going concern then absorption",
         2001,
         "a name no vendor markets",
-        "8-K/Form 15; may have been acquired rather than liquidated",
+        "its IPO prospectus (Form 424B); short-lived, so a prospectus is the likeliest join",
     ),
     _c(
         "MPPP",
@@ -203,7 +231,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "acquired",
         2001,
         "acquisition is not the same event as failure",
-        "8-K completion text; acquirer's S-4",
+        "its IPO prospectus (Form 424B); acquired before a symbol table would have existed",
     ),
     _c(
         "ENE",
@@ -212,7 +240,8 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "Chapter 11",
         2001,
         "large-cap disappearance",
-        "8-K text 2001; Form 15",
+        "each registrant's own filing; the predecessor's submission carries multiple filer "
+        "blocks, so attribution comes from the text and never from the header",
     ),
     _c(
         "WCOM",
@@ -221,7 +250,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "Chapter 11",
         2002,
         "emerges as MCI — a new identity, not a continuation",
-        "8-K; successor registrant is a separate CIK",
+        "the registrant's own annual report; a 2001 filing is Form 10-K405, not 10-K",
     ),
     _c(
         "EXDS",
@@ -230,7 +259,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "Chapter 11",
         2001,
         "the infrastructure cohort",
-        "",
+        "the registrant's own Form 10-K narrative; a 2001 12(b) table has no symbol column",
     ),
     _c(
         "PSIX",
@@ -239,7 +268,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "Chapter 11",
         2001,
         "the infrastructure cohort",
-        "",
+        "the registrant's own Form 10-K narrative; a 2000 12(b) table has no symbol column",
     ),
     _c(
         "GCTY",
@@ -248,7 +277,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "acquired by Yahoo",
         1999,
         "the series must END, not continue into the acquirer",
-        "acquirer S-4 plus target Form 15",
+        "its own Form 10-K narrative, filed while still independent of the acquirer",
     ),
     _c(
         "BCST",
@@ -257,7 +286,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "acquired by Yahoo",
         1999,
         "same; two acquisitions by one acquirer in one year",
-        "acquirer S-4 plus target Form 15",
+        "its IPO prospectus (Form 424B); acquired before it filed an annual report",
     ),
     _c(
         "CPQ",
@@ -266,7 +295,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "merged into HP",
         2002,
         "large-cap absorption",
-        "HP S-4; Compaq Form 15/25",
+        "Compaq's own Form 10-K narrative, filed before the merger closed",
     ),
     _c(
         "BEL",
@@ -275,7 +304,8 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "became Verizon",
         2000,
         "ticker change, ONE economic security",
-        "same CIK continues under the new name; submissions formerNames",
+        "a filing under the continuing CIK; formerNames explains the rename and establishes no "
+        "symbol",
     ),
     _c(
         "BBBY",
@@ -284,7 +314,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "delisted, ticker reused",
         2023,
         "the exact case full-01 failed on. Non-negotiable",
-        "Form 25 and Form 15 exist electronically; the later holder is a different CIK",
+        "two distinct CIKs; each registrant's own Form 10-K cover-page 12(b) table",
         required_issuer_investigations=2,
     ),
     _c(
@@ -294,7 +324,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "bankruptcy 2009, new issuer IPO 2010",
         2009,
         "short enough that a splice looks plausible — the strictest reuse case",
-        "two distinct CIKs; Motors Liquidation vs General Motors Company",
+        "two distinct CIKs; each registrant's own annual report, never one filing for both",
         required_issuer_investigations=2,
     ),
     _c(
@@ -304,7 +334,8 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "two distinct issuers",
         2001,
         "same ticker, unrelated registrants",
-        "two CIKs; the 2009 spin-off registered separately",
+        "two distinct CIKs; each registrant's own annual report -- the names are close, so the "
+        "CIK is the only discriminator",
         required_issuer_investigations=2,
     ),
     _c(
@@ -314,7 +345,8 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "1:8 reverse split",
         2006,
         "the largest reverse factor in the fixture",
-        "8-K/DEF 14A for the reverse split",
+        "its own Form 10-K narrative; a Nasdaq class of that era is registered under 12(g), so no "
+        "12(b) row exists to find",
     ),
     _c(
         "PCLN",
@@ -324,7 +356,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         2003,
         "unadjusted chart looks like a catastrophe; adjusted does not. "
         "The most valuable single control",
-        "DEF 14A authorising the reverse split",
+        "its own Form 10-K narrative; a 2003 12(b) table predates the symbol column",
     ),
     _c(
         "QCOM",
@@ -333,7 +365,8 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "4:1 split",
         1999,
         "a large forward split at the peak",
-        "company_tickers.json — currently listed",
+        "the annual report of its era, which is Form 10-K405 and not 10-K; the narrative carries "
+        "the symbol",
     ),
     _c(
         "LEH",
@@ -342,7 +375,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "Chapter 11",
         2008,
         "the crisis cohort; Form 25 era, so electronically evidenced",
-        "8-K item 1.03 (post-2004 numbering); Form 25",
+        "a prospectus or annual report of its era joining registrant, security, venue and symbol",
     ),
     _c(
         "CC",
@@ -351,7 +384,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "liquidation",
         2009,
         "a non-financial crisis failure",
-        "8-K; Form 25; Form 15",
+        "its own Form 10-K narrative; a 2008 12(b) row names a class and an exchange but no symbol",
     ),
     _c(
         "FRC",
@@ -360,7 +393,8 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "failure and delisting",
         2023,
         "the recent end is maintained, not just the archive",
-        "Form 25-NSE expected; bank receivership complicates the 8-K trail",
+        "NOT EDGAR: a bank with no holding company files Exchange Act reports with the FDIC. Its "
+        "FDIC-filed Form 10-K cover page, with FDIC/FFIEC records for the issuer identifier",
     ),
     _c(
         "RDDT",
@@ -369,7 +403,7 @@ CONTROL_UNIVERSE: tuple[ControlSecurity, ...] = (
         "IPO",
         2024,
         "the young end of the universe",
-        "S-1/424B4; company_tickers.json",
+        "its first post-IPO Form 10-K cover page: the Section 12(b) Trading Symbol(s) column",
     ),
 )
 

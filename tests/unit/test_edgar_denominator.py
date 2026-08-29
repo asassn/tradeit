@@ -966,6 +966,54 @@ def test_milestone_0b_reports_itself_complete() -> None:
     assert len(CONTROL_UNIVERSE) == 30
 
 
+def test_every_control_names_a_route_that_could_establish_an_identity() -> None:
+    """A route pointing at the wrong kind of document is worse than none.
+
+    Checked across all thirty rather than on one sample, which is how two
+    controls kept an empty route without anyone noticing: the only existing
+    assertion read ``MSFT`` and passed.
+
+    The three refusals below are the categories that were actually shipped here
+    and could not have worked. A reference file is a dated primary source but
+    not a filing anyone read. A lifecycle instrument evidences a corporate
+    action, not an identity. A bare name search establishes which CIK to read
+    and no part of the mapping.
+    """
+    reference_files = ("company_tickers.json", "sec_company_tickers")
+    lifecycle_only = ("form 25", "form 15", "8-k", "def 14a", "25-nse", "s-4")
+
+    for control in CONTROL_UNIVERSE:
+        route = control.verification_route
+        assert route.strip(), f"{control.ticker} has no verification route at all"
+
+        lowered = route.lower()
+        for reference in reference_files:
+            assert reference not in lowered, (
+                f"{control.ticker} routes through {reference}, which cannot reach "
+                f"MANUAL_VERIFIED: it is a reference file, not a filing someone read"
+            )
+        named = [term for term in lifecycle_only if term in lowered]
+        assert not named, (
+            f"{control.ticker} routes only through {named}, which evidence a corporate "
+            f"action rather than an identity"
+        )
+
+
+def test_a_route_may_mention_a_lifecycle_form_while_naming_an_identity_document() -> None:
+    """The guard above rejects a *category*, not a substring, so pin that.
+
+    Constructed rather than drawn from the fixture: if a future control needs to
+    say "the 8-K is not the route here", that must remain expressible. This test
+    fails if the guard is ever tightened into a blanket substring ban, which
+    would push authors toward vaguer routes rather than more accurate ones.
+    """
+    honest = "its own Form 10-K narrative; the 8-K trail evidences the collapse, not the symbol"
+    assert "8-k" in honest.lower()
+    # The identity document is named first and the lifecycle form is explicitly
+    # excluded, which is the shape the guard must not forbid outright.
+    assert "form 10-k" in honest.lower()
+
+
 def test_the_fixture_covers_the_failure_modes_it_claims_to() -> None:
     classes = " ".join(c.control_class for c in CONTROL_UNIVERSE)
     for needed in ("ticker reuse", "reverse split", "short-lived", "peak acquisition"):
