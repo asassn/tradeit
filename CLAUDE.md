@@ -105,6 +105,15 @@ today.
 - **Never** `git reset --hard`, force-push, or rewrite history to make a problem
   disappear. Preserve evidence.
 - Do not start the next task automatically because the last one succeeded.
+- **Push works from Terminal, over SSH.** An older rule routed all remote
+  synchronisation through GitHub Desktop; it is retired. The key was never
+  broken — the remote was an HTTPS URL, so Git never offered the key. Check with
+  `git remote -v`: `origin` must read `git@github.com:...`. A fresh GitHub
+  Desktop clone defaults back to HTTPS and would resurrect the symptom.
+  See [`docs/TERMINAL_COMMAND_STANDARD.md`](docs/TERMINAL_COMMAND_STANDARD.md)
+  §Git and GitHub.
+- A `non-fast-forward` rejection means the remote moved. Integrate it —
+  never resolve it with force.
 
 ## Environment
 

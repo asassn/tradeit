@@ -8,6 +8,51 @@ rather than something the operator has to restate.
 
 Each rule below is here because it failed once.
 
+## Two kinds of rule live in this file, and only one of them is about relaying
+
+The document was written for one arrangement: the assistant composes a block,
+the operator pastes it into their own Terminal, and the output comes back as
+text. When the assistant runs commands directly on the operator's machine — a
+local Claude Code session in the repository — that arrangement is gone, and
+roughly half of this file goes with it. The other half does not, and the
+difference is not obvious from the section titles, so it is stated here.
+
+**Relay hygiene — conditional on a human pasting the block.** These exist
+because a block lands in a shell the assistant cannot see, holding unrelated
+work, on a machine whose paths it cannot check.
+
+| section | why it relaxes when the assistant runs the command itself |
+|---|---|
+| [Environment](#environment) — no `cd`, not even in a subshell | the hazard was mutating the operator's own interactive shell; a tool-owned shell is disposable, and its cwd is already the repo |
+| [Environment](#environment) — never paste a container path | the assistant is now *on* the machine it is addressing, and a wrong path fails immediately and visibly rather than after a round trip |
+| [Shell hazards](#shell-hazards-and-why-python-is-usually-the-answer) — zsh interactive quoting, globbing, history expansion | a non-interactive tool shell does not expand `!`, and quoting is no longer being retyped by hand |
+| [Output](#output) — block formatting, one block per step | there is no block to format |
+
+Relaxing does not mean deleting. **The Environment path table stays
+authoritative**, because the data still lives outside the repository and a
+command that globs the repo for `form.idx` still manufactures a false negative.
+Python is still usually the better answer than a shell pipeline, for the reasons
+given — they were only partly about zsh.
+
+**Methodology — in force no matter who types the command.** These are not about
+Terminal at all. They are about not fabricating a finding, and they bind the
+assistant more tightly when it runs the command itself, because there is no
+longer a human reading the raw output as a second check.
+
+| section | what it protects |
+|---|---|
+| [Selecting candidates](#selecting-candidates) | choosing a candidate narrows a search and establishes nothing |
+| [Parsing the EDGAR index](#parsing-the-edgar-index) | exact whole-value matching; `10-K` is not `10-K405` |
+| [Accessions and URLs](#accessions-and-urls) | dashed vs undashed accession forms, and never hand-building a URL |
+| [The local filing store has a layout](#the-local-filing-store-has-a-layout--use-it) | a filing is found where it is stored, not where it might be |
+| [Downloads](#downloads) | `EDGAR_USER_AGENT` from the environment; rate limits; never a hard-coded contact address |
+| [Search-scope honesty](#search-scope-honesty) and its four subsections | a result is only what the output shows; absence of evidence is reported as absence of *search*, not as absence of the thing |
+| [An intentional stop must exit non-zero](#an-intentional-stop-must-exit-non-zero) | a stop that exits `0` is indistinguishable from success |
+| [Read-only vs network](#read-only-vs-network) | what a command touches is declared before it runs |
+
+If a rule below is not listed in either table, assume it is methodology and it
+still applies. The burden is on the argument for relaxing one, not on the rule.
+
 ## Environment
 
 The operator's paths are fixed and should be written out, not guessed:
@@ -376,29 +421,44 @@ should contain no `curl` at all.
 
 ## Git and GitHub
 
-**Terminal Git is local and read-only. Remote synchronization happens in GitHub
-Desktop.**
+> **The Desktop-only restriction is LIFTED. Networked Git works from Terminal
+> over SSH.** This section's own release clause required the operator to state
+> that CLI authentication had been repaired; it was instead *measured*, which is
+> better. Recorded here rather than deleted, because the diagnosis is the
+> useful part.
 
-GitHub HTTPS authentication does not work from Terminal on the operator's Mac.
-Any command that reaches the remote — `git fetch`, `git pull`, `git push`,
-`git ls-remote`, `git clone`, `git remote update` — stops at an interactive
-`Username for 'https://github.com':` prompt and hangs the block. There is no
-credential to type, so the block cannot succeed; it can only be interrupted.
+**What was actually wrong, and it was never the authentication.** An ED25519 key
+had been registered on the GitHub account and was authenticating fine. The
+repository's remote was an **HTTPS URL**, and Git only uses an SSH key when the
+remote is an SSH URL — so every networked command fell through to HTTPS, found
+no credential, and stopped at `Username for 'https://github.com':`. The rule
+below was correct about the symptom and wrong about the cause, for months.
 
-So a Terminal block may use, freely:
+The fix was one command:
+
+```
+git -C <repo> remote set-url origin git@github.com:asassn/tradeit.git
+```
+
+**Verified, in this order:** `git remote -v` confirmed the URL changed;
+`ssh -T git@github.com` returned `Hi asassn! You've successfully authenticated`;
+`git push --dry-run` was rejected `non-fast-forward` — which is itself proof of
+success, because a ref-comparison rejection can only happen *after*
+authentication — and returned `Everything up-to-date` once the clone was current.
+
+**So networked Git is now permitted from Terminal**: `git fetch`, `git pull`,
+`git push`, `git ls-remote`. Two conditions, and they are not optional:
+
+- **The remote must be the SSH URL.** If a clone is ever re-created from GitHub
+  Desktop it will default to HTTPS again and the old symptom returns. Check
+  `git remote -v` before concluding that authentication has broken.
+- **Never use a destructive shortcut** — `git reset --hard`, force-push, history
+  rewrite — to make a push problem disappear. A `non-fast-forward` rejection
+  means the branch is behind; the answer is to integrate, not to overwrite.
+  Preserve evidence.
+
+**The read-only commands remain free**, as they always were:
 
 ```
 git status, git log, git show, git diff, git branch, git rev-parse
 ```
-
-and any other command that reads only what is already on disk. It may also
-commit locally when the operator has asked for a commit.
-
-It may **never** contain a networked Git command. When remote state needs to
-change — pushing a commit, picking up a branch — say so in prose and let the
-operator do it in GitHub Desktop. When remote state needs to be *read*, ask the
-operator for the value rather than fetching it.
-
-This restriction is lifted only when the operator states explicitly that CLI
-authentication has been repaired. Until then it holds regardless of how
-convenient a one-line push would be.
