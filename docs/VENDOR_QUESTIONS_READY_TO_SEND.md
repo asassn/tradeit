@@ -339,6 +339,66 @@ answer.
 | grade | `VERIFIED`, `CORROBORATED` or `UNVERIFIED` per the table above |
 | classification | one of the four in `DATA_RETENTION_RIGHTS.md` §1 |
 
+### 5.1 Filed replies
+
+**Twelve Data — answered, adverse.** All three enquiries were sent on
+2026-08-29; Twelve Data replied within minutes.
+
+| field | value |
+|---|---|
+| date | 2026-08-29, 11:36 local — *taken from the reply as displayed; confirm the date if it matters to a later audit* |
+| responder | **"Dooz, Twelve Data's AI Agent"**, disclosed in the message footer. Not a named person, and no human at the vendor has confirmed it |
+| channel | email reply to the §2 enquiry; original in the account holder's mailbox |
+| clause cited | a footnote marker `[1]` appears against the answer to Q1. **Its target was not captured**, so no clause reference is on file |
+| Q1 — retention after termination | **No.** "all access rights end immediately and all Data must be deleted within 30 days. Permanent internal retention after termination is not permitted" |
+| Q2(c) — derived data | **Covered by the deletion requirement** — "derived datasets (bars, series, transformations)" listed explicitly |
+| Q2(e) — research corpora | **Covered** — "research corpora or analytical results built from the data" listed explicitly |
+| Q3 — categories | No distinction between OHLCV, corporate actions or reference data |
+| Q4 — free tier | Same rules on free and paid |
+| Q5 — licence tier | Retention rule does not change with tier or future commercialisation |
+| grade | `VERIFIED` **as an answer** — in writing, specific, question by question. The responder field carries the caveat that it was machine-composed |
+| classification | `DELETION REQUIRED AFTER TERMINATION` |
+
+**Why an AI-composed answer was accepted here.** Because it is adverse, and
+[`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §1.1 sets a lower bar for
+disqualifying a vendor than for qualifying one. The identical message saying
+"yes, retain permanently" would **not** have been enough to admit Twelve Data to
+a permanent corpus, because a corpus would then be resting on a chatbot's
+reading of a licence. Worth keeping straight: this is not a rule that AI answers
+count, it is a rule about which direction of error is recoverable.
+
+**The one follow-up worth sending** is in §5.2 — it asks for the `[1]` clause and
+a human confirmation. Its value is option value: if the agent misread the terms,
+Twelve Data comes back.
+
+### 5.2 Follow-up to Twelve Data — clause reference
+
+**Send to:** reply directly on the existing thread.
+**Subject:** Re: Data retention rights after subscription termination
+
+> Thank you — that is clear and answers what we asked.
+>
+> Two short follow-ups so we can file this properly.
+>
+> **1.** Your answer to question 1 carries a footnote marker. Could you give the
+> clause reference itself — the section number or heading in the terms that
+> states the 30-day deletion requirement — so we can cite the source rather than
+> the summary?
+>
+> **2.** We note the reply was composed by your AI agent. Could a member of your
+> team confirm it, particularly the point that the deletion requirement extends
+> to datasets *derived* from your data and to internal research corpora built
+> partly from it? That specific point determines whether we can use your data in
+> a permanent internal archive, so we would rather have it confirmed than
+> assumed.
+>
+> No action is needed beyond that, and nothing here is a complaint — the answer
+> was fast and directly responsive.
+>
+> Thank you.
+
+---
+
 **Q2(c) and Q2(e) decide it, and a partial answer does not upgrade a
 classification.** Sharadar is the worked example: its licence permits retaining
 nothing *and* requires deleting datasets derived from its data within 30 days,
@@ -353,20 +413,22 @@ leaves `research-01` undetermined, and undetermined is treated as prohibited.
 | vendor | classification | basis |
 |---|---|---|
 | Kibot | licence text permits permanent retention (**USER-VERIFIED**); **scope over derived data unconfirmed** | Q23–Q26 unanswered, and now moot — the vendor is eliminated on price |
-| Twelve Data | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `twelvedata.com` returned `EGRESS_BLOCKED`, re-measured and still blocked; question unsent |
-| FMP | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `site.financialmodelingprep.com` and `financialmodelingprep.com` both returned `EGRESS_BLOCKED`, re-measured; question unsent |
-| Tiingo | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | `app.tiingo.com` returned `EGRESS_BLOCKED`; working acquisition adapter, terms never examined; question unsent (§4) |
+| **Twelve Data** | **`DELETION REQUIRED AFTER TERMINATION`** | **ANSWERED 2026-08-29.** All Data deleted within 30 days of termination, explicitly including derived datasets and research corpora. Filed at §5.1. **Excluded from any permanent corpus** |
+| FMP | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | sent 2026-08-29, **awaiting reply** |
+| Tiingo | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | sent 2026-08-29, **awaiting reply** |
 
 **No retention determination is inferred from the fact that our API access
 currently works.** Access and retention are different grants, and it is common
-for the first to be generous while the second is silent.
+for the first to be generous while the second is silent. Twelve Data is the
+demonstration: the API worked throughout, and the answer was still no.
 
-**Nor is one inferred from a blocked fetch.** `EGRESS_BLOCKED` is a fact about
-this session's network and says nothing about a vendor's terms — it establishes
-that they were not read, which is why the classification is `UNCLEAR` rather
-than anything worse or better. Reading them needs a browser outside this
-environment; a written answer from the vendor is what would reach `VERIFIED`.
+**Nor is one inferred from a blocked fetch.** `EGRESS_BLOCKED` is a fact about a
+session's network and says nothing about a vendor's terms — it establishes that
+they were not read. Asking was what settled it, and asking took one message.
 
-**Milestone 0d is now the only licence question left open.** Sharadar and EODHD
-are excluded on licence, Kibot on price, so these three unsent questions stand
-between the project and a price spine it is permitted to keep.
+**Two replies now decide the price spine.** Sharadar, EODHD and Twelve Data are
+excluded on licence and Kibot on price, so FMP and Tiingo are what remain. If
+both answer as Twelve Data did, no vendor this project has examined satisfies
+the permanent-retention rule, and the choice becomes: relax the rule, pay for a
+licence that grants retention explicitly, or build the archive only from public
+sources ([`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §5.1b).

@@ -8,7 +8,7 @@ must be *destroyed* rather than corrected.
 The rule exists because TradeIt's whole economic model is a **one-time historical
 backfill retained permanently**, plus a forward archive TradeIt accumulates
 itself. Both assume the right to keep what was collected after access ends. Two
-vendors have already been eliminated for failing exactly that.
+vendors were eliminated for failing exactly that before the register existed; a third was eliminated by asking.
 
 ---
 
@@ -25,6 +25,25 @@ vendors have already been eliminated for failing exactly that.
 *after* the data is embedded in a research corpus is a far worse problem than one
 discovered now.
 
+### 1.1 An adverse answer is actionable at a lower bar than a favourable one
+
+**The two errors are not the same size, so they do not need the same evidence.**
+
+* Believing "we must delete" when in fact retention was permitted costs a vendor
+  that could have been used. Recoverable, and cheap to reverse later by asking
+  again.
+* Believing "we may keep" when in fact deletion was required means the corpus
+  must be destroyed, along with everything derived from it. That is the failure
+  this whole register exists to prevent.
+
+So a source good enough to **disqualify** a vendor is not automatically good
+enough to **qualify** one. A vendor-channel answer that is adverse may be acted
+on immediately; the same channel saying "yes, keep it permanently" needs the
+clause, because a permanent corpus would then be resting on it. Applied first to
+Twelve Data, whose answer was composed by the vendor's AI agent rather than by a
+named person — sufficient to exclude, and it would not have been sufficient to
+admit.
+
 ---
 
 ## 2. The register
@@ -35,17 +54,50 @@ discovered now.
 | **Sharadar** (Nasdaq Data Link) | `DELETION REQUIRED AFTER TERMINATION` | Personal Use License: on termination, discontinue use, delete all copies of Services Data within 30 days, **and delete datasets derived from Services Data within 30 days** | **USER-VERIFIED** (primary source, read by the project owner) |
 | **EODHD** | `DELETION REQUIRED AFTER TERMINATION` | terms require deletion of stored provider data within one month after termination | **USER-VERIFIED** |
 | **Kibot** | `PERMANENT RETENTION ALLOWED` *(claimed)* | licence states delivered data may be kept permanently; cancellation does not require deletion | **USER-VERIFIED** as licence text. **The scope of "delivered data" — raw files vs normalised rows vs derived bars vs a frozen research corpus — is not established.** See §3 Q23–Q26 |
-| **Twelve Data** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** `twelvedata.com` returns `EGRESS_BLOCKED`; re-measured, still blocked | **UNVERIFIED** |
+| **Twelve Data** | `DELETION REQUIRED AFTER TERMINATION` | **answered.** Reply to the §3.1 questions: "all access rights end immediately and **all Data must be deleted within 30 days**. Permanent internal retention after termination is not permitted." Deletion stated to cover raw API responses, normalised records, **derived datasets**, reference data **and research corpora or analytical results**; no distinction by data category; unchanged by free tier or licence tier | **VERIFIED as an answer, with the responder named** — composed by "Dooz, Twelve Data's AI Agent", disclosed as such, not by a named person; its footnote marker `[1]` was not captured, so no clause reference is on file. Adverse, so actionable under §1.1 |
 | **FMP** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** `site.financialmodelingprep.com` and `financialmodelingprep.com` both return `EGRESS_BLOCKED`; re-measured, still blocked | **UNVERIFIED** |
 | **Tiingo** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** Working acquisition adapter (`acquisition/tiingo.py`, not a stub); `app.tiingo.com` returns `EGRESS_BLOCKED`, terms never examined | **UNVERIFIED** |
 
-**The three `UNVERIFIED` rows are the three vendors with a functional adapter.**
-That is not a coincidence and it is the reason milestone 0d exists: every vendor
-this system can currently collect from has unread retention terms, and the
-register treats each as prohibited until answered. `EGRESS_BLOCKED` is a
-statement about this session's network, never about the vendor — a blocked fetch
-establishes that the terms were *not read*, and nothing whatever about what they
-say.
+**The three vendors with a functional adapter were the three unanswered rows.**
+That was not a coincidence and it is why milestone 0d exists: every vendor this
+system can currently collect from had unread retention terms. One is now
+answered, adversely. `EGRESS_BLOCKED` remains a statement about a session's
+network, never about a vendor — a blocked fetch establishes that terms were *not
+read*, and nothing whatever about what they say.
+
+### 2.0 Twelve Data is now excluded, and this is the answer §2.1 predicted
+
+§2.1 below was written before the question was asked and states the conditional:
+*"if Twelve Data's terms require deletion on termination, the forward
+accumulation model does not hold for prices."* **They do.** The conditional is
+kept exactly as written rather than rewritten into the past tense, because a
+prediction that was made before the evidence arrived is worth more on the record
+than one edited afterwards to match it.
+
+Three consequences follow immediately:
+
+1. **Twelve Data cannot be the price spine for any permanent corpus**, on the
+   same ground as Sharadar and EODHD and independent of data quality. The
+   deletion obligation is stated to reach derived datasets and research corpora,
+   which is the Sharadar shape and the reason questions 2(c) and 2(e) exist.
+2. **`full-01` carries a deletion trigger.** Its snapshot is
+   `twelve_data-daily-e3ddc03209bb25b4` ([`CORPUS_REGISTRY.md`](CORPUS_REGISTRY.md)),
+   so it is derived data under this answer. Retention is unaffected while the
+   subscription is live; on termination the 30-day clock starts, and it reaches
+   the patterns and breakout observations in the corpus, not only the bars.
+   **Do not terminate the Twelve Data subscription without first deciding what
+   happens to `full-01` and to the gate report's ratios.** "Frozen and permanent"
+   was true of this project's intentions and is not true of its rights.
+3. **The forward survivorship archive needs a different price source.** The
+   accumulation model in `FORWARD_SURVIVORSHIP_SYSTEM.md` §8 assumes today's
+   bars become permanent history. Under these terms Twelve Data's cannot.
+
+**One follow-up is still worth sending**, and its value is option value rather
+than diligence: the answer came from an AI agent and its `[1]` footnote was not
+captured, so no clause is on file. If the agent misread the terms, Twelve Data
+returns as a candidate. Ask for the clause reference and a human confirmation —
+one reply, and the downside is already priced in because the vendor is excluded
+either way.
 
 ### 2.1 Why Twelve Data and FMP now matter as much as any historical vendor
 
@@ -66,7 +118,9 @@ subscription decision made in 2026.
 
 **`full-01` is not at risk today**: it is frozen, machinery-validation only, and
 never cited for economic claims. But it *was* built from Twelve Data prices, and
-that is the shape of the exposure.
+that is the shape of the exposure. — *That exposure is now real rather than
+hypothetical; see §2.0. It is still not a present breach, because the obligation
+attaches on termination and the subscription is live.*
 
 **Do not assume current API access implies archival rights.** Access and
 retention are different grants, and it is common for the first to be generous and
@@ -163,11 +217,19 @@ writing, kept so the basis of a decision is auditable later.
 
 ## 5. Consequences already in force
 
-1. Sharadar and EODHD are **excluded from `research-01`** on licence grounds
-   alone, independent of data quality. Either may be reconsidered only under a
-   different written commercial or custom licence that explicitly grants
-   post-termination retention.
-2. **There is no live candidate for the price spine.** Kibot was the only one,
+1. Sharadar, EODHD **and now Twelve Data** are **excluded from `research-01`** on
+   licence grounds alone, independent of data quality. Any of them may be
+   reconsidered only under a different written commercial or custom licence that
+   explicitly grants post-termination retention.
+2. **Four of the six named vendors are out, and two are unanswered.** Sharadar,
+   EODHD and Twelve Data on licence; Kibot on price. If FMP and Tiingo answer the
+   way Twelve Data did, **no price or corporate-action vendor satisfies the
+   permanent-retention rule at any price this project has looked at** — which
+   would be a finding about the market rather than about the search, and would
+   force a choice between relaxing the rule, paying for an enterprise licence
+   that grants retention explicitly, or building the archive only from public
+   sources. Name that now rather than discovering it after the two replies.
+3. **There is no live candidate for the price spine.** Kibot was the only one,
    on licence grounds, and it is now eliminated on price — the archive is
    $990–$2,400, not the ~$14/month the plan had assumed
    ([`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) §1.3). Its licence
@@ -175,16 +237,22 @@ writing, kept so the basis of a decision is auditable later.
    replacement; its data was never proven (`KIBOT_DATA_PROBE.md`) and now never
    will be here. **So every remaining vendor is either excluded or unread**, and
    that is the state milestone 0d exists to change.
-3. **Twelve Data, FMP and Tiingo retention must be established before any of
-   them becomes part of a permanent corpus.** This blocks the forward
-   survivorship archive, not the current operating use. Tiingo belongs in this
-   sentence because its adapter works, which is the only property that matters
-   here — an adapter that can collect can encumber.
-4. Every `source` value in `ohlcv_bars`, `fundamental_facts` and
+4. **FMP and Tiingo retention must be established before either becomes part of
+   a permanent corpus** — Twelve Data's is now established and disqualifying.
+   This blocks the forward survivorship archive, not the current operating use.
+   Tiingo belongs in this sentence because its adapter works, which is the only
+   property that matters here — an adapter that can collect can encumber.
+5. **`full-01` may continue to be used and cited exactly as before.** Nothing
+   about its gate result, its regression ratios or its machinery-validation role
+   changes; what changed is that it now has a termination-triggered deletion
+   obligation attached to it (§2.0). Treat it as a corpus with an expiry
+   condition rather than a permanent one, and settle its disposition *before*
+   any decision to end the Twelve Data subscription rather than after.
+6. Every `source` value in `ohlcv_bars`, `fundamental_facts` and
    `corporate_actions` must have a row in §2 before its first fact is written.
    (This rule named `price_facts` and `corporate_action_facts` until the schema
    was fully inventoried; neither table exists, so as written the rule bound
    nothing. See [`DATA_MODEL.md`](DATA_MODEL.md) Domain 2.)
-5. **Free work is unaffected.** The EDGAR denominator, the control-universe
+7. **Free work is unaffected.** The EDGAR denominator, the control-universe
    verification and the whole filing spine are public domain and can proceed with
    no retention question at all.
