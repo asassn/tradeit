@@ -163,8 +163,9 @@ docs/               architecture, data model, API, roadmap, ADRs, phase reports
 
 - [Architecture](docs/ARCHITECTURE.md) — the complete technical architecture
 - [Analytics methodology](docs/ANALYTICS.md) — indicator formulas, regime rules
-- [Data model](docs/DATA_MODEL.md) — ERDs, partitioning and indexes for 26 of the
-  57 tables; `tables.py` is the source of truth and the gap is named in the document
+- [Data model](docs/DATA_MODEL.md) — all 57 tables inventoried across eight
+  domains, with ERDs, partitioning and indexes; `tables.py` remains the source of
+  truth and a test pins the inventory to it
 - [API specification](docs/API.md) — the endpoints Phase 10 will implement
 - [Vendor evaluation](docs/VENDOR_EVALUATION.md) — options and an acceptance test
 - [Roadmap](docs/ROADMAP.md) — the canonical twelve phases and the three non-numbered gates

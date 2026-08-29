@@ -13,6 +13,12 @@ moment the discrepancy is cheap to fix.
 They deliberately do **not** assert that a particular number appears; they
 assert that whatever the document says matches what the code contains. A
 docstring cannot satisfy them by coincidence.
+
+Two later checks extend the same idea past counts, because DATA_MODEL turned out
+to be wrong in ways a count cannot detect: it inventoried 22 of 57 tables, and
+two of its diagrams described a schema that had been deliberately replaced two
+phases earlier. So the *set* of documented tables is pinned to the ORM, and
+every field named in a diagram must exist on the table it claims to describe.
 """
 
 from __future__ import annotations
@@ -68,33 +74,85 @@ def test_the_orm_defines_the_table_count_the_docs_quote() -> None:
         )
 
 
-def test_the_docs_do_not_claim_to_describe_more_tables_than_they_name() -> None:
-    """DATA_MODEL states how many of the tables it actually covers.
+def _domain_inventories() -> dict[str, list[str]]:
+    """Table names listed in DATA_MODEL's per-domain inventories, by domain.
 
-    The header once read "49 tables in six domains. Every table is defined in
-    tables.py", which implied completeness it did not have: 35 of the 57 are
-    absent from the document entirely. Correcting only the count would have made
-    that worse -- asserting coverage of 57 while naming 22 -- so the coverage
-    figure is stated in the document and is checked here.
+    An inventory row is ``| `table_name` | what it is |``. Scoped to sections
+    titled "Domain ..." on purpose: the Partitioning section also opens rows
+    with a table name, and counting those would let a table be "documented" by
+    appearing in a sizing note.
     """
     doc = (REPO / "docs" / "DATA_MODEL.md").read_text(encoding="utf-8")
-    found = re.search(r"names (\d+) of those (\d+)", doc)
-    assert found, "DATA_MODEL.md no longer states how many tables it covers"
-    covered, total = int(found.group(1)), int(found.group(2))
+    out: dict[str, list[str]] = {}
+    for section in re.split(r"^## ", doc, flags=re.M)[1:]:
+        title = section.split("\n", 1)[0].strip()
+        if not title.startswith("Domain "):
+            continue
+        out[title] = re.findall(r"^\| `([a-z_]+)` \|", section, re.M)
+    return out
 
-    assert total == _table_count()
-    # The caveat itself lists what is *missing*, so a table named there is not
-    # thereby documented. Measuring without excluding it counted the gap as
-    # coverage -- which this test caught when the caveat was first written.
-    body = "\n".join(ln for ln in doc.split("\n") if not ln.lstrip().startswith(">"))
-    named = {t for t in Base.metadata.tables if re.search(rf"\b{re.escape(t)}\b", body)}
-    assert len(named) == covered, (
-        f"DATA_MODEL.md claims to describe {covered} tables but mentions {len(named)}"
-    )
-    assert covered < total, (
-        "the coverage caveat is now false because every table is documented -- "
-        "delete the caveat rather than leaving a claim that understates the document"
-    )
+
+def test_every_table_is_inventoried_in_exactly_one_domain() -> None:
+    """DATA_MODEL's inventory is the schema -- no more, no less, no duplicates.
+
+    This replaced a weaker check that read a stated coverage figure out of the
+    document ("names 22 of those 57") and compared it to how many table names
+    appeared in the prose. That was the right assertion while the document was
+    knowingly incomplete: it stopped the gap from being papered over. It is the
+    wrong one now that every table is covered, because a *count* can stay
+    correct while the wrong tables are documented -- add one, drop another, and
+    22 is still 22.
+
+    So the invariant is stated over the set rather than its size. A table added
+    to the ORM and not to a domain fails here; so does an inventory entry for a
+    table that no longer exists, and so does one table listed under two domains,
+    which is how a reader ends up with two different accounts of what it is for.
+    """
+    inventories = _domain_inventories()
+    assert inventories, "DATA_MODEL.md no longer has per-domain inventory tables"
+
+    listed = [name for names in inventories.values() for name in names]
+    orm = set(Base.metadata.tables)
+
+    duplicated = sorted({n for n in listed if listed.count(n) > 1})
+    assert not duplicated, f"listed under more than one domain: {duplicated}"
+    assert not set(listed) - orm, f"inventoried but not in the ORM: {sorted(set(listed) - orm)}"
+    assert not orm - set(listed), f"defined but not inventoried: {sorted(orm - set(listed))}"
+    # Belt and braces: the two set comparisons above are satisfied by an empty
+    # document if the ORM is ever empty, and the count check would not be.
+    assert len(listed) == _table_count()
+
+
+def test_no_diagram_names_a_field_that_does_not_exist() -> None:
+    """Mermaid entity blocks are checked against the columns they claim to show.
+
+    A stale diagram is a worse failure than a missing one, and this document
+    carried two for several phases: the ``PATTERNS`` and ``BREAKOUT_EVENTS``
+    blocks showed the Phase 2 draft -- ``status``, ``pivot_price``,
+    ``stop_price``, ``volume_ratio`` -- long after Phase 4 and Phase 5 replaced
+    both designs. Nothing marked them as historical, so a reader had no way to
+    tell them from current schema.
+
+    Only field *names* are checked. Types and the quoted comments are prose and
+    deliberately not pinned; the failure being prevented is a column that is not
+    there at all.
+    """
+    doc = (REPO / "docs" / "DATA_MODEL.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"^    ([A-Z_]+) \{\n(.*?)^    \}", doc, re.S | re.M)
+    assert blocks, "DATA_MODEL.md no longer contains mermaid entity blocks"
+
+    problems: list[str] = []
+    for entity, body in blocks:
+        table = Base.metadata.tables.get(entity.lower())
+        if table is None:
+            problems.append(f"{entity} is drawn as an entity but is not a table")
+            continue
+        columns = set(table.columns.keys())
+        for line in body.strip().split("\n"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] not in columns:
+                problems.append(f"{entity.lower()}.{parts[1]} does not exist")
+    assert not problems, "; ".join(problems)
 
 
 def test_the_feature_registry_defines_the_indicator_count_the_docs_quote() -> None:

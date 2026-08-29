@@ -611,8 +611,12 @@ class DataSnapshot(Base):
 class IndicatorValue(Base):
     """Materialised indicator output. The highest-volume table in the system.
 
-    Volume drives the design: universe x indicators x sessions is roughly
-    4,000 x 40 x 252 = 40M rows per year. Consequences:
+    Volume drives the design: universe x indicators x sessions, roughly
+    4,000 x 58 x 252 = 58M rows per year under the shipped ``baseline.toml``.
+    The indicator count is configuration-dependent -- a config declaring more
+    periods registers more features -- so measure it from the feature registry
+    rather than quoting this line; it said 40 for two phases after the registry
+    had grown. Consequences:
 
     * **Range partitioned by session_date** (monthly). Every query is bounded
       by a date window, so partition pruning eliminates almost all of it, and
