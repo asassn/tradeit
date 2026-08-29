@@ -23,13 +23,17 @@ questions `UNVERIFIED` is treated as prohibited.
 
 ## 1. Kibot — 26 questions
 
-> **Status: NOT SENT, by decision.** Milestone 0c was skipped in favour of buying
-> the ~$14 month and measuring the delivered data directly
-> ([`PHASE_06_IMPROVEMENT_PLAN.md`](PHASE_06_IMPROVEMENT_PLAN.md) §8). **These
-> questions are not obsolete** — they remain sendable exactly as written, and are
-> worth sending for any item the probe cannot settle, particularly the schema
-> questions the data alone will not answer. Sections 2 and 3 below are unaffected
-> and remain outstanding.
+> **Status: NOT SENT, and now MOOT for this vendor.** Kibot was first skipped in
+> favour of buying and measuring; that purchase is off, because the archive costs
+> $990–$2,400 rather than the ~$14/month assumed
+> ([`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) §1.3).
+>
+> **Keep them as the model for interrogating a replacement.** Question 1 is the
+> one that decides any price vendor and was never answered here either: whether
+> "delisted" securities are actually included, or only currently active ones.
+> Every question below is written to demand a clause or a specific statement
+> rather than reassurance, which is the property worth reusing. Sections 2 and 3
+> are unaffected and remain outstanding.
 
 **Send to:** Kibot sales/support.
 **Subject:** Pre-sales questions — historical US equity EOD data, delisted coverage and retention

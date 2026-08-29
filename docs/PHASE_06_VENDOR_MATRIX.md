@@ -70,15 +70,45 @@ for the same reason, and is eliminated as a permanent-archive source.
 
 EODHD's data *capabilities* were never the problem. The licence is.
 
-### 1.3 Kibot — **PERMITTED, per licence text**
+### 1.3 Kibot — **licence PERMITTED; ELIMINATED ON PRICE**
 
 Kibot's licence explicitly states that delivered data may be kept permanently
-and that cancellation does not require deletion — *USER-VERIFIED*.
+and that cancellation does not require deletion — *USER-VERIFIED*. On licence
+alone it remains the only candidate that supports the architecture, and that
+finding stands.
 
-This is the only candidate so far whose licence, on its own terms, supports the
-architecture. **It does not yet establish that the data is fit for purpose**;
-that is what `docs/KIBOT_DATA_PROBE.md` exists to determine, and every capability
-claim below is explicitly untested.
+**It is nonetheless eliminated: the price is out of budget, and the ~$14 figure
+this plan was built on was wrong.** *USER-VERIFIED from the vendor's own pricing
+page.* The two products were conflated:
+
+- **$14/month is the EOD *subscription*** — it refreshes data already purchased,
+  at a quarterly cadence. It is not the price of the archive.
+- **The archive is a separate one-time purchase**, priced per universe per
+  interval. For the "All Stocks" universe (18,000+ tickers) the observed
+  one-time prices run from **$600** (30-minute) through **$3,000** (1-minute) to
+  **$9,000** (tick with bid/ask). Cross-universe bundles were **$990**, **$2,400**
+  and **$4,800**.
+
+So the corpus this plan assumed cost ~$14 costs **$990–$2,400** — between 70 and
+170 times the assumption. Every downstream statement that treated a single ~$14
+month as sufficient was wrong, and is corrected rather than quietly dropped.
+
+**What survived the correction, and matters if the budget ever changes:** the
+retention property is real and does not require a subscription. The pricing page
+states the purchase carries *"lifetime access to the historical file set"* and
+that *"after one year the data stays downloadable"*. Kibot is therefore
+**eliminated on price alone, with its licence advantage intact** — the one
+candidate that would be reconsidered first, unchanged, if the budget changed.
+
+**One question was never answered and would still gate any purchase.** The
+package is described as *"every tradable US common stock"*. Whether *tradable*
+means currently tradable — excluding the delisted names that are the entire
+problem — is not resolvable from the pricing page, and is Kibot question 1
+verbatim. No purchase should proceed without it, at any price.
+
+`docs/KIBOT_DATA_PROBE.md` is retained in full. Its acceptance rules were written
+before any data was seen and remain the standard any replacement vendor is held
+to; only the vendor it names is out.
 
 ### 1.4 The blocker nobody had checked: Twelve Data and FMP
 
