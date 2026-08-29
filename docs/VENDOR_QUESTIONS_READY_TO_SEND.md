@@ -349,7 +349,7 @@ answer.
 | date | 2026-08-29, 11:36 local — *taken from the reply as displayed; confirm the date if it matters to a later audit* |
 | responder | **"Dooz, Twelve Data's AI Agent"**, disclosed in the message footer. Not a named person, and no human at the vendor has confirmed it |
 | channel | email reply to the §2 enquiry; original in the account holder's mailbox |
-| clause cited | a footnote marker `[1]` appears against the answer to Q1. **Its target was not captured**, so no clause reference is on file |
+| clause cited | none in the first reply — a bare footnote marker `[1]`. **Supplied on the follow-up**: Terms of Use §16, sub-clause **16.2 Data Deletion** (see §5.3) |
 | Q1 — retention after termination | **No.** "all access rights end immediately and all Data must be deleted within 30 days. Permanent internal retention after termination is not permitted" |
 | Q2(c) — derived data | **Covered by the deletion requirement** — "derived datasets (bars, series, transformations)" listed explicitly |
 | Q2(e) — research corpora | **Covered** — "research corpora or analytical results built from the data" listed explicitly |
@@ -367,9 +367,9 @@ a permanent corpus, because a corpus would then be resting on a chatbot's
 reading of a licence. Worth keeping straight: this is not a rule that AI answers
 count, it is a rule about which direction of error is recoverable.
 
-**The one follow-up worth sending** is in §5.2 — it asks for the `[1]` clause and
-a human confirmation. Its value is option value: if the agent misread the terms,
-Twelve Data comes back.
+**The follow-up in §5.2 was sent, and its outcome is filed at §5.3.** It got the
+clause and did not get the human confirmation, and the answer it returned on the
+derived-data question is weaker than the one it was asked to confirm.
 
 ### 5.2 Follow-up to Twelve Data — clause reference
 
@@ -397,6 +397,52 @@ Twelve Data comes back.
 >
 > Thank you.
 
+### 5.3 Twelve Data follow-up — the clause, and a walked-back interpretation
+
+**Sent and answered 2026-08-29, 11:53 local.** Responder again "Dooz, Twelve
+Data's AI Agent"; no human confirmation was given, which was half of what the
+follow-up asked for.
+
+**Question 1 — the clause. Answered.** Terms of Use §16, *Data retention and
+deletion*, sub-clause 16.2 *Data Deletion*, quoted as:
+
+> Upon termination or expiration: All Data must be deleted within 30 days.
+> Certification of deletion may be requested.
+> Audit trail data may be retained for compliance.
+
+**Question 2 — confirmation that this reaches derived data and research corpora.
+Not confirmed, and softened.** The first reply listed "derived datasets (bars,
+series, transformations)" and "research corpora or analytical results built from
+the data" as things the requirement applies to. Asked to confirm precisely that,
+the second reply said instead that because the requirement applies to "all
+Data", the reading that it covers derived datasets and internal research corpora
+**"is consistent with the wording of the clause"**.
+
+**Record the difference rather than smoothing it.** "The requirement applies to
+X" and "reading the requirement to cover X is consistent with its wording" are
+different claims, and only the first would settle the question. §16.2 as quoted
+does not name derived data; the extension to it is the agent's inference from
+the word "Data". Sharadar's licence, by contrast, names the category outright —
+which is why Sharadar's exclusion rests on clause text and this one rests on
+clause text **plus** an interpretation.
+
+**None of this changes the classification.** `DELETION REQUIRED AFTER
+TERMINATION` holds under either reading, because the raw prices are "Data" on
+any construction. What is unsettled is the *reach* — specifically whether
+`full-01`'s derived tables fall inside it — and that turns on the definition of
+"Data" in the Terms.
+
+**Do not send a third enquiry.** A third AI-composed reply adds nothing a
+definition would not settle better. `twelvedata.com/terms` §16 and the
+definitions section, read by the operator, would be `USER-VERIFIED` primary text
+and outranks anything relayed. That is the next step and it is two minutes'
+work.
+
+One note on provenance while filing this: the mail client rendered its own
+"AI Overview" of the thread above the message, by Gemini. **That is a third
+model summarising two others and is not evidence of anything** — the record here
+is taken from the vendor's message body, not from the client's summary of it.
+
 ---
 
 **Q2(c) and Q2(e) decide it, and a partial answer does not upgrade a
@@ -413,7 +459,7 @@ leaves `research-01` undetermined, and undetermined is treated as prohibited.
 | vendor | classification | basis |
 |---|---|---|
 | Kibot | licence text permits permanent retention (**USER-VERIFIED**); **scope over derived data unconfirmed** | Q23–Q26 unanswered, and now moot — the vendor is eliminated on price |
-| **Twelve Data** | **`DELETION REQUIRED AFTER TERMINATION`** | **ANSWERED 2026-08-29.** All Data deleted within 30 days of termination, explicitly including derived datasets and research corpora. Filed at §5.1. **Excluded from any permanent corpus** |
+| **Twelve Data** | **`DELETION REQUIRED AFTER TERMINATION`** | **ANSWERED 2026-08-29, with a clause.** Terms of Use §16.2: all Data deleted within 30 days of termination or expiration, certification available on request. **Excluded from any permanent corpus.** Whether the obligation reaches *derived* data is the vendor's interpretation of "all Data" rather than clause text — open, and it decides `full-01`'s fate. Filed at §5.1 and §5.3 |
 | FMP | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | sent 2026-08-29, **awaiting reply** |
 | Tiingo | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | sent 2026-08-29, **awaiting reply** |
 

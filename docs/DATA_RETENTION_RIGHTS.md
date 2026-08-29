@@ -54,7 +54,7 @@ admit.
 | **Sharadar** (Nasdaq Data Link) | `DELETION REQUIRED AFTER TERMINATION` | Personal Use License: on termination, discontinue use, delete all copies of Services Data within 30 days, **and delete datasets derived from Services Data within 30 days** | **USER-VERIFIED** (primary source, read by the project owner) |
 | **EODHD** | `DELETION REQUIRED AFTER TERMINATION` | terms require deletion of stored provider data within one month after termination | **USER-VERIFIED** |
 | **Kibot** | `PERMANENT RETENTION ALLOWED` *(claimed)* | licence states delivered data may be kept permanently; cancellation does not require deletion | **USER-VERIFIED** as licence text. **The scope of "delivered data" — raw files vs normalised rows vs derived bars vs a frozen research corpus — is not established.** See §3 Q23–Q26 |
-| **Twelve Data** | `DELETION REQUIRED AFTER TERMINATION` | **answered.** Reply to the §3.1 questions: "all access rights end immediately and **all Data must be deleted within 30 days**. Permanent internal retention after termination is not permitted." Deletion stated to cover raw API responses, normalised records, **derived datasets**, reference data **and research corpora or analytical results**; no distinction by data category; unchanged by free tier or licence tier | **VERIFIED as an answer, with the responder named** — composed by "Dooz, Twelve Data's AI Agent", disclosed as such, not by a named person; its footnote marker `[1]` was not captured, so no clause reference is on file. Adverse, so actionable under §1.1 |
+| **Twelve Data** | `DELETION REQUIRED AFTER TERMINATION` | **answered, with a clause.** Terms of Use **§16 — Data retention and deletion**, sub-clause **16.2 Data Deletion**, quoted by the vendor as: *"Upon termination or expiration: All Data must be deleted within 30 days. Certification of deletion may be requested. Audit trail data may be retained for compliance."* Unchanged by data category, free tier or licence tier | **VERIFIED for the clause; the derived-data extension is INTERPRETATION, not clause text.** §16.2 as quoted says "all Data" and does **not** name derived datasets or research corpora — the vendor's agent reached them by reasoning from "all Data", and on the second asking hedged it to "consistent with the wording of the clause". Both replies were composed by "Dooz, Twelve Data's AI Agent"; **no human at the vendor has confirmed anything.** See §2.0 |
 | **FMP** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** `site.financialmodelingprep.com` and `financialmodelingprep.com` both return `EGRESS_BLOCKED`; re-measured, still blocked | **UNVERIFIED** |
 | **Tiingo** | `UNCLEAR — WRITTEN CONFIRMATION REQUIRED` | **not established.** Working acquisition adapter (`acquisition/tiingo.py`, not a stub); `app.tiingo.com` returns `EGRESS_BLOCKED`, terms never examined | **UNVERIFIED** |
 
@@ -77,27 +77,64 @@ than one edited afterwards to match it.
 Three consequences follow immediately:
 
 1. **Twelve Data cannot be the price spine for any permanent corpus**, on the
-   same ground as Sharadar and EODHD and independent of data quality. The
-   deletion obligation is stated to reach derived datasets and research corpora,
-   which is the Sharadar shape and the reason questions 2(c) and 2(e) exist.
-2. **`full-01` carries a deletion trigger.** Its snapshot is
-   `twelve_data-daily-e3ddc03209bb25b4` ([`CORPUS_REGISTRY.md`](CORPUS_REGISTRY.md)),
-   so it is derived data under this answer. Retention is unaffected while the
-   subscription is live; on termination the 30-day clock starts, and it reaches
-   the patterns and breakout observations in the corpus, not only the bars.
-   **Do not terminate the Twelve Data subscription without first deciding what
-   happens to `full-01` and to the gate report's ratios.** "Frozen and permanent"
-   was true of this project's intentions and is not true of its rights.
+   same ground as Sharadar and EODHD and independent of data quality. This holds
+   under *either* reading of §16.2 below, because the raw prices are "Data" on
+   any construction of the word.
+2. **`full-01` carries a deletion trigger — and its exact reach is not settled.**
+   Its snapshot is `twelve_data-daily-e3ddc03209bb25b4`
+   ([`CORPUS_REGISTRY.md`](CORPUS_REGISTRY.md)). Retention is unaffected while
+   the subscription is live; on termination the 30-day clock starts. Whether it
+   stops at the bars or reaches the 272k patterns and 341k breakout events
+   derived from them **depends on how the Terms define "Data"**, which nobody
+   has read — see §2.0a. **Plan for the broad reading and do not terminate the
+   subscription without first deciding what happens to `full-01`.** "Frozen and
+   permanent" was true of this project's intentions and is not true of its
+   rights.
 3. **The forward survivorship archive needs a different price source.** The
    accumulation model in `FORWARD_SURVIVORSHIP_SYSTEM.md` §8 assumes today's
    bars become permanent history. Under these terms Twelve Data's cannot.
 
-**One follow-up is still worth sending**, and its value is option value rather
-than diligence: the answer came from an AI agent and its `[1]` footnote was not
-captured, so no clause is on file. If the agent misread the terms, Twelve Data
-returns as a candidate. Ask for the clause reference and a human confirmation —
-one reply, and the downside is already priced in because the vendor is excluded
-either way.
+### 2.0a What the clause says, and what was inferred from it
+
+The follow-up asked for two things. **It got one of them.**
+
+**Answered — the clause.** Terms of Use §16, *Data retention and deletion*,
+sub-clause **16.2 Data Deletion**, quoted by the vendor:
+
+> Upon termination or expiration: All Data must be deleted within 30 days.
+> Certification of deletion may be requested.
+> Audit trail data may be retained for compliance.
+
+Two operational details worth having: **deletion may have to be certified**, so
+the obligation is not merely nominal, and the only carve-out is audit-trail data
+for compliance, which is no use for research.
+
+**Not answered — human confirmation.** Both replies carry the footer *"This
+answer was composed by Dooz, Twelve Data's AI Agent."* No person at Twelve Data
+has confirmed any of it.
+
+**And the second reply is weaker than the first on the point that matters.** The
+first said flatly that the deletion requirement "applies to all forms of the
+data, including … derived datasets … research corpora or analytical results".
+The second, asked to confirm exactly that, said instead that because the
+requirement applies to "all Data", the reading that it includes derived datasets
+and research corpora **"is consistent with the wording of the clause"**. That is
+an interpretation offered as reasonable, not a statement of what the clause
+requires — and **§16.2 as quoted does not mention derived data at all.**
+
+The contrast with Sharadar is the whole point. Sharadar's licence *names* the
+category: "delete datasets derived from Services Data within 30 days." Twelve
+Data's §16.2 says "all Data", and everything past that turns on **how the Terms
+define "Data"** — a definition nobody in this record has read. If "Data" is
+defined as what the API delivers, the narrow reading is arguable. If it is
+defined to include works derived from it, the broad reading is the clause.
+
+**The remaining question is one definition, and the operator can settle it
+better than another email can.** Do not send a third enquiry: open
+`twelvedata.com/terms`, read §16 and the definition of "Data" in the definitions
+section, and record it here as `USER-VERIFIED` — primary text read by a person,
+which outranks anything an agent relays. Two minutes, and it decides whether
+`full-01` survives a cancellation.
 
 ### 2.1 Why Twelve Data and FMP now matter as much as any historical vendor
 

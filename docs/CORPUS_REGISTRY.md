@@ -25,16 +25,21 @@ about how often a pattern works, any threshold. The universe is not
 survivorship-safe (`data.survivorship_coverage` FAIL), so every cross-sectional
 number over it inherits a bias toward securities that survived to be in it.
 
-**It carries a termination-triggered deletion obligation.** Its snapshot is
-`twelve_data-daily-…`, and Twelve Data has answered in writing that on
-termination of the subscription or account all data must be deleted within 30
-days — explicitly including derived datasets and research corpora, which is what
-this corpus is. **Nothing about its current use changes**: it may be cited for
-everything below exactly as before, because the obligation attaches on
-termination and the subscription is live. What changes is that "permanent" is a
-statement about this project's intentions and not about its rights. **Settle
-what happens to this corpus before ending that subscription, not after.** See
-[`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §2.0.
+**It carries a termination-triggered deletion obligation, of unsettled reach.**
+Its snapshot is `twelve_data-daily-…`, and Twelve Data's Terms of Use §16.2
+require that on termination or expiration **all Data be deleted within 30 days**,
+with certification of deletion available on request. Whether that reaches only
+the underlying bars or also the patterns and breakout observations derived from
+them turns on how the Terms define "Data" — which has not been read, and which
+the vendor's own agent addressed by interpretation rather than by citation.
+**Plan for the broad reading.**
+
+**Nothing about its current use changes**: it may be cited for everything below
+exactly as before, because the obligation attaches on termination and the
+subscription is live. What changes is that "permanent" is a statement about this
+project's intentions and not about its rights. **Settle what happens to this
+corpus before ending that subscription, not after.** See
+[`DATA_RETENTION_RIGHTS.md`](DATA_RETENTION_RIGHTS.md) §2.0 and §2.0a.
 
 **Frozen means:** no further scan writes into it, and no new scan re-uses the
 scan id. A re-derivation under changed code gets its own run id and its own

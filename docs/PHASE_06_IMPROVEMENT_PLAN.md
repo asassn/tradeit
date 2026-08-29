@@ -35,7 +35,7 @@ answer eliminated the leading candidate and replaced it.
 | **Sharadar Personal Use License**: on termination, discontinue use, delete all copies within 30 days, **and delete datasets derived from Services Data within 30 days** | **Sharadar eliminated.** `research-01` and every scan run over it *are* derived datasets. The one-month-download-and-keep model is prohibited |
 | **EODHD**: deletion of stored provider data within one month after termination | **EODHD eliminated**, same reason |
 | **Kibot**: licence explicitly permits keeping delivered data permanently; cancellation does not require deletion | **licence correct, but ELIMINATED ON PRICE.** The archive is a one-time purchase of $990–$2,400, not the ~$14/month this plan assumed — that figure is the *subscription* that refreshes already-purchased data. See `PHASE_06_VENDOR_MATRIX.md` §1.3 |
-| **Twelve Data** (asked 2026-08-29, answered same day): on termination all access ends and **all data must be deleted within 30 days**, explicitly including **derived datasets** and **research corpora or analytical results**; no distinction by data category, free tier or licence tier | **Twelve Data eliminated** for any permanent corpus, on the same ground as Sharadar. Two further consequences: **`full-01` now carries a termination-triggered deletion obligation** (it is derived from `twelve_data-daily-…`), and **the forward accumulation model cannot use Twelve Data prices**. See `DATA_RETENTION_RIGHTS.md` §2.0 |
+| **Twelve Data** (asked 2026-08-29, answered same day, clause supplied on a follow-up): Terms of Use **§16.2** — *"Upon termination or expiration: All Data must be deleted within 30 days. Certification of deletion may be requested."* No distinction by data category, free tier or licence tier | **Twelve Data eliminated** for any permanent corpus — the raw prices are "Data" on any reading. Two further consequences: **`full-01` carries a termination-triggered deletion obligation** whose *reach* is unsettled (whether it takes the derived patterns and breakouts turns on how the Terms define "Data", which the vendor's agent addressed by interpretation, not citation), and **the forward accumulation model cannot use Twelve Data prices**. See `DATA_RETENTION_RIGHTS.md` §2.0, §2.0a |
 
 ### The blockers as they now stand
 
@@ -55,10 +55,12 @@ answer eliminated the leading candidate and replaced it.
    and the item most likely to fail is survivorship *completeness* (§G), which
    can fail while everything else passes.
 3. **Our own subscriptions' retention terms were unverified. One is now
-   verified, and it failed.** Twelve Data answered on 2026-08-29 that all data
-   must be deleted within 30 days of termination, derived datasets and research
-   corpora included — so the vendor that built `full-01` is eliminated for
-   permanent use on exactly the defect that eliminated Sharadar. **FMP and
+   verified, and it failed.** Twelve Data answered on 2026-08-29, citing Terms
+   of Use §16.2: all Data deleted within 30 days of termination — so the vendor
+   that built `full-01` is eliminated for permanent use on the defect that
+   eliminated Sharadar. The one part still open is whether "Data" reaches
+   *derived* datasets: Sharadar's licence named that category outright, §16.2
+   does not, and the vendor's agent got there by interpretation. **FMP and
    Tiingo are sent and unanswered.** `full-01` remains frozen, usable and never
    cited for economic claims, so nothing published is at risk and nothing about
    its current use changes; what it now carries is a deletion obligation that
