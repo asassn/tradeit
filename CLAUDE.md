@@ -38,11 +38,28 @@ restate any of them from memory or from a document.
 
 ## Validation baseline for any production change
 
+**This list mirrors `.github/workflows/ci.yml`. Anything CI runs that is not
+here can drift locally until CI catches it, which is how two files sat
+unformatted through several commits** — `ruff format` was never in this list, so
+nobody ran it, and the job that would have objected was failing earlier for an
+unrelated reason.
+
 ```
 .venv/bin/python -m pytest -q
-.venv/bin/python -m ruff check src tests
+.venv/bin/python -m ruff check src tests migrations
+.venv/bin/python -m ruff format --check src tests
 .venv/bin/python -m mypy src
 ```
+
+**`ruff check` and `ruff format --check` are different questions** and neither
+implies the other: the first is lint, the second is layout, and a file can pass
+one while failing the other. `migrations` is linted but deliberately not
+format-checked, because CI does not format-check it either — mirror CI rather
+than improving on it here, or this list drifts in the opposite direction.
+
+CI runs `mypy src/tradeit`; `mypy src` is equivalent because `[tool.mypy]` sets
+`packages = ["tradeit"]`, and both report the same 164 files. CI adds coverage
+flags to `pytest`, which change no result.
 
 Plus, where relevant: the CLI diagnostic, the schema loader, and citation
 integrity. Inspect the final diff before committing.
