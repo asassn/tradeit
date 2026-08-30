@@ -3003,6 +3003,18 @@ class SecurityPriceFact(Base, TimestampMixin):
     event_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     knowledge_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     knowledge_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: **How ``knowledge_time`` was arrived at, and it is not derivable from
+    #: anything else on this row.** The tempting simplification is that
+    #: ``adjustment_basis`` already implies it -- raw means session close,
+    #: adjusted means delivery time. It does not. A *raw* bar whose session
+    #: close cannot be established (a session_date that is not a trading day)
+    #: also takes delivery-time knowledge_time, and is then indistinguishable
+    #: from an ordinary raw bar by ``adjustment_basis`` alone. This column
+    #: records the one thing nothing else can recover: whether a timestamp was
+    #: measured, derived by rule, or fallen back to. Do not remove it.
+    knowledge_time_basis: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="session_close"
+    )
 
     open: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
     high: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
@@ -3035,6 +3047,11 @@ class SecurityPriceFact(Base, TimestampMixin):
         CheckConstraint("knowledge_time >= event_time", name="ck_security_price_knowledge"),
         CheckConstraint(
             "adjustment_basis IN ('raw', 'split', 'total')", name="ck_security_price_basis"
+        ),
+        CheckConstraint(
+            "knowledge_time_basis IN ('source_disseminated', 'session_close', "
+            "'computed_at_delivery', 'delivery_unestablished')",
+            name="ck_security_price_kt_basis",
         ),
     )
 

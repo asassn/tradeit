@@ -140,6 +140,46 @@ Rules:
 4. Adjusted series are **derived** (§6), carry a `derivation_version`, and are
    recomputed rather than patched.
 
+### Point-in-time for a backfill, and the dependency it creates
+
+**A vendor file delivered today containing a 1999 bar is not a bar we recorded in
+1999.** Two columns already separate the two questions and neither may stand in
+for the other:
+
+| field | answers | a 1999 raw bar delivered in 2026 |
+|---|---|---|
+| `knowledge_time` | when could a diligent observer first have *used* it? | 1999 session close |
+| `ingested_at` | when did our pipeline write the row? | 2026 |
+
+A 1999 `knowledge_time` is not a claim that we existed in 1999. It is a claim
+that the *print* was public then, which is true and checkable.
+
+**That reasoning fails for an adjusted series, and this is the consequential
+part.** A split-adjusted 1999 close computed by a vendor today embeds every
+corporate action between 1999 and today; its value depends on the future.
+
+The rule is **not** that adjusted prices are never historically knowable — a
+series adjusted as of 2005, using only splits public by 2005, is point-in-time
+valid. What is invalid is a **vendor-delivered** adjusted series, because its
+adjustment epoch is the delivery date and nothing earlier. Such rows therefore
+take `knowledge_time` = delivery and are invisible to any earlier as-of.
+
+> **Consequence, named now rather than discovered in milestone 4.**
+> **Point-in-time corporate actions are a hard dependency for any historical
+> backtest on this corpus.** Deriving our own adjusted series — from raw bars
+> plus the actions known at the as-of instant — is the *only* route to an
+> adjusted series valid at that instant, because every vendor-delivered one is
+> stamped at delivery. `security_corporate_action_facts` is not an optional
+> enrichment; it is on the critical path, and a backtest that needs adjusted
+> prices cannot run until it is populated.
+
+`security_price_facts.knowledge_time_basis` records which of the four routes
+produced a row's timestamp: `source_disseminated`, `session_close`,
+`computed_at_delivery`, or `delivery_unestablished`. **It is not derivable from
+`adjustment_basis`** — a *raw* bar whose session close cannot be established
+also falls back to delivery time, and is then indistinguishable from an ordinary
+raw bar without this column.
+
 ## 5. Corporate actions
 
 ```

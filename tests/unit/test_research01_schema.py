@@ -43,6 +43,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -62,11 +63,15 @@ from tradeit.storage.tables import (
     SecurityPriceFact,
 )
 
-MIGRATION = (
-    Path(__file__).resolve().parents[2]
-    / "migrations"
-    / "versions"
-    / "0013_research01_security_schema.py"
+VERSIONS = Path(__file__).resolve().parents[2] / "migrations" / "versions"
+
+#: Every migration touching these tables, in revision order. **A list, not a
+#: single file**: 0013 creates the tables and 0014 adds a column to one, so a
+#: guard reading only the first would report drift that the chain does not have.
+#: Append here when a later migration touches research-01.
+MIGRATIONS = (
+    VERSIONS / "0013_research01_security_schema.py",
+    VERSIONS / "0014_pit_basis_and_alias_overlap.py",
 )
 
 #: The twelve tables milestone 2 adds. Named explicitly rather than derived, so
@@ -90,32 +95,65 @@ RESEARCH01_TABLES = frozenset(
 
 
 class _OpRecorder:
-    """Stands in for ``alembic.op`` and keeps the columns each table declares."""
+    """Stands in for ``alembic.op`` and replays schema changes onto a dict.
+
+    Supports the operations these migrations actually use. Anything unsupported
+    would raise rather than be silently ignored, which is the behaviour we want:
+    a migration doing something this cannot model must not report "no drift".
+    """
 
     def __init__(self) -> None:
-        self.tables: dict[str, list[sa.Column[Any]]] = {}
+        self.tables: dict[str, dict[str, sa.Column[Any]]] = {}
+
+    # -- schema-shaping operations, replayed --------------------------------
 
     def create_table(self, name: str, *args: Any, **kwargs: Any) -> None:
-        self.tables[name] = [a for a in args if isinstance(a, sa.Column)]
+        self.tables[name] = {a.name: a for a in args if isinstance(a, sa.Column)}
+
+    def add_column(self, table: str, column: sa.Column[Any], **kwargs: Any) -> None:
+        self.tables.setdefault(table, {})[column.name] = column
+
+    def drop_column(self, table: str, name: str, **kwargs: Any) -> None:
+        self.tables.get(table, {}).pop(name, None)
+
+    # -- operations that cannot change the column set -----------------------
 
     def create_index(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def alter_column(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def create_check_constraint(self, *args: Any, **kwargs: Any) -> None:
         return None
 
     def drop_table(self, *args: Any, **kwargs: Any) -> None:
         return None
 
+    def execute(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def get_bind(self) -> Any:
+        """Non-PostgreSQL, so dialect-guarded blocks take their early return.
+
+        The EXCLUDE constraint 0014 adds is PostgreSQL-only and is verified by
+        the integration suite; it adds no column, so skipping it here changes
+        nothing this guard measures.
+        """
+        return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
 
 def _migration_columns() -> dict[str, dict[str, sa.Column[Any]]]:
-    """Run ``0013``'s ``upgrade()`` with ``op`` replaced, and collect its columns."""
-    spec = importlib.util.spec_from_file_location("migration_0013", MIGRATION)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
+    """Replay every research-01 migration in order and collect the result."""
     recorder = _OpRecorder()
-    module.op = recorder  # type: ignore[attr-defined]
-    module.upgrade()
-    return {t: {c.name: c for c in cols} for t, cols in recorder.tables.items()}
+    for path in MIGRATIONS:
+        spec = importlib.util.spec_from_file_location(f"migration_{path.stem}", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.op = recorder  # type: ignore[attr-defined]
+        module.upgrade()
+    return recorder.tables
 
 
 def _type_key(type_: Any) -> tuple[Any, ...]:

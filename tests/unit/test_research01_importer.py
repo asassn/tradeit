@@ -1,0 +1,369 @@
+"""The research-01 importer: the point-in-time policy, and the splice property.
+
+The property that matters most is stated as an inversion, because reading it the
+natural way gets it backwards:
+
+> **A continuous input series across a known identity break must produce a
+> DISCONTINUOUS output.** A continuous result is the failure. It looks like
+> complete coverage and is two companies spliced into one price history.
+
+That is why ``GM`` is in the EODHD sample, and the synthetic two-issuer ticker
+below pins the property before any real file arrives.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from decimal import Decimal
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from tradeit.research01 import (
+    Delivery,
+    KnowledgeTimeBasis,
+    RejectReason,
+    Resolution,
+    VendorBar,
+    import_price_bars,
+    knowledge_time_for,
+    resolve_security,
+)
+from tradeit.storage.tables import (
+    Issuer,
+    IssuerIdentifier,
+    Security,
+    SecurityPriceFact,
+    SymbolAlias,
+)
+
+UTC = dt.UTC
+#: A real NYSE session, so the session-close branch is exercised on a real day.
+SESSION = dt.date(2011, 4, 4)
+DELIVERED = dt.datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
+KT = dt.datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _issuer(session: Session, name: str, cik: str) -> Issuer:
+    issuer = Issuer(display_name=name, source="test")
+    session.add(issuer)
+    session.flush()
+    session.add(
+        IssuerIdentifier(
+            issuer_id=issuer.issuer_id,
+            namespace="sec_cik",
+            value=cik,
+            value_normalized=str(int(cik)),
+            role="primary",
+            citation=f"test fixture {cik}",
+            source="test",
+        )
+    )
+    session.flush()
+    return issuer
+
+
+def _security(session: Session, issuer: Issuer) -> Security:
+    security = Security(
+        issuer_id=issuer.issuer_id, security_type="common_stock", currency="USD", source="test"
+    )
+    session.add(security)
+    session.flush()
+    return security
+
+
+def _alias(
+    session: Session,
+    security: Security,
+    ticker: str,
+    valid_from: dt.date,
+    valid_to: dt.date | None,
+    knowledge_time: dt.datetime = KT,
+) -> None:
+    session.add(
+        SymbolAlias(
+            security_id=security.security_id,
+            alias_kind="ticker",
+            alias_value=ticker,
+            valid_from=valid_from,
+            valid_to=valid_to,
+            knowledge_time=knowledge_time,
+            knowledge_source="test",
+            source="test",
+        )
+    )
+    session.flush()
+
+
+def _bar(ticker: str, day: dt.date, basis: str = "raw") -> VendorBar:
+    return VendorBar(
+        ticker=ticker,
+        session_date=day,
+        open=Decimal("10"),
+        high=Decimal("11"),
+        low=Decimal("9"),
+        close=Decimal("10.5"),
+        volume=Decimal("1000"),
+        adjustment_basis=basis,
+    )
+
+
+class TestKnowledgeTimePolicy:
+    """A backfilled fact's usable-from instant is not its delivery instant."""
+
+    def test_a_raw_bar_is_knowable_at_the_session_close(self) -> None:
+        kt, basis = knowledge_time_for(
+            adjustment_basis="raw", session_date=SESSION, delivered_at=DELIVERED
+        )
+        assert basis is KnowledgeTimeBasis.SESSION_CLOSE
+        # 1999 knowledge for a 2026 delivery: the print was public then.
+        assert kt.date() == SESSION
+        assert kt < DELIVERED
+
+    @pytest.mark.parametrize("basis_name", ["split", "total"])
+    def test_a_vendor_adjusted_bar_is_knowable_only_at_delivery(self, basis_name: str) -> None:
+        """Its value embeds every action up to the moment it was computed.
+
+        Not "adjusted prices are never historically knowable" -- a series
+        adjusted as of 2005 from splits public by 2005 is point-in-time valid.
+        What is invalid is a *vendor-delivered* one, whose adjustment epoch is
+        the delivery date.
+        """
+        kt, basis = knowledge_time_for(
+            adjustment_basis=basis_name, session_date=SESSION, delivered_at=DELIVERED
+        )
+        assert basis is KnowledgeTimeBasis.COMPUTED_AT_DELIVERY
+        assert kt == DELIVERED
+
+    def test_an_adjusted_bar_ignores_a_vendor_dissemination_stamp(self) -> None:
+        """That stamp describes the print, not the adjustment. Accepting it
+        would backdate a value computed today, which is the whole failure."""
+        kt, basis = knowledge_time_for(
+            adjustment_basis="split",
+            session_date=SESSION,
+            delivered_at=DELIVERED,
+            disseminated_at=dt.datetime(2011, 4, 4, 20, tzinfo=UTC),
+        )
+        assert basis is KnowledgeTimeBasis.COMPUTED_AT_DELIVERY
+        assert kt == DELIVERED
+
+    def test_a_stated_dissemination_instant_wins_for_a_raw_bar(self) -> None:
+        stamped = dt.datetime(2011, 4, 4, 20, 15, tzinfo=UTC)
+        kt, basis = knowledge_time_for(
+            adjustment_basis="raw",
+            session_date=SESSION,
+            delivered_at=DELIVERED,
+            disseminated_at=stamped,
+        )
+        assert basis is KnowledgeTimeBasis.SOURCE_DISSEMINATED
+        assert kt == stamped
+
+    def test_a_raw_bar_on_a_non_session_falls_back_to_delivery(self) -> None:
+        """**The proof that the basis column is not derivable from
+        adjustment_basis.** This row is `raw`, exactly like an ordinary bar, and
+        its knowledge_time is the delivery instant. Only the basis separates
+        them, so nothing may 'simplify' the column away."""
+        boxing_day_sunday = dt.date(2010, 12, 26)
+        kt, basis = knowledge_time_for(
+            adjustment_basis="raw", session_date=boxing_day_sunday, delivered_at=DELIVERED
+        )
+        assert basis is KnowledgeTimeBasis.DELIVERY_UNESTABLISHED
+        assert kt == DELIVERED
+
+    def test_the_fallback_is_invisible_to_an_earlier_as_of(self) -> None:
+        """Fail closed: an unestablished bar cannot license a 2011 decision."""
+        kt, _ = knowledge_time_for(
+            adjustment_basis="raw", session_date=dt.date(2010, 12, 26), delivered_at=DELIVERED
+        )
+        assert kt > dt.datetime(2011, 1, 1, tzinfo=UTC)
+
+
+class TestResolution:
+    def test_an_unknown_ticker_resolves_to_nothing_and_creates_nothing(
+        self, db_session: Session
+    ) -> None:
+        security_id, resolution = resolve_security(db_session, ticker="NOPE", on=SESSION)
+        assert security_id is None
+        assert resolution is Resolution.UNRESOLVED_NO_ALIAS
+        assert db_session.scalars(select(Security)).all() == []
+
+    def test_the_importer_never_mints_a_security(self, db_session: Session) -> None:
+        result = import_price_bars(
+            db_session, [_bar("GHOST", SESSION)], Delivery("eodhd", DELIVERED)
+        )
+        assert result.landed == 0
+        assert result.rejected[0].reason is RejectReason.NO_ALIAS
+        assert db_session.scalars(select(Security)).all() == []
+        assert db_session.scalars(select(SymbolAlias)).all() == []
+        assert result.summary()["unresolved_tickers"] == ["GHOST"]
+
+    def test_two_securities_claiming_one_ticker_at_one_instant_is_ambiguous(
+        self, db_session: Session
+    ) -> None:
+        """Load-bearing on SQLite, where ``EXCLUDE USING gist`` cannot exist.
+
+        On PostgreSQL ``ex_alias_no_overlap`` refuses these rows outright; here
+        nothing does, so the importer is the only thing standing between an
+        overlapping pair and a silently-picked winner.
+        """
+        a = _security(db_session, _issuer(db_session, "A", "1"))
+        b = _security(db_session, _issuer(db_session, "B", "2"))
+        _alias(db_session, a, "DUP", dt.date(2000, 1, 1), None)
+        _alias(db_session, b, "DUP", dt.date(2000, 1, 1), None)
+
+        security_id, resolution = resolve_security(db_session, ticker="DUP", on=SESSION)
+        assert security_id is None
+        assert resolution is Resolution.UNRESOLVED_AMBIGUOUS
+
+    def test_a_later_revision_supersedes_rather_than_competes(self, db_session: Session) -> None:
+        """Overlapping intervals at *different* knowledge_times are a correction."""
+        a = _security(db_session, _issuer(db_session, "A", "1"))
+        b = _security(db_session, _issuer(db_session, "B", "2"))
+        _alias(db_session, a, "REV", dt.date(2000, 1, 1), None, dt.datetime(2020, 1, 1, tzinfo=UTC))
+        _alias(db_session, b, "REV", dt.date(2000, 1, 1), None, dt.datetime(2021, 1, 1, tzinfo=UTC))
+
+        security_id, resolution = resolve_security(db_session, ticker="REV", on=SESSION)
+        assert resolution is Resolution.RESOLVED
+        assert security_id == b.security_id
+
+
+class TestRoundTrip:
+    """The milestone gate: what goes in comes back out, and twice is once."""
+
+    def test_a_bar_round_trips_with_its_values_intact(self, db_session: Session) -> None:
+        security = _security(db_session, _issuer(db_session, "ACME", "1"))
+        _alias(db_session, security, "ACME", dt.date(2000, 1, 1), None)
+
+        result = import_price_bars(
+            db_session, [_bar("ACME", SESSION)], Delivery("eodhd", DELIVERED, "acme.csv")
+        )
+        assert result.landed == 1
+
+        stored = db_session.scalars(select(SecurityPriceFact)).one()
+        assert stored.security_id == security.security_id
+        assert stored.session_date == SESSION
+        assert (stored.open, stored.high, stored.low, stored.close) == (
+            Decimal("10"),
+            Decimal("11"),
+            Decimal("9"),
+            Decimal("10.5"),
+        )
+        assert stored.adjustment_basis == "raw"
+        assert stored.knowledge_time_basis == str(KnowledgeTimeBasis.SESSION_CLOSE)
+        assert stored.knowledge_source == "eodhd"
+        assert stored.knowledge_time >= stored.event_time
+
+    def test_re_importing_the_same_delivery_changes_nothing(self, db_session: Session) -> None:
+        security = _security(db_session, _issuer(db_session, "ACME", "1"))
+        _alias(db_session, security, "ACME", dt.date(2000, 1, 1), None)
+        delivery = Delivery("eodhd", DELIVERED, "acme.csv")
+
+        first = import_price_bars(db_session, [_bar("ACME", SESSION)], delivery)
+        second = import_price_bars(db_session, [_bar("ACME", SESSION)], delivery)
+
+        assert (first.landed, second.landed) == (1, 0)
+        assert second.rejected[0].reason is RejectReason.DUPLICATE
+        assert len(db_session.scalars(select(SecurityPriceFact)).all()) == 1
+
+    def test_the_three_bases_land_as_three_rows_with_different_knowledge_times(
+        self, db_session: Session
+    ) -> None:
+        security = _security(db_session, _issuer(db_session, "ACME", "1"))
+        _alias(db_session, security, "ACME", dt.date(2000, 1, 1), None)
+
+        import_price_bars(
+            db_session,
+            [_bar("ACME", SESSION, b) for b in ("raw", "split", "total")],
+            Delivery("eodhd", DELIVERED),
+        )
+        rows = db_session.scalars(select(SecurityPriceFact)).all()
+        by_basis = {r.adjustment_basis: r for r in rows}
+        assert set(by_basis) == {"raw", "split", "total"}
+        # The raw print is usable in 2011; the adjusted ones only from delivery.
+        assert by_basis["raw"].knowledge_time < by_basis["split"].knowledge_time
+        assert by_basis["split"].knowledge_time == by_basis["total"].knowledge_time == DELIVERED
+
+
+class TestNoSpliceAcrossAnIdentityBreak:
+    """The GM property, pinned on a synthetic two-issuer ticker.
+
+    Two unrelated issuers hold ``TWO`` either side of a break, with a deliberate
+    gap between the intervals. The vendor file is one continuous run of bars,
+    exactly as a spliced vendor series would arrive.
+    """
+
+    BREAK_OUT = dt.date(2009, 6, 1)
+    BREAK_IN = dt.date(2009, 9, 1)
+
+    def _corpus(self, db_session: Session) -> tuple[Security, Security]:
+        old = _security(db_session, _issuer(db_session, "OLD CO", "40730"))
+        new = _security(db_session, _issuer(db_session, "NEW CO", "1467858"))
+        _alias(db_session, old, "TWO", dt.date(2000, 1, 3), self.BREAK_OUT)
+        _alias(db_session, new, "TWO", self.BREAK_IN, None)
+        return old, new
+
+    def _continuous_input(self) -> list[VendorBar]:
+        """One unbroken run of sessions spanning the break, as a vendor sends it."""
+        days = [
+            dt.date(2009, 5, 1),
+            dt.date(2009, 5, 29),
+            dt.date(2009, 7, 1),  # inside the gap
+            dt.date(2009, 8, 3),  # inside the gap
+            dt.date(2009, 9, 1),
+            dt.date(2009, 10, 1),
+        ]
+        return [_bar("TWO", d) for d in days]
+
+    def test_a_continuous_input_produces_a_discontinuous_output(self, db_session: Session) -> None:
+        """The inversion. A single continuous series here would be the defect."""
+        old, new = self._corpus(db_session)
+        result = import_price_bars(
+            db_session, self._continuous_input(), Delivery("eodhd", DELIVERED)
+        )
+
+        assert result.securities_touched == {old.security_id, new.security_id}
+        rows = db_session.scalars(select(SecurityPriceFact)).all()
+        by_security: dict[int, list[dt.date]] = {}
+        for r in rows:
+            by_security.setdefault(r.security_id, []).append(r.session_date)
+
+        # Two series, not one.
+        assert len(by_security) == 2
+        # And neither spans the break: every old-co bar precedes it, every
+        # new-co bar follows it.
+        assert max(by_security[old.security_id]) < self.BREAK_OUT
+        assert min(by_security[new.security_id]) >= self.BREAK_IN
+
+    def test_no_single_security_spans_the_break(self, db_session: Session) -> None:
+        old, new = self._corpus(db_session)
+        import_price_bars(db_session, self._continuous_input(), Delivery("eodhd", DELIVERED))
+        for security_id in (old.security_id, new.security_id):
+            days = db_session.scalars(
+                select(SecurityPriceFact.session_date).where(
+                    SecurityPriceFact.security_id == security_id
+                )
+            ).all()
+            spans = any(d < self.BREAK_OUT for d in days) and any(d >= self.BREAK_IN for d in days)
+            assert not spans, f"security {security_id} spans the identity break"
+
+    def test_gap_bars_are_unresolved_not_nearest_neighboured(self, db_session: Session) -> None:
+        """The bars between the intervals belong to neither issuer.
+
+        Attaching them to the closer side is the tempting repair and is exactly
+        the splice in miniature: it would manufacture an attribution the
+        evidence does not support.
+        """
+        self._corpus(db_session)
+        result = import_price_bars(
+            db_session, self._continuous_input(), Delivery("eodhd", DELIVERED)
+        )
+
+        gap = {dt.date(2009, 7, 1), dt.date(2009, 8, 3)}
+        rejected_days = {r.bar.session_date for r in result.unresolved}
+        assert rejected_days == gap
+        assert all(r.reason is RejectReason.NO_ALIAS for r in result.unresolved)
+
+        landed_days = set(db_session.scalars(select(SecurityPriceFact.session_date)).all())
+        assert landed_days.isdisjoint(gap)
+        assert result.landed == 4
