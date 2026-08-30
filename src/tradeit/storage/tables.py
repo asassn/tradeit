@@ -2897,7 +2897,7 @@ class SymbolAlias(Base, TimestampMixin):
     alias_value: Mapped[str] = mapped_column(String(32), nullable=False)
     valid_from: Mapped[dt.date] = mapped_column(Date, nullable=False)
     valid_to: Mapped[dt.date | None] = mapped_column(Date)
-    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     knowledge_source: Mapped[str] = mapped_column(String(32), nullable=False)
     citation: Mapped[str | None] = mapped_column(Text)
 
@@ -3000,8 +3000,8 @@ class SecurityPriceFact(Base, TimestampMixin):
     #: ``raw``, ``split``, or ``total``. Which series this row belongs to, held
     #: explicitly so the three can coexist and never be silently mixed.
     adjustment_basis: Mapped[str] = mapped_column(String(16), nullable=False, default="raw")
-    event_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
-    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    event_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     knowledge_source: Mapped[str] = mapped_column(String(32), nullable=False)
 
     open: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
@@ -3056,8 +3056,8 @@ class SecurityCorporateActionFact(Base, TimestampMixin):
     #: ``split``, ``reverse_split``, ``cash_dividend``, ``spinoff``, ...
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
     ex_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
-    event_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
-    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    event_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     knowledge_source: Mapped[str] = mapped_column(String(32), nullable=False)
     ratio: Mapped[Decimal | None] = mapped_column(RATIO)
     cash_amount: Mapped[Decimal | None] = mapped_column(PRICE)
@@ -3102,8 +3102,8 @@ class SecurityFundamentalFact(Base, TimestampMixin):
     fiscal_year: Mapped[int] = mapped_column(Integer, nullable=False)
     fiscal_period: Mapped[str] = mapped_column(String(4), nullable=False)
     period_end: Mapped[dt.date] = mapped_column(Date, nullable=False)
-    event_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
-    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    event_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     knowledge_source: Mapped[str] = mapped_column(String(32), nullable=False)
     value: Mapped[Decimal | None] = mapped_column(VALUE)
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="USD")

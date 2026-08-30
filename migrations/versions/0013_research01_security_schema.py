@@ -57,6 +57,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from tradeit.storage.tables import UTCDateTime
+
 revision: str = "0013_research01_security_schema"
 down_revision: str | None = "0012_run_scoped_derivation"
 branch_labels: str | Sequence[str] | None = None
@@ -67,7 +69,12 @@ PRICE = sa.Numeric(18, 6)
 QTY = sa.Numeric(24, 6)
 RATIO = sa.Numeric(18, 8)
 VALUE = sa.Numeric(28, 6)
-TS = sa.DateTime(timezone=True)
+#: The ORM declares every timestamp with ``UTCDateTime`` -- and ``DateTime``
+#: in ``tables.py`` is an alias *for* it (line 80), so ``TimestampMixin``
+#: columns are ``UTCDateTime`` as well. ``sa.DateTime`` renders identical
+#: DDL and is a different Python type, which is drift Alembic reports and
+#: no SQL comparison can see. Matches ``0001_initial``.
+TS = UTCDateTime(timezone=True)
 
 #: Created newest-last so every foreign key has its target. Dropped in reverse.
 _TABLES = (
@@ -89,7 +96,7 @@ _TABLES = (
 def _audit() -> tuple[sa.Column[object], ...]:
     """The TimestampMixin columns, identical on every table it is applied to."""
     return (
-        sa.Column("ingested_at", TS, nullable=False, server_default=sa.func.now()),
+        sa.Column("ingested_at", TS, nullable=False, server_default=sa.text("now()")),
         sa.Column("source", sa.String(64), nullable=False),
     )
 

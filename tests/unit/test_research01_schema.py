@@ -2,13 +2,35 @@
 
 Two things are checked here and they are different questions.
 
-**Drift** -- the ORM and migration ``0013`` must describe the same tables and
-the same columns. The full drift gate runs against PostgreSQL in
-``tests/integration/test_migration_chain.py`` and needs a container; this one
-reads the migration source and needs nothing, so a mismatch is caught while it
-is still cheap. It found a real one on the first run: the migration had invented
-an ``updated_at`` column because ``TimestampMixin`` was assumed rather than read,
-when the mixin is ``ingested_at`` and ``source``.
+**Drift** -- the ORM and migration ``0013`` must describe the same tables, the
+same columns, the same column *types* and the same nullability.
+
+The type half exists because the first version of this guard did not have it.
+It compared column names only, passed locally, and CI then failed on seven
+columns where the migration declared ``sa.DateTime(timezone=True)`` and the ORM
+declared ``UTCDateTime()``. **No SQL comparison could have caught that**: both
+render ``TIMESTAMP WITH TIME ZONE``, and the difference is the Python type
+object, which is exactly what Alembic compares. That was the second
+type-assumption error in one migration -- the first invented an ``updated_at``
+column because ``TimestampMixin`` was assumed rather than read -- so the guard is
+now built to catch the class rather than the instance.
+
+It works by **executing** the migration's ``upgrade()`` against a recorder that
+stands in for ``alembic.op``, which yields the real :class:`sqlalchemy.Column`
+objects the migration declares. Static parsing of the source could not do this:
+a type is an expression, and comparing expressions as text would call
+``UTCDateTime(timezone=True)`` and ``TS`` different when they are the same thing.
+
+**What still needs PostgreSQL, and why.** This guard compares what the migration
+*declares* to what the ORM declares. ``tests/integration/test_phase2_schema.py``
+compares what a real database *has* to what the ORM declares, via Alembic's
+``compare_metadata`` against a live schema. Three things only the latter can
+see: whether the whole migration chain leaves these tables in the expected end
+state (this file reads 0013 alone), whether PostgreSQL renders a declared type
+or constraint differently from what was asked for, and whether the partial index
+predicate is enforced by the deployed engine rather than merely declared. Neither
+supersedes the other; this one exists so the common failures do not need a CI
+round-trip.
 
 **FRC** -- the regulator-neutral identity claim, exercised end to end. A schema
 that merely *has* a namespace column has not shown it can key an issuer on
@@ -18,11 +40,13 @@ shaped this way.
 
 from __future__ import annotations
 
-import ast
 import datetime as dt
+import importlib.util
 from pathlib import Path
+from typing import Any
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -65,59 +89,111 @@ RESEARCH01_TABLES = frozenset(
 )
 
 
-def _migration_tables() -> dict[str, set[str]]:
-    """Table -> column names, parsed from the migration's ``op.create_table`` calls.
+class _OpRecorder:
+    """Stands in for ``alembic.op`` and keeps the columns each table declares."""
 
-    Static parsing rather than execution: running the migration needs an Alembic
-    context and a database, and the question here is only whether the two
-    descriptions agree.
+    def __init__(self) -> None:
+        self.tables: dict[str, list[sa.Column[Any]]] = {}
+
+    def create_table(self, name: str, *args: Any, **kwargs: Any) -> None:
+        self.tables[name] = [a for a in args if isinstance(a, sa.Column)]
+
+    def create_index(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def drop_table(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+def _migration_columns() -> dict[str, dict[str, sa.Column[Any]]]:
+    """Run ``0013``'s ``upgrade()`` with ``op`` replaced, and collect its columns."""
+    spec = importlib.util.spec_from_file_location("migration_0013", MIGRATION)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    recorder = _OpRecorder()
+    module.op = recorder  # type: ignore[attr-defined]
+    module.upgrade()
+    return {t: {c.name: c for c in cols} for t, cols in recorder.tables.items()}
+
+
+def _type_key(type_: Any) -> tuple[Any, ...]:
+    """A comparable fingerprint of a column type.
+
+    The **Python class** leads, because that is what Alembic compares and what
+    the CI failure turned on: ``UTCDateTime`` and ``DateTime`` render identical
+    DDL and are not the same type. Length, precision and scale follow, so a
+    ``String(32)`` never matches a ``String(64)``.
     """
-    tree = ast.parse(MIGRATION.read_text())
-    audit: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "_audit":
-            audit = {
-                c.args[0].value
-                for c in ast.walk(node)
-                if isinstance(c, ast.Call)
-                and isinstance(c.func, ast.Attribute)
-                and c.func.attr == "Column"
-                and isinstance(c.args[0], ast.Constant)
-            }
-
-    tables: dict[str, set[str]] = {}
-    for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "create_table"
-        ):
-            continue
-        name = node.args[0].value
-        cols = {
-            a.args[0].value
-            for a in node.args[1:]
-            if isinstance(a, ast.Call)
-            and isinstance(a.func, ast.Attribute)
-            and a.func.attr == "Column"
-            and isinstance(a.args[0], ast.Constant)
-        }
-        if any(isinstance(a, ast.Starred) for a in node.args):
-            cols |= audit
-        tables[name] = cols
-    return tables
+    return (
+        type(type_).__name__,
+        getattr(type_, "length", None),
+        getattr(type_, "precision", None),
+        getattr(type_, "scale", None),
+        getattr(type_, "timezone", None),
+    )
 
 
 class TestMigrationOrmDrift:
     def test_the_migration_creates_exactly_the_twelve_new_tables(self) -> None:
-        assert set(_migration_tables()) == RESEARCH01_TABLES
+        assert set(_migration_columns()) == RESEARCH01_TABLES
 
     def test_every_new_table_is_in_the_orm(self) -> None:
         assert set(Base.metadata.tables) >= RESEARCH01_TABLES
 
     @pytest.mark.parametrize("table", sorted(RESEARCH01_TABLES))
     def test_columns_match_the_orm(self, table: str) -> None:
-        assert _migration_tables()[table] == {c.name for c in Base.metadata.tables[table].columns}
+        assert set(_migration_columns()[table]) == {
+            c.name for c in Base.metadata.tables[table].columns
+        }
+
+    @pytest.mark.parametrize("table", sorted(RESEARCH01_TABLES))
+    def test_column_types_match_the_orm(self, table: str) -> None:
+        """The check that was missing when CI caught seven drifted timestamps."""
+        migration = _migration_columns()[table]
+        orm = Base.metadata.tables[table].columns
+        mismatched = {
+            name: (_type_key(migration[name].type), _type_key(orm[name].type))
+            for name in migration
+            if name in orm and _type_key(migration[name].type) != _type_key(orm[name].type)
+        }
+        assert not mismatched, f"{table}: migration/ORM type drift {mismatched}"
+
+    @pytest.mark.parametrize("table", sorted(RESEARCH01_TABLES))
+    def test_nullability_matches_the_orm(self, table: str) -> None:
+        migration = _migration_columns()[table]
+        orm = Base.metadata.tables[table].columns
+        # Primary keys are implicitly NOT NULL and Alembic renders them either
+        # way, so they are compared on type and name rather than on this flag.
+        mismatched = {
+            name: (migration[name].nullable, orm[name].nullable)
+            for name in migration
+            if name in orm
+            and not orm[name].primary_key
+            and migration[name].nullable != orm[name].nullable
+        }
+        assert not mismatched, f"{table}: migration/ORM nullability drift {mismatched}"
+
+    def test_every_point_in_time_column_is_utcdatetime(self) -> None:
+        """The specific regression, pinned by name rather than only by comparison.
+
+        A naive ``knowledge_time`` compared against an aware ``as_of`` is either
+        a crash or a silently wrong comparison, which is why ``UTCDateTime``
+        exists. Both sides are asserted so that changing them together -- the
+        way the comparison test alone could be satisfied -- still fails.
+        """
+        migration = _migration_columns()
+        for table in sorted(RESEARCH01_TABLES):
+            for name in ("event_time", "knowledge_time", "ingested_at"):
+                if name not in migration[table]:
+                    continue
+                assert type(migration[table][name].type).__name__ == "UTCDateTime", (
+                    f"{table}.{name} in the migration"
+                )
+                assert (
+                    type(Base.metadata.tables[table].columns[name].type).__name__ == "UTCDateTime"
+                ), f"{table}.{name} in the ORM"
 
     def test_nothing_existing_was_re_keyed_onto_a_security(self) -> None:
         """The near-neighbours keep their own subject.
