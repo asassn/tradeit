@@ -83,8 +83,17 @@ class EvidenceType(StrEnum):
     """What an exit is, as distinct from the fact that one seems to have happened.
 
     The first five are conclusions supported by a filing that says so. The last
-    two are explicitly *not* conclusions, and the design turns on keeping them
+    three are explicitly *not* conclusions, and the design turns on keeping them
     that way.
+
+    :data:`NON_EXIT_REGISTRANT_STILL_REPORTING` is the newest and was added
+    because the first real run produced its opposite. A registrant that files a
+    Form 15 for one registered class and goes on filing 10-Ks for thirty years
+    was being recorded as having exited on the date of that Form 15 -- so the
+    corpus *invented* dead companies rather than omitting them. The filing is
+    real and something did end; what did not end is the registrant, and the
+    evidence type now says which. See
+    :func:`~tradeit.edgar.lifecycle.assert_exit_not_contradicted`.
     """
 
     CONFIRMED_EXCHANGE_DELISTING = "confirmed_exchange_delisting"
@@ -94,6 +103,11 @@ class EvidenceType(StrEnum):
     CONFIRMED_SECURITY_EXTINGUISHED = "confirmed_security_extinguished"
     #: The registrant stopped filing. **This is a lead, not a death.**
     POSSIBLE_EXIT_FILING_CESSATION = "possible_exit_filing_cessation"
+    #: A confirming filing exists, and the registrant filed a periodic report
+    #: *after* it. **The registrant did not exit.** Something narrower did --
+    #: the index names no security class, so it cannot say what -- and this
+    #: carries no lifecycle date for the same reason cessation carries none.
+    NON_EXIT_REGISTRANT_STILL_REPORTING = "non_exit_registrant_still_reporting"
     #: Something ended and the evidence does not say what.
     UNRESOLVED_EXIT = "unresolved_exit"
 

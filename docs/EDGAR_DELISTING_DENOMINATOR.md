@@ -518,6 +518,218 @@ now known to be wrong on 30.7% of its inputs, and explaining a number before
 correcting the defect underneath it is how a wrong number acquires a defender.
 Fix, re-run, then look.
 
+> **RESOLVED the same day — §7bc.** Everything above is left exactly as it was
+> written, because it is the record of what the first run found. Two of its
+> forward-looking statements are now out of date and are corrected here rather
+> than edited above: the fix *has* been made, and it is **not** the
+> `confirming[-1]` the section guessed at — taking the latest filing was
+> considered and rejected, because it would still have handed Intel a date. The
+> rule adopted is supersession. The measurements, including the fate of the
+> 2005–2007 peak this section declined to explain, are in §7bc.
+
+## 7bc. THE PROPOSITION that fixes §7bb — supersession
+
+Denominator methodology may not be altered by a silent patch, so the change is
+stated here first, in the terms it will be judged on. It was proposed on
+2026-08-29 against the defect measured the same day.
+
+### The question, restated
+
+The obvious repair is `confirming[-1]` instead of `confirming[0]` — take the
+latest confirming filing rather than the earliest. **That repair is rejected.**
+It answers the wrong question. It would still hand `INTEL CORP` an exit date,
+merely a less absurd one, and the thing wrong with Intel's record is not that
+the date is early. It is that Intel has not exited.
+
+The real question is the one §2.3 already answers for cessation, asked in the
+other direction. There, the rule is that *a resumption retroactively cancels a
+cessation candidate*. Here: **a periodic report retroactively cancels the
+reading of an earlier filing as the registrant's exit.** A registrant cannot
+report after it has exited. Same principle, opposite sign, and it was never
+implemented.
+
+### The rule
+
+> **A confirming filing dates an exit only if the registrant filed no periodic
+> report after it.** A filing that precedes the registrant's own last periodic
+> report is **superseded**: it remains in the record as evidence at its own
+> scope, and it is disqualified from supplying the exit date.
+
+Three consequences, each deliberate:
+
+**1. Supersession is a disqualification, not a veto.** A superseded Form 25
+still removed a listing — §2.4 says outright that "an issuer can be delisted and
+continue to file", so continued reporting does not falsify the filing, only the
+reading of it as *the registrant's* exit. Superseded filings keep contributing
+their scopes and stay attached to the resolution in a new `superseded` field, so
+a reader can see what was refused without going back to the index.
+
+**2. If every confirming filing is superseded, no date is offered at all.** Not
+a better date — none. This is the Intel case, and it gets its own evidence type,
+`NON_EXIT_REGISTRANT_STILL_REPORTING`, on the same reasoning that gives cessation
+its own: the honest content of the record is "something ended, the index cannot
+say what, and the registrant is still here." The index names no security class
+(§7b limitation 2), so this cannot be sharpened into a class-level fact from the
+index alone. It is `FORM_INFERRED` — derived by combining the confirming filings
+with the periodic reports that outlive them — and it carries **no date**.
+
+**3. It is not counted as an undated exit.** Folding these into `undated_exits`
+would have made the totals reconcile in one line and would have preserved the
+original error in a quieter form, because `undated_exits` means *exits we
+believe happened and cannot place in time*, and we do not believe these
+happened. They are reported on their own line.
+
+### Where the date now comes from
+
+| case | date | why |
+|---|---|---|
+| no standing filing | **none** | the registrant did not exit |
+| single-type exit | **earliest standing** | first uncontradicted direct evidence |
+| extinguishment | **latest standing** | the conjunction does not exist until its later half is filed |
+
+**Earliest standing, deliberately, for the ordinary case.** Taking the latest
+would re-date the 20,813 registrants §7bb measured as *already correct* — their
+confirming filings all post-date their last periodic report, so nothing about
+them is in question. A later Form 15 is usually the administrative tail of the
+same exit. The fix changes the rows the defect touched and leaves the rest
+where they were.
+
+**The extinguishment branch keeps `[-1]`, and it is no longer unexplained.**
+§7bb called the asymmetry "an oversight rather than a decision". On inspection
+it is defensible and now carries the comment it lacked: the derived claim rests
+on a *conjunction* of a delisting and a registration termination, and that
+conjunction does not exist until the later of the two is filed. Dating it from
+the earlier one would assert the derived event before its own evidence was
+complete. The asymmetry with the single-type branch is real and intended — the
+two branches are dating different things.
+
+### The assertion
+
+`evidence_date < last_periodic` was, as §7bb noted, "a contradiction the type
+system currently permits and nothing checks." It is now
+`assert_exit_not_contradicted()`, the exact companion of
+`assert_cessation_undated()`, run by `Denominator.__post_init__`. **A
+denominator containing a self-contradicting exit cannot be built at all**, and
+the failure names the worst offender rather than a count alone.
+
+Two boundary decisions, both narrow:
+
+* **Same-day is not "after".** A registrant filing its last 10-K and its Form 25
+  on one day is an ordinary exit. The filter's boundary (`>= last_periodic` is
+  standing) is *identical* to the guard's (`< last_periodic` is a contradiction),
+  so the two can never disagree about a marginal case. This is why the guard is
+  a property on `ExitResolution` rather than an inline comparison.
+* **`effective_date` is checked too**, though the index never populates it. The
+  document-parsing pass that will populate it is the obvious place for this
+  defect to reappear in a new form.
+
+### Measured after the fix — re-run 2026-08-29, same pinned `--as-of`
+
+Both runs used the identical index range, so the columns are comparable.
+
+| measurement | before | after |
+|---|---|---|
+| registrants | 90,548 | **90,548** |
+| dated confirmed exits | 40,920 | **29,180** |
+| — `confirmed_exchange_delisting` | 3,940 | 2,359 |
+| — `confirmed_registration_termination` | 29,205 | 19,772 |
+| — `confirmed_security_extinguished` | 7,775 | 7,049 |
+| `non_exit_registrant_still_reporting` | — | **11,740** |
+| undated exits (cessation + unresolved) | 49,628 | **49,628** |
+| exits contradicting their own evidence | 12,549 | **0** |
+
+**The denominator built, which is the result.** `assert_exit_not_contradicted`
+runs at construction over all 90,548 registrants; before the fix it would have
+refused. Registrant total, undated population and identity mapping are byte-for-
+byte unchanged, as a dating-only change requires.
+
+Supersession reached **22,776 confirming filings across 14,733 registrants**.
+Of those registrants, 11,740 had no standing filing left and lost their date;
+**2,993 kept a dated exit**, taken from a filing their own later reporting does
+not contradict — which is the "disqualification, not veto" rule doing visible
+work rather than merely being asserted.
+
+**Every figure closes against §7bb's independently measured 12,549:**
+
+* 40,920 − 29,180 = 11,740 — the drop in dated exits *is* the non-exit
+  population, exactly.
+* 11,740 + 2,993 = 14,733 — every registrant with superseded evidence is
+  accounted for in one of the two outcomes.
+* 12,549 − 11,740 = 809 single-type cases that had a later standing filing;
+  14,733 − 12,549 = 2,184 extinguishment cases already dated from
+  `confirming[-1]` and so never contradicted; 809 + 2,184 = 2,993.
+
+The last line is the useful one: the 2,184 are precisely the registrants the old
+extinguishment `[-1]` had already protected by accident. That the two branches
+reconcile to the digit is the strongest available evidence that supersession
+describes the same population §7bb measured, rather than a different one that
+happens to be a similar size.
+
+**All four named cases are fixed.** Resolved against the real archive:
+
+| CIK | registrant | evidence type | date | last periodic |
+|---|---|---|---|---|
+| 50863 | INTEL CORP | `non_exit_registrant_still_reporting` | **none** | 2026-04-24 |
+| 796343 | ADOBE INC. | `non_exit_registrant_still_reporting` | **none** | 2026-06-15 |
+| 23217 | CONAGRA BRANDS INC. | `non_exit_registrant_still_reporting` | **none** | 2026-04-01 |
+| 109198 | TJX COMPANIES INC /DE/ | `non_exit_registrant_still_reporting` | **none** | 2026-05-29 |
+
+Intel carried four superseded confirming filings and ConAgra six. None of the
+four is dated, none contradicts its evidence, and none appears in any per-year
+count.
+
+### The 2005–2007 peak was largely an artefact, and §7bb's third prediction is now due
+
+§7bb recorded that the per-year peak was 2005–2007 rather than the expected
+dot-com and 2008 bulges, and **deliberately declined to explain it** until the
+dating rule was corrected. That was the right call:
+
+| year | before | after | change |
+|---|---|---|---|
+| 2005 | 2,827 | 1,393 | −51% |
+| 2006 | 3,012 | 1,205 | −60% |
+| 2007 | 3,113 | 1,417 | −54% |
+| 2012 | 1,679 | 1,518 | −10% |
+| 2026 | 447 | 429 | −4% |
+
+**More than half of the 2005–2007 peak was registrants that never exited.** The
+shape is consistent with `ELECTRONIC_FORM_25_FROM` (2005-04-24, §2.2): once
+Form 25 became an electronic filing, surviving registrants began filing them to
+remove *individual classes* — a warrant, a preferred series — and the old rule
+read every one of those as the registrant's death. That is a hypothesis with a
+mechanism, not a finding, and it is recorded as such. **The curve is now built
+from a dating rule with no known contradictions and may be looked at properly;
+that is separate work and is not done here.**
+
+### A separate discrepancy, found while re-running and NOT fixed here
+
+§7bb records the run as "129 quarterly index files, 1994 Q3 – 2026 Q3". Measured
+on 2026-08-29: **129 `form.idx` files exist on disk, and the command reads 128.**
+`tradeit edgar denominator` defaults to `--end 2026Q2`, so `2026/QTR3/form.idx`
+— 23 MB of real filings, present since 2026-08-14 — is silently excluded. The
+before-run reproduced §7bb's registrant and exit counts exactly, which confirms
+the original run also read 128; the section's file count and end quarter are
+therefore both off by one quarter.
+
+**Left alone deliberately.** Changing the range changes the denominator's
+coverage, and §7b limitation 4 is explicit that quarter coverage is a property
+of the measurement rather than a detail — this is that same concern inverted, a
+*present* quarter silently excluded by a stale default rather than a missing one
+read as a zero. It wants its own scoped decision: move the default, require the
+flag, or make a stale default an error. It is not folded into a dating fix, and
+the numbers in this section are all `--end 2026Q2` on both sides so the
+comparison holds regardless of which way that decision goes.
+
+### What this does not fix
+
+Supersession is a *dating* rule and touches nothing else. Row counts, the
+registrant total, the parser-integrity gate and the identity mapping are
+untouched by construction. It also does not make the per-year curve explicable:
+§7bb recorded two falsified predictions and declined to offer a third
+explanation until the dating rule was corrected. It is corrected now; the curve
+still has to be looked at, and that is a separate piece of work with its own
+evidence.
+
 ## 7c. The parser-integrity gate, and one anomaly left open
 
 The denominator's classification consumes exactly three fields per row — `cik`,

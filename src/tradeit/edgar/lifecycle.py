@@ -22,6 +22,17 @@ extinguished or that the *issuer* ceased to exist.
 therefore never read off a single form — it is derived, only from corroborating
 evidence across scopes, and it is marked ``FORM_INFERRED`` so it can never be
 mistaken for something a filing said outright.
+
+The third discipline is **supersession**, and it was added after the first real
+run rather than designed in. A confirming filing dates an exit only if the
+registrant did not go on reporting afterwards. ``INTEL CORP`` filed a Form 15
+in 1994 and files to this day; reading that form as Intel's exit date is not a
+near-miss, it is a fabricated death. So a confirming filing that *precedes* the
+registrant's last periodic report is **superseded**: it stays in the record as
+evidence at its own scope, and it may not supply the exit date.
+
+:func:`assert_exit_not_contradicted` exists so that rule, like the cessation
+rule, is checkable rather than merely intended.
 """
 
 from __future__ import annotations
@@ -45,6 +56,7 @@ __all__ = [
     "ExitResolution",
     "IssuerTimeline",
     "assert_cessation_undated",
+    "assert_exit_not_contradicted",
     "build_timelines",
     "resolve_exit",
 ]
@@ -69,10 +81,16 @@ class ExitResolution:
     """What we can defend saying about one registrant's exit.
 
     ``evidence_date`` is the date of the filing the conclusion rests on, and is
-    ``None`` for cessation-only and unresolved cases -- there is no filing to
-    point at. ``effective_date`` is the date the event actually took effect and
-    is ``None`` unless a parsed document stated it. **Counting by year uses
-    ``evidence_date`` and the reports say so.**
+    ``None`` for cessation-only, non-exit and unresolved cases -- there is no
+    filing that dates an exit to point at. ``effective_date`` is the date the
+    event actually took effect and is ``None`` unless a parsed document stated
+    it. **Counting by year uses ``evidence_date`` and the reports say so.**
+
+    ``supporting`` and ``superseded`` partition the confirming filings. A
+    superseded filing is one the registrant went on reporting after; it is real
+    evidence at its own scope and it is disqualified from supplying the exit
+    date. Keeping both means a reader can see *why* a date was refused without
+    going back to the index.
     """
 
     cik: int
@@ -85,12 +103,29 @@ class ExitResolution:
     supporting: tuple[LifecycleEvidence, ...]
     #: For cessation candidates: the last periodic report seen. Context, not a date of death.
     last_periodic: dt.date | None = None
+    #: Confirming filings the registrant kept reporting after. Never a date source.
+    superseded: tuple[LifecycleEvidence, ...] = ()
     note: str = ""
 
     @property
     def is_confirmed(self) -> bool:
         return self.evidence_type in _CONFIRMING or (
             self.evidence_type is EvidenceType.CONFIRMED_SECURITY_EXTINGUISHED
+        )
+
+    @property
+    def contradicts_its_own_evidence(self) -> bool:
+        """True when a date claimed here precedes the registrant's last periodic report.
+
+        The shape :func:`assert_exit_not_contradicted` refuses to publish. It is
+        a property rather than an inline check so that a diagnostic can count
+        the offenders without duplicating the definition.
+        """
+        if self.last_periodic is None:
+            return False
+        return any(
+            date is not None and date < self.last_periodic
+            for date in (self.evidence_date, self.effective_date)
         )
 
     def summary(self) -> dict[str, object]:
@@ -103,6 +138,7 @@ class ExitResolution:
             "effective_date": self.effective_date.isoformat() if self.effective_date else None,
             "last_periodic": self.last_periodic.isoformat() if self.last_periodic else None,
             "accessions": [e.accession for e in self.supporting],
+            "superseded_accessions": [e.accession for e in self.superseded],
             "note": self.note,
         }
 
@@ -156,6 +192,30 @@ def _quarters_between(earlier: dt.date, later: dt.date) -> float:
     return (later - earlier).days / 91.3125
 
 
+def _partition_superseded(
+    confirming: Sequence[LifecycleEvidence], last_periodic: dt.date | None
+) -> tuple[tuple[LifecycleEvidence, ...], tuple[LifecycleEvidence, ...]]:
+    """Split confirming filings into (superseded, standing).
+
+    A filing is **superseded** when the registrant filed a periodic report after
+    it. That is the same principle as "a resumption retroactively cancels a
+    cessation candidate", applied in the other direction: continued reporting
+    falsifies the reading of an earlier filing as the registrant's exit.
+
+    The boundary is strict. A confirming filing on the *same day* as the last
+    periodic report is standing, because same-day is not "after" and a
+    registrant filing its final report and its Form 25 together is an ordinary
+    exit, not a contradiction. That boundary is deliberately identical to the
+    one :func:`assert_exit_not_contradicted` tests, so the filter and the guard
+    can never disagree about a marginal case.
+    """
+    if last_periodic is None:
+        return (), tuple(confirming)
+    superseded = tuple(e for e in confirming if e.evidence_date < last_periodic)
+    standing = tuple(e for e in confirming if e.evidence_date >= last_periodic)
+    return superseded, standing
+
+
 def resolve_exit(
     timeline: IssuerTimeline,
     *,
@@ -168,6 +228,11 @@ def resolve_exit(
     scopes upgrades to ``CONFIRMED_SECURITY_EXTINGUISHED``; cessation is only
     considered when nothing direct exists, and produces a dated *context* rather
     than a dated conclusion.
+
+    **A confirming filing only dates an exit if the registrant stopped reporting
+    afterwards.** Filings the registrant kept reporting past are superseded and
+    may not supply the date; if every one of them is superseded, the registrant
+    has not exited on this evidence and no date is offered at all.
     """
     confirming = [
         e
@@ -175,11 +240,45 @@ def resolve_exit(
         if e.evidence_type is not None and e.evidence_type in _CONFIRMING
     ]
     periodic = timeline.periodic_dates
+    last_periodic = max(periodic) if periodic else None
 
     if confirming:
         confirming.sort(key=lambda e: e.evidence_date)
-        primary = confirming[0]
+        superseded, standing = _partition_superseded(confirming, last_periodic)
+        # Scopes come from *all* confirming filings, superseded included. A
+        # superseded Form 25 still removed a listing; what it does not do is
+        # date the registrant's exit. Dropping it from the scope set would
+        # discard evidence to fix a dating bug.
         scopes = frozenset(e.scope for e in confirming if e.scope is not None)
+
+        if not standing:
+            # Every confirming filing precedes the registrant's own last
+            # periodic report. This is INTEL CORP: a Form 15 in 1994 and 10-Ks
+            # ever since. The filings are real and something ended -- the index
+            # names no security class, so it cannot say what -- but the
+            # registrant plainly did not exit, and picking a "better" date here
+            # would still be picking a date for an event that did not happen.
+            return ExitResolution(
+                cik=timeline.cik,
+                company_name=timeline.company_name,
+                evidence_type=EvidenceType.NON_EXIT_REGISTRANT_STILL_REPORTING,
+                # Derived by combining the confirming filings with the periodic
+                # reports that outlive them; no single form says this.
+                strength=EvidenceStrength.FORM_INFERRED,
+                scopes=scopes,
+                evidence_date=None,
+                effective_date=None,
+                supporting=(),
+                last_periodic=last_periodic,
+                superseded=superseded,
+                note=(
+                    f"{len(superseded)} confirming filing(s) through "
+                    f"{superseded[-1].evidence_date.isoformat()}, all superseded by a "
+                    f"periodic report on {last_periodic.isoformat() if last_periodic else '?'}; "
+                    "a class-scope event, not a registrant exit -- no date is claimed"
+                ),
+            )
+
         distinct_types = {e.evidence_type for e in confirming}
         # Extinguishment is a derived claim: it needs the listing to have ended
         # AND the registration to have been terminated. One alone does not do it,
@@ -195,15 +294,36 @@ def resolve_exit(
                 evidence_type=EvidenceType.CONFIRMED_SECURITY_EXTINGUISHED,
                 strength=EvidenceStrength.FORM_INFERRED,
                 scopes=scopes,
-                evidence_date=confirming[-1].evidence_date,
+                # The *latest* standing filing, and here that is a decision
+                # rather than the oversight it once looked like: the conjunction
+                # this claim rests on does not exist until its later half is
+                # filed, so an earlier date would assert the derived event
+                # before its own evidence was complete.
+                evidence_date=standing[-1].evidence_date,
                 effective_date=None,
                 supporting=tuple(confirming),
-                last_periodic=max(periodic) if periodic else None,
+                last_periodic=last_periodic,
+                superseded=superseded,
                 note=(
                     "derived from delisting AND registration termination; "
                     "no single filing asserts extinguishment"
+                    + (
+                        f"; dated from the latest of {len(standing)} standing filing(s), "
+                        f"{len(superseded)} superseded"
+                        if superseded
+                        else ""
+                    )
                 ),
             )
+        # The *earliest standing* filing: the first direct evidence of an exit
+        # that the registrant's own later reporting does not contradict.
+        # Earliest rather than latest, so that every registrant whose filings
+        # were already consistent keeps the date it already had -- a later
+        # confirming filing is usually the administrative tail of the same exit,
+        # and re-dating all of them would be a far wider change than this defect
+        # calls for. The measured split is in EDGAR_DELISTING_DENOMINATOR.md
+        # §7bc; it is not restated here, where it would rot.
+        primary = standing[0]
         assert primary.evidence_type is not None
         return ExitResolution(
             cik=timeline.cik,
@@ -214,8 +334,17 @@ def resolve_exit(
             evidence_date=primary.evidence_date,
             effective_date=primary.effective_date,
             supporting=tuple(confirming),
-            last_periodic=max(periodic) if periodic else None,
-            note=primary.note,
+            last_periodic=last_periodic,
+            superseded=superseded,
+            note=(
+                primary.note
+                + (
+                    f"; dated from the earliest of {len(standing)} standing filing(s), "
+                    f"{len(superseded)} superseded by later periodic reporting"
+                    if superseded
+                    else ""
+                )
+            ),
         )
 
     if periodic:
@@ -248,7 +377,7 @@ def resolve_exit(
         evidence_date=None,
         effective_date=None,
         supporting=(),
-        last_periodic=max(periodic) if periodic else None,
+        last_periodic=last_periodic,
         note="still filing, or no evidence either way",
     )
 
@@ -270,4 +399,36 @@ def assert_cessation_undated(resolutions: Sequence[ExitResolution]) -> None:
         raise DataError(
             "filing cessation assigned a lifecycle date for CIKs "
             f"{sorted(offenders)[:10]}; cessation is a candidate signal, not a death date"
+        )
+
+
+def assert_exit_not_contradicted(resolutions: Sequence[ExitResolution]) -> None:
+    """Guard: no resolution may date an exit before its own last periodic report.
+
+    The companion to :func:`assert_cessation_undated`, and it exists for the
+    same reason: the rule had been stated in prose, nothing checked it, and the
+    first run against the real archive produced 12,549 registrants -- 30.7% of
+    all dated exits -- whose exit date preceded a periodic report they had
+    themselves filed. ``INTEL CORP`` was dated 1994 while still filing in 2026.
+
+    A registrant cannot report after it has exited. This is therefore not a
+    tolerance to be tuned but a contradiction in the record, and the denominator
+    refuses to publish one. Raises :class:`~tradeit.errors.DataError` naming
+    every offender.
+    """
+    offenders = [r for r in resolutions if r.contradicts_its_own_evidence]
+    if offenders:
+        worst = max(
+            offenders,
+            key=lambda r: (
+                r.last_periodic - r.evidence_date
+                if r.last_periodic and r.evidence_date
+                else dt.timedelta(0)
+            ),
+        )
+        raise DataError(
+            f"{len(offenders)} exit(s) dated before the registrant's own last periodic "
+            f"report, e.g. CIK {worst.cik} ({worst.company_name}) dated "
+            f"{worst.evidence_date} with a periodic report on {worst.last_periodic}; "
+            "a registrant that reports after its exit date has not exited"
         )

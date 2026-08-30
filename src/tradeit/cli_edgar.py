@@ -113,6 +113,24 @@ def cmd_denominator(args: argparse.Namespace) -> int:
         print(f"  {key:42s} {value:>9,}")
     print(f"\nundated exits (no year assignable): {report['undated_exits']:,}")
     print("  cessation candidates carry no date by construction")
+    print(
+        f"\nnon-exits (registrant still reporting): "
+        f"{report['non_exits_registrant_still_reporting']:,}"
+    )
+    print(
+        "  a confirming filing exists and the registrant filed a periodic report\n"
+        "  after it, so it did not exit; deliberately NOT counted as an undated\n"
+        "  exit, because that would still be claiming an exit"
+    )
+    sup = report["superseded_evidence"]
+    print(
+        f"\nsuperseded confirming filings: {sup['superseded_filings']:,} across "
+        f"{sup['resolutions_with_superseded_evidence']:,} registrants"
+    )
+    print(
+        f"  {sup['still_dated_from_a_standing_filing']:,} of those registrants keep a "
+        "dated exit, taken from a\n  filing their own later reporting does not contradict"
+    )
     print("\nconfirmed terminations by year")
     for year, value in report["counts_by_year_confirmed"].items():
         print(f"  {year}  {value:>9,}")

@@ -71,6 +71,7 @@ from tradeit.edgar.index import (
 from tradeit.edgar.lifecycle import (
     ExitResolution,
     assert_cessation_undated,
+    assert_exit_not_contradicted,
     build_timelines,
     resolve_exit,
 )
@@ -682,6 +683,240 @@ def test_extinguishment_is_derived_from_two_scopes_never_one() -> None:
     assert resolution.scopes == frozenset(
         {LifecycleScope.EXCHANGE_LISTING, LifecycleScope.SEC_REPORTING}
     )
+
+
+# ---------------------------------------------------------------------------
+# lifecycle: supersession -- a registrant that kept reporting did not exit
+#
+# Every test below fails against the pre-2026-08-29 `resolve_exit`, which took
+# `confirming[0]` unconditionally. They are written against the shapes the first
+# real run produced, not against invented ones.
+# ---------------------------------------------------------------------------
+
+
+def test_intel_shape_gets_no_exit_date_at_all() -> None:
+    """The measured defect, reduced to its smallest form.
+
+    ``INTEL CORP`` was recorded as exiting 1994-08-02 while still filing in
+    2026. A Form 15 deregisters *a class*; the registrant went on reporting for
+    three decades. The honest answer is not a better date, it is no date.
+    """
+    timeline = build_timelines(
+        [
+            _ev(50863, "10-K", dt.date(1994, 3, 1)),
+            _ev(50863, "15-12G", dt.date(1994, 8, 2)),
+            _ev(50863, "10-K", dt.date(2000, 3, 1)),
+            _ev(50863, "10-K", dt.date(2026, 1, 26)),
+        ]
+    )[50863]
+    resolution = resolve_exit(timeline, as_of=dt.date(2026, 8, 29))
+
+    assert resolution.evidence_type is EvidenceType.NON_EXIT_REGISTRANT_STILL_REPORTING
+    assert resolution.evidence_date is None
+    assert resolution.effective_date is None
+    assert resolution.is_confirmed is False
+    # The filing is not discarded -- it is recorded as superseded, so a reader
+    # can see what was refused and why.
+    assert [e.form_type for e in resolution.superseded] == ["15-12G"]
+    assert resolution.last_periodic == dt.date(2026, 1, 26)
+    assert resolution.contradicts_its_own_evidence is False
+
+
+def test_a_still_reporting_registrant_is_absent_from_every_per_year_count() -> None:
+    """The defect's actual consequence: a phantom termination in 1994."""
+    timelines = build_timelines(
+        [
+            _ev(50863, "10-K", dt.date(1994, 3, 1)),
+            _ev(50863, "15-12G", dt.date(1994, 8, 2)),
+            _ev(50863, "10-K", dt.date(2026, 1, 26)),
+        ]
+    )
+    denominator = Denominator(
+        resolutions=[resolve_exit(t, as_of=dt.date(2026, 8, 29)) for t in timelines.values()],
+        timelines=timelines,
+    )
+    assert denominator.counts_by_year() == {}
+    assert denominator.non_exits() == 1
+    # And it must NOT be laundered into the undated-exit population, which is a
+    # count of exits we believe happened.
+    assert denominator.undated_exits() == 0
+    assert denominator.superseded_evidence_counts() == {
+        "resolutions_with_superseded_evidence": 1,
+        "superseded_filings": 1,
+        "still_dated_from_a_standing_filing": 0,
+    }
+
+
+def test_a_superseded_filing_does_not_veto_a_later_standing_one() -> None:
+    """Supersession disqualifies a filing from dating the exit; it is not a veto.
+
+    One registered class deregistered in 1994, thirteen more years of 10-Ks,
+    then the registrant deregisters for good. It did exit -- in 2009, on
+    evidence nothing contradicts -- and the 1994 filing is neither the date nor
+    a reason to refuse one. Both filings are the same evidence type, so this
+    stays clear of the extinguishment conjunction, which is tested separately.
+    """
+    timeline = build_timelines(
+        [
+            _ev(20, "10-K", dt.date(1994, 3, 1)),
+            _ev(20, "15-12G", dt.date(1994, 8, 2)),
+            _ev(20, "10-K", dt.date(2007, 3, 1)),
+            _ev(20, "15-12G", dt.date(2009, 6, 15)),
+        ]
+    )[20]
+    resolution = resolve_exit(timeline, as_of=dt.date(2020, 1, 1))
+
+    assert resolution.evidence_type is EvidenceType.CONFIRMED_REGISTRATION_TERMINATION
+    assert resolution.evidence_date == dt.date(2009, 6, 15)
+    assert [e.evidence_date for e in resolution.superseded] == [dt.date(1994, 8, 2)]
+    # The superseded filing stays in the record at its own scope.
+    assert resolution.scopes == frozenset({LifecycleScope.SEC_REPORTING})
+    assert resolution.contradicts_its_own_evidence is False
+
+
+def test_an_ordinary_exit_keeps_its_earliest_date() -> None:
+    """The 20,813 already-correct rows must not move.
+
+    Every confirming filing post-dates the last periodic report, so nothing is
+    superseded and the earliest one still supplies the date. A fix that re-dated
+    these to the latest filing would be a far wider change than the defect.
+    """
+    timeline = build_timelines(
+        [
+            _ev(21, "10-K", dt.date(2000, 3, 1)),
+            _ev(21, "15-12G", dt.date(2001, 2, 14)),
+            _ev(21, "15-12G", dt.date(2001, 9, 30)),
+        ]
+    )[21]
+    resolution = resolve_exit(timeline, as_of=dt.date(2010, 1, 1))
+    assert resolution.evidence_date == dt.date(2001, 2, 14)
+    assert resolution.superseded == ()
+
+
+def test_same_day_periodic_and_confirming_filing_is_an_exit_not_a_contradiction() -> None:
+    """The boundary is strict: same-day is not "after".
+
+    A registrant filing its last 10-K and its Form 25 on one day is an ordinary
+    exit. Treating that as a contradiction would manufacture one.
+    """
+    timeline = build_timelines(
+        [
+            _ev(22, "10-K", dt.date(2011, 4, 4)),
+            _ev(22, "25", dt.date(2011, 4, 4)),
+        ]
+    )[22]
+    resolution = resolve_exit(timeline, as_of=dt.date(2020, 1, 1))
+    assert resolution.evidence_type is EvidenceType.CONFIRMED_EXCHANGE_DELISTING
+    assert resolution.evidence_date == dt.date(2011, 4, 4)
+    assert resolution.superseded == ()
+    assert resolution.contradicts_its_own_evidence is False
+
+
+def test_extinguishment_is_dated_from_the_latest_standing_filing() -> None:
+    """The `confirming[-1]` that looked like an oversight, now stated as a decision.
+
+    The derived claim needs both halves, so it cannot be dated before its later
+    half exists -- and a superseded half may not supply that date either.
+    """
+    timeline = build_timelines(
+        [
+            _ev(23, "10-K", dt.date(2012, 3, 1)),
+            _ev(23, "25", dt.date(2013, 5, 3)),
+            _ev(23, "15-12B", dt.date(2013, 8, 20)),
+        ]
+    )[23]
+    resolution = resolve_exit(timeline, as_of=dt.date(2020, 1, 1))
+    assert resolution.evidence_type is EvidenceType.CONFIRMED_SECURITY_EXTINGUISHED
+    assert resolution.evidence_date == dt.date(2013, 8, 20)
+    assert resolution.contradicts_its_own_evidence is False
+
+
+def test_extinguishment_with_a_superseded_half_is_dated_from_the_standing_half() -> None:
+    """A delisting can precede more reporting -- §2.4 says so explicitly.
+
+    "An issuer can be delisted and continue to file." So the 2005 Form 25 is
+    real evidence and the conjunction still holds; what it may not do is supply
+    a date the registrant's 2011 10-K contradicts.
+    """
+    timeline = build_timelines(
+        [
+            _ev(24, "25", dt.date(2005, 6, 1)),
+            _ev(24, "10-K", dt.date(2011, 3, 1)),
+            _ev(24, "15-12B", dt.date(2012, 1, 10)),
+        ]
+    )[24]
+    resolution = resolve_exit(timeline, as_of=dt.date(2020, 1, 1))
+    assert resolution.evidence_type is EvidenceType.CONFIRMED_SECURITY_EXTINGUISHED
+    assert resolution.evidence_date == dt.date(2012, 1, 10)
+    assert [e.form_type for e in resolution.superseded] == ["25"]
+    assert resolution.contradicts_its_own_evidence is False
+
+
+def test_a_registrant_that_never_filed_a_periodic_report_is_unaffected() -> None:
+    """No periodic reports means nothing can supersede anything."""
+    timeline = build_timelines([_ev(25, "25", dt.date(2010, 5, 3))])[25]
+    resolution = resolve_exit(timeline, as_of=dt.date(2020, 1, 1))
+    assert resolution.evidence_type is EvidenceType.CONFIRMED_EXCHANGE_DELISTING
+    assert resolution.evidence_date == dt.date(2010, 5, 3)
+    assert resolution.last_periodic is None
+    assert resolution.superseded == ()
+
+
+def test_guard_catches_an_exit_dated_before_its_own_last_periodic_report() -> None:
+    """The companion to the cessation guard, and the one that was missing.
+
+    This is exactly the shape 12,549 registrants had on 2026-08-29.
+    """
+    bad = ExitResolution(
+        cik=50863,
+        company_name="INTEL CORP",
+        evidence_type=EvidenceType.CONFIRMED_REGISTRATION_TERMINATION,
+        strength=EvidenceStrength.FORM_DIRECT,
+        scopes=frozenset({LifecycleScope.SEC_REPORTING}),
+        evidence_date=dt.date(1994, 8, 2),
+        effective_date=None,
+        supporting=(),
+        last_periodic=dt.date(2026, 1, 26),
+    )
+    assert bad.contradicts_its_own_evidence is True
+    with pytest.raises(DataError, match="has not exited"):
+        assert_exit_not_contradicted([bad])
+
+
+def test_guard_also_catches_a_contradicted_effective_date() -> None:
+    """``effective_date`` is always None from the index today. The guard covers
+    it anyway, because the document-parsing pass that will populate it is the
+    obvious place for this defect to reappear in a new form."""
+    bad = ExitResolution(
+        cik=26,
+        company_name="X",
+        evidence_type=EvidenceType.CONFIRMED_EXCHANGE_DELISTING,
+        strength=EvidenceStrength.FORM_DIRECT,
+        scopes=frozenset(),
+        evidence_date=None,
+        effective_date=dt.date(1999, 1, 1),
+        supporting=(),
+        last_periodic=dt.date(2005, 1, 1),
+    )
+    with pytest.raises(DataError, match="has not exited"):
+        assert_exit_not_contradicted([bad])
+
+
+def test_denominator_refuses_to_be_built_from_a_contradicted_exit() -> None:
+    """The rule is structural: the report cannot be produced at all."""
+    bad = ExitResolution(
+        cik=50863,
+        company_name="INTEL CORP",
+        evidence_type=EvidenceType.CONFIRMED_REGISTRATION_TERMINATION,
+        strength=EvidenceStrength.FORM_DIRECT,
+        scopes=frozenset(),
+        evidence_date=dt.date(1994, 8, 2),
+        effective_date=None,
+        supporting=(),
+        last_periodic=dt.date(2026, 1, 26),
+    )
+    with pytest.raises(DataError, match="has not exited"):
+        Denominator(resolutions=[bad])
 
 
 def test_guard_catches_a_dated_cessation() -> None:

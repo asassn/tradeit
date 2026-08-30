@@ -34,7 +34,12 @@ from enum import StrEnum
 
 from tradeit.edgar.evidence import EvidenceStrength, EvidenceType, LifecycleScope
 from tradeit.edgar.identity import MappingStatus, SecurityMapping
-from tradeit.edgar.lifecycle import ExitResolution, IssuerTimeline, assert_cessation_undated
+from tradeit.edgar.lifecycle import (
+    ExitResolution,
+    IssuerTimeline,
+    assert_cessation_undated,
+    assert_exit_not_contradicted,
+)
 
 __all__ = [
     "LIFESPAN_BUCKETS",
@@ -108,8 +113,10 @@ class CoverageBounds:
 class Denominator:
     """Aggregated lifecycle conclusions, sliced the ways the probe needs.
 
-    Construction runs :func:`assert_cessation_undated`, so a denominator that
-    dated a cessation cannot be built at all.
+    Construction runs :func:`assert_cessation_undated` **and**
+    :func:`assert_exit_not_contradicted`, so neither a denominator that dated a
+    cessation nor one that dated an exit before the registrant's own last
+    periodic report can be built at all.
     """
 
     resolutions: list[ExitResolution]
@@ -119,6 +126,7 @@ class Denominator:
 
     def __post_init__(self) -> None:
         assert_cessation_undated(self.resolutions)
+        assert_exit_not_contradicted(self.resolutions)
 
     # -- counts ------------------------------------------------------------
 
@@ -160,13 +168,45 @@ class Denominator:
         return dict(sorted(counts.items()))
 
     def undated_exits(self) -> int:
-        """Exits we believe happened but cannot place in time."""
+        """Exits we believe happened but cannot place in time.
+
+        ``NON_EXIT_REGISTRANT_STILL_REPORTING`` is deliberately **not** counted
+        here. Folding it in would have been the easy way to make the totals
+        reconcile after the supersession fix, and it would have preserved the
+        original error in a quieter form: these are registrants we believe did
+        *not* exit, so counting them among exits-we-cannot-date would still be
+        claiming an exit. :meth:`non_exits` reports them separately.
+        """
         return sum(
             1
             for r in self.resolutions
             if r.evidence_type
             in {EvidenceType.POSSIBLE_EXIT_FILING_CESSATION, EvidenceType.UNRESOLVED_EXIT}
         )
+
+    def non_exits(self) -> int:
+        """Registrants with confirming filings that went on reporting anyway."""
+        return sum(
+            1
+            for r in self.resolutions
+            if r.evidence_type is EvidenceType.NON_EXIT_REGISTRANT_STILL_REPORTING
+        )
+
+    def superseded_evidence_counts(self) -> dict[str, int]:
+        """How far supersession reached, so the fix is measurable rather than asserted.
+
+        ``resolutions_with_superseded_evidence`` includes the confirmed exits
+        that kept a date from a *standing* filing, which :meth:`non_exits` does
+        not -- the two answer different questions and are reported together.
+        """
+        touched = [r for r in self.resolutions if r.superseded]
+        return {
+            "resolutions_with_superseded_evidence": len(touched),
+            "superseded_filings": sum(len(r.superseded) for r in touched),
+            "still_dated_from_a_standing_filing": sum(
+                1 for r in touched if r.evidence_date is not None
+            ),
+        }
 
     def mapping_counts(self) -> dict[str, int]:
         counts = {str(status): 0 for status in MappingStatus}
@@ -287,6 +327,8 @@ class Denominator:
             "counts_by_scope": self.counts_by_scope(),
             "counts_by_year_confirmed": self.counts_by_year(),
             "undated_exits": self.undated_exits(),
+            "non_exits_registrant_still_reporting": self.non_exits(),
+            "superseded_evidence": self.superseded_evidence_counts(),
             "mapping_counts": self.mapping_counts(),
             "supplied_mappings": self.supplied_mapping_reach(),
             "lifespan_buckets": self.lifespan_buckets(),
