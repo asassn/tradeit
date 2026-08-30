@@ -126,9 +126,59 @@ it. Two questions were added ahead of the vendor-neutral set:
   measurement ourselves*. A vendor's assurance was never admissible evidence
   here; now it does not need to be.
 
-**Question 1 remains unanswered by anybody** — whether "delisted" means the
-delisted names actually are included, or only currently active ones. It has
-outlived three vendors.
+### Question 1 — answered **in part**, and two earlier gradings corrected
+
+**EODHD answered question 1 on 2026-08-29, and the reply splits it in two.**
+Verbatim, from EOD Level 1 (`supportlevel1@eodhistoricaldata.com`):
+
+> "We do provide historical EOD data for active and delisted securities, along with separate dividends and splits endpoints. However, support cannot certify that the complete active and delisted US universe, every security from 1998 onward, all delisting reasons, or every lifecycle event will be present without a requirements review and commercial coverage assessment."
+
+| half of question 1 | grade | |
+|---|---|---|
+| **existence** — is delisted EOD data provided at all? | **`VENDOR-STATED`** | **yes**, with separate dividends and splits endpoints |
+| **completeness** — the full US universe, from 1998, all reasons, every lifecycle event? | **not certified** | the vendor explicitly declines, absent a requirements review and commercial coverage assessment |
+
+**Two earlier gradings of this same reply were wrong, in opposite directions, and
+both are corrected here rather than quietly replaced.**
+
+| where | said | why it was wrong |
+|---|---|---|
+| this document, before this revision | *"Question 1 remains unanswered by anybody… it has outlived three vendors"* | too strict. The existence half **was** answered, in writing, and treating a partial answer as none discards a real result |
+| the first attempt at a reply register | question 1 `VERIFIED` | too generous. `VERIFIED` means answered specifically, and the completeness half was expressly **not** — grading the whole question off its easier half is how an unverified claim acquires a tick |
+
+**Neither reading survives the verbatim text**, which is the argument for the
+rule the register already carries: quote it verbatim or not at all. Both
+gradings came from paraphrase.
+
+> **The falsified-prediction convention applies to us, not only to the curve.**
+> `EDGAR_DELISTING_DENOMINATOR.md` records three predictions it made and then
+> disproved, on the grounds that a wrong statement left visible is cheaper than
+> one silently corrected. Two wrong gradings of a vendor reply are the same
+> class of error and are recorded the same way.
+
+**A note on provenance.** The reply answers the **original** send, not the
+follow-up: it still responds to Q23/Q24, which the follow-up had withdrawn. It
+therefore predates, and is unaffected by, the reframe described above.
+
+### The vendor declined to certify completeness *before* we asked it not to
+
+The reframe — stop asking a vendor to certify completeness, ask only for the
+cheapest access that lets us measure it — was sent **after** this reply was
+written. So the vendor's refusal is not a response to our reframe; it arrived
+independently.
+
+**That is corroboration rather than coincidence.** The reframe was argued from
+our side (0a builds the benchmark, so an assurance is not admissible evidence);
+the vendor reached the same boundary from its side, and declines to assert
+precisely what we had decided not to rely on. Two parties independently locating
+the same line is the strongest available evidence that the line is real.
+
+**It also sharpens what we must not over-claim.** `EDGAR_DELISTING_DENOMINATOR.md`
+§7be measures that our own benchmark holds **no exchange-listing evidence before
+2006** — `25-NSE` does not appear once until then. So for 1998–2002 neither party
+can currently speak to completeness: the vendor will not certify it, and our
+instrument cannot yet measure it. **The reframe asks for the right thing and does
+not by itself close that window.**
 
 ---
 
@@ -144,7 +194,7 @@ are not a criterion and no row records them.
 | # | criterion | **Kibot** | **Sharadar** | **EODHD** | **Polygon / Massive** | **Twelve Data** |
 |---|---|---|---|---|---|---|
 | 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | "from January 2000" vs "30+ years" — CORROBORATED, internally inconsistent. **Asked directly; unanswered. This decides EODHD** (§1.3) | not established | "back to the first trading date" — CORROBORATED |
-| 2 | active **and** delisted | **active + delisted rosters, and a delisted-only roster — USER-VERIFIED (vendor claim); completeness UNTESTED** | yes — CORROBORATED | yes — CORROBORATED | **"spotty at best" — CORROBORATED** | not established |
+| 2 | active **and** delisted | **active + delisted rosters, and a delisted-only roster — USER-VERIFIED (vendor claim); completeness UNTESTED** | yes — CORROBORATED | **existence YES — VENDOR-STATED in writing 2026-08-29, with separate dividends and splits endpoints. Completeness for the 1998+ US universe EXPLICITLY NOT CERTIFIED absent a paid requirements review (§1.3)** | **"spotty at best" — CORROBORATED** | not established |
 | 3 | delisted history truly downloadable | **UNTESTED — probe item A** | claimed — CORROBORATED | claimed — CORROBORATED | doubtful | unknown |
 | 4 | permanent identifier | **UNTESTED — probe item D. Expect none; expect ticker-keyed files** | `permaticker` — UNVERIFIED | not established | not established | not established |
 | 5 | raw / unadjusted prices | **unadjusted, split-adjusted and fully-adjusted equity data — USER-VERIFIED (vendor claim); methodology UNTESTED — probe item E** | yes, three bases — CORROBORATED | not established | flat files — CORROBORATED | in use for `full-01` |

@@ -1034,13 +1034,41 @@ the 2002 or 2023 boundaries; or be used to evaluate a vendor's 1998–2002
 delisted-price coverage — **the window `research-01` exists to reconstruct is
 precisely the window in which this instrument cannot see delistings at all.**
 
-That last point lands directly on milestone 0c. EODHD declines to certify
-complete 1998+ coverage without a paid review
-([`VENDOR_QUESTIONS_READY_TO_SEND.md`](VENDOR_QUESTIONS_READY_TO_SEND.md) §2),
-and the plan's answer has been that we would measure it ourselves rather than buy
-the assurance. **For 1998–2002 we currently cannot**, and closing that gap needs
-the document-parsing pass (§7b limitation 1) or a non-EDGAR listing source — not
-another vendor question.
+### The consequence for milestone 0c, which is sharper than it first looks
+
+That last point lands directly on 0c, and the vendor correspondence lands on it
+from the other side.
+
+EODHD stated in writing on 2026-08-29 that it provides EOD data for active **and
+delisted** securities, while **expressly declining to certify** that the complete
+US universe, every security from 1998 onward, all delisting reasons or every
+lifecycle event is present, absent a paid requirements review
+([`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) §1.3, verbatim).
+
+**The refusal predates our asking for it.** The reframe — stop asking a vendor to
+certify completeness, ask only for the cheapest access that lets us measure it —
+was sent *after* that reply was written. Two parties reached the same boundary
+independently, which is corroboration that the boundary is real rather than a
+negotiating posture.
+
+**But the reframe rests on an assumption this section has just qualified.** It
+works because 0a built an instrument that measures completeness for us. Measured
+above, that instrument holds **no exchange-listing evidence before 2006** —
+`25-NSE` does not appear once until then, and 1994–2001 is 100% Form 15.
+
+So for **1998–2002**, the window `research-01` exists to reconstruct:
+
+| | can it speak to delisted completeness there? |
+|---|---|
+| the vendor | **no** — declines to certify without a paid review |
+| our denominator | **no** — holds no delisting evidence for those years |
+
+**Neither party can currently answer the question that matters most, and the
+reframe does not change that** — it correctly stops us paying for an assurance,
+and it does not conjure the measurement it substitutes. Closing this needs the
+document-parsing pass (§7b limitation 1) or a non-EDGAR listing source. **It does
+not need another vendor question**, and asking one would produce an answer we
+still could not check.
 
 ## 7c. The parser-integrity gate, and one anomaly left open
 
