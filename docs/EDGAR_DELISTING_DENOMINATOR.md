@@ -882,6 +882,166 @@ a third instance of the same omission and is left for the same decision.
 Nothing in §7bb or §7bc is affected: both sides of every before/after comparison
 there used `--end 2026Q2`, so the deltas hold whichever way this is decided.
 
+## 7be. READING THE CORRECTED CURVE, 2026-08-30
+
+§7bc corrected the dating rule and said the curve still had to be read. This is
+that reading. Everything here is measured over the same `--end 2026Q2` range.
+
+### The finding: this is not one measurement, and its meaning changes along its own x-axis
+
+The per-year total hides the only thing that matters about it — **which
+lifecycle each year's exits belong to.**
+
+| year | total | reg. termination | delisting | extinguished | listing-lifecycle share |
+|---|---|---|---|---|---|
+| 1994 | 30 | 30 | 0 | 0 | **0.0%** |
+| 1997 | 714 | 714 | 0 | 0 | **0.0%** |
+| 1999 | 1,111 | 1,111 | 0 | 0 | **0.0%** |
+| 2000 | 1,034 | 1,034 | 0 | 0 | **0.0%** |
+| 2001 | 1,044 | 1,040 | 1 | 3 | 0.4% |
+| 2002 | 1,208 | 1,079 | 58 | 71 | 10.7% |
+| 2005 | 1,393 | 1,251 | 51 | 91 | 10.2% |
+| 2007 | 1,417 | 794 | 128 | 495 | 44.0% |
+| 2012 | 1,518 | 1,071 | 163 | 284 | 29.4% |
+| 2016 | 1,015 | 575 | 104 | 336 | 43.3% |
+| 2020 | 560 | 234 | 64 | 262 | 58.2% |
+| 2023 | 885 | 239 | 116 | 530 | **73.0%** |
+| 2026 | 429 | 129 | 113 | 187 | 69.9% |
+
+**From 1994 to 2001 the curve contains no exchange-listing evidence whatsoever** —
+not "few", zero, with a single delisting in 2001. Every exit in those years is a
+Form 15: a *reporting* exit. By 2023 nearly three quarters of each year is
+listing-lifecycle evidence.
+
+So the y-axis is not one quantity. **A 1999 count and a 2023 count are different
+measurements wearing the same units**, and any statement of the form "exits fell
+from X to Y" across that boundary is comparing a Form 15 count to something
+mostly made of Form 25s.
+
+### This is §2.1b and §2.2 arriving as data rather than as a caveat
+
+The document predicted the mechanism and did not predict its severity.
+`ELECTRONIC_FORM_25_FROM` is 2005-04-24, and Nasdaq issuers of the era would not
+file a Form 25 at all (§2.1b). Measured, by the form that actually supplied each
+exit date:
+
+| | 1994–2001 | 2006–2012 | 2023–2026 |
+|---|---|---|---|
+| `25-NSE` | **0** | 730 | 501 |
+| `25` | 2 | 201 | 37 |
+
+`25-NSE` — the exchange-filed notification that is the *bulk* of all listing
+evidence in this corpus (32,482 filings, more than any other exit form) — **does
+not appear even once before 2006.**
+
+### What this does to the two falsified predictions of §7bb
+
+**Prediction 1 stays falsified, and now has a cause.** "2000–2002 and 2008–2009
+will show visible bulges." They still do not: 2000 is 1,034 and 2001 is 1,044
+against 1,111 in 1999, and 2008–2009 (1,026 / 962) sit *below* 2002 (1,208).
+Correcting the dating defect did not resurrect them.
+
+**But the reason is now identifiable, and it is instrumental rather than
+historical.** A dot-com *delisting* wave could not appear in this curve however
+large it was, because the corpus holds no delisting evidence for those years. The
+prediction was not merely wrong; it asked the data a question the data cannot
+answer. **The absence of a dot-com bulge is evidence about the instrument, not
+about 1999–2002.**
+
+### The 2012 peak, previously unexplained
+
+§7bb left it open. It is **a Form 15-15D event and nothing else**:
+
+| | 2011 | **2012** | 2013 |
+|---|---|---|---|
+| dated by `15-15D` | 284 | **835** | 295 |
+| dated by everything else | 621 | 683 | 629 |
+| total | 905 | **1,518** | 924 |
+
+Every other form is flat. The entire excess is suspensions of the duty to file
+under Section 15(d).
+
+> *Hypothesis, not a finding.* The JOBS Act of April 2012 raised the holder
+> thresholds at which a registrant may suspend reporting. A one-year wave of
+> 15-15D filings by newly-eligible registrants would produce exactly this shape.
+> **What would falsify it:** the 2012 excess should be concentrated after April
+> 2012 rather than spread across the year, and should skew toward small
+> registrants and banks. Neither has been measured.
+
+### The §7bb hypothesis, tested: half of it is wrong
+
+§7bb offered the electronic-Form-25 mechanism for the 2005–2007 artefact and
+wrote its falsification test in advance — "the superseded population should be
+disproportionately Form 25 rather than Form 15, and disproportionately post-2005
+in filing date." Both limbs are now measured over all 22,776 superseded filings.
+
+| limb | prediction | measured | verdict |
+|---|---|---|---|
+| timing | skews post-2005 | 75.6% filed 2005+, peaking 2006–2007 | **holds** |
+| form | skews Form 25 | Form 25 family **39.6%**, Form 15 family **60.4%** | **FALSIFIED** |
+
+The single largest contributor is **`15-15D` at 45.8%** — 10,424 filings — more
+than both Form 25 variants combined.
+
+**This is the third prediction this document has recorded and then falsified, and
+the first that was written by the party proposing the fix.** It is left standing
+rather than quietly restated, on the same reasoning as the other two.
+
+> *Replacement candidate, unmeasured.* `15-15D` suspends a **Section 15(d)**
+> obligation arising from a registered offering. A registrant that is also listed
+> under 12(b) keeps reporting on that separate obligation, so a 15-15D followed
+> by years of further 10-Ks is not anomalous but *routine* — which would make it
+> the natural dominant source of superseded filings. **What would falsify it:**
+> registrants whose superseding filing is a 15-15D should disproportionately hold
+> a 12(b) registration (an `8-A12B` birth) at the time of filing. Not measured.
+
+### Two anomalies found while reading, both left open
+
+**1. `15-12B` stops existing after 2022.** Verified against the raw index rather
+than inferred from the pipeline:
+
+| | 2021 | 2022 | 2023 | 2024 | 2025 |
+|---|---|---|---|---|---|
+| `15-12B` | 312 | 125 | **0** | **0** | **0** |
+| `15-12G` | 139 | 345 | 649 | 469 | 448 |
+| `15-15D` | 328 | 777 | 183 | 130 | 147 |
+
+**No replacement string appears** — the 2023+ indexes contain no new `15*` form
+type. Termination of a 12(b) registration did not cease to happen in 2023, so
+this is a change in the record rather than in the world, and its cause is
+unknown. **The 2023–2026 end of the curve should not be read as comparable to
+2019–2022 until this is explained.**
+
+**2. `15F-15D` is not classified, and that is an inconsistency rather than a
+decision.** `FORM_SIGNALS` carries `15F-12B` and `15F-12G` but not `15F-15D`, the
+foreign private issuer analogue of the single most common exit form in the
+corpus. **184 filings** are silently dropped as `IRRELEVANT`.
+
+By contrast, the amendment forms — `25-NSE/A` (604), `15-12G/A` (446),
+`15-15D/A` (339), `15-12B/A` (111) — are **correctly** excluded: an amendment to
+a Form 25 is not a second delisting, and admitting them would double-count.
+That distinction is why this was read rather than swept.
+
+### What the curve may now be used for, and what it may not
+
+**May:** compare years *within* the 2006–2022 regime, where composition is
+broadly stable; measure reporting exits across the whole span; and serve as the
+denominator against which a vendor's delisted roster is measured **for the years
+in which listing evidence exists**.
+
+**May not:** be read as a delisting curve before 2006; be used to compare across
+the 2002 or 2023 boundaries; or be used to evaluate a vendor's 1998–2002
+delisted-price coverage — **the window `research-01` exists to reconstruct is
+precisely the window in which this instrument cannot see delistings at all.**
+
+That last point lands directly on milestone 0c. EODHD declines to certify
+complete 1998+ coverage without a paid review
+([`VENDOR_QUESTIONS_READY_TO_SEND.md`](VENDOR_QUESTIONS_READY_TO_SEND.md) §2),
+and the plan's answer has been that we would measure it ourselves rather than buy
+the assurance. **For 1998–2002 we currently cannot**, and closing that gap needs
+the document-parsing pass (§7b limitation 1) or a non-EDGAR listing source — not
+another vendor question.
+
 ## 7c. The parser-integrity gate, and one anomaly left open
 
 The denominator's classification consumes exactly three fields per row — `cik`,
