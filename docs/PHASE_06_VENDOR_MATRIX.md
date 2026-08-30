@@ -1,6 +1,9 @@
 # Phase 6 — vendor and data-contract verification
 
-**Nothing was purchased. No subscription was taken. No implementation began.**
+**Nothing was purchased. No subscription was taken.** Implementation *has* begun:
+milestone 2 landed the `research-01` schema (`DATA_MODEL.md` Domain 9). No vendor
+data has been acquired, which is the claim this line was making and the one that
+still holds.
 
 ## 0. Verification conditions — read this first
 
@@ -75,7 +78,7 @@ to; only the vendor it names is out, and only on price.
 |---|---|---|
 | **Kibot** | eliminated | price — $990–$2,400 for the archive, out of budget |
 | **Sharadar** | **candidate, unprobed — questions sent, no reply yet** | never capability-tested; its earlier elimination was licence-based and is withdrawn |
-| **EODHD** | **candidate, unprobed — questions sent, replied; published pricing does not apply to us (§1.3)** | capabilities were never in question |
+| **EODHD** | **candidate, sample requested and not received.** Depth answered (US 30+ years), delisted data asserted, no trial exists, published pricing does not apply to us (§1.3) | the disqualifier we thought we had was our own misreading; nothing has yet been *measured* |
 | **Twelve Data** | in use for operating prices; `full-01` was built from it | never capability-probed for archive use |
 | **FMP** | in use for corporate actions and symbol reference | never capability-probed for archive use |
 | **Tiingo** | working acquisition adapter | never capability-probed for archive use |
@@ -102,6 +105,84 @@ been requested and has not been received. The remainder of the reply is **not
 transcribed into this repository**; do not restate it from memory, and quote it
 verbatim if it is ever recorded here.
 
+#### Second reply, 2026-08-30 — depth answered, and EODHD is not disqualified
+
+From Levon V., EOD Level 1, cc Sales. Verbatim:
+
+> "US tickers have 30+ years of historical data available. For EU tickers it is
+> mostly from 2000 onwards, though there may be exceptions. Delisted tickers are
+> also available but need to be checked individually."
+
+**`VENDOR-STATED`. The depth question is answered and EODHD stays a candidate.**
+US history is asserted at 30+ years, which spans 1998–2002.
+
+**The "contradiction" was ours.** Their documentation says *"from January 2000"*
+for **EU** coverage and *"30+ years"* for **US** — two figures for two markets,
+which is not an inconsistency. We read one into it, recorded it as
+`internally inconsistent`, and carried it as a live disqualifier — *"if US
+history really begins in 2000 it cannot span 1998–2002 and EODHD is out
+regardless of price"* — across three emails. Nothing the vendor did caused that.
+
+**"Checked individually" is not a coverage claim** and is not read as one. It
+says a delisted ticker can be looked up, not that any particular one is present,
+which is the completeness question the vendor already declined to certify.
+
+#### There is no trial. The thing we reframed the question to ask for does not exist
+
+`VENDOR-STATED`:
+
+> "we do not provide trials like that… only monthly subscriptions."
+
+The reframe asks for *the least expensive access that lets us measure coverage
+ourselves*. This answers it: **that access is not sold.** A monthly commercial
+subscription, at a price not yet quoted, is the only door.
+
+That is a real finding rather than a dead end, and it is the second time the
+cheap door has turned out not to exist — Kibot's ~$14/month subscription was not
+the archive either. **An advertised entry price is a claim about a different
+customer until a vendor quotes ours.**
+
+#### They offered sample files, unprompted, and we chose the three deliberately
+
+`VENDOR-STATED`, offered free and without being asked:
+
+> "you can provide any 2-3 symbols of your choice, and we will send you the
+> files with data."
+
+**This is better than the trial we asked for**, because a trial would have shown
+us the product and this shows us the *data*. We accepted with **ETYS**, **WBVN**
+and **GM**.
+
+| symbol | why |
+|---|---|
+| `ETYS` | listed 1999, gone 2001. Small and short-lived — the population question 7 is about |
+| `WBVN` | same shape, independently chosen so one absence is not one anecdote |
+| `GM` | **an identity-splice test, and the vendor was not told so** |
+
+**ETYS and WBVN are the measurement we cannot otherwise make.** §7be established
+that our own denominator holds **no exchange-listing evidence before 2006**, so
+for the 1998–2002 window this corpus exists to reconstruct we have no instrument
+of our own. These two files are evidence about exactly the years we are blind in.
+
+**GM's purpose was withheld on purpose, and that must be read correctly when the
+file arrives.** Two unrelated registrants held that ticker across 2009 — CIK
+40730 and CIK 1467858 — and no price series may legitimately run across the
+break. If the returned file shows **one continuous series through mid-2009, the
+vendor has spliced two companies into one price history.** Telling them what we
+were testing would have let the answer be prepared rather than measured.
+
+> **A continuous 2009 series is a FAILURE, not a success.** It will look like
+> complete coverage. This is the exact shape of *never answer by accident*: the
+> expected-looking output is the defect, and anyone reading the file without this
+> note would grade it the wrong way round.
+
+**No large survivor was chosen.** `AAPL` would come back complete from any
+vendor and prove nothing about the only thing in question.
+
+**Status: requested, not received.** Nothing here promotes a capability cell in
+§2a. The assertions are the vendor's; the sample files are the measurement, and
+they have not arrived.
+
 **Two defects in the EODHD send, both ours, both corrected in a follow-up on the
 same thread.** The message as sent carried two questions belonging to Sharadar's
 schema (`permaticker`, the `ACTIONS` table), which are not EODHD concepts; and
@@ -126,7 +207,7 @@ it. Two questions were added ahead of the vendor-neutral set:
   measurement ourselves*. A vendor's assurance was never admissible evidence
   here; now it does not need to be.
 
-### Question 1 — answered **in part**, and two earlier gradings corrected
+### Question 1 — answered **in part**
 
 **EODHD answered question 1 on 2026-08-29, and the reply splits it in two.**
 Verbatim, from EOD Level 1 (`supportlevel1@eodhistoricaldata.com`):
@@ -138,23 +219,31 @@ Verbatim, from EOD Level 1 (`supportlevel1@eodhistoricaldata.com`):
 | **existence** — is delisted EOD data provided at all? | **`VENDOR-STATED`** | **yes**, with separate dividends and splits endpoints |
 | **completeness** — the full US universe, from 1998, all reasons, every lifecycle event? | **not certified** | the vendor explicitly declines, absent a requirements review and commercial coverage assessment |
 
-**Two earlier gradings of this same reply were wrong, in opposite directions, and
-both are corrected here rather than quietly replaced.**
+### Our own errors about this vendor — three, and every one is ours
 
-| where | said | why it was wrong |
+**This is not a vendor-error log.** EODHD has answered every question put to it,
+in writing, within a day. All three entries below are mistakes *we* made reading
+what it said, and they are kept visible on the same reasoning that keeps the
+falsified predictions in `EDGAR_DELISTING_DENOMINATOR.md`: a wrong statement left
+standing is cheaper than one silently corrected.
+
+| # | what we recorded | why it was wrong |
 |---|---|---|
-| this document, before this revision | *"Question 1 remains unanswered by anybody… it has outlived three vendors"* | too strict. The existence half **was** answered, in writing, and treating a partial answer as none discards a real result |
-| the first attempt at a reply register | question 1 `VERIFIED` | too generous. `VERIFIED` means answered specifically, and the completeness half was expressly **not** — grading the whole question off its easier half is how an unverified claim acquires a tick |
+| 1 | *"Question 1 remains unanswered by anybody… it has outlived three vendors"* | **too strict.** The existence half **was** answered in writing, and treating a partial answer as none discards a real result |
+| 2 | question 1 graded `VERIFIED` | **too generous.** `VERIFIED` means answered specifically, and the completeness half was expressly **not**. Grading a question off its easier half is how an unverified claim acquires a tick |
+| 3 | *"from January 2000" vs "30+ years" — internally inconsistent*, carried as a disqualifier: *"if US history really begins in 2000… EODHD is out regardless of price"* | **there was no contradiction.** January 2000 is the **EU** figure and 30+ years is the **US** figure — two markets, two numbers. We invented the inconsistency and held it against the vendor across three emails |
 
-**Neither reading survives the verbatim text**, which is the argument for the
-rule the register already carries: quote it verbatim or not at all. Both
-gradings came from paraphrase.
+**Errors 1 and 2 came from paraphrase**, which is the argument for the rule this
+document already carries: quote it verbatim or not at all. **Error 3 came from
+something worse** — reading two figures as competing answers to one question
+without checking whether they answered the same question. That is the same
+failure the schema work is built to prevent: two things that look alike are not
+therefore one thing.
 
-> **The falsified-prediction convention applies to us, not only to the curve.**
-> `EDGAR_DELISTING_DENOMINATOR.md` records three predictions it made and then
-> disproved, on the grounds that a wrong statement left visible is cheaper than
-> one silently corrected. Two wrong gradings of a vendor reply are the same
-> class of error and are recorded the same way.
+**The pattern worth naming:** all three errors ran *against* the vendor except
+the one that ran for it, and error 3 nearly eliminated a candidate on our own
+misreading. A vendor record that only logs vendor faults would have recorded none
+of this.
 
 **A note on provenance.** The reply answers the **original** send, not the
 follow-up: it still responds to Q23/Q24, which the follow-up had withdrawn. It
@@ -193,7 +282,7 @@ are not a criterion and no row records them.
 
 | # | criterion | **Kibot** | **Sharadar** | **EODHD** | **Polygon / Massive** | **Twelve Data** |
 |---|---|---|---|---|---|---|
-| 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | "from January 2000" vs "30+ years" — CORROBORATED, internally inconsistent. **Asked directly; unanswered. This decides EODHD** (§1.3) | not established | "back to the first trading date" — CORROBORATED |
+| 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | **US: "30+ years" — VENDOR-STATED 2026-08-30, and EODHD is NOT disqualified.** The "January 2000" figure is EU coverage, not US: the documentation was never self-contradictory and we misread it (§1.3). Delisted tickers "need to be checked individually" — untested | not established | "back to the first trading date" — CORROBORATED |
 | 2 | active **and** delisted | **active + delisted rosters, and a delisted-only roster — USER-VERIFIED (vendor claim); completeness UNTESTED** | yes — CORROBORATED | **existence YES — VENDOR-STATED in writing 2026-08-29, with separate dividends and splits endpoints. Completeness for the 1998+ US universe EXPLICITLY NOT CERTIFIED absent a paid requirements review (§1.3)** | **"spotty at best" — CORROBORATED** | not established |
 | 3 | delisted history truly downloadable | **UNTESTED — probe item A** | claimed — CORROBORATED | claimed — CORROBORATED | doubtful | unknown |
 | 4 | permanent identifier | **UNTESTED — probe item D. Expect none; expect ticker-keyed files** | `permaticker` — UNVERIFIED | not established | not established | not established |

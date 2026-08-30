@@ -37,16 +37,25 @@ operator's discretion, and are not a criterion here.
 
 ### The blockers as they now stand
 
-1. **No price vendor is selected. EODHD is partially probed; Sharadar is not
-   contacted.** Kibot is out on price. EODHD answered on 2026-08-30: question 1
-   passes — delisted history exists — but it **declines to certify completeness**
-   without a paid requirements review, so question 7 is unanswered and its
-   commercial price is unknown. `KIBOT_DATA_PROBE.md` is retained as the
-   acceptance standard — its rules were written before any data was seen, and the
-   item most likely to fail is survivorship *completeness* (§G), which can fail
-   while everything else passes. **EODHD's reply is that failure mode stated by
-   the vendor itself**, which makes measuring it against the denominator the
-   next real step rather than an optional check.
+1. **No price vendor is selected. EODHD is partially probed; Sharadar was sent
+   the questions on 2026-08-30 and has not replied.** Kibot is out on price.
+   EODHD has answered twice: question 1 passes in part — delisted history exists
+   — and US depth is stated at 30+ years, so **the "January 2000" disqualifier we
+   were carrying was our own misreading of an EU figure** and EODHD remains a
+   candidate. It still **declines to certify completeness** without a paid
+   requirements review, and its commercial price is unquoted. **No trial exists**
+   — `VENDOR-STATED`, so the "least expensive access to measure it ourselves"
+   that the reframe asks for is not a thing EODHD sells. It instead offered
+   sample files for symbols of our choosing, unprompted and free; **ETYS, WBVN
+   and GM are requested and not received**
+   ([`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) §1.3).
+   `KIBOT_DATA_PROBE.md` is retained as the acceptance standard — its rules were
+   written before any data was seen, and the item most likely to fail is
+   survivorship *completeness* (§G), which can fail while everything else passes.
+   **EODHD's reply is that failure mode stated by the vendor itself**, which
+   makes measuring it the next real step rather than an optional check — and the
+   sample files are that measurement, since §7be showed our own denominator is
+   blind to exchange delistings before 2006.
 2. **The denominator has been run, its dating rule was found broken on 30.7% of
    dated exits, and it has been fixed.** First real run 2026-08-29: 90,548
    registrants, parser-integrity gate PASSED on 27,084,668 rows — but

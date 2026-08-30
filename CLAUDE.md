@@ -83,6 +83,22 @@ Section 12(b) row does not mean the row exists. Four separate 12(b) failure
 shapes are recorded in the evidence corpus, and every one was found by a real run
 rather than by the synthetic suite.
 
+**A green check can belong to the wrong commit.** `gh pr checks` returns the
+runs it knows about, and for the first ~30s after a push those are the
+*previous* commit's. A wait loop that polls for `pending` therefore sees none,
+exits immediately, and reports four passes for code that was never built. This
+has happened here. **Resolve the SHA and wait on that run**, never on the PR:
+
+```
+SHA=$(git rev-parse HEAD)
+gh run list --repo <owner>/<repo> --commit "$SHA" --json databaseId,status
+gh run view <id> --repo <owner>/<repo> --json conclusion,jobs
+```
+
+The tell is a run ID identical to the one from the previous commit. Same class
+as the rest of this section: the expected answer arrived, and it was not an
+answer to the question asked.
+
 **`MANUAL_VERIFIED` means a *person* read the filing.** A program that reads it
 for you has not satisfied it — `src/tradeit/edgar/acquire.py` says so, and
 imports nothing from the evidence layer so the boundary is structural. Running
