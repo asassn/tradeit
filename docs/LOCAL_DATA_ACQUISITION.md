@@ -75,14 +75,16 @@ than its manifest says would not be detectable by inspection afterwards.
 
 ## 1. What you need first
 
-- **Python 3.11 or newer.** Check by opening a terminal and running:
+- **Python 3.12 or newer.** Check by opening a terminal and running:
 
   ```bash
   python3 --version
   ```
 
-  If that prints `Python 3.11.x` or higher, you are fine. If it says "command
+  If that prints `Python 3.12.x` or higher, you are fine. If it says "command
   not found", install Python from [python.org](https://www.python.org/downloads/).
+  **3.11 will not work** — numpy requires 3.12 or newer, so the install step
+  fails rather than degrading.
 
 - **A copy of this project.** If you do not have one:
 

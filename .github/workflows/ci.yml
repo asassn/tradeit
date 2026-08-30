@@ -37,9 +37,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Must track requires-python in pyproject.toml. numpy declares
+      # Requires-Python >=3.12, so `pip install -e ".[dev]"` fails outright on
+      # 3.11 -- the job dies at Install before it can lint or test anything.
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install
         run: |
