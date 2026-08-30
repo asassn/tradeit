@@ -1,0 +1,82 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.local
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+# Local data directories at the repository root only. Unanchored, this pattern
+# also matched src/tradeit/data/, which silently excluded the entire data
+# package -- providers, registry, quality, validation universe and the offline
+# package importer -- from every commit. A fresh clone did not build.
+/data/
+/var/
+*.db
+*.sqlite3
+.DS_Store
+.idea/
+.vscode/
+
+# ---------------------------------------------------------------------------
+# Acquired market data.
+#
+# Narrowly scoped on purpose. An earlier unanchored `data/` rule in this file
+# also matched `src/tradeit/data/` and silently kept the entire data package out
+# of every commit; a fresh clone did not build. Every pattern below is either
+# anchored to the repository root (leading `/`) or names a directory that no
+# source tree uses (`_acquisition`).
+#
+# LICENSING: market-data licences commonly forbid redistribution. Do not push
+# bulk vendor data to a public repository unless the licence explicitly permits
+# it. Source code, manifests, small deterministic fixtures and validation
+# reports are fine; the raw vendor responses and the bar files are not.
+# ---------------------------------------------------------------------------
+
+# The acquisition workspace: raw vendor responses, journal, adjusted-price
+# sidecar. Lives inside a package directory and is always vendor data.
+**/_acquisition/
+
+# Acquisition output directories at the repository ROOT only.
+#
+# The leading `/` is doing the important work. `empirical-*/` unanchored would
+# match any directory anywhere whose name starts with "empirical"; anchored, it
+# matches only children of the repository root, which is where the CLI's
+# `--output` conventionally points. Nothing under `src/`, `docs/` or `tests/`
+# can be caught by it, and `git check-ignore` is run against those paths in the
+# test suite so the guarantee is enforced rather than asserted in a comment.
+#
+# Covers /empirical-smoke/, /empirical-smoke-2/, /empirical-smoke-fmp/,
+# /empirical-validation-2010-2026/ and anything else following the convention.
+/empirical-*/
+/market-data/
+/packages/
+
+# ---------------------------------------------------------------------------
+# Local diagnostic and validation output.
+#
+# `tradeit scan --json <path>` and `tradeit validate --json <path>` take a path
+# the operator chooses, and the documented examples used to be bare filenames --
+# `--json out.json`, `--json report.json` -- which land in whatever directory the
+# command was run from. Run from a clone, that is the repository root, and a
+# diagnostic session leaves scan-*.json, validation-report-*.json and redirected
+# .log files sitting next to pyproject.toml as untracked clutter.
+#
+# `/out/` is the one place those belong. The documentation now points there and
+# the CLI creates it on demand.
+#
+# WHAT IS DELIBERATELY *NOT* IGNORED, AND WHY. Not `*.json`: the curated identity
+# evidence in docs/research/ is a .json file, it is the research output rather
+# than a rebuildable artifact, and a blanket rule would hide it the way the old
+# unanchored `data/` rule hid src/tradeit/data/. Not `*.log`, `scan-*` or
+# `validation-*` either -- each would silently swallow a future source file,
+# fixture or document whose name happens to match. The rule is narrow on
+# purpose: one root-anchored directory, chosen for output, ignored entirely.
+# ---------------------------------------------------------------------------
+/out/

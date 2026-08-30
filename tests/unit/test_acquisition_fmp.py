@@ -1,0 +1,1913 @@
+"""FMP split enrichment, exercised against recorded response shapes.
+
+**No real network call happened inside this suite, and none is claimed.** The
+project owner verified ``/stable/splits`` from their own machine against a real
+free account; everything here runs against deterministic fixtures shaped like
+that endpoint's documented responses. A suite that hit the vendor would spend
+the account's daily allowance on every CI run and fail during their outages.
+
+What these tests are actually protecting, in rough order of how much damage the
+regression would do:
+
+* **A plan restriction is not an absence of splits.** The whole reason FMP is in
+  this project is that Twelve Data answers "not on your plan" for ``/splits``,
+  and treating that as "this stock never split" would write a false history into
+  a package. Every classification path is pinned.
+* **Direction.** A reverse split read as a forward one inverts every price
+  before its ex-date, and the resulting series looks perfectly plausible.
+* **The label.** The reconstructed series is derived from one vendor's adjusted
+  bars and another's split schedule, so it was supplied by neither. Several
+  tests exist purely to make it loud if it ever gets called a vendor price.
+* **Splits outside coverage.** A 2005 split must change nothing in a package
+  that starts in 2010, and the arithmetic that guarantees that is one comparison
+  operator wide.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import datetime as dt
+import gzip
+import io
+import json
+import tomllib
+import urllib.error
+import urllib.request
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from tradeit import cli_data
+from tradeit.acquisition.base import (
+    AcquisitionDataset,
+    CapabilitySupport,
+    FetchStatus,
+    available_providers,
+)
+from tradeit.acquisition.enrich import (
+    ENRICHMENT_TOOL_VERSION,
+    CorporateActionSource,
+    EnrichmentOptions,
+    EnrichmentStatus,
+    PackageEnricher,
+    available_sources,
+    compare_schedules,
+    get_source_class,
+)
+from tradeit.acquisition.fmp import (
+    BASE_URL,
+    DEFAULT_REQUESTS_PER_MINUTE,
+    ENDPOINTS,
+    FmpSplitSource,
+    RequestPacer,
+    normalize_splits,
+)
+from tradeit.acquisition.journal import AcquisitionJournal
+from tradeit.acquisition.reconstruct import (
+    RECONSTRUCTION_ALGORITHM_VERSION,
+    RECONSTRUCTION_LABEL,
+    ReconstructionQuality,
+    ScheduleFindingKind,
+    SplitEvent,
+    SplitFactorConvention,
+    ratios_agree,
+    take_census,
+    to_share_count_multiplier,
+)
+from tradeit.acquisition.runner import AcquisitionOptions, AcquisitionRunner
+from tradeit.acquisition.twelvedata import TwelveDataAcquisition
+from tradeit.data.packages.manifest import WORKSPACE_DIRNAME, load_manifest
+from tradeit.data.packages.spec import DATASET_SPECS, DatasetKind
+from tradeit.data.providers.http import (
+    HttpTransport,
+    ProviderAuthError,
+    ProviderRateLimitError,
+    ProviderUnreachableError,
+)
+from tradeit.errors import ConfigError
+
+FMP_SECRET = "FMPSECRETKEY0123456789"
+TD_SECRET = "TWELVEDATASECRET99887766"
+START = dt.date(2010, 1, 1)
+END = dt.date(2011, 3, 31)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures shaped like the vendor's documented responses
+# ---------------------------------------------------------------------------
+
+#: Apple's real split history, in FMP's shape. Used for the "a 2005 split must
+#: touch nothing in a 2010 package" test, which is the arithmetic this whole
+#: module rests on.
+AAPL_SPLITS: list[dict[str, Any]] = [
+    {"symbol": "AAPL", "date": "2020-08-31", "numerator": 4, "denominator": 1},
+    {"symbol": "AAPL", "date": "2014-06-09", "numerator": 7, "denominator": 1},
+    {"symbol": "AAPL", "date": "2005-02-28", "numerator": 2, "denominator": 1},
+    {"symbol": "AAPL", "date": "2000-06-21", "numerator": 2, "denominator": 1},
+    {"symbol": "AAPL", "date": "1987-06-16", "numerator": 2, "denominator": 1},
+]
+
+NVDA_SPLITS: list[dict[str, Any]] = [
+    {
+        "symbol": "NVDA",
+        "date": "2024-06-10",
+        "numerator": 10,
+        "denominator": 1,
+        "splitType": "stock_split",
+    },
+    {
+        "symbol": "NVDA",
+        "date": "2021-07-20",
+        "numerator": 4,
+        "denominator": 1,
+        "splitType": "stock_split",
+    },
+    {
+        "symbol": "NVDA",
+        "date": "2007-09-11",
+        "numerator": 3,
+        "denominator": 2,
+        # A label this code has never seen. It must survive to the package
+        # rather than be dropped by a whitelist written today.
+        "splitType": "some_future_label",
+    },
+]
+
+PLAN_ERROR = {
+    "Error Message": (
+        "Exclusive Endpoint: This endpoint is not available under your current "
+        "subscription. Please upgrade your plan."
+    )
+}
+DAILY_CAP_ERROR = {
+    "Error Message": "Limit Reach . Please upgrade your plan or visit our documentation"
+}
+BAD_KEY_ERROR = {"Error Message": "Invalid API KEY. Please retry or visit our documentation"}
+
+#: A 1-for-8 reverse split, for the direction tests. Written out because reading
+#: it backwards inverts every price before its ex-date and the resulting series
+#: looks perfectly plausible.
+REVERSE_SPLIT: dict[str, Any] = {
+    "symbol": "AAPL",
+    "date": "2020-01-02",
+    "numerator": 1,
+    "denominator": 8,
+}
+
+
+class FakeFmpTransport:
+    """Answers like FMP, including its 200-with-an-error-body habit."""
+
+    def __init__(
+        self,
+        *,
+        by_symbol: dict[str, Any] | None = None,
+        default: Any = None,
+        raise_on: dict[str, Exception] | None = None,
+        body_override: bytes | None = None,
+    ) -> None:
+        self.by_symbol = by_symbol if by_symbol is not None else {"AAPL": AAPL_SPLITS}
+        self.default = default if default is not None else []
+        self.raise_on = raise_on or {}
+        self.body_override = body_override
+        self.calls: list[str] = []
+
+    def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
+        self.calls.append(url)
+        symbol = url.split("symbol=")[1].split("&")[0]
+        error = self.raise_on.get(symbol) or self.raise_on.get("*")
+        if error is not None:
+            raise error
+        if self.body_override is not None:
+            return self.body_override
+        return json.dumps(self.by_symbol.get(symbol, self.default)).encode()
+
+
+def make_source(transport: FakeFmpTransport | None = None, **kwargs: Any) -> FmpSplitSource:
+    # A very high self-imposed rate so the pacer never actually sleeps in tests.
+    kwargs.setdefault("requests_per_minute", 600_000)
+    return FmpSplitSource(token=FMP_SECRET, transport=transport or FakeFmpTransport(), **kwargs)
+
+
+# -- a Twelve Data package to enrich ----------------------------------------
+
+
+def bars(count: int = 60, *, symbol: str = "AAPL") -> list[dict[str, str]]:
+    """Daily rows in Twelve Data's shape: string values, `datetime` key.
+
+    Prices and volumes are chosen to divide exactly by the factors under test,
+    so the dollar-volume invariance can be asserted as equality rather than
+    "close enough", which would pass while hiding a real drift.
+    """
+    rows: list[dict[str, str]] = []
+    day = dt.date(2010, 1, 4)
+    written = 0
+    while written < count:
+        if day.weekday() < 5:
+            rows.append(
+                {
+                    "datetime": day.isoformat(),
+                    "open": "100.00",
+                    "high": "112.00",
+                    "low": "96.00",
+                    "close": "108.00",
+                    "volume": str(28_000_000 + written * 28),
+                }
+            )
+            written += 1
+        day += dt.timedelta(days=1)
+    _ = symbol
+    return rows
+
+
+#: Apple's 2014 and 2020 splits **in Twelve Data's own convention**, exactly as
+#: the live smoke test observed them: from_factor/to_factor reversed relative to
+#: the share count, so the derived single factor is 1/7 and 1/4.
+TD_APPLE_SPLITS: dict[str, Any] = {
+    "splits": [
+        {"date": "2014-06-09", "from_factor": 7, "to_factor": 1},
+        {"date": "2020-08-31", "from_factor": 4, "to_factor": 1},
+    ]
+}
+
+
+class FakeTwelveDataTransport:
+    """Twelve Data with `/splits` refused by the plan — the real situation.
+
+    ``splits_available`` takes three values: ``False`` for the plan restriction
+    the free tier actually returns, ``True`` for a single generic split, and
+    ``"apple"`` for the two real Apple events in the vendor's own reciprocal
+    convention, which is what the cross-provider normalization test needs.
+    """
+
+    def __init__(self, *, splits_available: bool | str = False) -> None:
+        self.splits_available = splits_available
+        self.calls: list[str] = []
+
+    def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
+        self.calls.append(url)
+        symbols = url.split("symbol=")[1].split("&")[0].split(",")
+        if "/time_series" in url:
+            blocks = {
+                s: {
+                    "meta": {"symbol": s, "exchange": "NASDAQ", "type": "Common Stock"},
+                    "values": bars(symbol=s),
+                    "status": "ok",
+                }
+                for s in symbols
+            }
+            payload = blocks[symbols[0]] if len(symbols) == 1 else blocks
+            return json.dumps(payload).encode()
+        if "/splits" in url:
+            if self.splits_available == "apple":
+                return json.dumps(TD_APPLE_SPLITS).encode()
+            if self.splits_available:
+                return json.dumps(
+                    {"splits": [{"date": "2014-06-09", "from_factor": 7, "to_factor": 1}]}
+                ).encode()
+            return json.dumps(
+                {
+                    "code": 403,
+                    "message": "/splits is available with the Grow plan and above",
+                    "status": "error",
+                }
+            ).encode()
+        if "/dividends" in url:
+            return json.dumps({"dividends": [{"ex_date": "2010-03-15", "amount": "0.55"}]}).encode()
+        return b"{}"
+
+
+def build_package(
+    output: Path, symbols: list[str], *, splits_available: bool | str = False
+) -> Path:
+    """A real acquisition run against fixtures, producing a real package."""
+    provider = TwelveDataAcquisition(
+        token=TD_SECRET,
+        transport=FakeTwelveDataTransport(splits_available=splits_available),
+        batch_size=4,
+        credits_per_minute=100_000,
+    )
+    options = AcquisitionOptions(start=START, end=END, max_wait_s=0)
+    AcquisitionRunner(provider, symbols, output, options).run()
+    return output
+
+
+def enrich(
+    package: Path,
+    transport: FakeFmpTransport | None = None,
+    source: FmpSplitSource | None = None,
+    **kwargs: Any,
+) -> Any:
+    return PackageEnricher(
+        package, source or make_source(transport), EnrichmentOptions(max_wait_s=0, **kwargs)
+    ).run()
+
+
+def read_csv(path: Path) -> list[dict[str, str]]:
+    raw = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
+    return list(csv.DictReader(io.StringIO(raw.decode("utf-8"))))
+
+
+# ---------------------------------------------------------------------------
+# Registration, scope and credentials
+# ---------------------------------------------------------------------------
+
+
+class TestRegistrationAndScope:
+    def test_fmp_is_a_corporate_action_source(self) -> None:
+        assert available_sources() == ["fmp"]
+        assert get_source_class("fmp") is FmpSplitSource
+
+    def test_fmp_is_NOT_a_price_provider(self) -> None:
+        """The structural guarantee that FMP cannot become the OHLCV source.
+
+        Not a convention and not a code review rule: a package whose prices
+        quietly came from a different vendor than its manifest says is not
+        detectable by inspection afterwards.
+        """
+        assert "fmp" not in available_providers()
+        assert available_providers() == ["eodhd", "tiingo", "twelve_data"]
+        assert not hasattr(FmpSplitSource, "plan")
+        assert not hasattr(FmpSplitSource, "fetch")
+        assert not hasattr(FmpSplitSource, "adjustment_policy")
+
+    def test_it_satisfies_the_enrichment_protocol(self) -> None:
+        assert isinstance(make_source(), CorporateActionSource)
+
+    def test_the_env_var_is_the_one_the_docs_promise(self) -> None:
+        assert FmpSplitSource.credential_env == "FMP_API_KEY"
+
+    def test_readiness_follows_the_environment(self, monkeypatch: Any) -> None:
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        assert FmpSplitSource().has_credential() is False
+        monkeypatch.setenv("FMP_API_KEY", "abc")
+        assert FmpSplitSource().has_credential() is True
+
+    def test_only_the_verified_endpoint_is_known(self) -> None:
+        """One endpoint, named. Nothing is string-built into existence."""
+        assert list(ENDPOINTS) == [AcquisitionDataset.SPLITS]
+        assert ENDPOINTS[AcquisitionDataset.SPLITS] == "/stable/splits"
+
+    def test_the_url_is_the_documented_one(self) -> None:
+        source = make_source()
+        transport = source.transport
+        source.lookup("AAPL")
+        assert isinstance(transport, FakeFmpTransport)
+        assert transport.calls == [
+            f"{BASE_URL}/stable/splits?symbol=AAPL&apikey={FMP_SECRET}",
+        ]
+
+    @pytest.mark.parametrize(
+        "forbidden",
+        [
+            "income-statement",
+            "balance-sheet",
+            "cash-flow",
+            "ratios",
+            "earnings",
+            "analyst",
+            "estimates",
+            "historical-price",
+            "insider",
+            "institutional",
+            "profile",
+        ],
+    )
+    def test_no_other_fmp_endpoint_appears_anywhere_in_the_module(self, forbidden: str) -> None:
+        """Scope is splits only, and the file itself is the evidence."""
+        from tradeit.acquisition import fmp
+
+        source_text = Path(fmp.__file__).read_text(encoding="utf-8")
+        for line in source_text.splitlines():
+            if "financialmodelingprep.com" in line or "/stable/" in line:
+                assert forbidden not in line, line
+
+    def test_no_credential_reaches_the_hint(self) -> None:
+        hint = make_source().credential_hint()
+        assert FMP_SECRET not in hint
+        assert hint.startswith("set (")
+
+
+# ---------------------------------------------------------------------------
+# Normalizing the vendor's records
+# ---------------------------------------------------------------------------
+
+
+class TestNormalization:
+    def test_a_forward_split_becomes_a_share_count_multiplier(self) -> None:
+        events, findings = normalize_splits("AAPL", [AAPL_SPLITS[0]])
+        assert findings == []
+        assert len(events) == 1
+        event = events[0]
+        assert event.ex_date == dt.date(2020, 8, 31)
+        assert event.ratio == Decimal(4)
+        assert event.is_reverse is False
+        assert event.describe == "4-for-1"
+
+    def test_the_vendors_own_numbers_survive_the_derived_ratio(self) -> None:
+        """A ratio of 0.1 could be 1-for-10 or 2-for-20. The pair says which."""
+        events, _ = normalize_splits(
+            "X", [{"date": "2020-01-02", "numerator": 2, "denominator": 20}]
+        )
+        assert events[0].ratio == Decimal("0.1")
+        assert events[0].numerator == 2
+        assert events[0].denominator == 20
+        assert events[0].describe == "2-for-20"
+
+    def test_a_reverse_split_is_not_read_as_a_forward_one(self) -> None:
+        events, findings = normalize_splits(
+            "RVRS", [{"date": "2019-05-06", "numerator": 1, "denominator": 8}]
+        )
+        assert findings == []
+        assert events[0].ratio == Decimal("0.125")
+        assert events[0].is_reverse is True
+
+    def test_events_come_back_in_date_order_whatever_the_vendor_sent(self) -> None:
+        events, _ = normalize_splits("AAPL", AAPL_SPLITS)
+        assert [e.ex_date for e in events] == sorted(e.ex_date for e in events)
+
+    def test_an_unfamiliar_split_type_is_carried_not_dropped(self) -> None:
+        """No whitelist. A label written today cannot silence tomorrow's data."""
+        events, findings = normalize_splits("NVDA", NVDA_SPLITS)
+        assert findings == []
+        assert {e.split_type for e in events} == {"stock_split", "some_future_label"}
+
+    def test_the_nvda_ten_for_one_normalizes_exactly(self) -> None:
+        events, _ = normalize_splits("NVDA", NVDA_SPLITS)
+        latest = next(e for e in events if e.ex_date == dt.date(2024, 6, 10))
+        assert (latest.numerator, latest.denominator) == (10, 1)
+        assert latest.ratio == Decimal(10)
+
+    def test_an_announcement_time_is_never_invented(self) -> None:
+        """An effective date is not an announcement date, and saying so by
+        leaving the field empty is the only honest option available."""
+        events, _ = normalize_splits("NVDA", NVDA_SPLITS)
+        assert all(event.announced_at is None for event in events)
+
+    def test_a_zero_denominator_is_refused_rather_than_coerced(self) -> None:
+        events, findings = normalize_splits(
+            "BAD", [{"date": "2020-01-02", "numerator": 4, "denominator": 0}]
+        )
+        assert events == ()
+        assert any("denominator 0" in f for f in findings)
+
+    def test_a_missing_numerator_is_refused_rather_than_assumed_to_be_one(self) -> None:
+        events, findings = normalize_splits("BAD", [{"date": "2020-01-02", "denominator": 1}])
+        assert events == ()
+        assert any("not guessed" in f.lower() for f in findings)
+
+    def test_a_fractional_numerator_is_refused_rather_than_truncated(self) -> None:
+        events, findings = normalize_splits(
+            "BAD", [{"date": "2020-01-02", "numerator": "2.5", "denominator": 1}]
+        )
+        assert events == ()
+        assert findings
+
+    def test_a_negative_fraction_is_refused(self) -> None:
+        events, findings = normalize_splits(
+            "BAD", [{"date": "2020-01-02", "numerator": -2, "denominator": 1}]
+        )
+        assert events == ()
+        assert any("non-positive" in f for f in findings)
+
+    def test_an_unreadable_date_is_refused(self) -> None:
+        events, findings = normalize_splits(
+            "BAD", [{"date": "not-a-date", "numerator": 2, "denominator": 1}]
+        )
+        assert events == ()
+        assert any("unreadable date" in f for f in findings)
+
+    def test_a_record_for_another_symbol_is_refused(self) -> None:
+        """A split from a different security rewrites every price before it."""
+        events, findings = normalize_splits(
+            "AAPL", [{"symbol": "MSFT", "date": "2003-02-18", "numerator": 2, "denominator": 1}]
+        )
+        assert events == ()
+        assert any("MSFT" in f for f in findings)
+
+    def test_a_datetime_is_reduced_to_its_date_without_a_timezone_hop(self) -> None:
+        events, _ = normalize_splits(
+            "X", [{"date": "2020-08-31T00:00:00.000Z", "numerator": 4, "denominator": 1}]
+        )
+        assert events[0].ex_date == dt.date(2020, 8, 31)
+
+    def test_duplicate_records_are_kept_and_reported_not_merged(self) -> None:
+        """Two identical records may be one event listed twice, or two events.
+        Silently collapsing them decides that question without evidence."""
+        events, findings = normalize_splits("AAPL", [AAPL_SPLITS[0], AAPL_SPLITS[0]])
+        assert len(events) == 2
+        assert findings == []
+        from tradeit.acquisition.reconstruct import check_split_consistency
+
+        found = check_split_consistency("AAPL", events, None)
+        assert [f.kind for f in found] == [ScheduleFindingKind.DUPLICATE_RECORD]
+        assert found[0].is_conflict is True
+        assert "NOT merged" in found[0].message
+
+
+# ---------------------------------------------------------------------------
+# Classifying what came back
+# ---------------------------------------------------------------------------
+
+
+class TestClassification:
+    def test_a_populated_response_is_available(self) -> None:
+        lookup = make_source().lookup("AAPL")
+        assert lookup.support is CapabilitySupport.AVAILABLE
+        assert lookup.status is FetchStatus.OK
+        assert len(lookup.splits) == 5
+        assert lookup.is_usable is True
+
+    def test_an_empty_response_is_evidence_of_absence_but_says_what_it_cannot_tell(
+        self,
+    ) -> None:
+        source = make_source(FakeFmpTransport(by_symbol={}, default=[]))
+        lookup = source.lookup("NOSPLITS")
+        assert lookup.support is CapabilitySupport.EMPTY_VALID_RESPONSE
+        assert lookup.support.is_evidence_of_absence is True
+        assert lookup.status is FetchStatus.EMPTY
+        assert lookup.splits == ()
+        assert any("unrecognised ticker" in f for f in lookup.findings)
+
+    def test_an_empty_response_is_never_silently_a_never_split_claim(self) -> None:
+        source = make_source(FakeFmpTransport(by_symbol={}, default=[]))
+        source.lookup("MADEUPTICKER")
+        assert any("unrecognised ticker" in item for item in source.limitations())
+
+    def test_a_plan_restriction_is_not_an_absence_of_splits(self) -> None:
+        """The single most damaging confusion this module can make."""
+        source = make_source(FakeFmpTransport(default=PLAN_ERROR, by_symbol={}))
+        lookup = source.lookup("AAPL")
+        assert lookup.support is CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+        assert lookup.support.is_evidence_of_absence is False
+        assert lookup.is_usable is False
+        assert lookup.status is FetchStatus.REJECTED
+        assert any("NOT about" in item for item in source.limitations())
+
+    def test_a_bad_key_is_not_reported_as_a_plan_restriction(self) -> None:
+        """A typo must not put "not available on this subscription" in a manifest."""
+        source = make_source(FakeFmpTransport(default=BAD_KEY_ERROR, by_symbol={}))
+        lookup = source.lookup("AAPL")
+        assert lookup.support is CapabilitySupport.UNKNOWN
+        assert lookup.support is not CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+        assert lookup.is_usable is False
+
+    def test_the_daily_cap_stops_the_pass_rather_than_spinning(self) -> None:
+        source = make_source(FakeFmpTransport(default=DAILY_CAP_ERROR, by_symbol={}))
+        lookup = source.lookup("AAPL")
+        assert lookup.status is FetchStatus.QUOTA_EXHAUSTED
+        assert lookup.status.stops_the_run is True
+        assert lookup.support is CapabilitySupport.UNKNOWN
+
+    def test_a_rate_limit_is_a_delay_not_a_wall(self) -> None:
+        source = make_source(
+            FakeFmpTransport(raise_on={"*": ProviderRateLimitError("rate-limited, 3 attempts")})
+        )
+        lookup = source.lookup("AAPL")
+        assert lookup.status is FetchStatus.RATE_LIMITED
+        assert lookup.status.stops_the_run is False
+        assert lookup.status.is_retryable is True
+        assert source.pacer.backoffs == 1
+
+    def test_a_429_widens_the_self_imposed_gap(self) -> None:
+        source = make_source(
+            FakeFmpTransport(raise_on={"*": ProviderRateLimitError("slow down")}),
+            requests_per_minute=60,
+        )
+        before = source.pacer.interval_s
+        source.lookup("AAPL")
+        assert source.pacer.interval_s > before
+
+    def test_a_network_failure_says_nothing_about_splits(self) -> None:
+        """No HTTP status means the vendor never saw the request."""
+        source = make_source(
+            FakeFmpTransport(raise_on={"*": ProviderUnreachableError("could not reach host")})
+        )
+        lookup = source.lookup("AAPL")
+        assert lookup.status is FetchStatus.UNREACHABLE
+        assert lookup.support is CapabilitySupport.UNKNOWN
+        assert lookup.is_usable is False
+
+    def test_an_auth_failure_is_not_retried_into_a_ban(self) -> None:
+        source = make_source(FakeFmpTransport(raise_on={"*": ProviderAuthError("401 rejected")}))
+        lookup = source.lookup("AAPL")
+        assert lookup.status is FetchStatus.REJECTED
+        assert lookup.status.is_retryable is False
+
+    def test_malformed_json_is_not_an_absence_of_splits(self) -> None:
+        source = make_source(FakeFmpTransport(body_override=b"<html>gateway timeout</html>"))
+        lookup = source.lookup("AAPL")
+        assert lookup.status is FetchStatus.MALFORMED
+        assert lookup.support is CapabilitySupport.PROVIDER_ERROR
+        assert lookup.is_usable is False
+
+    def test_an_unexpected_object_shape_is_not_an_absence_of_splits(self) -> None:
+        source = make_source(FakeFmpTransport(default={"unexpected": "shape"}, by_symbol={}))
+        lookup = source.lookup("AAPL")
+        assert lookup.status is FetchStatus.MALFORMED
+        assert lookup.is_usable is False
+
+    def test_a_proven_success_is_not_downgraded_by_a_later_empty(self) -> None:
+        source = make_source(FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS}, default=[]))
+        source.lookup("AAPL")
+        source.lookup("NOSPLITS")
+        assert source.support is CapabilitySupport.AVAILABLE
+
+    def test_a_plan_restriction_does_override_a_prior_success(self) -> None:
+        source = make_source(FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "X": PLAN_ERROR}))
+        source.lookup("AAPL")
+        source.lookup("X")
+        assert source.support is CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+
+    def test_no_credential_refuses_before_issuing_a_request(self) -> None:
+        transport = FakeFmpTransport()
+        source = FmpSplitSource(token="", transport=transport)
+        lookup = source.lookup("AAPL")
+        assert lookup.status is FetchStatus.REJECTED
+        assert transport.calls == []
+        assert "FMP_API_KEY" in lookup.error
+
+
+# ---------------------------------------------------------------------------
+# Credential hygiene
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialsNeverEscape:
+    def test_the_key_is_in_the_url_and_is_always_redacted(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        transport = FakeFmpTransport()
+        enrich(package, transport)
+        assert any(FMP_SECRET in call for call in transport.calls), "fixture assumption"
+        for path in package.rglob("*"):
+            if not path.is_file():
+                continue
+            blob = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
+            assert FMP_SECRET.encode() not in blob, f"{path} contains the API key"
+            assert TD_SECRET.encode() not in blob, f"{path} contains the API key"
+
+    def test_the_journal_records_a_redacted_url(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        journal = AcquisitionJournal(package / WORKSPACE_DIRNAME / "journal.jsonl")
+        fmp_entries = [e for e in journal.entries if e.provider == "fmp"]
+        assert fmp_entries
+        for entry in fmp_entries:
+            assert FMP_SECRET not in entry.url
+            assert "apikey=REDACTED" in entry.url
+
+    def test_an_error_message_never_echoes_the_key(self) -> None:
+        source = make_source(
+            FakeFmpTransport(
+                raise_on={"*": ProviderAuthError(f"rejected apikey={FMP_SECRET} outright")}
+            )
+        )
+        lookup = source.lookup("AAPL")
+        assert FMP_SECRET not in lookup.error
+        assert "REDACTED" in lookup.error
+
+    def test_the_key_never_reaches_the_manifest(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        text = (package / "manifest.toml").read_text(encoding="utf-8")
+        assert FMP_SECRET not in text
+        assert TD_SECRET not in text
+
+
+# ---------------------------------------------------------------------------
+# Enrichment over a real package
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichment:
+    def test_a_split_adjusted_package_gains_a_reconstruction(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        before = load_manifest(package / "manifest.toml")
+        assert before.provenance is not None
+        assert before.provenance.reconstruction_performed is False
+
+        report = enrich(package)
+        assert report.status is EnrichmentStatus.ENRICHED
+        assert report.price_provider == "twelve_data"
+        assert report.split_provider == "fmp"
+        assert report.reconstruction
+        assert report.reconstruction[0].quality is ReconstructionQuality.APPLIED
+
+    def test_the_splits_dataset_keeps_the_vendors_numbers(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        rows = read_csv(package / "splits.csv")
+        assert len(rows) == 5
+        row = next(r for r in rows if r["ex_date"] == "2020-08-31")
+        assert row["ratio"] == "4"
+        assert row["numerator"] == "4"
+        assert row["denominator"] == "1"
+        assert row["source_provider"] == "fmp"
+
+    def test_every_split_column_is_in_the_dataset_contract(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["NVDA"])
+        enrich(package, FakeFmpTransport(by_symbol={"NVDA": NVDA_SPLITS}))
+        known = {c.name for c in DATASET_SPECS[DatasetKind.SPLITS].columns}
+        rows = read_csv(package / "splits.csv")
+        assert set(rows[0]) <= known
+
+    def test_no_announcement_time_column_is_written(self, tmp_path: Path) -> None:
+        """The contract has the column. This source cannot fill it, and an
+        effective date presented as an announcement would license research the
+        data does not support."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        rows = read_csv(package / "splits.csv")
+        assert "announcement_time" not in rows[0]
+
+    def test_the_package_still_verifies_after_enrichment(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package)
+        assert report.problems == []
+        manifest = load_manifest(package / "manifest.toml")
+        from tradeit.data.packages.manifest import verify_files
+
+        assert verify_files(manifest, package) == []
+
+    def test_nothing_is_written_when_the_source_answers_for_nobody(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        before = (package / "manifest.toml").read_bytes()
+        report = enrich(package, FakeFmpTransport(default=PLAN_ERROR, by_symbol={}))
+        assert report.status is EnrichmentStatus.NOT_ENRICHED
+        assert report.splits_written == 0
+        assert (package / "manifest.toml").read_bytes() == before
+        assert any("NOT about whether" in note for note in report.notes)
+
+    def test_a_partial_answer_names_the_symbols_it_could_not_reach(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA"])
+        report = enrich(
+            package,
+            FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": PLAN_ERROR}),
+        )
+        assert report.status is EnrichmentStatus.PARTIAL
+        assert [s.symbol for s in report.unenriched] == ["NVDA"]
+        manifest = load_manifest(package / "manifest.toml")
+        assert any(
+            "NVDA" in item and "not a claim that they never split" in item
+            for item in manifest.known_limitations
+        )
+
+    def test_a_missing_credential_leaves_the_package_untouched(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        before = (package / "manifest.toml").read_bytes()
+        report = PackageEnricher(package, FmpSplitSource(transport=FakeFmpTransport())).run()
+        assert report.status is EnrichmentStatus.FAILED
+        assert any("FMP_API_KEY" in p for p in report.problems)
+        assert (package / "manifest.toml").read_bytes() == before
+
+    def test_a_package_without_symbol_mappings_is_refused_not_guessed(self, tmp_path: Path) -> None:
+        """Re-deriving instrument ids would attach one company's splits to
+        another company's prices."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        manifest = load_manifest(package / "manifest.toml")
+        stripped = manifest.model_copy(
+            update={
+                "files": tuple(
+                    f for f in manifest.files if f.dataset is not DatasetKind.SYMBOL_MAPPINGS
+                )
+            }
+        )
+        from tradeit.data.packages.manifest import render_manifest
+
+        (package / "manifest.toml").write_text(render_manifest(stripped), encoding="utf-8")
+        report = enrich(package)
+        assert report.status is EnrichmentStatus.FAILED
+        assert any("symbol_mappings" in p for p in report.problems)
+
+    def test_only_the_named_symbols_are_asked_about(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA"])
+        transport = FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": NVDA_SPLITS})
+        enrich(package, transport, symbols=("AAPL",))
+        assert len(transport.calls) == 1
+        assert "symbol=AAPL" in transport.calls[0]
+
+    def test_a_daily_cap_stops_the_pass_and_keeps_what_arrived(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA", "SPY"])
+        report = enrich(
+            package,
+            FakeFmpTransport(
+                by_symbol={"AAPL": AAPL_SPLITS, "NVDA": DAILY_CAP_ERROR, "SPY": NVDA_SPLITS}
+            ),
+        )
+        assert report.quota_stopped is True
+        # SPY was never asked about: the run stopped at NVDA.
+        assert [s.symbol for s in report.symbols] == ["AAPL", "NVDA"]
+        assert report.splits_written == 5
+        assert any("allowance" in note or "Limit Reach" in note for note in report.notes)
+
+    def test_no_reconstruct_writes_splits_and_no_sidecar(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package, reconstruct=False)
+        assert report.splits_written == 5
+        assert report.reconstruction == []
+        assert not (package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz").exists()
+
+
+# ---------------------------------------------------------------------------
+# Resume
+# ---------------------------------------------------------------------------
+
+
+class TestResume:
+    def test_a_second_pass_reads_the_cache_and_asks_nothing(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        transport = FakeFmpTransport()
+        report = enrich(package, transport)
+        assert transport.calls == []
+        assert report.cached == 1
+        assert report.requests == 0
+        assert report.splits_written == 5
+
+    def test_resuming_after_a_partial_pass_only_asks_for_what_is_missing(
+        self, tmp_path: Path
+    ) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA"])
+        first = enrich(
+            package,
+            FakeFmpTransport(
+                by_symbol={"AAPL": AAPL_SPLITS, "NVDA": DAILY_CAP_ERROR},
+            ),
+        )
+        assert first.quota_stopped is True
+        assert first.splits_written == 5
+
+        transport = FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": NVDA_SPLITS})
+        second = enrich(package, transport)
+        assert [c for c in transport.calls if "AAPL" in c] == []
+        assert len(transport.calls) == 1 and "NVDA" in transport.calls[0]
+        assert second.status is EnrichmentStatus.ENRICHED
+        assert second.splits_written == 8
+
+    def test_force_refresh_re_asks(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        transport = FakeFmpTransport()
+        enrich(package, transport, force_refresh=True)
+        assert len(transport.calls) == 1
+
+    def test_a_cached_body_is_replayed_through_the_same_interpretation(self) -> None:
+        source = make_source()
+        live = source.lookup("AAPL")
+        replayed = source.replay("AAPL", live.raw)
+        assert replayed.splits == live.splits
+        assert replayed.status is FetchStatus.CACHED
+        assert replayed.status.is_success is True
+
+
+# ---------------------------------------------------------------------------
+# The arithmetic
+# ---------------------------------------------------------------------------
+
+
+class TestReconstructionArithmetic:
+    def test_splits_before_the_package_window_change_nothing(self, tmp_path: Path) -> None:
+        """A 2005 split must not be applied to prices that begin in 2010.
+
+        The comparison is strictly-after, and this is the test that says so:
+        Apple's 1987, 2000 and 2005 splits all precede every session in this
+        package and must contribute nothing, while 2014 and 2020 both follow
+        every session and must contribute 7 * 4 = 28.
+        """
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        rows = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")
+        assert rows
+        for row in rows:
+            applied = row["splits_applied"].split(";")
+            assert applied == ["2014-06-09", "2020-08-31"]
+            assert "2005-02-28" not in row["splits_applied"]
+            assert "2000-06-21" not in row["splits_applied"]
+            assert "1987-06-16" not in row["splits_applied"]
+            assert Decimal(row["factor"]) == Decimal(28)
+
+    def test_out_of_coverage_splits_are_reported_rather_than_hidden(self, tmp_path: Path) -> None:
+        """Five splits and only two affecting anything is otherwise a puzzle."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package)
+        assert any(
+            "1987-06-16" in item and "affects no row" in item for item in report.all_findings
+        )
+        # Informational, not a conflict: nothing is wrong and nobody has to act.
+        assert report.conflicts == []
+        assert all(f.kind is ScheduleFindingKind.OUTSIDE_COVERAGE for f in report.schedule_findings)
+
+    def test_prices_are_multiplied_and_volume_divided(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        row = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")[0]
+        assert Decimal(row["vendor_close"]) == Decimal("108")
+        assert Decimal(row["reconstructed_close"]) == Decimal("108") * 28
+        assert Decimal(row["reconstructed_volume"]) == Decimal(row["vendor_volume"]) / 28
+
+    def test_dollar_volume_is_invariant_under_the_reconstruction(self, tmp_path: Path) -> None:
+        """Price and volume move in opposite directions by the same factor, so
+        the money that changed hands is unchanged. The fixture's volumes are
+        chosen to divide exactly, so this is equality rather than 'close'."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        rows = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")
+        assert rows
+        for row in rows:
+            vendor = Decimal(row["vendor_close"]) * Decimal(row["vendor_volume"])
+            derived = Decimal(row["reconstructed_close"]) * Decimal(row["reconstructed_volume"])
+            assert derived == vendor, row["session_date"]
+
+    def test_dollar_volume_survives_a_reverse_split_too(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(
+            package,
+            FakeFmpTransport(by_symbol={"AAPL": [REVERSE_SPLIT]}),
+        )
+        rows = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")
+        assert rows
+        for row in rows:
+            assert Decimal(row["factor"]) == Decimal("0.125")
+            vendor = Decimal(row["vendor_close"]) * Decimal(row["vendor_volume"])
+            derived = Decimal(row["reconstructed_close"]) * Decimal(row["reconstructed_volume"])
+            assert derived == vendor, row["session_date"]
+
+    def test_a_reverse_split_lowers_the_reconstructed_price(self, tmp_path: Path) -> None:
+        """Direction, stated as an inequality so an inverted ratio is loud."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(
+            package,
+            FakeFmpTransport(by_symbol={"AAPL": [REVERSE_SPLIT]}),
+        )
+        row = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")[0]
+        assert Decimal(row["reconstructed_close"]) < Decimal(row["vendor_close"])
+        assert Decimal(row["reconstructed_volume"]) > Decimal(row["vendor_volume"])
+
+    def test_multiple_splits_compound(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["NVDA"])
+        enrich(package, FakeFmpTransport(by_symbol={"NVDA": NVDA_SPLITS}))
+        rows = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")
+        # 2007 precedes the window; 2021 and 2024 follow all of it.
+        assert Decimal(rows[0]["factor"]) == Decimal(40)
+
+    def test_no_splits_reported_means_no_sidecar_and_a_stated_caveat(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package, FakeFmpTransport(by_symbol={}, default=[]))
+        assert report.reconstruction[0].quality is ReconstructionQuality.NO_SPLITS_REPORTED
+        assert "only as good as the vendor's split record" in report.reconstruction[0].summary()
+        assert not (package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz").exists()
+
+    def test_high_factors_are_flagged_because_rounding_is_magnified(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        rows = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")
+        assert all(row["rounding_magnified"] == "true" for row in rows)
+
+
+# ---------------------------------------------------------------------------
+# Cross-vendor labelling and provenance
+# ---------------------------------------------------------------------------
+
+
+class TestProvenance:
+    def test_every_reconstructed_row_names_both_vendors(self, tmp_path: Path) -> None:
+        """The value came from neither of them. One field would let a reader
+        attribute one vendor's numbers to the other's record."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        rows = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")
+        for row in rows:
+            assert row["price_provider"] == "twelve_data"
+            assert row["split_provider"] == "fmp"
+
+    def test_every_reconstructed_row_carries_the_derived_label(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        rows = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")
+        for row in rows:
+            assert row["label"] == RECONSTRUCTION_LABEL
+            assert row["label"] == "RECONSTRUCTED_RAW_FROM_SPLIT_ADJUSTED"
+            assert row["algorithm"] == RECONSTRUCTION_ALGORITHM_VERSION
+
+    @pytest.mark.parametrize("forbidden", ["RAW_VENDOR_PRICE", "raw_vendor_price"])
+    def test_the_word_the_label_must_never_be(self, tmp_path: Path, forbidden: str) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        for path in package.rglob("*"):
+            if not path.is_file():
+                continue
+            blob = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
+            assert forbidden.encode() not in blob, path
+
+    def test_the_reconstruction_is_never_a_declared_package_file(self, tmp_path: Path) -> None:
+        """It is DERIVED. The importer must not read it as prices."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        manifest = load_manifest(package / "manifest.toml")
+        assert all("reconstructed" not in file.path for file in manifest.files)
+        assert manifest.provenance is not None
+        assert manifest.provenance.reconstruction_file.startswith(WORKSPACE_DIRNAME)
+
+    def test_the_manifest_names_each_vendors_contribution(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        manifest = load_manifest(package / "manifest.toml")
+        provenance = manifest.provenance
+        assert provenance is not None
+        assert provenance.price_provider == "twelve_data"
+        assert provenance.price_representation == "split_adjusted"
+        assert provenance.split_provider == "fmp"
+        assert provenance.dividend_provider == "twelve_data"
+        assert provenance.reconstruction_performed is True
+        assert provenance.reconstruction_algorithm == RECONSTRUCTION_ALGORITHM_VERSION
+        assert provenance.reconstruction_label == RECONSTRUCTION_LABEL
+
+    def test_the_top_level_provider_still_names_the_price_source(self, tmp_path: Path) -> None:
+        """Enrichment does not rebrand the package. Its prices are still Twelve
+        Data's, and the snapshot id must not start pointing somewhere else."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        manifest = load_manifest(package / "manifest.toml")
+        assert manifest.provider == "twelve_data"
+
+    def test_the_splits_file_note_says_who_supplied_it(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        manifest = load_manifest(package / "manifest.toml")
+        entry = manifest.files_for(DatasetKind.SPLITS)[0]
+        assert "fmp" in entry.note
+        assert "twelve_data" in entry.note
+
+    def test_the_stale_not_attempted_limitation_is_replaced(self, tmp_path: Path) -> None:
+        """A manifest saying both "splits are not on this plan" and
+        "reconstruction used FMP records" would let a reader believe either."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        before = load_manifest(package / "manifest.toml").known_limitations
+        assert any("not available on this subscription" in item for item in before)
+
+        enrich(package)
+        after = load_manifest(package / "manifest.toml").known_limitations
+        assert not any(
+            "the splits endpoint is not available on this subscription" in item for item in after
+        )
+        assert any("raw reconstruction performed using fmp" in item.lower() for item in after)
+        assert any(
+            "completeness of the raw reconstruction depends on fmp" in item.lower()
+            for item in after
+        )
+
+    def test_the_manifest_keeps_the_announcement_time_caveat(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        limitations = load_manifest(package / "manifest.toml").known_limitations
+        assert any("EFFECTIVE (ex-) date" in item for item in limitations)
+        assert any("announcement-time" in item for item in limitations)
+
+    def test_the_manifest_records_the_enrichment_tool_version(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        limitations = load_manifest(package / "manifest.toml").known_limitations
+        assert any(ENRICHMENT_TOOL_VERSION in item for item in limitations)
+
+    def test_the_provenance_table_round_trips_through_toml(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        raw = tomllib.loads((package / "manifest.toml").read_text(encoding="utf-8"))
+        assert raw["provenance"]["split_provider"] == "fmp"
+        # The classic TOML nesting bug: a top-level key emitted after a table
+        # header silently becomes a member of it.
+        assert "known_limitations" in raw
+        assert "known_limitations" not in raw["coverage"]
+        assert "known_limitations" not in raw["provenance"]
+
+
+# ---------------------------------------------------------------------------
+# Two vendors disagreeing
+# ---------------------------------------------------------------------------
+
+
+class TestCrossProviderNormalization:
+    """The apparent conflicts the real smoke test produced, and why they are not.
+
+    Twelve Data served Apple's 2014 split as ``0.142857142857…`` and its 2020
+    split as ``0.25``. FMP served the same two events as 7/1 and 4/1. Compared
+    as raw vendor numbers these look like flat contradictions. They are exact
+    reciprocals: the same corporate action measured from opposite ends.
+
+    The fix is to normalize both into a canonical share-count multiplier before
+    comparing anything, which is what these tests hold in place. Everything here
+    uses the real ratios of real corporate actions, so a regression shows up as
+    a recognisably wrong statement about a well-known event.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "ex_date", "vendor_price_factor", "numerator", "denominator", "economic"),
+        [
+            ("AAPL 7-for-1", dt.date(2014, 6, 9), "0.142857142857", 7, 1, Decimal(7)),
+            ("AAPL 4-for-1", dt.date(2020, 8, 31), "0.25", 4, 1, Decimal(4)),
+            ("NVDA 10-for-1", dt.date(2024, 6, 10), "0.1", 10, 1, Decimal(10)),
+            ("NVDA 4-for-1", dt.date(2021, 7, 20), "0.25", 4, 1, Decimal(4)),
+            ("NVDA 3-for-2", dt.date(2007, 9, 11), "0.666666666667", 3, 2, Decimal("1.5")),
+            ("1-for-8 reverse", dt.date(2019, 5, 6), "8", 1, 8, Decimal("0.125")),
+            ("1-for-10 reverse", dt.date(2018, 3, 1), "10", 1, 10, Decimal("0.1")),
+        ],
+    )
+    def test_reciprocal_representations_normalize_to_the_same_split(
+        self,
+        label: str,
+        ex_date: dt.date,
+        vendor_price_factor: str,
+        numerator: int,
+        denominator: int,
+        economic: Decimal,
+    ) -> None:
+        price_side = SplitEvent.from_vendor(
+            ex_date=ex_date,
+            value=Decimal(vendor_price_factor),
+            convention=SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER,
+            source="twelve_data",
+        )
+        share_side = SplitEvent.from_vendor(
+            ex_date=ex_date,
+            value=Decimal(numerator) / Decimal(denominator),
+            convention=SplitFactorConvention.NEW_OVER_OLD_SHARES,
+            source="fmp",
+            numerator=numerator,
+            denominator=denominator,
+        )
+        assert ratios_agree(price_side.economic_ratio, economic), label
+        assert ratios_agree(share_side.economic_ratio, economic), label
+        assert ratios_agree(price_side.economic_ratio, share_side.economic_ratio), label
+
+        found = compare_schedules("X", (price_side,), (share_side,), "fmp")
+        assert found == [], f"{label} produced a finding of any kind"
+
+    @pytest.mark.parametrize(
+        ("economic", "price_adjustment"),
+        [
+            (Decimal(7), Decimal(1) / Decimal(7)),
+            (Decimal(4), Decimal("0.25")),
+            (Decimal(10), Decimal("0.1")),
+            (Decimal("1.5"), Decimal(1) / Decimal("1.5")),
+            (Decimal("0.125"), Decimal(8)),
+        ],
+    )
+    def test_the_four_derived_multipliers_are_consistent(
+        self, economic: Decimal, price_adjustment: Decimal
+    ) -> None:
+        """Adjusting and reconstructing are inverses, and price and volume move
+        in opposite directions. Stated as identities rather than examples."""
+        event = SplitEvent(ex_date=dt.date(2020, 1, 2), ratio=economic)
+        assert event.economic_ratio == economic
+        assert ratios_agree(event.price_adjustment_multiplier, price_adjustment)
+        assert event.volume_adjustment_multiplier == economic
+        assert event.raw_price_reconstruction_multiplier == economic
+        assert ratios_agree(event.raw_volume_reconstruction_multiplier, price_adjustment)
+        # Adjust then reconstruct returns the original price.
+        assert ratios_agree(
+            event.price_adjustment_multiplier * event.raw_price_reconstruction_multiplier,
+            Decimal(1),
+        )
+        # Dollar volume survives the adjustment.
+        assert ratios_agree(
+            event.price_adjustment_multiplier * event.volume_adjustment_multiplier,
+            Decimal(1),
+        )
+
+    def test_a_bare_factor_cannot_settle_its_own_direction(self) -> None:
+        """0.25 is a 4-for-1's price factor and a 1-for-4's share factor.
+
+        The single most important reason the convention is declared per provider
+        rather than sniffed from the value.
+        """
+        forward = SplitEvent.from_vendor(
+            ex_date=dt.date(2020, 8, 31),
+            value=Decimal("0.25"),
+            convention=SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER,
+        )
+        reverse = SplitEvent.from_vendor(
+            ex_date=dt.date(2020, 8, 31),
+            value=Decimal("0.25"),
+            convention=SplitFactorConvention.SHARE_COUNT_MULTIPLIER,
+        )
+        assert forward.economic_ratio == Decimal(4)
+        assert forward.is_reverse is False
+        assert reverse.economic_ratio == Decimal("0.25")
+        assert reverse.is_reverse is True
+
+    def test_an_unknown_convention_is_refused_rather_than_assumed(self) -> None:
+        with pytest.raises(ValueError, match="not established"):
+            to_share_count_multiplier(Decimal("0.25"), SplitFactorConvention.UNKNOWN)
+
+    def test_the_vendors_own_value_and_convention_are_preserved(self) -> None:
+        event = SplitEvent.from_vendor(
+            ex_date=dt.date(2014, 6, 9),
+            value=Decimal("0.142857142857"),
+            convention=SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER,
+            source="twelve_data",
+        )
+        assert event.vendor_value == Decimal("0.142857142857")
+        assert event.vendor_convention is SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER
+        assert "0.142857142857" in event.vendor_note
+        assert "price-adjustment multiplier" in event.vendor_note
+
+    def test_the_package_records_what_each_vendor_actually_sent(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        row = next(r for r in read_csv(package / "splits.csv") if r["ex_date"] == "2020-08-31")
+        assert row["ratio"] == "4"
+        assert row["numerator"] == "4"
+        assert row["denominator"] == "1"
+        assert row["vendor_convention"] == "new_over_old_shares"
+
+
+class TestConflictSemantics:
+    """What counts as a CONFLICT, and what is merely worth saying.
+
+    A real run reported three AAPL splits from 1987, 2000 and 2005 under a
+    heading that told the reader a person had to resolve them. They fall before
+    the package's 2010 price coverage, affect no row, and their absence from the
+    price provider's records proves nothing — that provider was only ever asked
+    about 2010 onward. Demanding that Twelve Data's package-local corporate
+    actions contain a 1987 split is asking a vendor for a history nobody
+    requested from it.
+
+    Every observation is now classified once, by kind, and both the rendered
+    report and the JSON payload partition that single list. `is_conflict` is the
+    whole distinction.
+    """
+
+    IN_WINDOW = (dt.date(2010, 1, 4), dt.date(2025, 12, 31))
+
+    def _fmp(self, day: dt.date, num: int, den: int) -> SplitEvent:
+        return SplitEvent.from_vendor(
+            ex_date=day,
+            value=Decimal(num) / Decimal(den),
+            convention=SplitFactorConvention.NEW_OVER_OLD_SHARES,
+            source="fmp",
+            numerator=num,
+            denominator=den,
+        )
+
+    def _price_side(self, day: dt.date, factor: str) -> SplitEvent:
+        return SplitEvent.from_vendor(
+            ex_date=day,
+            value=Decimal(factor),
+            convention=SplitFactorConvention.PRICE_ADJUSTMENT_MULTIPLIER,
+            source="twelve_data",
+        )
+
+    # -- the reported defect --------------------------------------------------
+
+    def test_a_pre_window_split_absent_from_the_price_provider_is_not_a_conflict(
+        self,
+    ) -> None:
+        """AAPL 2005-02-28 against a package that starts in 2010."""
+        secondary = (self._fmp(dt.date(2005, 2, 28), 2, 1),)
+        primary = (self._price_side(dt.date(2014, 6, 9), "0.142857142857"),)
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        outside = [f for f in found if f.ex_date == dt.date(2005, 2, 28)]
+        assert len(outside) == 1
+        assert outside[0].kind is ScheduleFindingKind.OUTSIDE_COVERAGE
+        assert outside[0].is_conflict is False
+        assert "expected rather than contradictory" in outside[0].message
+
+    def test_a_post_window_split_absent_from_the_price_provider_is_not_a_conflict(
+        self,
+    ) -> None:
+        secondary = (self._fmp(dt.date(2026, 5, 1), 2, 1),)
+        primary = (self._price_side(dt.date(2014, 6, 9), "0.142857142857"),)
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        outside = [f for f in found if f.ex_date == dt.date(2026, 5, 1)]
+        assert len(outside) == 1
+        assert outside[0].kind is ScheduleFindingKind.OUTSIDE_COVERAGE
+        assert outside[0].is_conflict is False
+
+    def test_the_real_aapl_run_produces_zero_conflicts(self, tmp_path: Path) -> None:
+        """The end-to-end assertion the reported defect asks for.
+
+        FMP supplies five AAPL splits; Twelve Data's package supplies its two
+        in-window ones in its own reciprocal convention. Nothing here needs a
+        person.
+        """
+        package = build_package(tmp_path / "pkg", ["AAPL"], splits_available="apple")
+        report = enrich(package)
+        assert report.conflicts == [], report.conflicts
+        assert report.to_payload()["conflict_count"] == 0
+        kinds = {f.kind for f in report.schedule_findings}
+        assert kinds <= {ScheduleFindingKind.OUTSIDE_COVERAGE}
+
+    def test_the_two_views_of_a_run_agree_about_what_a_conflict_is(self, tmp_path: Path) -> None:
+        """The reported inconsistency: the rendered report showed CONFLICTS
+        where the payload showed none. One classification, read by both."""
+        package = build_package(tmp_path / "pkg", ["AAPL"], splits_available="apple")
+        report = enrich(package)
+        payload = report.to_payload()
+        rendered = report.render()
+
+        assert payload["conflict_count"] == len(report.conflicts)
+        assert payload["conflicts"] == report.conflicts
+        typed = [f for f in payload["schedule_findings"] if f["is_conflict"]]
+        assert len(typed) == payload["conflict_count"]
+        if not report.conflicts:
+            assert "CONFLICTS" not in rendered
+        # Every informational finding names its kind in both views.
+        for item in payload["schedule_findings"]:
+            if not item["is_conflict"]:
+                assert item["kind"] in {str(k) for k in ScheduleFindingKind}
+
+    # -- what remains a conflict ---------------------------------------------
+
+    def test_a_same_date_equivalent_normalized_split_is_not_a_conflict(self) -> None:
+        primary = (self._price_side(dt.date(2020, 8, 31), "0.25"),)
+        secondary = (self._fmp(dt.date(2020, 8, 31), 4, 1),)
+        assert compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW) == []
+
+    def test_a_same_date_genuinely_differing_ratio_is_a_conflict(self) -> None:
+        primary = (self._price_side(dt.date(2020, 8, 31), "0.5"),)
+        secondary = (self._fmp(dt.date(2020, 8, 31), 4, 1),)
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert len(found) == 1
+        assert found[0].kind is ScheduleFindingKind.CROSS_PROVIDER_CONFLICT
+        assert found[0].is_conflict is True
+        assert "Not reconciled" in found[0].message
+
+    def test_an_in_window_event_missing_from_a_source_that_claims_the_window(
+        self,
+    ) -> None:
+        """The documented semantics for the ambiguous case.
+
+        The price provider supplied an in-coverage split of its own, so it is
+        asserting a schedule for that window rather than staying silent. A gap
+        in it is then a real contradiction between two schedules.
+        """
+        primary = (self._price_side(dt.date(2014, 6, 9), "0.142857142857"),)
+        secondary = (
+            self._fmp(dt.date(2014, 6, 9), 7, 1),
+            self._fmp(dt.date(2020, 8, 31), 4, 1),
+        )
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert len(found) == 1
+        assert found[0].kind is ScheduleFindingKind.MISSING_FROM_PRICE_PROVIDER
+        assert found[0].is_conflict is True
+        assert found[0].ex_date == dt.date(2020, 8, 31)
+
+    def test_an_in_window_event_missing_from_a_source_that_claims_nothing(self) -> None:
+        """The mirror of the case above, and the reason it is not symmetric.
+
+        A price provider with no in-window splits at all is silent, not
+        contradicting. Treating silence as disagreement would turn every
+        plan-restricted package into a wall of conflicts.
+        """
+        primary = (self._price_side(dt.date(2005, 2, 28), "0.5"),)
+        secondary = (
+            self._fmp(dt.date(2005, 2, 28), 2, 1),
+            self._fmp(dt.date(2020, 8, 31), 4, 1),
+        )
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert [f.kind for f in found] == []
+
+    def test_an_in_window_event_the_split_provider_lacks_is_a_conflict(self) -> None:
+        primary = (
+            self._price_side(dt.date(2014, 6, 9), "0.142857142857"),
+            self._price_side(dt.date(2020, 8, 31), "0.25"),
+        )
+        secondary = (self._fmp(dt.date(2014, 6, 9), 7, 1),)
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert len(found) == 1
+        assert found[0].kind is ScheduleFindingKind.MISSING_FROM_SPLIT_PROVIDER
+        assert found[0].is_conflict is True
+        assert "NOT applied" in found[0].message
+
+    def test_a_reciprocal_pair_is_a_convention_finding_not_a_conflict(self) -> None:
+        """If two *normalized* ratios come out reciprocal, a declaration is
+        wrong — a different problem from the vendors disagreeing, with a
+        different fix."""
+        primary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="twelve_data"),)
+        secondary = (
+            SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(1) / Decimal(7), source="fmp"),
+        )
+        found = compare_schedules("AAPL", primary, secondary, "fmp", coverage=self.IN_WINDOW)
+        assert len(found) == 1
+        assert found[0].kind is ScheduleFindingKind.REPRESENTATION_MISMATCH
+        assert found[0].is_conflict is False
+        assert "convention is wrong" in found[0].message
+
+    def test_a_forward_against_a_reverse_split_is_a_conflict(self) -> None:
+        """4-for-1 against 1-for-8: opposite directions and not reciprocal.
+        The one comparison that must never be smoothed away."""
+        primary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal(4), source="a"),)
+        secondary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal("0.125"), source="b"),)
+        found = compare_schedules("X", primary, secondary, "b", coverage=self.IN_WINDOW)
+        assert [f.kind for f in found] == [ScheduleFindingKind.CROSS_PROVIDER_CONFLICT]
+
+    def test_vendor_truncation_does_not_manufacture_a_conflict(self) -> None:
+        """A vendor serving 1/7 to twelve digits still round-trips to 7."""
+        primary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="a"),)
+        secondary = (
+            SplitEvent(
+                ex_date=dt.date(2014, 6, 9),
+                ratio=Decimal(1) / Decimal("0.142857142857"),
+                source="b",
+            ),
+        )
+        assert compare_schedules("AAPL", primary, secondary, "b", coverage=self.IN_WINDOW) == []
+
+    def test_agreement_produces_no_finding(self) -> None:
+        shared = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="twelve_data"),)
+        assert compare_schedules("AAPL", shared, shared, "fmp", coverage=self.IN_WINDOW) == []
+
+    def test_without_a_coverage_window_nothing_is_assumed_out_of_range(self) -> None:
+        """No bars means no window, and a claim about what is inside it would be
+        invented. Everything is treated as in-range and the silence rule still
+        applies."""
+        primary = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7), source="a"),)
+        secondary = (SplitEvent(ex_date=dt.date(2020, 8, 31), ratio=Decimal(4), source="b"),)
+        found = compare_schedules("AAPL", primary, secondary, "b", coverage=None)
+        assert {f.kind for f in found} == {
+            ScheduleFindingKind.MISSING_FROM_SPLIT_PROVIDER,
+            ScheduleFindingKind.MISSING_FROM_PRICE_PROVIDER,
+        }
+
+    def test_the_manifest_only_mentions_conflicts_when_there_are_some(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"], splits_available="apple")
+        enrich(package)
+        limitations = load_manifest(package / "manifest.toml").known_limitations
+        assert not any("NOT resolved automatically" in item for item in limitations)
+
+    def test_the_secondary_schedule_is_the_one_reconstruction_uses(self, tmp_path: Path) -> None:
+        """Named on the command line, so used — and every difference reported."""
+        package = build_package(tmp_path / "pkg", ["AAPL"], splits_available=True)
+        enrich(package)
+        rows = read_csv(package / "splits.csv")
+        assert {row["source_provider"] for row in rows} == {"fmp"}
+        assert len(rows) == 5
+
+
+# ---------------------------------------------------------------------------
+# Pacing
+# ---------------------------------------------------------------------------
+
+
+class TestPacing:
+    def test_the_default_rate_is_documented_as_self_imposed(self) -> None:
+        text = RequestPacer(requests_per_minute=DEFAULT_REQUESTS_PER_MINUTE).describe()
+        assert "self-imposed" in text
+        assert "not a limit quoted" in text
+
+    def test_the_rate_is_configurable(self) -> None:
+        assert RequestPacer(requests_per_minute=60).interval_s == pytest.approx(1.0)
+        assert RequestPacer(requests_per_minute=6).interval_s == pytest.approx(10.0)
+
+    def test_the_pacing_note_reaches_the_manifest(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        enrich(package)
+        limitations = load_manifest(package / "manifest.toml").known_limitations
+        assert any("self-imposed pacing" in item for item in limitations)
+
+    def test_backoff_is_capped_so_it_cannot_become_a_hang(self) -> None:
+        pacer = RequestPacer(requests_per_minute=1)
+        for _ in range(20):
+            pacer.note_rate_limited()
+        assert pacer.interval_s <= 30.0
+
+    def test_the_first_request_does_not_wait(self) -> None:
+        pacer = RequestPacer(requests_per_minute=1)
+        assert pacer.wait_for_slot() == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
+
+class TestSourceRegistry:
+    def test_an_unknown_source_names_the_alternatives(self) -> None:
+        with pytest.raises(ConfigError) as excinfo:
+            get_source_class("nope")
+        assert "fmp" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# The operator-facing commands
+# ---------------------------------------------------------------------------
+
+
+class _CliFmp(FmpSplitSource):
+    """The real adapter with a recorded transport, for the CLI tests."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(
+            token=FMP_SECRET,
+            transport=FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": NVDA_SPLITS}),
+            requests_per_minute=600_000,
+        )
+
+
+class _CliTwelveData(TwelveDataAcquisition):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(
+            token=TD_SECRET,
+            transport=FakeTwelveDataTransport(),
+            batch_size=4,
+            credits_per_minute=100_000,
+        )
+
+
+class TestCommands:
+    """``tradeit data enrich`` is the primitive; ``--split-provider`` is sugar.
+
+    The design choice, since it is not obvious: enrichment is a pass over an
+    *existing package directory*, and the ``acquire`` flag runs exactly that
+    pass immediately afterwards. It is not a second implementation living inside
+    acquisition. Price acquisition on a free plan spans days — the daily credit
+    allowance runs out, the run stops cleanly, the operator resumes tomorrow —
+    so a package sits usable-but-incomplete for a long time, and the split
+    schedule for the symbols already downloaded has to be obtainable without
+    re-downloading a single bar.
+    """
+
+    def _args(self, **kwargs: Any) -> argparse.Namespace:
+        return argparse.Namespace(**kwargs)
+
+    def test_enrich_runs_over_an_existing_package(
+        self, tmp_path: Path, monkeypatch: Any, capsys: Any
+    ) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        monkeypatch.setattr(cli_data, "get_source_class", lambda name: _CliFmp)
+        code = cli_data.cmd_enrich(
+            self._args(
+                package=str(package),
+                source="fmp",
+                symbols=None,
+                split_rate_limit=None,
+                force_refresh=False,
+                no_reconstruct=False,
+            )
+        )
+        assert code == 0
+        assert "ENRICHED" in capsys.readouterr().out
+        assert load_manifest(package / "manifest.toml").provenance.split_provider == "fmp"
+
+    def test_enrich_writes_a_machine_readable_report(
+        self, tmp_path: Path, monkeypatch: Any, capsys: Any
+    ) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        monkeypatch.setattr(cli_data, "get_source_class", lambda name: _CliFmp)
+        cli_data.cmd_enrich(
+            self._args(
+                package=str(package),
+                source="fmp",
+                symbols=None,
+                split_rate_limit=None,
+                force_refresh=False,
+                no_reconstruct=False,
+            )
+        )
+        capsys.readouterr()
+        payload = json.loads(
+            (package / WORKSPACE_DIRNAME / "enrichment_report.json").read_text(encoding="utf-8")
+        )
+        assert payload["split_provider"] == "fmp"
+        assert payload["price_provider"] == "twelve_data"
+        assert payload["reconstruction"][0]["label"] == RECONSTRUCTION_LABEL
+        assert FMP_SECRET not in json.dumps(payload)
+
+    def test_acquire_with_split_provider_runs_the_same_pass(
+        self, tmp_path: Path, monkeypatch: Any, capsys: Any
+    ) -> None:
+        monkeypatch.setattr(cli_data, "get_provider_class", lambda name: _CliTwelveData)
+        monkeypatch.setattr(cli_data, "get_source_class", lambda name: _CliFmp)
+        output = tmp_path / "pkg"
+        code = cli_data.cmd_acquire(
+            self._args(
+                provider="twelve_data",
+                symbols=["AAPL"],
+                universe="validation",
+                start="2010-01-01",
+                end="2011-03-31",
+                output=str(output),
+                name=None,
+                force_refresh=False,
+                retry_failed=False,
+                rate_limit=None,
+                batch_size=None,
+                estimate_only=False,
+                split_provider="fmp",
+                split_rate_limit=None,
+            )
+        )
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "ACQUISITION SUMMARY" in out
+        assert "ENRICHMENT SUMMARY" in out
+        manifest = load_manifest(output / "manifest.toml")
+        assert manifest.provider == "twelve_data"
+        assert manifest.provenance is not None
+        assert manifest.provenance.split_provider == "fmp"
+
+    def test_acquire_without_split_provider_leaves_the_package_alone(
+        self, tmp_path: Path, monkeypatch: Any, capsys: Any
+    ) -> None:
+        monkeypatch.setattr(cli_data, "get_provider_class", lambda name: _CliTwelveData)
+        output = tmp_path / "pkg"
+        code = cli_data.cmd_acquire(
+            self._args(
+                provider="twelve_data",
+                symbols=["AAPL"],
+                universe="validation",
+                start="2010-01-01",
+                end="2011-03-31",
+                output=str(output),
+                name=None,
+                force_refresh=False,
+                retry_failed=False,
+                rate_limit=None,
+                batch_size=None,
+                estimate_only=False,
+                split_provider=None,
+                split_rate_limit=None,
+            )
+        )
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "ENRICHMENT SUMMARY" not in out
+        assert not (output / "splits.csv").exists()
+
+    def test_the_parser_offers_the_source_by_name(self) -> None:
+        parser = argparse.ArgumentParser()
+        cli_data.add_data_commands(parser.add_subparsers(dest="command", required=True))
+        args = parser.parse_args(["data", "enrich", "./pkg", "--source", "fmp"])
+        assert args.source == "fmp"
+        assert args.func is cli_data.cmd_enrich
+
+    def test_fmp_is_refused_as_a_price_provider_by_the_registry(self) -> None:
+        with pytest.raises(ConfigError):
+            cli_data.get_provider_class("fmp")
+
+    def test_providers_lists_sources_separately(self, capsys: Any) -> None:
+        cli_data.cmd_providers(argparse.Namespace())
+        out = capsys.readouterr().out
+        assert "Price providers" in out
+        assert "Corporate-action sources" in out
+        assert "fmp" in out
+        assert "cannot be used as --provider" in out
+
+
+# ---------------------------------------------------------------------------
+# Counting splits honestly
+# ---------------------------------------------------------------------------
+
+
+class TestSplitCensus:
+    """ "Reconstructed across 5 split(s)" was true and told the reader nothing.
+
+    Over a 2010-2025 Apple package, three of those five records are from 1987,
+    2000 and 2005 and change no row in it. The line reads as though five splits
+    were applied. Four separate counts replace it, and none of them is the sum
+    of the others.
+    """
+
+    def test_the_four_counts_are_measured_separately(self) -> None:
+        coverage = (dt.date(2010, 1, 4), dt.date(2025, 12, 31))
+        events = tuple(
+            SplitEvent(ex_date=d, ratio=Decimal(2))
+            for d in (
+                dt.date(1987, 6, 16),
+                dt.date(2000, 6, 21),
+                dt.date(2005, 2, 28),
+                dt.date(2014, 6, 9),
+                dt.date(2020, 8, 31),
+            )
+        )
+        census = take_census(events, coverage)
+        assert census.supplied == 5
+        assert census.in_coverage == 2
+        assert census.effective == 2
+        assert census.outside_coverage == 3
+        assert census.before_coverage == 3
+        assert census.after_coverage == 0
+
+    def test_a_split_after_the_window_is_outside_coverage_and_affects_every_row(self) -> None:
+        """The two counts that are easy to conflate, pulled apart.
+
+        Outside coverage does not mean harmless. A split after the window's end
+        touches every session in it.
+        """
+        coverage = (dt.date(2010, 1, 4), dt.date(2011, 3, 31))
+        events = (SplitEvent(ex_date=dt.date(2014, 6, 9), ratio=Decimal(7)),)
+        census = take_census(events, coverage)
+        assert census.in_coverage == 0
+        assert census.outside_coverage == 1
+        assert census.after_coverage == 1
+        assert census.effective == 1
+
+    def test_a_split_before_the_window_is_outside_coverage_and_affects_nothing(self) -> None:
+        coverage = (dt.date(2010, 1, 4), dt.date(2011, 3, 31))
+        events = (SplitEvent(ex_date=dt.date(2005, 2, 28), ratio=Decimal(2)),)
+        census = take_census(events, coverage)
+        assert census.in_coverage == 0
+        assert census.after_coverage == 0
+        assert census.before_coverage == 1
+        assert census.effective == 0
+
+    def test_a_split_on_the_first_session_affects_no_row(self) -> None:
+        """The ex-date already trades on the new basis, so nothing precedes it
+        inside the package. In coverage, and not effective."""
+        coverage = (dt.date(2010, 1, 4), dt.date(2011, 3, 31))
+        events = (SplitEvent(ex_date=dt.date(2010, 1, 4), ratio=Decimal(2)),)
+        census = take_census(events, coverage)
+        assert census.in_coverage == 1
+        assert census.effective == 0
+
+    def test_the_census_matches_the_rows_the_arithmetic_actually_changed(
+        self, tmp_path: Path
+    ) -> None:
+        """A census that disagreed with the reconstruction it describes would be
+        worse than no census."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package)
+        result = report.reconstruction[0]
+        rows = read_csv(package / WORKSPACE_DIRNAME / "reconstructed_raw_prices.csv.gz")
+        applied = {d for row in rows for d in row["splits_applied"].split(";") if d}
+        assert len(applied) == result.census.effective
+        assert result.census.supplied == 5
+        assert result.census.effective == 2
+        # The fixture package spans early 2010 only, so Apple's 2014 and 2020
+        # splits sit after the window: outside coverage, and affecting every row.
+        assert result.census.in_coverage == 0
+        assert result.census.after_coverage == 2
+        assert result.census.before_coverage == 3
+
+    def test_the_summary_no_longer_says_across_five_splits(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package)
+        summary = report.reconstruction[0].summary()
+        assert "across 5 split" not in summary
+        assert "5 supplied" in summary
+        assert "0 inside price coverage" in summary
+        assert "2 affecting at least one row" in summary
+        assert "5 outside coverage" in summary
+        assert "3 before the window, affecting none" in summary
+        assert "2 after the window, affecting every row" in summary
+
+    def test_the_rendered_report_breaks_the_counts_out_per_symbol(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA"])
+        report = enrich(
+            package, FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": NVDA_SPLITS})
+        )
+        text = report.render()
+        assert "supplied / inside coverage / affecting rows / outside" in text
+        assert "A split before the window affects no row" in text
+
+    def test_the_payload_carries_all_four_counts(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        report = enrich(package)
+        payload = report.to_payload()
+        splits = payload["symbols"][0]["splits"]
+        assert splits["supplied"] == 5
+        assert splits["in_coverage"] == 0
+        assert splits["effective"] == 2
+        assert splits["outside_coverage"] == 5
+        assert splits["before_coverage"] == 3
+        assert splits["after_coverage"] == 2
+        assert payload["reconstruction"][0]["splits"] == splits
+
+    def test_nvda_over_the_smoke_window_reports_two_effective_splits(self, tmp_path: Path) -> None:
+        """The other half of the reported complaint: NVDA showed 6."""
+        package = build_package(tmp_path / "pkg", ["NVDA"])
+        report = enrich(package, FakeFmpTransport(by_symbol={"NVDA": NVDA_SPLITS}))
+        census = report.reconstruction[0].census
+        assert census.supplied == 3
+        # The 2007 3-for-2 predates the fixture window; 2021 and 2024 follow it.
+        assert census.before_coverage == 1
+        assert census.after_coverage == 2
+        assert census.effective == 2
+
+
+# ---------------------------------------------------------------------------
+# Entitlement, as the full universe run met it
+# ---------------------------------------------------------------------------
+
+
+def http_error(code: int, body: bytes = b"") -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "https://financialmodelingprep.com/stable/splits?symbol=X&apikey=REDACTED",
+        code,
+        "Payment Required",
+        {},  # type: ignore[arg-type]
+        io.BytesIO(body),
+    )
+
+
+class RealTransport(HttpTransport):
+    """The real transport with urlopen replaced, so status handling is exercised."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(cache=None, timeout_s=1.0, max_attempts=3, min_interval_s=0.0)
+        self.error = error
+        self.attempts = 0
+
+    def _fetch(self, url: str, headers: dict[str, str]) -> bytes:  # type: ignore[override]
+        self.attempts += 1
+        return super()._fetch(url, headers)
+
+
+class TestEntitlementSemantics:
+    """HTTP 402 is a subscription answer, not a failure.
+
+    The full universe run met it on 44 of 78 symbols, interleaved with 200s —
+    so it is per-symbol entitlement, not a rate or daily-quota event. Recording
+    it as PROVIDER_ERROR would leave those 44 "unexplained" and invite a retry
+    loop against a certainty.
+    """
+
+    def _source(self, code: int, body: bytes = b"") -> FmpSplitSource:
+        transport = RealTransport(http_error(code, body))
+        original = urllib.request.urlopen
+
+        def fake(*args: Any, **kwargs: Any) -> Any:
+            raise transport.error
+
+        urllib.request.urlopen = fake  # type: ignore[assignment]
+        try:
+            source = FmpSplitSource(
+                token=FMP_SECRET, transport=transport, requests_per_minute=600_000
+            )
+            source._live_lookup = source.lookup("AAPL")  # type: ignore[attr-defined]
+        finally:
+            urllib.request.urlopen = original  # type: ignore[assignment]
+        return source
+
+    def test_402_is_an_entitlement_answer_not_a_provider_error(self) -> None:
+        source = self._source(402)
+        lookup = source._live_lookup  # type: ignore[attr-defined]
+        assert lookup.support is CapabilitySupport.NOT_AVAILABLE_ON_PLAN
+        assert lookup.support is not CapabilitySupport.PROVIDER_ERROR
+        assert lookup.support.is_evidence_of_absence is False
+
+    def test_402_is_never_retried(self) -> None:
+        """Retrying an answer the vendor will repeat spends the day's allowance
+        on a certainty."""
+        source = self._source(402)
+        assert source.transport.attempts == 1  # type: ignore[attr-defined]
+
+    def test_the_http_status_survives_into_provenance(self) -> None:
+        lookup = self._source(402)._live_lookup  # type: ignore[attr-defined]
+        assert lookup.http_status == 402
+        assert lookup.status is FetchStatus.REJECTED
+        assert lookup.status.is_retryable is False
+
+    def test_the_vendors_own_message_is_preserved(self) -> None:
+        body = json.dumps({"Error Message": "Special Endpoint: upgrade required"}).encode()
+        lookup = self._source(402, body)._live_lookup  # type: ignore[attr-defined]
+        assert "Special Endpoint: upgrade required" in lookup.error
+        assert "402" in lookup.error
+
+    def test_a_402_symbol_keeps_its_price_data_capability(self, tmp_path: Path) -> None:
+        """The consequence that matters: a second vendor's billing does not
+        delete a legitimately acquired price history."""
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA"])
+        report = enrich(
+            package,
+            FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": PLAN_ERROR}),
+        )
+        index = report.instrument_capabilities
+        nvda = next(r for r in index.records if r.ticker == "NVDA")
+        assert nvda.price_data_available is True
+        assert nvda.raw_reconstruction_available is False
+        assert nvda.split_schedule_verified is False
+        assert len(index.price_eligible) == 2
+        assert len(index.raw_verified) == 1
+
+    def test_the_summary_separates_the_four_outcomes(self, tmp_path: Path) -> None:
+        package = build_package(tmp_path / "pkg", ["AAPL", "NVDA"])
+        report = enrich(
+            package,
+            FakeFmpTransport(by_symbol={"AAPL": AAPL_SPLITS, "NVDA": PLAN_ERROR}),
+        )
+        counts = report.outcome_counts
+        assert counts["answered"] == 1
+        assert counts["not_available_on_plan"] == 1
+        assert counts["provider_or_network_error"] == 0
+        text = report.render()
+        assert "NOT AVAILABLE ON PLAN" in text
+        assert "an entitlement answer" in text
+        assert report.to_payload()["outcome_counts"] == counts
+
+    def test_an_entitlement_answer_is_not_a_true_error(self, tmp_path: Path) -> None:
+        """The distinction the request asked for: a plan answer and a network
+        failure both produce zero splits and mean different things."""
+        package = build_package(tmp_path / "pkg", ["AAPL"])
+        broken = enrich(
+            package,
+            FakeFmpTransport(raise_on={"*": ProviderUnreachableError("no route to host")}),
+        )
+        assert broken.outcome_counts["provider_or_network_error"] == 1
+        assert broken.outcome_counts["not_available_on_plan"] == 0

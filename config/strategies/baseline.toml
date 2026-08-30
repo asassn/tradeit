@@ -1,0 +1,274 @@
+# Baseline strategy configuration.
+#
+# Every number that affects a trading decision lives in a file like this one.
+# The strategy's identity is the hash of this content, so changing any value
+# here produces a different strategy -- which is exactly what makes a backtest
+# and a live session comparable, or provably not.
+#
+# These values are a documented starting point, not a validated edge. Nothing
+# has been backtested yet; Phase 9 does that. Treat every threshold below as a
+# hypothesis. In particular the regime and volatility thresholds were NOT
+# fitted to historical returns, deliberately: tuning them before there is an
+# out-of-sample harness produces a model that looks excellent on the data it
+# was tuned on and says nothing about the future.
+#
+# A test asserts this file matches the code defaults, so the two cannot drift
+# apart while appearing to agree.
+#
+# Keys whose value is null are omitted: TOML has no null literal, and leaving
+# them out yields the model default, which is null.
+
+name = "baseline"
+description = "Trend-following breakout on fundamentally sound names. Unvalidated starting point."
+schema_version = 1
+
+[universe]
+name = "us_equity"
+exchanges = ["XNYS", "XNAS", "XASE"]
+asset_classes = ["common_stock", "adr", "reit"]
+exclude_asset_classes = ["warrant", "unit", "preferred", "closed_end_fund", "etf"]
+include_adrs = true
+include_reits = true
+etf_universe_name = "us_etf"
+exclude_otc = true
+exclude_leveraged_etfs = true
+exclude_inverse_etfs = true
+exclude_pre_merger_spacs = true
+country = "US"
+
+[benchmarks]
+primary_symbol = "SPY"
+growth_symbol = "QQQ"
+small_cap_symbol = "IWM"
+comparison_symbols = ["SPY", "QQQ", "IWM"]
+volatility_symbol = "VIX"
+classification_scheme = "GICS"
+
+[benchmarks.sector_proxies]
+"Communication Services" = "XLC"
+"Consumer Discretionary" = "XLY"
+"Consumer Staples" = "XLP"
+Energy = "XLE"
+Financials = "XLF"
+"Health Care" = "XLV"
+Industrials = "XLI"
+"Information Technology" = "XLK"
+Materials = "XLB"
+"Real Estate" = "XLRE"
+Utilities = "XLU"
+
+[liquidity]
+min_price = 5.0
+max_price = 10000.0
+min_market_cap = 500000000.0
+min_avg_dollar_volume = 10000000.0
+dollar_volume_lookback = 20
+min_trading_history_sessions = 252
+max_participation_rate = 0.02
+
+[scanner_profiles]
+
+
+[scanner_profiles.institutional_growth]
+min_market_cap = 2000000000.0
+min_avg_dollar_volume = 25000000.0
+description = "Large, heavily traded names only."
+
+[scanner_profiles.broad_opportunity]
+min_market_cap = 500000000.0
+min_avg_dollar_volume = 10000000.0
+description = "The default breadth of coverage."
+
+[indicators]
+sma_periods = [10, 20, 50, 150, 200]
+ema_periods = [8, 21, 50]
+rsi_period = 14
+macd_fast = 12
+macd_slow = 26
+macd_signal = 9
+adx_period = 14
+atr_period = 14
+bollinger_period = 20
+bollinger_stdev = 2.0
+vwap_period = 20
+relative_volume_period = 20
+volatility_periods = [20, 60]
+momentum_periods = [20, 60, 120, 250]
+roc_periods = [5, 20, 60]
+ma_slope_period = 20
+ma_slope_lookback = 10
+rolling_extreme_periods = [20, 52, 252]
+dollar_volume_period = 20
+contraction_short_window = 10
+contraction_long_window = 50
+annualisation_factor = 252
+
+[timeframes]
+base_timeframe = "1d"
+enabled = ["1d", "1w"]
+intraday_enabled = ["15m", "1h", "4h"]
+intraday_base = "1m"
+emit_incomplete_bars = false
+week_anchor = "friday"
+
+[relative_strength]
+lookbacks = [20, 60, 120, 250]
+benchmarks = ["SPY", "QQQ", "IWM"]
+score_benchmark = "SPY"
+rank_against_sector = true
+rank_against_industry = true
+min_universe_for_rank = 20
+min_sector_peers_for_rank = 5
+
+[relative_strength.lookback_weights]
+20 = 0.15
+60 = 0.25
+120 = 0.3
+250 = 0.3
+
+[sector_strength]
+scheme = "GICS"
+breadth_ma_periods = [20, 50, 200]
+momentum_lookbacks = [20, 60]
+min_members = 5
+use_etf_proxy_when_unavailable = true
+
+[sector_strength.factor_weights]
+relative_return = 0.25
+absolute_return = 0.15
+relative_momentum = 0.2
+breadth_above_50dma = 0.2
+breadth_above_200dma = 0.1
+participation = 0.1
+
+[breadth]
+ma_periods = [20, 50, 200]
+new_high_low_lookback = 252
+min_universe_size = 50
+thrust_lookback = 10
+advance_threshold_pct = 0.0
+
+[regime]
+trend_ma_fast = 50
+trend_ma_slow = 200
+slope_lookback = 20
+benchmarks = ["SPY", "QQQ", "IWM"]
+severe_risk_off_volatility_states = ["EXTREME"]
+
+[regime.signal_weights]
+primary_trend = 0.3
+benchmark_agreement = 0.15
+ma_slope = 0.15
+breadth_above_200dma = 0.15
+new_high_low = 0.1
+sector_participation = 0.1
+volatility = 0.05
+
+[regime.thresholds]
+STRONG_BULL = 0.6
+BULL = 0.25
+NEUTRAL = -0.1
+WEAK = -0.35
+BEAR = -0.65
+
+[volatility_regime]
+realized_vol_period = 20
+percentile_lookback = 252
+atr_period = 14
+gap_lookback = 20
+gap_threshold_pct = 0.02
+
+[volatility_regime.thresholds]
+LOW = 0.2
+NORMAL = 0.6
+ELEVATED = 0.8
+HIGH = 0.95
+
+[fundamental]
+require_positive_revenue_growth = true
+min_revenue_growth_yoy = 0.1
+min_earnings_growth_yoy = 0.15
+require_positive_earnings = false
+max_debt_to_equity = 2.0
+min_return_on_equity = 0.1
+min_quarters_of_history = 4
+
+[technical]
+trend_ma_periods = [50, 150, 200]
+require_price_above_ma = [50, 200]
+require_ma_stack = true
+min_pct_off_52w_low = 0.3
+max_pct_below_52w_high = 0.25
+relative_strength_lookback = 126
+min_relative_strength_rank = 0.7
+atr_period = 14
+volume_baseline_period = 50
+
+[patterns]
+enabled_patterns = ["flat_base", "cup_with_handle", "volatility_contraction", "ascending_triangle"]
+min_base_sessions = 25
+max_base_sessions = 150
+max_base_depth_pct = 0.35
+min_base_depth_pct = 0.08
+max_volatility_contraction_ratio = 0.6
+pivot_buffer_pct = 0.001
+
+[breakout]
+approach_threshold_pct = 0.03
+trigger_buffer_pct = 0.002
+min_volume_ratio = 1.5
+confirmation_sessions = 2
+max_extension_from_pivot_pct = 0.05
+failure_undercut_pct = 0.02
+max_sessions_to_confirm = 5
+
+[scoring]
+min_score_to_consider = 0.6
+max_candidates_per_session = 20
+
+[scoring.weights]
+relative_strength = 0.25
+pattern_quality = 0.2
+breakout_confirmation = 0.2
+fundamental_quality = 0.15
+sector_strength = 0.1
+volume_accumulation = 0.1
+
+[sizing]
+risk_per_trade_pct = 0.005
+max_position_pct_of_equity = 0.2
+min_position_notional = 500.0
+allow_fractional_shares = false
+allow_pyramiding = true
+max_pyramid_entries = 2
+pyramid_min_gain_pct = 0.03
+
+[risk]
+max_portfolio_heat_pct = 0.06
+max_positions = 12
+max_sector_exposure_pct = 0.3
+max_correlation_for_new_position = 0.75
+correlation_lookback_sessions = 126
+max_gross_exposure_pct = 1.0
+max_daily_loss_pct = 0.03
+drawdown_halt_pct = 0.15
+reduce_risk_below_regime = ["bear_trending", "high_volatility"]
+regime_risk_multiplier = 0.5
+
+[exits]
+initial_stop_atr_multiple = 2.0
+max_initial_stop_pct = 0.08
+trailing_stop_atr_multiple = 3.0
+activate_trailing_at_r = 1.5
+move_stop_to_breakeven_at_r = 1.0
+time_stop_sessions = 40
+take_partial_profit_at_r = 2.0
+partial_profit_fraction = 0.33
+earnings_blackout_sessions = 2
+
+[costs]
+commission_per_share = 0.005
+commission_minimum = 1.0
+slippage_bps = 5.0
+spread_bps = 3.0
+market_impact_coefficient = 0.1

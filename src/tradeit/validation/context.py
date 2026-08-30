@@ -1,0 +1,285 @@
+"""What a check is handed, and why each piece of it is pinned.
+
+A validation result is only worth as much as the reader's ability to say what
+produced it. So the context is not "a database session" — it is a session
+*plus* every identifier needed to reproduce the run: which package snapshot,
+which as-of instant, which universe, which configuration digests, which code
+version.
+
+The awkward part is deliberate. Constructing a context requires naming a
+snapshot, and a snapshot is a row written by an import that verified its own
+file digests. There is no path from "I have a database somewhere" to a
+validation result, because that path is how a result ends up describing data
+nobody can identify afterwards.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from tradeit.data.packages.capability import CapabilityIndex
+from tradeit.data.packages.spec import DatasetKind
+from tradeit.data.validation_universe import ValidationUniverse, default_universe
+from tradeit.errors import ConfigError
+from tradeit.reproducibility.versioning import content_hash
+from tradeit.storage import tables as t
+from tradeit.validation.checks import CheckClock
+from tradeit.validation.scope import RunSelection, ScanScope, resolve_run, resolve_scope
+from tradeit.validation.survivorship import AcquisitionRecordView
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    pass
+
+
+@dataclass(slots=True)
+class ValidationContext:
+    """Everything a check may read, and everything the report must record."""
+
+    session: Session
+    package: t.DataPackage
+    clock: CheckClock
+    universe: ValidationUniverse = field(default_factory=default_universe)
+    code_version: str = "unknown"
+    #: Configuration digests for the layers under test, so a later run that
+    #: differs can say whether the data changed or the settings did.
+    config_digests: dict[str, str] = field(default_factory=dict)
+    #: Which scan run's derived rows the Phase 4/5 checks may read. Empty means
+    #: "infer, if exactly one completed run exists" — never "read them all".
+    scan_id: str = ""
+    _datasets: frozenset[DatasetKind] | None = field(default=None, init=False)
+    _capabilities: CapabilityIndex | None = field(default=None, init=False)
+    _acquisition: AcquisitionRecordView | None = field(default=None, init=False)
+    _scope: ScanScope | None = field(default=None, init=False)
+    _run: RunSelection | None = field(default=None, init=False)
+
+    @property
+    def as_of(self) -> dt.datetime:
+        return self.clock.as_of
+
+    @property
+    def run(self) -> RunSelection:
+        """The single scan run the Phase 4/5 checks read.
+
+        A snapshot can carry several completed scans, and they are separate
+        corpora. When the selection is ambiguous this returns unresolved and the
+        checks BLOCK, because a population assembled from two runs is one that
+        never existed.
+        """
+        if self._run is None:
+            object.__setattr__(
+                self, "_run", resolve_run(self.session, self.snapshot_id, scan_id=self.scan_id)
+            )
+        assert self._run is not None
+        return self._run
+
+    @property
+    def scope(self) -> ScanScope:
+        """Which instruments the selected run's rows actually cover.
+
+        Every empirical rate is computed over that run's *completed* instrument
+        universe, not over the snapshot and not over every run that ever
+        touched it. Cached because several checks ask for it and the answer
+        cannot change within one validation run.
+        """
+        if self._scope is None:
+            object.__setattr__(
+                self,
+                "_scope",
+                resolve_scope(self.session, self.snapshot_id, scan_run_id=self.run.scan_run_id),
+            )
+        assert self._scope is not None
+        return self._scope
+
+    @property
+    def snapshot_id(self) -> str:
+        return self.package.snapshot_id
+
+    @property
+    def datasets(self) -> frozenset[DatasetKind]:
+        """Which datasets this snapshot actually imported.
+
+        Read from ``data_package_files`` rather than from the manifest object,
+        so a dataset declared but never successfully read is not counted as
+        present.
+        """
+        if self._datasets is None:
+            rows = self.session.scalars(
+                select(t.DataPackageFile.dataset).where(
+                    t.DataPackageFile.package_id == self.package.id
+                )
+            ).all()
+            kinds = set()
+            for name in rows:
+                try:
+                    kinds.add(DatasetKind(name))
+                except ValueError:  # pragma: no cover - forward compatibility
+                    continue
+            self._datasets = frozenset(kinds)
+        return self._datasets
+
+    @property
+    def capabilities(self) -> CapabilityIndex:
+        """What each instrument's data supports, as recorded at acquisition.
+
+        Read from the stored import report rather than re-derived here, because
+        the distinction it carries cannot be re-derived: an instrument with no
+        split rows is either one that never split or one whose split source
+        answered HTTP 402, and the database looks identical either way. Only the
+        acquisition knew, so only the acquisition can say.
+
+        An empty index means **not recorded**, never "nothing is eligible". A
+        package imported before capabilities existed says nothing, and checks
+        must report that as unknown rather than as a sample of zero.
+        """
+        if self._capabilities is None:
+            report = self.package.report if isinstance(self.package.report, dict) else {}
+            raw = report.get("instrument_capabilities")
+            self._capabilities = CapabilityIndex.from_payload(
+                raw if isinstance(raw, list) else None
+            )
+        return self._capabilities
+
+    @property
+    def acquisition(self) -> AcquisitionRecordView:
+        """What the run that produced this snapshot asked for, and got.
+
+        The requested window and the per-symbol outcomes — *including the
+        symbols that returned nothing*, which by construction appear nowhere in
+        the snapshot's tables. Without this, "why is LEH absent?" has no answer
+        available to a check, and one word has to cover a request that asked
+        for the wrong years, a symbol the vendor renamed, and a vendor that
+        genuinely has no delisted coverage.
+
+        An empty record means **not recorded**, never "nothing failed".
+        """
+        if self._acquisition is None:
+            report = self.package.report if isinstance(self.package.report, dict) else {}
+            self._acquisition = AcquisitionRecordView.from_payload(report.get("acquisition"))
+        return self._acquisition
+
+    def missing(self, required: tuple[DatasetKind, ...]) -> tuple[DatasetKind, ...]:
+        return tuple(kind for kind in required if kind not in self.datasets)
+
+    def is_usable(self) -> tuple[bool, str]:
+        """Whether this snapshot may be cited as evidence at all.
+
+        Three disqualifications, each of which makes every number computed from
+        the snapshot describe something other than the market:
+
+        * a partial import — a row limit was in force, so the sample is
+          whatever the first N lines happened to be;
+        * an aborted import — the run stopped, so the coverage is unknown;
+        * unverified digests — the bytes cannot be attributed to the package.
+
+        An UNKNOWN adjustment policy is not on the list because it disqualifies
+        specific checks rather than the whole snapshot; those checks say so
+        themselves.
+        """
+        if self.package.aborted:
+            return False, "the import aborted; its coverage is unknown"
+        if self.package.partial:
+            return False, (
+                "the import was partial (a row limit was in force), so the sample is "
+                "the first N lines of each file rather than a period"
+            )
+        if not self.package.digests_verified:
+            return False, (
+                "file digests were not verified, so the rows cannot be attributed "
+                "to the package that claims them"
+            )
+        return True, ""
+
+    def provenance(self) -> dict[str, Any]:
+        """The block every report repeats verbatim."""
+        return {
+            "snapshot_id": self.package.snapshot_id,
+            "package_name": self.package.name,
+            "provider": self.package.provider,
+            "manifest_digest": self.package.manifest_digest,
+            "adjustment_policy": self.package.adjustment_policy,
+            "export_date": self.package.export_date.isoformat(),
+            "declared_coverage": [
+                self.package.coverage_start.isoformat(),
+                self.package.coverage_end.isoformat(),
+            ],
+            "observed_coverage": [
+                self.package.observed_start.isoformat() if self.package.observed_start else None,
+                self.package.observed_end.isoformat() if self.package.observed_end else None,
+            ],
+            "rows_imported": self.package.rows_imported,
+            "rows_quarantined": self.package.rows_quarantined,
+            "rows_estimated_knowledge_time": self.package.rows_estimated_knowledge_time,
+            "as_of": self.as_of.isoformat(),
+            "universe": self.universe.name,
+            "universe_digest": self.universe_digest(),
+            "universe_size": len(self.universe),
+            # Two sample sizes, never one. A result over every instrument with
+            # price data and a result over those whose raw series is verified
+            # are different statistics, and reporting a single N would let them
+            # be read as the same.
+            "instruments_price_eligible": len(self.capabilities.price_eligible),
+            "instruments_raw_verified": len(self.capabilities.raw_verified),
+            "capability_counts": self.capabilities.counts(),
+            "capability_recorded": not self.capabilities.is_empty,
+            "code_version": self.code_version,
+            "config_digests": dict(sorted(self.config_digests.items())),
+        }
+
+    def universe_digest(self) -> str:
+        """Identity of the roster a result was computed over.
+
+        Comparing a reading over 85 names with one over 4,000 is comparing two
+        different statistics, and the digest is what makes that detectable
+        rather than invisible.
+        """
+        return content_hash(
+            {
+                "name": self.universe.name,
+                "tickers": sorted(self.universe.tickers),
+            }
+        )
+
+
+def load_context(
+    session: Session,
+    snapshot_id: str,
+    *,
+    as_of: dt.datetime | None = None,
+    universe: ValidationUniverse | None = None,
+    code_version: str = "unknown",
+    config_digests: dict[str, str] | None = None,
+    scan_id: str = "",
+) -> ValidationContext:
+    """Resolve a snapshot id into a context, or say why it cannot be.
+
+    ``as_of`` defaults to the package's export date at end of day. Defaulting to
+    *now* would let the same snapshot produce different answers on different
+    days; defaulting to the export date makes the run a function of the package.
+    """
+    package = session.scalar(select(t.DataPackage).where(t.DataPackage.snapshot_id == snapshot_id))
+    if package is None:
+        known = session.scalars(
+            select(t.DataPackage.snapshot_id).order_by(t.DataPackage.imported_at.desc()).limit(10)
+        ).all()
+        raise ConfigError(
+            f"no imported package with snapshot id {snapshot_id!r}. "
+            + (f"Known snapshots: {list(known)}" if known else "No packages have been imported.")
+        )
+    moment = as_of or dt.datetime.combine(package.export_date, dt.time(23, 59), tzinfo=dt.UTC)
+    return ValidationContext(
+        session=session,
+        package=package,
+        clock=CheckClock(as_of=moment),
+        universe=universe or default_universe(),
+        code_version=code_version,
+        config_digests=dict(config_digests or {}),
+        scan_id=scan_id,
+    )
+
+
+__all__ = ["ValidationContext", "load_context"]

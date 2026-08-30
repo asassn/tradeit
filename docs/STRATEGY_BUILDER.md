@@ -1,0 +1,280 @@
+# Strategy Builder / Strategy Definition Engine
+
+**Design and mandate only. Nothing implemented, no strategy authored, no
+threshold tuned, no profitability computed, no live-trading logic written.**
+
+TradeIt must not be a collection of hard-coded strategies. It must let strategies
+be **created, edited, versioned, backtested, paper-traded, compared, promoted and
+retired** — eventually through the dashboard, without writing Python.
+
+---
+
+## 1. The core idea
+
+> **A strategy is a versioned declarative object composed from capabilities the
+> platform already has.**
+
+Not a script. Not a subclass. A *definition* that names which universe, which
+timeframes, which detectors, which confirmation rules and which risk model to
+compose — and which the existing engines then execute.
+
+The distinction matters for one specific reason: **a script can bypass the
+causality guarantees; a declaration cannot.** Every rule TradeIt has accumulated
+about point-in-time reads, knowledge time, completed bars and corpus eligibility
+lives in the engines. A strategy that *describes* what it wants inherits those
+rules. A strategy that *executes its own logic* is a hole in them.
+
+### It composes; it does not reimplement
+
+The builder must call the same indicator, pattern, breakout, fundamentals and
+multi-timeframe engines built elsewhere in TradeIt. A strategy that computes its
+own RSI, or its own bull-flag geometry, is a second implementation that will
+drift from the validated one and produce numbers nobody can reconcile.
+
+---
+
+## 2. Declarative structure
+
+```
+STRATEGY
+├── mandate                    day | swing | retirement
+├── universe
+│   ├── exchanges
+│   ├── market-cap range
+│   ├── sectors / industries
+│   ├── liquidity constraints
+│   ├── price constraints
+│   └── survivorship / data eligibility
+├── timeframe hierarchy
+│   ├── context timeframe(s)
+│   ├── setup timeframe(s)
+│   └── trigger timeframe(s)
+├── market regime requirements
+├── fundamental filters
+├── technical indicators
+├── pattern requirements
+├── breakout / confirmation requirements
+├── entry rules
+├── position sizing
+├── stop / invalidation rules
+├── profit-taking / exit rules
+├── portfolio-level risk constraints
+└── execution assumptions
+```
+
+Every branch is a *reference into an existing engine*, not an inline
+implementation:
+
+| branch | resolves against |
+|---|---|
+| universe, survivorship eligibility | `CapabilityIndex`, `SurvivorshipStatus`, corpus classification |
+| timeframe hierarchy | `Bartimeframe`, the mandate hierarchies in `MULTI_TIMEFRAME_MANDATES.md` |
+| indicators | the Phase 3 feature registry |
+| patterns | the Phase 4 detector registry and its `SUPPORTED_TIMEFRAMES` |
+| breakout / confirmation | the Phase 5 lifecycle, evidence profiles and confirmation paths |
+| fundamentals | the three-date rule; `knowledge_time`, never `period_end` |
+| stops / invalidation | structural levels from patterns — *levels*, which are not stops until a position owns them |
+| regime | the Phase 3 regime classifier |
+
+**A strategy may only reference what the registries already declare.** A
+definition naming an indicator that does not exist, or a detector on a timeframe
+its family is not defined for, is invalid — the same refusal
+`registry.supports()` already performs, one layer up.
+
+---
+
+## 3. Versioning and reproducibility
+
+Every strategy carries:
+
+```
+strategy_id            stable across versions
+strategy_version       monotonic; an edit creates a NEW version
+created_at
+definition_hash        content hash of the full definition
+data_snapshot / corpus which corpus, at which snapshot digest
+feature_engine_version
+detector_versions      per detector, as the Phase 4 baseline already pins
+parameter_values
+mandate
+eligible_timeframes
+```
+
+**Editing a strategy creates a new version. History is never mutated in place.**
+
+Every backtest and every paper-trading result references the exact immutable
+strategy version that produced it. This is the discipline `scan_runs`,
+`config_digest` and `data_snapshot_digest` already implement for scans — the
+strategy layer inherits it rather than inventing a parallel scheme, and
+`0012_run_scoped_derivation` is the precedent for making it an isolation boundary
+rather than a label.
+
+---
+
+## 4. Research governance — the builder is not a loophole
+
+**A strategy definition cannot bypass any existing rule.** Named explicitly so
+this cannot erode:
+
+| rule | still applies |
+|---|---|
+| point-in-time reads | `WHERE knowledge_time <= :as_of`, always, no second path |
+| `knowledge_time` provenance | never derived from `period_end`; never manufactured |
+| causal indicator computation | Phase 3 |
+| causal pattern detection | Phase 4; `structure_known_through` |
+| breakout lifecycle causality | Phase 5 |
+| completed-bar rule | historical detection sees `COMPLETE` bars only |
+| survivorship / data eligibility | corpus classification and its prohibited-conclusion table |
+| timeframe eligibility | per-detector and per-mandate |
+| no state authorises a trade | `ADR-0025`: `EvidenceBundle` carries evidence and has no aggregate |
+
+The builder is an **orchestration and definition layer**. If a strategy could
+express something the engines refuse, the expression is the bug.
+
+---
+
+## 5. Lifecycle
+
+```
+DRAFT
+  └─ validated against the registries: does everything it references exist?
+VALIDATED
+  └─ runs at all, on a corpus whose classification permits the claim
+BACKTESTING
+OUT_OF_SAMPLE_TESTING
+PAPER_TRADING
+  └─ on the live code path, simulated venue
+ELIGIBLE_FOR_CAPITAL
+LIVE
+PAUSED
+RETIRED
+```
+
+**The gates operate on strategy *versions*, not on strategies.** An edit drops
+the new version back to `DRAFT`; it does not inherit the parent's evidence.
+
+> **No strategy becomes LIVE because a backtest was profitable.**
+
+That is the whole point of separating the states. Live trading additionally
+remains behind the `ADR-0004` interlock and outside the roadmap.
+
+---
+
+## 6. Comparison and learning — architecture only
+
+The platform should eventually compare strategy versions across regime,
+timeframe, mandate, universe, expectancy, hit rate, drawdown, risk-adjusted
+return, turnover, exposure, robustness, parameter sensitivity and out-of-sample
+degradation.
+
+**None of those is computed now, and none is computed by this document.**
+
+The governing intent: **learn which strategy versions work under which
+conditions, rather than collapsing everything into one global "best strategy".**
+A single champion is the shape overfitting takes when a platform is asked for a
+winner — and it discards precisely the conditional structure that the mandate
+separation exists to preserve.
+
+---
+
+## 7. The three mandates are not one strategy with three holding periods
+
+From `MULTI_TIMEFRAME_MANDATES.md`, and binding on the builder:
+
+| | Day | Swing | Retirement |
+|---|---|---|---|
+| context | `1d` / `1h` | `1w` / `1d` | `1mo` / `1w` |
+| setup | `1h` / `15m` | `1d` / `1h` | `1w` / `1d` |
+| trigger | `5m` / `1m` | `1h` / `15m` | `1d` |
+
+They may legitimately differ in timeframe hierarchy, signals, risk model,
+execution assumptions, data requirements and performance gates. **A 5-minute bull
+flag for the day portfolio is not the same statistical object as a daily bull
+flag for the swing portfolio, and the two must never share a population.**
+
+These hierarchies are **current architectural defaults**, not eternal strategy
+thresholds. A strategy may select *within* its mandate's eligible hierarchy; it
+may not select outside it. `4h` remains unadopted pending the decision recorded
+in `MULTI_TIMEFRAME_MANDATES.md` §3.2.
+
+### Worked shapes, illustrative only
+
+```
+"Daily Bull Flag Momentum"        mandate: day
+  context  1d trend bullish; 1h relative strength above threshold
+  setup    15m bull flag
+  trigger  5m breakout; 1m volume confirmation
+  risk     0.5% portfolio risk per trade
+  stop     pattern invalidation, or an ATR-based rule
+  exit     partial target + trailing stop
+
+"3-Month Breakout Swing"          mandate: swing
+  context  weekly trend + daily market regime
+  setup    daily VCP / flat base / bull flag
+  trigger  1h or 15m confirmation
+  horizon  days to ~3 months
+
+"Long-Term Compounder"            mandate: retirement
+  context  monthly / weekly
+  filters  quality / growth / value conditions on point-in-time fundamentals
+  setup    weekly / daily accumulation or breakout
+  horizon  months to years
+```
+
+**These are illustrations of the definition surface, not proposed strategies, and
+no threshold in them is a recommendation.**
+
+---
+
+## 8. Future dashboard modules
+
+Documented so the data model is designed for them. **No UI is built.**
+
+| module | shows |
+|---|---|
+| **Strategy Library** | every strategy: status, version, mandate, timeframes, and eventually its performance evidence |
+| **Strategy Builder** | the declarative editor; composition from registries |
+| **Strategy Detail** | one version's full definition and its `definition_hash` |
+| **Backtest Results** | results bound to the exact version and corpus that produced them |
+| **Paper Trading** | live-code-path track record per version |
+| **Strategy Comparison** | side-by-side across the §6 dimensions |
+| **Promotion / Capital Gate** | the `ELIGIBLE_FOR_CAPITAL` decision, with its evidence |
+| **Live Strategy Monitor** | running versions and their current state |
+| **Retired Strategy Archive** | retired versions, never deleted |
+
+---
+
+## 9. What will eventually need to change
+
+Assessed against the code as it stands. **Nothing is changed by this document.**
+
+| # | area | change |
+|---|---|---|
+| 1 | `strategy/config.py` | `TimeframeConfig` and friends are engine configuration, not a strategy definition. A strategy definition is a new, versioned, content-hashed object; the existing config becomes one of its resolved *outputs* |
+| 2 | new tables | `strategies`, `strategy_versions`, `strategy_runs`, and the promotion/gate evidence. None exist |
+| 3 | `scan_runs` | already carries `config_digest`, `data_snapshot_digest`, `code_version`. A `strategy_version_id` joins naturally and is the obvious binding point |
+| 4 | `registry.SUPPORTED_TIMEFRAMES` | already the per-detector eligibility mechanism. The builder needs the same shape per *mandate*, one layer up |
+| 5 | mandate tables | do not exist — noted in `MULTI_TIMEFRAME_MANDATES.md` §9 item 13 and unchanged |
+| 6 | `EvidenceBundle` | must stay aggregate-free. The builder must not become the place a combined score is finally computed |
+| 7 | backtesting (Phase 9) | must take a strategy *version* as input rather than a config object |
+| 8 | date-grained schema | the same intraday limitation recorded in `MULTI_TIMEFRAME_MANDATES.md` §9 applies to any day-mandate strategy |
+
+---
+
+## 10. Placement
+
+**A named platform gate after the Multi-Timeframe & Portfolio Mandate
+Architecture gate, and before Phase 7.** Not a renumbering; Phases 3, 4 and 5 are
+untouched, following the precedent of the empirical gate and the multi-timeframe
+gate.
+
+The reason for *before Phase 7* specifically: **Phase 7 is the first stage that
+ranks anything.** Opportunity scoring produces a Standalone Opportunity Score, a
+Portfolio Fit Score and a combination — and "fit" and "combination" are
+meaningless without a strategy object to fit *to*. Ranking before strategies are
+first-class would bake one implicit hard-coded strategy into the ranking layer,
+which is exactly the outcome this milestone exists to prevent.
+
+It must follow the multi-timeframe gate because a strategy's timeframe hierarchy
+is part of its definition, and the mandate hierarchies must exist before a
+definition can reference them.
