@@ -239,10 +239,16 @@ not to moving the date.
 
 ### 7.2 Pre-2009 fundamental *values* — three options, evaluated
 
-The constraint is absolute: **no subscription source whose cancellation would
-force deletion of `research-01`.** That eliminates Sharadar and EODHD outright
-(`PHASE_06_VENDOR_MATRIX.md` §1), and it is the filter every future candidate
-must pass *before* its data is examined.
+**A constraint that used to sit here has been removed.** It read that no
+subscription source could be used if cancelling it would force deletion of
+`research-01`, and it eliminated Sharadar and EODHD outright on that ground
+alone. **That elimination is withdrawn and the rule is gone.** What a vendor
+requires when a subscription ends is the operator's own decision, taken at the
+operator's discretion; it is not a corpus-design constraint, it is not a
+selection criterion, and no part of this contract is built around it
+(`PHASE_06_VENDOR_MATRIX.md` §1). Vendors are judged on **coverage, data quality
+and price**. Nothing else was resting on this rule — it filtered candidates and
+never shaped a schema, an interface or a stored field.
 
 **Option 1 — parse SEC filing HTML/text ourselves.**
 Free, public domain, permanent, no licence risk of any kind, and the values are

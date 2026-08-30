@@ -20,6 +20,7 @@ to VERIFIED.**
 |---|---|
 | **VERIFIED** | read directly from a primary or open-source integration source *in this session* |
 | **USER-VERIFIED** | read from the primary source **by the project owner, outside this session**, and reported here. Authoritative for published prices and page text; still subject to the data probe for capability claims |
+| **VENDOR-STATED** | written **by the vendor to the operator in correspondence**. Authoritative as to what the vendor *asserts* about its own product and terms — and therefore binding on licence and pricing questions, which are the vendor's to answer. It is **not** a measurement: a capability claim at this grade is still UNTESTED and still subject to the data probe |
 | **CORROBORATED** | consistent across ≥2 independent search extracts, primary page not reachable |
 | **UNVERIFIED** | single second-hand extract, or not established at all |
 
@@ -73,8 +74,8 @@ to; only the vendor it names is out, and only on price.
 | vendor | status | on what ground |
 |---|---|---|
 | **Kibot** | eliminated | price — $990–$2,400 for the archive, out of budget |
-| **Sharadar** | **candidate, unprobed** | never capability-tested; its earlier elimination was licence-based and is withdrawn |
-| **EODHD** | **candidate, unprobed** | capabilities were never in question |
+| **Sharadar** | **candidate, unprobed — questions sent, no reply yet** | never capability-tested; its earlier elimination was licence-based and is withdrawn |
+| **EODHD** | **candidate, unprobed — questions sent, replied; published pricing does not apply to us (§1.3)** | capabilities were never in question |
 | **Twelve Data** | in use for operating prices; `full-01` was built from it | never capability-probed for archive use |
 | **FMP** | in use for corporate actions and symbol reference | never capability-probed for archive use |
 | **Tiingo** | working acquisition adapter | never capability-probed for archive use |
@@ -83,6 +84,51 @@ to; only the vendor it names is out, and only on price.
 is a statement about what has and has not been *tested*, and the item most likely
 to fail for any of them is survivorship completeness (`KIBOT_DATA_PROBE.md` §G),
 which can fail while everything else passes.
+
+### 1.3 Correspondence — what the vendors have actually said
+
+Capability questions have now been **sent** to both surviving candidates. This
+section records what came back. It is a log of vendor *assertions*, at
+**VENDOR-STATED**; nothing in it has been measured, and nothing in it promotes a
+capability cell in §2a.
+
+**EODHD — sent, replied.** One thing is established and it is a licensing fact,
+not a capability one: EODHD classifies our use — internal, non-public
+organisational research with a one-time historical backfill, no redistribution —
+as **commercial**, and states that the subscriptions on its public pricing page
+are intended for personal use. **The consequence is that EODHD's published price
+is not our price**, and row 18 is corrected accordingly. A commercial quote has
+been requested and has not been received. The remainder of the reply is **not
+transcribed into this repository**; do not restate it from memory, and quote it
+verbatim if it is ever recorded here.
+
+**Two defects in the EODHD send, both ours, both corrected in a follow-up on the
+same thread.** The message as sent carried two questions belonging to Sharadar's
+schema (`permaticker`, the `ACTIONS` table), which are not EODHD concepts; and
+**the one EODHD-specific question was omitted** — its documentation gives
+*"from January 2000"* in one place and *"30+ years"* in another, and which is
+correct for US common stocks is the question that decides EODHD for us. If US
+history genuinely begins in 2000 it does not span 1998–2002 and EODHD cannot
+serve `research-01` at any price. The misdirected pair has been withdrawn and the
+depth question asked; **no answer yet**.
+
+**Sharadar — sent, no reply.** Addressed to Nasdaq Data Link, which distributes
+it. Two questions were added ahead of the vendor-neutral set:
+
+- a **licence-classification question asked first**, because EODHD's answer shows
+  that published pricing can evaporate on exactly our use, and it is cheaper to
+  learn that in the first exchange than the fourth;
+- a **restatement of the completeness question**, which is the methodological
+  change worth recording: we no longer ask a vendor to certify that its delisted
+  coverage is complete. Milestone 0a built an EDGAR-derived benchmark that
+  measures coverage independently, so the question put to the vendor is now the
+  much smaller one — *what is the least expensive access that lets us run that
+  measurement ourselves*. A vendor's assurance was never admissible evidence
+  here; now it does not need to be.
+
+**Question 1 remains unanswered by anybody** — whether "delisted" means the
+delisted names actually are included, or only currently active ones. It has
+outlived three vendors.
 
 ---
 
@@ -97,7 +143,7 @@ are not a criterion and no row records them.
 
 | # | criterion | **Kibot** | **Sharadar** | **EODHD** | **Polygon / Massive** | **Twelve Data** |
 |---|---|---|---|---|---|---|
-| 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | "from January 2000" vs "30+ years" — CORROBORATED, internally inconsistent | not established | "back to the first trading date" — CORROBORATED |
+| 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | "from January 2000" vs "30+ years" — CORROBORATED, internally inconsistent. **Asked directly; unanswered. This decides EODHD** (§1.3) | not established | "back to the first trading date" — CORROBORATED |
 | 2 | active **and** delisted | **active + delisted rosters, and a delisted-only roster — USER-VERIFIED (vendor claim); completeness UNTESTED** | yes — CORROBORATED | yes — CORROBORATED | **"spotty at best" — CORROBORATED** | not established |
 | 3 | delisted history truly downloadable | **UNTESTED — probe item A** | claimed — CORROBORATED | claimed — CORROBORATED | doubtful | unknown |
 | 4 | permanent identifier | **UNTESTED — probe item D. Expect none; expect ticker-keyed files** | `permaticker` — UNVERIFIED | not established | not established | not established |
@@ -106,7 +152,7 @@ are not a criterion and no row records them.
 | 8 | dividends | **UNTESTED — probe item E** | `ACTIONS` — CORROBORATED | yes — CORROBORATED | yes | yes |
 | 9 | delisting **reason** | **expect none — a price vendor. Reasons come from EDGAR** | `ACTIONS` — CORROBORATED | delisted product — CORROBORATED | weak | not established |
 | 16 | API vs bulk | **UNTESTED — probe item A** | both — UNVERIFIED | both — CORROBORATED | REST + S3 — CORROBORATED | REST |
-| 18 | price | **~$14/month EOD subscription — USER-VERIFIED (vendor page); exact tier for the full historical universe UNTESTED — probe item A** | UNVERIFIED (~$69/mo cited) | UNVERIFIED (~€59.99/mo cited) | UNVERIFIED (~$29/mo cited) | existing subscription |
+| 18 | price | **~$14/month EOD subscription — USER-VERIFIED (vendor page); exact tier for the full historical universe UNTESTED — probe item A** | UNVERIFIED (~$69/mo cited); licence classification asked, **no reply yet** | **published price DOES NOT APPLY — VENDOR-STATED that public pricing is for personal use and that our use is commercial (§1.3). The ~€59.99/mo figure is withdrawn, not merely unverified. Commercial quote requested, not received** | UNVERIFIED (~$29/mo cited) | existing subscription |
 
 ### 2a-i. Intraday history — a separate corpus, a separate decision
 
@@ -148,10 +194,14 @@ for `intraday-01`** and should be evaluated on item H alongside Kibot.
 
 ### What the matrix now decides on its own
 
-- **Sharadar and EODHD: candidates, unprobed.** Their earlier elimination was
-  licence-based and is withdrawn; neither has ever been capability-tested for the
-  archive role, and Sharadar's `permaticker` and as-reported/restated split are
-  the strongest claimed feature set in the fundamentals table.
+- **Sharadar and EODHD: candidates, unprobed — but no longer unasked.** Their
+  earlier elimination was licence-based and is withdrawn; neither has ever been
+  capability-tested for the archive role, and Sharadar's `permaticker` and
+  as-reported/restated split are the strongest claimed feature set in the
+  fundamentals table. Questions are now with both (§1.3). **EODHD's published
+  price is already out** — it applies to personal use and ours is commercial by
+  the vendor's own classification — so the field has not narrowed on capability,
+  it has narrowed on cost, which was not the axis anyone was watching.
 - **Polygon/Massive: still ruled out** for EOD on delisted coverage — the entire
   problem being solved — and **still a candidate for `intraday-01`**, where bulk
   flat-file delivery is its strongest feature.
@@ -160,9 +210,11 @@ for `intraday-01`** and should be evaluated on item H alongside Kibot.
 - **FMP: excluded by standing project rule** for fundamentals, ratios, earnings,
   estimates, statements, OHLCV, insider and institutional data. Permitted role is
   corporate-action and symbol-change corroboration only.
-- **SEC EDGAR: adopt regardless, immediately.** Free, public domain, and the only
-  source that can independently *verify* or *enumerate* what a price vendor
-  claims.
+- **SEC EDGAR: adopted, and now built.** Free, public domain, and the only source
+  that can independently *verify* or *enumerate* what a price vendor claims.
+  Milestone 0a has run against a real archive, which changes what we have to ask
+  a vendor for: completeness is now something **we measure** rather than
+  something a vendor certifies (§1.3).
 - **Kibot: eliminated on price**, and entirely unverified as data. See §3.
 
 **No vendor in either table has been probed.** The field is wider than it was —
