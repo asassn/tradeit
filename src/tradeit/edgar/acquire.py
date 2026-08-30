@@ -741,9 +741,7 @@ _ROLE_WORD = re.compile(
 #: Column headings of the registration-statement listing table. Recognised as a
 #: set rather than a fixed order, because the order is a layout choice.
 _FUND_COLUMN = re.compile(r"^Funds?(?:\s+Name)?$", re.IGNORECASE)
-_EXCHANGE_COLUMN = re.compile(
-    r"^Principal\s+(?:U\.?\s*S\.?\s+)?Listing\s+Exchange$", re.IGNORECASE
-)
+_EXCHANGE_COLUMN = re.compile(r"^Principal\s+(?:U\.?\s*S\.?\s+)?Listing\s+Exchange$", re.IGNORECASE)
 _TICKER_COLUMN = re.compile(r"^(?:Ticker|Trading)?\s*(?:Ticker|Symbol)$", re.IGNORECASE)
 
 #: A plausible ticker cell. Short, and not a sentence.
@@ -1257,9 +1255,7 @@ def _listing_constructions(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]
         # the surviving text is a units construction however it was matched --
         # otherwise the shortest-span rule quietly relabels the filing's own
         # purchase-and-sale sentence as a generic listing mention.
-        labelled = is_trading or any(
-            start < other[1] and other[0] < end for other in trading_spans
-        )
+        labelled = is_trading or any(start < other[1] and other[0] < end for other in trading_spans)
         kept.append((start, end, cleaned, labelled))
 
     kept.sort(key=lambda item: item[0])

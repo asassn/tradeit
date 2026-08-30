@@ -92,7 +92,6 @@ def _shipped(control_id: str) -> Any:
     return next(c for c in resolve_controls(evidence) if c.control.ticker == control_id)
 
 
-
 # ---------------------------------------------------------------------------
 # loading
 # ---------------------------------------------------------------------------
@@ -1037,8 +1036,17 @@ def test_shipped_gcty_lifecycle_facts_assign_no_last_trading_date() -> None:
         [control.notes, mapping.scope_notes]
         + [f.fact + " " + f.note for f in mapping.lifecycle_facts]
     )
-    negations = ("does not", "not establish", "not derived", "unknown", "nothing is",
-                 "never be restated", "not adjudicated", "not supplied", "no inference")
+    negations = (
+        "does not",
+        "not establish",
+        "not derived",
+        "unknown",
+        "nothing is",
+        "never be restated",
+        "not adjudicated",
+        "not supplied",
+        "no inference",
+    )
     for phrase in ("last gcty trading session", "cessation of quotation", "end-of-series"):
         sentences = [s for s in prose.replace("\n", " ").split(". ") if phrase in s.lower()]
         assert sentences, f"{phrase} should be addressed explicitly"
@@ -3175,9 +3183,7 @@ def test_manual_filing_citation_stays_regulator_neutral() -> None:
 def test_identifier_values_must_be_positive_integers(
     tmp_path: Path, namespace: str, value: str
 ) -> None:
-    path = _write(
-        tmp_path, [_control([_bank_mapping(identifiers=[_ident(namespace, value)])])]
-    )
+    path = _write(tmp_path, [_control([_bank_mapping(identifiers=[_ident(namespace, value)])])])
     with pytest.raises(ConfigError):
         load_control_evidence(path)
 
