@@ -447,12 +447,13 @@ conclusion.
 ## 7bb. FIRST REAL RUN, 2026-08-29 — and the defect it exposed
 
 **The denominator was built against the real archive for the first time on
-2026-08-29**, 129 quarterly index files, 1994 Q3 – 2026 Q3, pinned
-`--as-of 2026-08-29`. Everything below is measured, not estimated.
+2026-08-29**, ~~129 quarterly index files, 1994 Q3 – 2026 Q3~~ — **the range is
+wrong as written; see the correction below** — pinned `--as-of 2026-08-29`.
+Everything below is measured, not estimated.
 
 | measurement | value |
 |---|---|
-| index files scanned | 129 |
+| index files scanned | ~~129~~ → **128** (corrected below) |
 | rows read, and independently re-read | 27,084,668 |
 | FORM / CIK / DATE / PATH / ACCESSION mismatches | **0** |
 | registrants | 90,548 |
@@ -461,6 +462,33 @@ conclusion.
 | control mappings attached to a registrant | 33 of 33 handed over |
 
 The parser-integrity gate **PASSED** on all 27,084,668 rows.
+
+### CORRECTION to this record — the run read 128 files, 1994 Q3 – 2026 Q2
+
+The range line above was written by the session that performed the original run
+and is wrong. It is struck rather than rewritten, because what a record said is
+part of the record. **What was actually read:**
+
+| | as written | as measured |
+|---|---|---|
+| index files scanned | 129 | **128** |
+| range | 1994 Q3 – 2026 Q3 | **1994 Q3 – 2026 Q2** |
+
+`tradeit edgar denominator` defaults to `--end 2026Q2`, and the published command
+line passes no `--end`. There are **129 `form.idx` files on disk** — 1994 Q3 to
+2026 Q2 is 128 quarters, and `2026/QTR3/form.idx` (23 MB, present since
+2026-08-14) exists but was never opened. The claim of 129 appears to have been
+taken from the file count on disk rather than from what the command read.
+
+**Nothing else in the table moves, and this is checked rather than assumed.** A
+re-run over the same default range reproduced 90,548 registrants, 40,920 dated
+exits and 49,628 undated exits exactly — which is also what establishes that the
+*original* run read 128 files, since a 129th quarter of filings could not have
+left every count identical. The row total, the parser-integrity result and the
+control mapping figures stand as written.
+
+The stale default is a coverage question in its own right and is **not** resolved
+by this correction. It is proposed separately in §7bd.
 
 ### The defect: 30.7% of dated exits contradict their own evidence
 
@@ -513,10 +541,74 @@ Both were made before the numbers existed, and both were contradicted:
 2. *"The peak is the dot-com wave arriving 3–5 years late as paperwork."* The
    median lag between last periodic report and exit filing is **0.21 years**.
 
-**No third explanation is offered here.** The curve is built from a dating rule
-now known to be wrong on 30.7% of its inputs, and explaining a number before
-correcting the defect underneath it is how a wrong number acquires a defender.
-Fix, re-run, then look.
+**No third explanation was offered at the time**, deliberately: the curve was
+built from a dating rule known to be wrong on 30.7% of its inputs, and explaining
+a number before correcting the defect underneath it is how a wrong number
+acquires a defender. Fix, re-run, then look. That has now been done, and what it
+showed is recorded below.
+
+### What the fix showed: the peak was mostly an artefact, and it moved
+
+Measured on the re-run after supersession (§7bc), same pinned `--as-of`, same
+`--end 2026Q2` range on both sides:
+
+| year | before | after | change |
+|---|---|---|---|
+| 2005 | 2,827 | 1,393 | **−51%** |
+| 2006 | 3,012 | 1,205 | **−60%** |
+| 2007 | 3,113 | 1,417 | **−54%** |
+| 2008 | 2,284 | 1,026 | −55% |
+| 2003 | 1,777 | 1,198 | −33% |
+| 2012 | 1,679 | 1,518 | −10% |
+| 2002 | 1,546 | 1,208 | −22% |
+| 1999 | 1,435 | 1,111 | −23% |
+
+**Roughly half of the 2005–2007 block was registrants that never exited.** Two
+consequences, both measured rather than inferred:
+
+**1. The peak moved.** It is no longer 2005–2007. Ranked after the fix:
+
+| rank | before | after |
+|---|---|---|
+| 1 | 2007 — 3,113 | **2012 — 1,518** |
+| 2 | 2006 — 3,012 | 2007 — 1,417 |
+| 3 | 2005 — 2,827 | 2005 — 1,393 |
+| 4 | 2008 — 2,284 | 2002 — 1,208 |
+| 5 | 2004 — 1,806 | 2006 — 1,205 |
+
+**2. The curve flattened, which is the more important half.** Before, the top
+year led the eighth by 2.0×; after, by 1.37× (1,518 against 1,111). The old
+"peak" was substantially the defect's own footprint, and what remains does not
+have a dominant year so much as a broad 1999–2012 plateau. **A curve with no
+sharp peak is a different object to reason about than one with a peak in the
+wrong place**, and any reading of it starts from here rather than from §7bb's
+ranking.
+
+### The third explanation is a hypothesis, and is not graduating
+
+Two predictions above were falsified. A third is now available and is **recorded
+as a hypothesis with a mechanism, not as a finding**, precisely because the first
+two were stated confidently and were wrong:
+
+> *Hypothesis.* `ELECTRONIC_FORM_25_FROM` is 2005-04-24 (§2.2). Once Form 25
+> became an electronic filing, **surviving** registrants began filing them to
+> remove individual classes — a warrant, a preferred series, a tracking stock —
+> and the old rule read every one as the registrant's death. That would put the
+> artefact's onset in 2005 and concentrate it in the years just after, which is
+> where it is.
+
+**What would falsify it**, stated before anyone goes looking, in the manner §7
+requires: the superseded population should be disproportionately Form 25 rather
+than Form 15, and disproportionately post-2005 in filing date. Neither has been
+measured. The `superseded` field added in §7bc carries the filings needed to
+check it, and nothing in this document may treat it as established until someone
+does.
+
+**The 2012 peak is not explained at all**, and is not speculated about here. It
+fell only 10%, so it is largely untouched by the defect and is not an artefact of
+it — which makes it a real feature of the corpus that has never been accounted
+for. That is a question for whoever reads the corrected curve, and reading it is
+work that has not been done.
 
 > **RESOLVED the same day — §7bc.** Everything above is left exactly as it was
 > written, because it is the record of what the first run found. Two of its
@@ -678,47 +770,31 @@ Intel carried four superseded confirming filings and ConAgra six. None of the
 four is dated, none contradicts its evidence, and none appears in any per-year
 count.
 
-### The 2005–2007 peak was largely an artefact, and §7bb's third prediction is now due
+### What the corrected curve looks like — recorded in §7bb
 
-§7bb recorded that the per-year peak was 2005–2007 rather than the expected
-dot-com and 2008 bulges, and **deliberately declined to explain it** until the
-dating rule was corrected. That was the right call:
+The per-year effect is **not duplicated here**. §7bb is where the curve was first
+reported and where its two falsified predictions live, so the before/after
+numbers, the peak moving from 2007 to 2012, and the electronic-Form-25 hypothesis
+are recorded there, in place, against the predictions they bear on. Keeping one
+copy is deliberate: two copies of a table drift, and this document has already
+had to correct one number that rotted.
 
-| year | before | after | change |
-|---|---|---|---|
-| 2005 | 2,827 | 1,393 | −51% |
-| 2006 | 3,012 | 1,205 | −60% |
-| 2007 | 3,113 | 1,417 | −54% |
-| 2012 | 1,679 | 1,518 | −10% |
-| 2026 | 447 | 429 | −4% |
-
-**More than half of the 2005–2007 peak was registrants that never exited.** The
-shape is consistent with `ELECTRONIC_FORM_25_FROM` (2005-04-24, §2.2): once
-Form 25 became an electronic filing, surviving registrants began filing them to
-remove *individual classes* — a warrant, a preferred series — and the old rule
-read every one of those as the registrant's death. That is a hypothesis with a
-mechanism, not a finding, and it is recorded as such. **The curve is now built
-from a dating rule with no known contradictions and may be looked at properly;
-that is separate work and is not done here.**
+The short form: **roughly half of the 2005–2007 peak was registrants that never
+exited**, the curve flattened, and the surviving 2012 peak is unexplained. The
+mechanism offered is a hypothesis with a stated falsification test, not a
+finding.
 
 ### A separate discrepancy, found while re-running and NOT fixed here
 
-§7bb records the run as "129 quarterly index files, 1994 Q3 – 2026 Q3". Measured
-on 2026-08-29: **129 `form.idx` files exist on disk, and the command reads 128.**
-`tradeit edgar denominator` defaults to `--end 2026Q2`, so `2026/QTR3/form.idx`
-— 23 MB of real filings, present since 2026-08-14 — is silently excluded. The
-before-run reproduced §7bb's registrant and exit counts exactly, which confirms
-the original run also read 128; the section's file count and end quarter are
-therefore both off by one quarter.
+Re-running surfaced that the command reads **128** index files, not the 129
+§7bb recorded, because `--end` defaults to `2026Q2` and a populated
+`2026/QTR3/form.idx` is never opened. §7bb now carries the correction to its own
+record; **§7bd proposes what the default should be**, as a decision rather than a
+quiet change.
 
-**Left alone deliberately.** Changing the range changes the denominator's
-coverage, and §7b limitation 4 is explicit that quarter coverage is a property
-of the measurement rather than a detail — this is that same concern inverted, a
-*present* quarter silently excluded by a stale default rather than a missing one
-read as a zero. It wants its own scoped decision: move the default, require the
-flag, or make a stale default an error. It is not folded into a dating fix, and
-the numbers in this section are all `--end 2026Q2` on both sides so the
-comparison holds regardless of which way that decision goes.
+It is deliberately not folded into a dating fix. Both sides of every before/after
+number in this section used `--end 2026Q2`, so the comparison holds whichever way
+§7bd is decided.
 
 ### What this does not fix
 
@@ -729,6 +805,82 @@ untouched by construction. It also does not make the per-year curve explicable:
 explanation until the dating rule was corrected. It is corrected now; the curve
 still has to be looked at, and that is a separate piece of work with its own
 evidence.
+
+## 7bd. PROPOSITION: what `--end` should default to
+
+**Not implemented.** Stated here for a decision, because changing the default
+changes the denominator's coverage, and a coverage change that arrives as a
+silently different number is the thing this document exists to prevent.
+
+### The defect, stated plainly
+
+`tradeit edgar denominator --end` defaults to the literal string `2026Q2`
+(`cli_edgar.py`), and `BuildOptions.end` defaults to `IndexQuarter(2026, 2)`
+(`pipeline.py`). The published command line passes no `--end`. So
+`2026/QTR3/form.idx` — present on disk since 2026-08-14 — has never been read by
+any run, and §7bb recorded a range it did not use.
+
+**Two failures, and the second is worse than the first.**
+
+1. A hard-coded quarter in a default is a number that rots. It was presumably
+   current when written. `tests/unit/test_documented_counts.py` exists because
+   three documented counts already rotted this way.
+2. **The truncation is silent.** `LocalFullIndexSource` is careful in one
+   direction — an absent quarter is appended to `missing` and the report prints
+   it first, because "a missing quarter is a coverage gap, not a zero" (§7b
+   limitation 4). There is **no counterpart for a quarter that is present and
+   never requested.** The report never states the range it read, which is
+   exactly why the 129-vs-128 error survived into a published record and had to
+   be corrected in §7bb rather than caught.
+
+The asymmetry is the real finding. The code already knows that quarter coverage
+is a property of the measurement rather than an implementation detail; it just
+enforces it on one side only.
+
+### What is proposed
+
+**Default `--end` to the latest quarter present under `--index-root`, discovered
+at run time; keep `--end` as an explicit override for pinning a published
+number; and report the range actually read, in both directions.**
+
+| | behaviour |
+|---|---|
+| no `--end` | read to the newest quarter on disk, and print the range read |
+| `--end 2026Q2` given | read to 2026 Q2, and print *"2026 QTR3 present and not read"* |
+| quarter absent mid-range | unchanged — recorded in `missing`, printed first |
+
+Concretely: a `latest_present` discovery on `LocalFullIndexSource`, a
+`not_requested` list beside the existing `missing` list, and a range line at the
+top of the report next to the missing-quarter line.
+
+### Why this rather than the alternatives
+
+| option | rejected because |
+|---|---|
+| bump the default to `2026Q3` | fixes today and rots tomorrow; it is the same defect with a later date, and would need a human to notice again |
+| default to the current calendar quarter | makes coverage depend on the day the command is run, which `BuildOptions.as_of` already warns against for exactly this reason — and it would silently request a quarter that may not have been downloaded, converting a coverage gap into a `missing` entry that is really an operator error |
+| require `--end` explicitly, no default | reproducible, and it relocates the rot into the operator, who must keep a quarter number current by hand and will eventually paste a stale one. It also makes the common case fail closed on something that is not actually ambiguous |
+| leave it, document it | the range is not printed, so a reader cannot tell what was read. That is how this got into §7bb |
+
+**The reproducibility objection, answered.** Defaulting to disk means the same
+command can return different numbers as the archive grows. That is a real cost
+and it is accepted, on two grounds: the run **prints the range it read**, so a
+number is never again reported without its coverage; and a published figure is
+pinned with an explicit `--end` alongside the `--as-of` it already pins. The
+alternative — a default that is stable because it is stale — buys reproducibility
+by quietly discarding data, which is the worse trade for a survivorship corpus.
+
+### What this does not claim
+
+Reading 2026 Q3 will **change the published numbers**, and the direction is not
+predicted here. It adds filings, so registrant and exit counts can only rise or
+hold; what it does to the per-year curve for 2026 is a measurement, not a
+guess. **The current-year count is partial regardless** — 2026 is an incomplete
+year in any range — and the report does not currently say so, which is arguably
+a third instance of the same omission and is left for the same decision.
+
+Nothing in §7bb or §7bc is affected: both sides of every before/after comparison
+there used `--end 2026Q2`, so the deltas hold whichever way this is decided.
 
 ## 7c. The parser-integrity gate, and one anomaly left open
 
