@@ -355,7 +355,7 @@ the point-in-time guarantee hold transitively rather than by vigilance.
 
 Full specification in **[DATA_MODEL.md](DATA_MODEL.md)** — five domains with
 primary keys, foreign keys, indexes, unique constraints and partitioning, plus
-Mermaid ERDs per domain. It documents 26 of the 57 tables now in `tables.py`;
+Mermaid ERDs per domain. It documents 26 of the 69 tables now in `tables.py`;
 the 41 below are Phase 2's schema, and DATA_MODEL.md names what it does not
 cover.
 

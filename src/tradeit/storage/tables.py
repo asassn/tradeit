@@ -37,6 +37,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy import (
     DateTime as SADateTime,
@@ -2623,4 +2624,512 @@ class ScanProgress(Base):
     __table_args__ = (
         UniqueConstraint("scan_run_id", "instrument_id", name="uq_scan_progress"),
         Index("ix_scan_progress_run", "scan_run_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# research-01: the twelve tables of Phase 6 milestone 2
+#
+# **These are additive and share nothing with the tables above.** Everything
+# before this point hangs off ``instruments``, and one ``instruments`` row
+# carries an issuer key (``cik``), a security key (``figi``), a listing venue
+# (``primary_exchange``) and a lifecycle (``listing_status``/``delisted_date``)
+# at once. That conflation is serviceable for the Daily machinery and is
+# disqualifying for survivorship research, where the whole question is which of
+# those four ended and when.
+#
+# So the near-neighbours are not older names for these tables: ``ohlcv_bars``,
+# ``corporate_actions`` and ``symbol_mappings`` are these tables' concepts
+# fused. Nothing above is renamed, absorbed or re-keyed --  every one of them is
+# load-bearing for ``full-01``.
+#
+# **Naming departs from PHASE_06_IMPROVEMENT_PLAN.md §8 deliberately.** The plan
+# says ``price_facts``, ``corporate_action_facts`` and ``fundamental_facts``.
+# All three are prefixed ``security_`` instead, and the rename is applied to all
+# three rather than only to ``fundamental_facts``, which was the one that
+# actually collided with an existing table. A name that states its subject
+# cannot be confused with the near-neighbour it sits beside: nobody joins
+# ``security_price_facts`` to ``instruments`` by accident, whereas
+# ``price_facts`` next to ``ohlcv_bars`` invites exactly that.
+#
+# **The bridge from ``instruments`` to ``securities`` is an open question, not
+# an oversight.** There is deliberately no foreign key and no view joining the
+# two. Deciding that instrument *i* and security *s* are the same thing is an
+# identity claim requiring evidence, on the same footing as a control mapping --
+# and the obvious shortcut, joining on ``instruments.cik``, is wrong twice over:
+# it assumes an SEC CIK exists (FRC has none) and it assumes a CIK identifies a
+# security rather than a registrant (one registrant lists several classes).
+# Whoever builds that bridge needs an evidence rule and a mapping-quality state,
+# not a join. See ``docs/EDGAR_DELISTING_DENOMINATOR.md`` §4.
+# ---------------------------------------------------------------------------
+
+
+class Issuer(Base, TimestampMixin):
+    """A legal issuing entity, identified by no column on this table.
+
+    **There is no ``cik`` here and that is the point.** An issuer's key lives in
+    :class:`IssuerIdentifier` under an explicit namespace, because the SEC is not
+    the only registry that identifies one: ``FRC`` is a bank with no holding
+    company, files its Exchange Act reports with the FDIC, has no SEC filer
+    account at all, and is discriminated by ``FDIC_CERT:59017``. A ``cik``
+    column would have made that issuer unrepresentable, or -- worse --
+    representable only by inventing a number for it.
+
+    ``display_name`` is a label for humans reading query output. It identifies
+    nothing: matching company names establishes nothing, which is why identity
+    is decided on namespaced identifiers and never on this column.
+    """
+
+    __tablename__ = "issuers"
+
+    issuer_id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    display_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+
+
+class IssuerIdentifier(Base, TimestampMixin):
+    """A registry identifier that *belongs to* this issuer.
+
+    Mirrors ``tradeit.edgar.control_evidence.IssuerIdentifier``. Two invariants
+    are enforced in the schema rather than left to the writer:
+
+    ``uq_issuer_primary_identifier``
+        a partial unique index admitting **exactly one** ``primary`` row per
+        issuer. Two co-equal primaries discriminate nothing, because two records
+        can then each fail to collide by being compared on different keys.
+    ``uq_issuer_identifier_global``
+        unique on ``(namespace, value_normalized)`` across every issuer. The
+        same registry value appearing on two issuers means one institution was
+        recorded twice, and that is the splice this table exists to prevent.
+
+    ``value`` is stored **verbatim**, leading zeros and all; ``value_normalized``
+    carries ``str(int(value))`` and is the only column compared, matching
+    ``IdentifierRef.key``. ``0001132979`` and ``1132979`` are one identifier
+    written two ways.
+    """
+
+    __tablename__ = "issuer_identifiers"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    issuer_id: Mapped[int] = mapped_column(
+        ForeignKey("issuers.issuer_id", ondelete="CASCADE"), nullable=False
+    )
+    #: One of ``tradeit.edgar.control_evidence.IdentifierNamespace``. Issuer
+    #: registries only -- CUSIP, ISIN and FIGI identify securities and belong in
+    #: :class:`SecurityIdentifier`, never here.
+    namespace: Mapped[str] = mapped_column(String(32), nullable=False)
+    value: Mapped[str] = mapped_column(String(64), nullable=False)
+    value_normalized: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: ``primary`` or ``corroborating``. Never ``unresolved`` -- see
+    #: :class:`IssuerRelatedIdentity`.
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: Required. An uncited identifier is a number nobody can check.
+    citation: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("namespace", "value_normalized", name="uq_issuer_identifier_global"),
+        UniqueConstraint("issuer_id", "namespace", "value_normalized", name="uq_issuer_identifier"),
+        Index(
+            "uq_issuer_primary_identifier",
+            "issuer_id",
+            unique=True,
+            postgresql_where=text("role = 'primary'"),
+            sqlite_where=text("role = 'primary'"),
+        ),
+        Index("ix_issuer_identifier_lookup", "namespace", "value_normalized"),
+        CheckConstraint("role IN ('primary', 'corroborating')", name="ck_issuer_identifier_role"),
+    )
+
+
+class IssuerRelatedIdentity(Base, TimestampMixin):
+    """An identifier that *appears to* describe this issuer and has not been shown to.
+
+    **A separate table, and that is the design.** It would have been shorter to
+    add ``role = 'unresolved'`` to :class:`IssuerIdentifier`, and it would have
+    put an unproven identifier one WHERE-clause slip away from identifying an
+    issuer. Here it is structurally impossible: nothing joins this table when
+    resolving identity, it has no ``role`` column, and the uniqueness rules that
+    make an identifier authoritative do not apply to it.
+
+    ``FRC`` is the worked example. Its SEC subject-company CIK ``1132979`` lives
+    here rather than in :class:`IssuerIdentifier`, because that SEC record
+    reports EIN ``88-0157485`` while the FDIC registrant reports
+    ``80-0513856``, and sameness is not established in either direction.
+    """
+
+    __tablename__ = "issuer_related_identities"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    issuer_id: Mapped[int] = mapped_column(
+        ForeignKey("issuers.issuer_id", ondelete="CASCADE"), nullable=False
+    )
+    namespace: Mapped[str] = mapped_column(String(32), nullable=False)
+    value: Mapped[str] = mapped_column(String(64), nullable=False)
+    value_normalized: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: ``tradeit.edgar.control_evidence.IdentityRelation``. One member today,
+    #: deliberately: asserting sameness or succession needs its own evidence
+    #: rules and does not get a value here speculatively.
+    relation: Mapped[str] = mapped_column(String(24), nullable=False, default="unresolved")
+    citation: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "issuer_id", "namespace", "value_normalized", name="uq_issuer_related_identity"
+        ),
+        CheckConstraint("relation IN ('unresolved')", name="ck_issuer_relation"),
+    )
+
+
+class Security(Base, TimestampMixin):
+    """One class of securities issued by one issuer.
+
+    **Holds no ticker and no exchange.** A ticker is an attribute of time
+    (:class:`SymbolAlias`) and a venue is an attribute of a listing
+    (:class:`Listing`); folding either into this row would collapse three of the
+    nine concepts back into one and undo the reason this table exists.
+
+    ``class_label`` is the filing's own words -- ``"Common Stock, $.01 par
+    value"`` -- kept verbatim. It is what separates BBBY's two issuers, whose
+    par values differ, and normalising it would destroy that discrimination.
+    """
+
+    __tablename__ = "securities"
+
+    security_id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    issuer_id: Mapped[int] = mapped_column(
+        ForeignKey("issuers.issuer_id", ondelete="RESTRICT"), nullable=False
+    )
+    #: ``common_stock``, ``preferred``, ``warrant``, ``unit``, ``adr`` ...
+    security_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Verbatim from the filing. Never normalised.
+    class_label: Mapped[str | None] = mapped_column(Text)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (Index("ix_security_issuer", "issuer_id", "security_type"),)
+
+
+class SecurityIdentifier(Base, TimestampMixin):
+    """CUSIP / ISIN / FIGI -- identifiers of a *security*, never of an issuer.
+
+    Kept out of :class:`IssuerIdentifier` on the instruction in
+    ``IdentifierNamespace``'s own docstring: one issuer has several CUSIPs while
+    one CUSIP has one issuer, so admitting a security key into the issuer
+    namespace would make the anti-splicing check compare the wrong things and
+    quietly stop working. Separate table, separate namespace vocabulary.
+    """
+
+    __tablename__ = "security_identifiers"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="CASCADE"), nullable=False
+    )
+    #: ``cusip``, ``isin``, ``figi``, ``sedol``. A *security* vocabulary.
+    namespace: Mapped[str] = mapped_column(String(32), nullable=False)
+    value: Mapped[str] = mapped_column(String(64), nullable=False)
+    citation: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("namespace", "value", name="uq_security_identifier_global"),
+        Index("ix_security_identifier_lookup", "namespace", "value"),
+    )
+
+
+class Listing(Base, TimestampMixin):
+    """Where a security was listed, and between which dates.
+
+    The **exchange-listing lifecycle**, kept apart from the security's own
+    existence and from the issuer's reporting obligation. A security can be
+    delisted and keep trading over the counter; an issuer can deregister while
+    its shares still trade. Those are different rows here and the same row in
+    ``instruments``.
+
+    ``venue`` is stored **exactly as the source rendered it and is never
+    normalised**. Six distinct Nasdaq renderings coexist in the evidence corpus
+    deliberately; collapsing them would discard the fact that the sources differ.
+    """
+
+    __tablename__ = "listings"
+
+    listing_id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="CASCADE"), nullable=False
+    )
+    #: Verbatim venue string. NEVER normalised, NEVER mapped to a code here.
+    venue: Mapped[str] = mapped_column(String(128), nullable=False)
+    listed_from: Mapped[dt.date | None] = mapped_column(Date)
+    listed_to: Mapped[dt.date | None] = mapped_column(Date)
+    #: How the interval is known: ``form_direct``, ``form_inferred``, ``vendor``.
+    evidence_strength: Mapped[str | None] = mapped_column(String(24))
+    citation: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("ix_listing_security", "security_id", "listed_from"),
+        Index("ix_listing_venue", "venue"),
+        CheckConstraint(
+            "listed_to IS NULL OR listed_from IS NULL OR listed_to >= listed_from",
+            name="ck_listing_interval",
+        ),
+    )
+
+
+class SymbolAlias(Base, TimestampMixin):
+    """A ticker or vendor symbol standing for a security over an interval.
+
+    Distinct from ``symbol_mappings`` in subject and in epistemics. That table
+    keys on ``instrument_id`` and carries no ``knowledge_time``, so it holds
+    current truth and cannot answer what a ticker meant *as known on* a past
+    date. This one carries provenance, because reconstructing what the corpus
+    believed in 2000 is the point of ``research-01``.
+    """
+
+    __tablename__ = "symbol_aliases"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="CASCADE"), nullable=False
+    )
+    #: ``ticker`` or ``vendor_symbol`` -- a ticker and a vendor's internal code
+    #: are not the same claim and are not stored as though they were.
+    alias_kind: Mapped[str] = mapped_column(String(24), nullable=False, default="ticker")
+    alias_value: Mapped[str] = mapped_column(String(32), nullable=False)
+    valid_from: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    valid_to: Mapped[dt.date | None] = mapped_column(Date)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    knowledge_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    citation: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("ix_alias_lookup", "alias_kind", "alias_value", "valid_from", "valid_to"),
+        Index("ix_alias_security", "security_id", "valid_from"),
+        CheckConstraint("valid_to IS NULL OR valid_to > valid_from", name="ck_alias_interval"),
+    )
+
+
+class SecurityRelationship(Base, TimestampMixin):
+    """A directed, evidenced claim between two securities.
+
+    Where an identity break is recorded rather than resolved. ``AOL`` is the
+    strict case: two registrants, both naming the New York Stock Exchange, both
+    using the same symbol, with close registrant names -- the CIK is the only
+    discriminator, and no price series may run across the two. That is a
+    relationship between two securities, not one security with a gap.
+    """
+
+    __tablename__ = "security_relationships"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    from_security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="CASCADE"), nullable=False
+    )
+    to_security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="CASCADE"), nullable=False
+    )
+    #: ``succeeds``, ``merged_into``, ``renamed_from``, ``ticker_reused_by``.
+    relation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    effective_date: Mapped[dt.date | None] = mapped_column(Date)
+    #: Required: an unevidenced relationship between two securities is a splice.
+    citation: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "from_security_id", "to_security_id", "relation_type", name="uq_security_relationship"
+        ),
+        Index("ix_security_rel_from", "from_security_id"),
+        Index("ix_security_rel_to", "to_security_id"),
+        CheckConstraint("from_security_id <> to_security_id", name="ck_security_rel_distinct"),
+    )
+
+
+class Filing(Base, TimestampMixin):
+    """One filing, keyed on the **issuer** because registrants file, not securities.
+
+    A 10-K belongs to a registrant. A Form 25 removes a class from listing and
+    the quarterly index does not say which class, so attaching a filing to a
+    security would require an attribution the source does not supply. Where a
+    filing genuinely concerns one security, ``security_id`` may be set -- and it
+    is nullable precisely because that is the exception.
+
+    ``form_type`` is verbatim: ``10-K`` is not ``10-K405``.
+    """
+
+    __tablename__ = "filings"
+
+    filing_id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    issuer_id: Mapped[int] = mapped_column(
+        ForeignKey("issuers.issuer_id", ondelete="CASCADE"), nullable=False
+    )
+    #: Only when the source attributes the filing to one class. Usually NULL.
+    security_id: Mapped[int | None] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="SET NULL")
+    )
+    accession: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Verbatim. Never normalised, never folded into a family.
+    form_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    filed_at: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[dt.date | None] = mapped_column(Date)
+    source_path: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("accession", name="uq_filing_accession"),
+        Index("ix_filing_issuer", "issuer_id", "filed_at"),
+        Index("ix_filing_form", "form_type", "filed_at"),
+    )
+
+
+class SecurityPriceFact(Base, TimestampMixin):
+    """Raw and adjusted daily bars for a security. Append-only.
+
+    Named for its subject so it cannot be mistaken for ``ohlcv_bars``, which is
+    a different table for a different corpus. Two differences, either sufficient
+    on its own: ``ohlcv_bars`` keys on ``instrument_id``, and it is
+    **unadjusted-only with no adjustment basis**, so it cannot carry the three
+    bases ``research-01`` needs side by side.
+    """
+
+    __tablename__ = "security_price_facts"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="CASCADE"), nullable=False
+    )
+    session_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    #: ``raw``, ``split``, or ``total``. Which series this row belongs to, held
+    #: explicitly so the three can coexist and never be silently mixed.
+    adjustment_basis: Mapped[str] = mapped_column(String(16), nullable=False, default="raw")
+    event_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    knowledge_source: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    open: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    high: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    low: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    close: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    volume: Mapped[Decimal] = mapped_column(QTY, nullable=False)
+    #: Whether volume is adjusted under this basis, or left as printed. Asked as
+    #: question 22 of the vendor set because vendors differ and rarely say.
+    volume_adjusted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "security_id",
+            "session_date",
+            "adjustment_basis",
+            "knowledge_time",
+            name="uq_security_price_revision",
+        ),
+        Index(
+            "ix_security_price_pit",
+            "security_id",
+            "adjustment_basis",
+            "session_date",
+            "knowledge_time",
+        ),
+        CheckConstraint("high >= low", name="ck_security_price_high_low"),
+        CheckConstraint("high >= open AND high >= close", name="ck_security_price_high"),
+        CheckConstraint("low <= open AND low <= close", name="ck_security_price_low"),
+        CheckConstraint("volume >= 0", name="ck_security_price_volume"),
+        CheckConstraint("knowledge_time >= event_time", name="ck_security_price_knowledge"),
+        CheckConstraint(
+            "adjustment_basis IN ('raw', 'split', 'total')", name="ck_security_price_basis"
+        ),
+    )
+
+
+class SecurityCorporateActionFact(Base, TimestampMixin):
+    """Splits, dividends and other actions on a security. Append-only.
+
+    Carries no ``new_ticker``. ``corporate_actions`` embeds one, which makes a
+    ticker change knowable from two places that can disagree;
+    :class:`SymbolAlias` is the one place a ticker interval is recorded here.
+    """
+
+    __tablename__ = "security_corporate_action_facts"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="CASCADE"), nullable=False
+    )
+    #: ``split``, ``reverse_split``, ``cash_dividend``, ``spinoff``, ...
+    action_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    ex_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    event_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    knowledge_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    ratio: Mapped[Decimal | None] = mapped_column(RATIO)
+    cash_amount: Mapped[Decimal | None] = mapped_column(PRICE)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "security_id",
+            "action_type",
+            "ex_date",
+            "knowledge_time",
+            name="uq_security_action_revision",
+        ),
+        Index("ix_security_action_pit", "security_id", "ex_date", "knowledge_time"),
+        CheckConstraint("ratio IS NULL OR ratio > 0", name="ck_security_action_ratio"),
+        CheckConstraint("cash_amount IS NULL OR cash_amount >= 0", name="ck_security_action_cash"),
+        CheckConstraint("knowledge_time >= event_time", name="ck_security_action_knowledge"),
+    )
+
+
+class SecurityFundamentalFact(Base, TimestampMixin):
+    """Narrow financial facts for a security, with restatement history.
+
+    The name that forced the decision: ``fundamental_facts`` already exists on
+    ``instrument_id``. Rather than qualify only the colliding name, all three
+    fact tables take the ``security_`` prefix, so the subject is legible at the
+    call site instead of only in this docstring.
+    """
+
+    __tablename__ = "security_fundamental_facts"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="CASCADE"), nullable=False
+    )
+    #: Filings are the issuer's, so a fundamental fact points at the one it came
+    #: from rather than re-deriving the link from dates.
+    filing_id: Mapped[int | None] = mapped_column(
+        ForeignKey("filings.filing_id", ondelete="SET NULL")
+    )
+    metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    fiscal_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    fiscal_period: Mapped[str] = mapped_column(String(4), nullable=False)
+    period_end: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    event_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(UTCDateTime, nullable=False)
+    knowledge_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    value: Mapped[Decimal | None] = mapped_column(VALUE)
+    unit: Mapped[str] = mapped_column(String(16), nullable=False, default="USD")
+    #: ``as_reported`` or ``restated``. Kept apart because a restatement is a
+    #: different claim about the same period, not a correction of the first.
+    basis: Mapped[str] = mapped_column(String(16), nullable=False, default="as_reported")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "security_id",
+            "metric",
+            "fiscal_year",
+            "fiscal_period",
+            "basis",
+            "knowledge_time",
+            name="uq_security_fundamental_revision",
+        ),
+        Index(
+            "ix_security_fundamental_pit",
+            "security_id",
+            "metric",
+            "knowledge_time",
+            "period_end",
+        ),
+        CheckConstraint("knowledge_time >= event_time", name="ck_security_fundamental_knowledge"),
+        CheckConstraint(
+            "basis IN ('as_reported', 'restated')", name="ck_security_fundamental_basis"
+        ),
     )

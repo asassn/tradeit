@@ -1,12 +1,12 @@
 # Data Model
 
-**57 tables are defined** in `src/tradeit/storage/tables.py` and created by
+**69 tables are defined** in `src/tradeit/storage/tables.py` and created by
 `migrations/versions/` — measured from the ORM metadata, not counted by hand.
 The schema has been applied to PostgreSQL 16 and is verified by
 `tests/integration/test_phase2_schema.py`, which includes a drift check
 asserting the ORM and the migrations still agree.
 
-**Every table is inventoried below, in exactly one of eight domains.** Each
+**Every table is inventoried below, in exactly one of nine domains.** Each
 domain opens with a table naming its members and what each is for; the diagrams
 and the prose that follow cover the parts with design decisions worth
 explaining. `tests/unit/test_documented_counts.py` compares the inventories
@@ -1031,6 +1031,81 @@ had data. `low_confidence` is set rather than the row being withheld, because a
 thin reading and a missing reading are different facts.
 
 ---
+
+## Domain 9 — research-01 securities, identity and facts
+
+**Twelve tables that share nothing with Domain 1, on purpose.** Domain 1 keys
+everything on `instruments`, and one `instruments` row carries an issuer key
+(`cik`), a security key (`figi`), a listing venue (`primary_exchange`) and a
+lifecycle (`listing_status`/`delisted_date`) at once. That is serviceable for the
+Daily machinery and disqualifying for survivorship research, where the question
+is *which of those four ended, and when*.
+
+So `ohlcv_bars`, `corporate_actions` and `symbol_mappings` are **not** older
+names for `security_price_facts`, `security_corporate_action_facts` and
+`symbol_aliases`. They are those tables' concepts fused together. Nothing in
+Domain 1 was renamed, re-keyed or extended — all of it is load-bearing for
+`full-01`.
+
+| table | what it is |
+|---|---|
+| `issuers` | A legal issuing entity. Carries **no** `cik`: its key lives in `issuer_identifiers` under a namespace |
+| `issuer_identifiers` | The namespaced keys that *are* this issuer — exactly one `primary`, any number of `corroborating` |
+| `issuer_related_identities` | Identifiers that appear to describe this issuer and have not been shown to. A separate table so an unproven key can never resolve identity |
+| `securities` | One class of securities issued by one issuer. Holds no ticker and no venue |
+| `security_identifiers` | CUSIP / ISIN / FIGI — identifiers of a *security*, kept out of the issuer namespace |
+| `listings` | Where a security was listed and between which dates. The venue string is stored verbatim |
+| `symbol_aliases` | A ticker or vendor symbol standing for a security over an interval, with point-in-time provenance |
+| `security_relationships` | Directed, evidenced claims between two securities — succession, merger, ticker reuse |
+| `filings` | One filing, keyed on the **issuer**, because registrants file and securities do not |
+| `security_price_facts` | Daily bars carrying an explicit `adjustment_basis`, so raw, split and total series coexist |
+| `security_corporate_action_facts` | Splits, dividends and other actions on a security. Carries no `new_ticker` |
+| `security_fundamental_facts` | Narrow financial facts for a security, with an `as_reported` / `restated` basis |
+
+**The names depart from `PHASE_06_IMPROVEMENT_PLAN.md` §8 deliberately.** The
+plan says `price_facts`, `corporate_action_facts` and `fundamental_facts`. Only
+the last collided with an existing table, but all three took the `security_`
+prefix, because a name that states its subject cannot be confused with the
+near-neighbour beside it. `price_facts` sitting next to `ohlcv_bars` invites the
+wrong join; `security_price_facts` does not.
+
+### Identity is regulator-neutral, and `FRC` is why
+
+`issuers` has no `cik` column because the SEC is not the only registry that
+identifies an issuer. **First Republic Bank has no SEC filer account at all** —
+a bank with no holding company files its Exchange Act reports with the FDIC — and
+is discriminated by `FDIC_CERT:59017`, corroborated by `FRB_RSSD:4114567`. A
+`cik` column would have made it unrepresentable, or invited a fabricated number.
+
+Its SEC subject-company CIK `1132979` is recorded in `issuer_related_identities`
+as **unresolved**: that record reports EIN `88-0157485` while the FDIC registrant
+reports `80-0513856`, and sameness is established in neither direction. Keeping
+it in a separate table rather than as a third `role` is what makes it
+*structurally* unable to identify the issuer — a resolver reading
+`issuer_identifiers` cannot reach it.
+
+Three constraints carry the guarantees, and `tests/unit/test_research01_schema.py`
+exercises each:
+
+- `uq_issuer_primary_identifier` — a **partial** unique index admitting one
+  `primary` per issuer. Two co-equal primaries discriminate nothing.
+- `uq_issuer_identifier_global` — unique on `(namespace, value_normalized)`
+  across every issuer, so one registry value naming two issuers collides.
+- `value` is stored verbatim, leading zeros and all; `value_normalized` carries
+  `str(int(value))` and is the only column compared, matching
+  `IdentifierRef.key`.
+
+### There is no bridge to `instruments`, and that is an open question
+
+No foreign key, no view, no join. Deciding that instrument *i* and security *s*
+are the same thing is an **identity claim requiring evidence**, on the same
+footing as a control mapping — and the obvious shortcut, joining on
+`instruments.cik`, is wrong twice over: it assumes an SEC CIK exists, and it
+assumes a CIK identifies a security rather than a registrant, when one registrant
+lists several classes.
+
+**Whoever builds that bridge needs an evidence rule and a mapping-quality state,
+not a join.** See `docs/EDGAR_DELISTING_DENOMINATOR.md` §4.
 
 ## Partitioning
 
