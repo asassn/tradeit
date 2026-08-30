@@ -177,3 +177,39 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
   itself authorise it.
 - **Goldbugger is a separate project.** Do not import its gold-specific
   architecture into TradeIt.
+
+## Working with vendors
+
+Standing rules. Current vendor *state* rots and lives in
+[`docs/PHASE_06_VENDOR_MATRIX.md`](docs/PHASE_06_VENDOR_MATRIX.md) §1.3 and the
+improvement plan's milestone table — read it there, never from this file.
+
+- **Nothing is purchased without the owner's explicit approval, per purchase.**
+  Approval of a plan that mentions a vendor is not approval to buy from it.
+  Phase 9 is where the money question opens; nothing before it spends anything.
+- **The owner sends every vendor email and pastes every reply.** Claude drafts;
+  the operator is the only party with a mailbox. A reply enters the repository
+  **verbatim or not at all** — three gradings have already been wrong because
+  somebody graded a paraphrase, and two of those ran against the vendor.
+- **A vendor's assertion is not a measurement.** `VENDOR-STATED` is a real grade
+  with real weight on licence and price, which are the vendor's own facts, and
+  no weight at all on coverage. Only a file we have loaded and checked moves a
+  capability cell.
+- **Do not ask a vendor to certify completeness, and do not accept it if
+  offered.** Milestone 0a built an EDGAR-derived benchmark to measure coverage
+  independently — but read §7be first: it is **blind to exchange delistings
+  before roughly 2002**, which is the window `research-01` exists for. In that
+  window neither the vendor nor the denominator can answer, and the honest move
+  is to say so rather than to substitute one for the other.
+- **Licence retention and deletion terms are out of scope entirely.** What a
+  vendor requires when a subscription ends is the operator's own decision, taken
+  at the operator's discretion. It is not a selection criterion, it does not
+  disqualify a vendor, and **no part of this system is designed around it**.
+  This rule exists because a version of it was baked into a data contract as an
+  absolute constraint and quietly eliminated two candidates; if it reappears
+  anywhere, delete it.
+- **When a sample file arrives, the identity test can invert.** A control chosen
+  because two unrelated issuers held its ticker is testing whether the vendor
+  splices them: **a continuous series across the break is the failure, not the
+  success.** Read the purpose recorded beside each requested symbol before
+  grading any file, and never grade one on whether it "looks complete".
