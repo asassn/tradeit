@@ -444,6 +444,80 @@ over a directory that quietly lacked 2001 QTR3 would report a real dip in
 terminations, which is exactly the kind of artefact that survives into a
 conclusion.
 
+## 7bb. FIRST REAL RUN, 2026-08-29 — and the defect it exposed
+
+**The denominator was built against the real archive for the first time on
+2026-08-29**, 129 quarterly index files, 1994 Q3 – 2026 Q3, pinned
+`--as-of 2026-08-29`. Everything below is measured, not estimated.
+
+| measurement | value |
+|---|---|
+| index files scanned | 129 |
+| rows read, and independently re-read | 27,084,668 |
+| FORM / CIK / DATE / PATH / ACCESSION mismatches | **0** |
+| registrants | 90,548 |
+| confirmed exits carrying a date | 40,920 |
+| undated exits (cessation + unresolved) | 49,628 |
+| control mappings attached to a registrant | 33 of 33 handed over |
+
+The parser-integrity gate **PASSED** on all 27,084,668 rows.
+
+### The defect: 30.7% of dated exits contradict their own evidence
+
+**`resolve_exit` takes the *earliest* confirming filing** — `lifecycle.py:180-181`,
+`confirming.sort(...)` then `confirming[0]`. A registrant that deregisters one
+class of securities and keeps reporting is therefore recorded as having exited on
+the date of that first Form 15.
+
+Measured against the real archive:
+
+| check | count | share |
+|---|---|---|
+| exit dated **before** the registrant's last periodic report | **12,549** | **30.7%** of dated exits |
+| … of those, overlap > 5 years | 1,948 | |
+| resolutions resting on more than one confirming filing | 11,239 | 27.5% |
+| exit dated *after* the last periodic report (the normal case) | 20,813 | median lag **0.21 years** |
+
+**The worst cases are not obscure.** `INTEL CORP` is recorded as exiting
+1994-08-02 while still filing in 2026 — a 31.7-year contradiction. So are
+`ADOBE INC.` (1995), `CONAGRA BRANDS` (1995) and `TJX COMPANIES` (1996). Every
+one is listed and trading today.
+
+**This is the opposite of survivorship bias**, and worth naming as its own
+failure: the corpus does not omit dead companies, it *invents* dead ones. A
+vendor measured against this denominator would be asked to supply delisted
+history for Intel, and marked down for not having it.
+
+**Two notes on the shape of the fix, which is not yet made.**
+
+* The extinguishment branch eight lines above already uses `confirming[-1]`, the
+  *latest*. Same function, opposite choice, no comment explaining why — which
+  reads as an oversight rather than a decision.
+* Taking the latest is probably right and is **not obviously sufficient**: a
+  registrant whose last periodic report post-dates *every* confirming filing has
+  not exited at all on this evidence, and the honest resolution may be to refuse
+  a date rather than to pick a better one. `evidence_date < last_periodic` is a
+  contradiction the type system currently permits and nothing checks.
+
+**Until it is fixed, the per-year curve may not be used to evaluate a vendor.**
+The row counts, the registrant total and the undated population are unaffected —
+the defect is in *dating* an exit, not in detecting one.
+
+### Two predictions this run falsified, recorded because they were wrong
+
+Both were made before the numbers existed, and both were contradicted:
+
+1. *"2000–2002 and 2008–2009 will show visible bulges; if not, the build is
+   broken."* They do not. The peak is 2005–2007 (2,827 / 3,012 / 3,113) and 2009
+   (1,318) is lower than 2002 (1,546).
+2. *"The peak is the dot-com wave arriving 3–5 years late as paperwork."* The
+   median lag between last periodic report and exit filing is **0.21 years**.
+
+**No third explanation is offered here.** The curve is built from a dating rule
+now known to be wrong on 30.7% of its inputs, and explaining a number before
+correcting the defect underneath it is how a wrong number acquires a defender.
+Fix, re-run, then look.
+
 ## 7c. The parser-integrity gate, and one anomaly left open
 
 The denominator's classification consumes exactly three fields per row — `cik`,
