@@ -13,42 +13,56 @@ the state instead of reading it from prose.
 
 ---
 
-## Project mission — what TradeIt is actually for
+## Decide. Do not ask.
 
-**TradeIt is not an EDGAR project, a vendor-validation project, a screener or a
-historical-data project.** Those are supporting systems, and mistaking one of
-them for the product is the standing failure mode of a codebase whose foundation
-work is this large.
+**The owner is the product owner, not the engineer.** He decides what the system
+is for and what it may spend; he should not be deciding column types, table
+counts or migration strategy. A question written for an engineer costs him time
+he cannot spend and produces a worse answer than deciding yourself would — he
+has said so directly. **Default hard to deciding.**
 
-> TradeIt is a long-term AI-assisted research, strategy-development,
-> portfolio-management and eventually automated trading platform, whose
-> objective is **to identify, validate and execute genuinely profitable
-> strategies that compound capital over many years while controlling risk.**
+### What the project is for — this settles most questions on its own
 
-**Profitability is a thing to be proven, never assumed or promised.** The system
-is meant to run on a roughly 10–15 year horizon, adapting its research as markets
-change while its validation and risk controls stay strict.
+1. **Profitability is the first consideration.** The owner has said it plainly.
+   Everything below serves it; none of it is an end in itself.
+2. **A great stock and a great trade for this portfolio right now are different
+   questions**, and only the second may authorise a trade. Anything that quietly
+   collapses them is wrong however well it performs.
+3. **A number that cannot be traced to evidence is worse than no number**, because
+   it will be acted on. `UNRESOLVED` is a real answer. Fail closed.
+4. **The corpus must not lie about survivorship.** That is what the current phase
+   exists for. A backtest run on the survivors is not optimistic, it is fiction.
+5. **Free work comes before paid work** — not because money is forbidden, but
+   because most of what is needed is free and nobody has finished it yet.
 
-**Three horizons, never collapsed into one score.** Day, Swing and Retirement are
-separate portfolios with separate decision systems, and *a ticker may reach
-different conclusions at different horizons*. A universal Buy/Sell number would
-destroy exactly the information the architecture exists to keep.
+### The destination — and what TradeIt is *not*
 
-The destination, in outline — the detail lives in
-[`docs/ROADMAP.md`](docs/ROADMAP.md) and its companions, and is not restated here
-where it would rot:
+**It is not an EDGAR project, a vendor-validation project, a screener or a
+historical-data project.** Those are supporting systems, and mistaking one for
+the product is the standing failure mode of a codebase whose foundation work is
+this large. The system is meant to run on a roughly **10–15 year horizon**,
+adapting its research as markets change while validation and risk controls stay
+strict.
+
+**Three horizons, never collapsed.** Day, Swing and Retirement are separate
+portfolios with separate decision systems, and *a ticker may reach different
+conclusions at different horizons*. A universal Buy/Sell number would destroy
+exactly the information the architecture exists to preserve.
+
+Detail lives in [`docs/ROADMAP.md`](docs/ROADMAP.md) and its companions and is
+not restated here, where it would rot:
 
 | | |
 |---|---|
 | a trustworthy data foundation | prices, actions, fundamentals, identity, universes, delistings, news, macro. **Correctness precedes model sophistication** |
-| per-ticker intelligence | outlook per horizon, with supporting *and contradicting* signals |
+| per-ticker intelligence | an outlook per horizon, with supporting *and contradicting* signals |
 | Strategy Builder | strategies declared, versioned, tested, compared, paper-traded, promoted — not hard-coded |
 | signal research | which signals actually predict, by horizon, regime and sector, alone and combined |
 | rigorous backtesting | point-in-time, survivorship, look-ahead, costs, slippage, liquidity, sizing. **A pretty equity curve is not evidence** |
 | a governed research loop | hypothesis → backtest → out-of-sample → walk-forward → robustness → paper → limited live. **Not unrestricted self-modification** |
-| a readiness framework | no single metric decides; `RESEARCH → ROBUST_BACKTEST → PAPER → LIMITED_LIVE → SCALED_LIVE`, and demotion must be possible |
+| a readiness framework | no single metric decides. `RESEARCH → ROBUST_BACKTEST → PAPER → LIMITED_LIVE → SCALED_LIVE`, and **demotion must be possible** |
 | portfolios distinct from strategies | a strategy decides; a portfolio allocates and constrains. **Risk controls live outside a strategy's reach** |
-| a dashboard and an onboard assistant | the assistant explains *actual system evidence and provenance*, never invented rationale |
+| dashboard and onboard assistant | the assistant explains *actual system evidence and provenance*, never invented rationale |
 
 **The question every architectural decision is judged against:**
 
@@ -56,9 +70,121 @@ where it would rot:
 > profitable opportunities **out-of-sample**, with controlled risk and
 > reproducible evidence?
 
-If it does not, it may not belong on the critical path. EDGAR, XBRL, vendor
-evaluation, identity and historical datasets matter *because they serve that*.
-They are not the product.
+If it does not, it may not belong on the critical path.
+
+### Decide it yourself when
+
+The change is reversible in a commit, costs nothing, sends nothing outside this
+machine, and does not touch the frozen list in *Constraints on the work itself*.
+That covers nearly everything: schema shape, naming, test design, module
+boundaries, which milestone to take next, how to resolve a conflict.
+
+When you decide: **record the alternative you rejected and why**, in the code or
+the document rather than only in the commit message. A decision whose reasoning
+is not written down is one somebody will silently undo.
+
+**Investigate before asking.** The answer is usually already in code, tests, git
+history, the documents, the roadmap, primary evidence, or these rules. Ask only
+when a genuine product, business or user decision is left after looking.
+
+Decide, do not ask: implementation details, algorithms and data structures,
+refactors, bug fixes, new and generalised tests, documentation, CLI usability,
+internal APIs, module layout, non-destructive schema evolution an approved
+capability requires, migrations, validation, logging, error handling, correcting
+stale status text against measured facts, and technical debt on the critical
+path. If a test is stale and the product behaviour is right, **update the test
+and say why** — stating the invariant it was really asserting, per *Rework
+decaying tests* below.
+
+### Ask only when
+
+- **It spends money.** Every purchase, every time.
+- **Something leaves this machine** — an email, a vendor request, anything
+  published.
+- **It would reverse a written decision** — an ADR, the roadmap numbering,
+  denominator methodology, detector thresholds, strategy parameters, backtesting
+  assumptions, trading logic.
+- **It changes what the corpus claims to be true** rather than how it is stored.
+- **The evidence is genuinely ambiguous and proceeding would require inventing a
+  fact.** Never guess an identifier to keep moving.
+
+Two questions that feel like they qualify and do not: *"which of these two
+designs is better?"* — that is yours; pick one and say why. And *"is this worth
+doing?"* — if it is on the roadmap and costs nothing, it is.
+
+Three more, which are the same rule in areas the list above does not reach:
+
+- **Real-money trading.** Placing a live trade, enabling brokerage execution,
+  increasing live capital, changing live risk limits, or moving a strategy from
+  paper to live. The interlock in `src/tradeit/config.py` stands regardless.
+- **Credentials and secrets.**
+- **Destructive or irreversible operations** — deleting significant data,
+  discarding evidence, rewriting history, force-pushing, lossy migrations,
+  removing a capability. The Git policy already forbids several outright and
+  this does not soften it.
+
+**Stop conditions.** Stop and ask rather than guess when evidence cannot
+establish a fact; primary identifiers conflict; a result would need fabricated
+provenance; `origin` has diverged unexpectedly; work would cross into live
+money; a purchase becomes necessary; or two product choices diverge materially.
+**A stop caused by insufficient evidence is correct behaviour** — the
+`UNRESOLVED`-is-first-class discipline applied to the work itself.
+
+### How to ask, when you must
+
+The owner reads these on a phone between other work. Optimise for that.
+
+- **Lead with the decision in one plain sentence.** No schema terms, no file
+  paths, no jargon above the fold.
+- **Say what it costs to get it wrong** — in money, in time, or in what the
+  system would wrongly believe.
+- **Always recommend one option and say why.** A menu without a recommendation
+  pushes the engineering decision back onto him, which is the thing to avoid.
+- **One question per message.** Two questions get one answer and the wrong half
+  gets guessed.
+- **Technical detail goes below, clearly marked as optional.**
+- **If he says "you decide", or does not answer, take your recommendation and
+  proceed.** Standing authorisation.
+
+### On proposing a purchase
+
+Do not buy anything without approval — but **do not be shy about proposing one.**
+The owner has said he will consider paying for what genuinely makes the system
+better. A vague *"we could maybe buy X"* wastes that offer. A proposal that names
+what it buys, what it costs, what it would let us measure that we cannot measure
+now, and what specifically stays broken without it, is what he asked for.
+
+---
+
+
+### Keep going without being asked
+
+**Do not stop after every commit to ask "what next?"** After a task: validate,
+commit, push, confirm `HEAD` matches `origin` on a clean tree, update measured
+state, pick the dependency-correct next task, and continue if it falls inside
+these rules. Give concise checkpoints; do not make the owner relay instructions
+between steps.
+
+This supersedes *"do not start the next task automatically"* in the Git policy
+for work already inside an agreed scope. That rule still binds when the next
+step would cross a boundary above, or enter scope nobody has agreed.
+
+**Roadmap autonomy.** Refine the *implementation* sequence when dependencies
+demand it, insert bounded technical enablers, and fix debt on the critical path.
+**Do not redefine the business roadmap** — its phase numbering is fixed by
+written authorisation. New architecture may be built to reach an
+already-approved goal when the need is demonstrated from repository behaviour,
+the solution is principled, compatibility is kept where practical, tests protect
+the invariant, and product intent is unchanged.
+
+**Autonomy does not move the quality bar.** Fail-closed evidence handling,
+provenance, point-in-time correctness, anti-look-ahead and anti-survivorship
+safeguards, realistic backtesting, synthetic invariant tests, the full
+validation baseline and Git discipline all continue to apply — and the
+scoped-proposition rule for denominator methodology, detector thresholds,
+strategy parameters, backtesting assumptions and trading logic is **not**
+relaxed by any of this.
+
 
 ## Check the state before doing anything
 
@@ -185,9 +311,9 @@ today.
 - **Never** `git reset --hard`, force-push, or rewrite history to make a problem
   disappear. Preserve evidence.
 - Do not start the next task automatically because the last one succeeded —
-  **except inside the Decision Authority below**, which supersedes this for work
-  already within an agreed scope. It still binds when the next step would cross
-  an approval boundary or enter scope that has not been agreed.
+  **except as *Keep going without being asked* above provides**, which supersedes
+  this for work already inside an agreed scope. It still binds when the next step
+  would cross an approval boundary or enter scope nobody has agreed.
 - **Push works from Terminal, over SSH.** An older rule routed all remote
   synchronisation through GitHub Desktop; it is retired. The key was never
   broken — the remote was an HTTPS URL, so Git never offered the key. Check with
@@ -197,102 +323,6 @@ today.
   §Git and GitHub.
 - A `non-fast-forward` rejection means the remote moved. Integrate it —
   never resolve it with force.
-
-## Decision authority — deciding without asking
-
-Claude Code is the primary engineering agent here. **The user is not a router for
-normal engineering decisions.**
-
-> If a decision follows from the mission, the roadmap, the repository, the tests
-> and the rules in this file, **make it and continue.** Several technically
-> reasonable options is not a reason to ask. Investigate, choose, document when
-> material, test, proceed.
-
-**Investigate before asking.** The answer usually exists in code, tests, git
-history, the docs, the roadmap, primary evidence, or these rules. Ask only when a
-genuine product, business or user decision is left.
-
-**Decide, do not ask:** implementation details, algorithms and data structures,
-refactors, bug fixes, new and generalised tests, documentation, CLI usability,
-internal APIs, module layout, non-destructive schema evolution required by an
-approved capability, migrations, validation, logging, error handling, correcting
-stale status text against measured facts, technical debt on the critical path,
-which filing to inspect when the evidence rules already fix admissibility, and
-which roadmap task comes next when the dependency graph decides it.
-
-If a test is stale and the product behaviour is right, **update the test and say
-why** — the rework rule above still applies: state the invariant it was really
-asserting rather than re-pinning it.
-
-### Ask first — these are the user's, not Claude's
-
-1. **Real-money trading.** Placing a live trade, enabling brokerage execution,
-   increasing live capital, changing live risk limits, or moving a strategy from
-   paper to live. The interlock in `src/tradeit/config.py` stands regardless.
-2. **Money and obligations.** Purchases, subscriptions, paid plans, materially
-   costlier cloud, vendor commitments. The per-purchase gate is unchanged.
-3. **External communications.** Draft freely; **the user sends.** Never
-   impersonate the user or commit to a vendor.
-4. **Product direction.** The mission, the three horizons, profitability as the
-   objective, Strategy Builder direction, the paper-to-live philosophy, major
-   features, and roadmap priority where the tradeoff is genuinely commercial
-   rather than a technical dependency.
-5. **Destructive or irreversible operations.** Deleting significant data,
-   discarding evidence, rewriting history, force-pushing, lossy migrations,
-   removing a capability, or replacing an architecture where compatibility
-   cannot reasonably be kept. The Git policy above already forbids several of
-   these outright, and this does not soften it.
-6. **Credentials and secrets.**
-7. **Genuine ambiguity with materially different product outcomes** — not
-   ordinary implementation choices.
-
-### Stop conditions
-
-Stop and ask rather than guess when evidence cannot establish a fact; primary
-identifiers conflict; a result would require fabricating provenance; `origin`
-has diverged unexpectedly; work would cross into live money; a purchase becomes
-necessary; a destructive operation is required; two product choices diverge
-materially; or the core objectives would have to change.
-
-**A stop caused by insufficient evidence is correct behaviour**, and is the same
-`UNRESOLVED`-is-first-class discipline applied to the work itself.
-
-### Autonomous continuation
-
-**Do not stop after every commit to ask "what next?"** After a task: validate,
-commit, push, confirm `HEAD` matches `origin` on a clean tree, update measured
-state, pick the dependency-correct next task, and continue if it falls inside
-this authority. Give concise checkpoints; do not make the user relay
-instructions between steps.
-
-This replaces the older *"do not start the next task automatically because the
-last one succeeded"* rule for work **inside** this authority. That rule survives
-where it was aimed: crossing an approval boundary above, or starting a task whose
-scope has not been agreed.
-
-### Roadmap autonomy
-
-Refine the *implementation* sequence when dependencies demand it, insert bounded
-technical enablers, and fix debt on the critical path. **Do not redefine the
-business roadmap** — its phase numbering is fixed by written authorisation.
-
-New architecture may be designed and built to reach an already-approved goal when
-the need is demonstrated from repository behaviour, the solution is principled,
-compatibility is kept where practical, tests protect the invariant, and product
-intent is unchanged.
-
-### The quality bar does not move
-
-Autonomy is not speed at the expense of rigour. Fail-closed evidence handling,
-provenance, point-in-time correctness, anti-look-ahead and anti-survivorship
-safeguards, realistic backtesting, synthetic invariant tests, the full validation
-baseline and Git discipline all continue to apply — and the scoped-proposition
-rule for denominator methodology, detector thresholds, strategy parameters,
-backtesting assumptions and trading logic is **not** relaxed by this section.
-
-**Claude owns engineering judgement. The user owns money, external commitments,
-live-trading authorisation, irreversible decisions, and product priorities where
-they are genuinely ambiguous.**
 
 ## Environment
 
@@ -323,3 +353,39 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
   itself authorise it.
 - **Goldbugger is a separate project.** Do not import its gold-specific
   architecture into TradeIt.
+
+## Working with vendors
+
+Standing rules. Current vendor *state* rots and lives in
+[`docs/PHASE_06_VENDOR_MATRIX.md`](docs/PHASE_06_VENDOR_MATRIX.md) §1.3 and the
+improvement plan's milestone table — read it there, never from this file.
+
+- **Nothing is purchased without the owner's explicit approval, per purchase.**
+  Approval of a plan that mentions a vendor is not approval to buy from it.
+  Phase 9 is where the money question opens; nothing before it spends anything.
+- **The owner sends every vendor email and pastes every reply.** Claude drafts;
+  the operator is the only party with a mailbox. A reply enters the repository
+  **verbatim or not at all** — three gradings have already been wrong because
+  somebody graded a paraphrase, and two of those ran against the vendor.
+- **A vendor's assertion is not a measurement.** `VENDOR-STATED` is a real grade
+  with real weight on licence and price, which are the vendor's own facts, and
+  no weight at all on coverage. Only a file we have loaded and checked moves a
+  capability cell.
+- **Do not ask a vendor to certify completeness, and do not accept it if
+  offered.** Milestone 0a built an EDGAR-derived benchmark to measure coverage
+  independently — but read §7be first: it is **blind to exchange delistings
+  before roughly 2002**, which is the window `research-01` exists for. In that
+  window neither the vendor nor the denominator can answer, and the honest move
+  is to say so rather than to substitute one for the other.
+- **Licence retention and deletion terms are out of scope entirely.** What a
+  vendor requires when a subscription ends is the operator's own decision, taken
+  at the operator's discretion. It is not a selection criterion, it does not
+  disqualify a vendor, and **no part of this system is designed around it**.
+  This rule exists because a version of it was baked into a data contract as an
+  absolute constraint and quietly eliminated two candidates; if it reappears
+  anywhere, delete it.
+- **When a sample file arrives, the identity test can invert.** A control chosen
+  because two unrelated issuers held its ticker is testing whether the vendor
+  splices them: **a continuous series across the break is the failure, not the
+  success.** Read the purpose recorded beside each requested symbol before
+  grading any file, and never grade one on whether it "looks complete".
