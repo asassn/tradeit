@@ -13,6 +13,81 @@ the state instead of reading it from prose.
 
 ---
 
+## Decide. Do not ask.
+
+**The owner is the product owner, not the engineer.** He decides what the system
+is for and what it may spend; he should not be deciding column types, table
+counts or migration strategy. A question written for an engineer costs him time
+he cannot spend and produces a worse answer than deciding yourself would — he
+has said so directly. **Default hard to deciding.**
+
+### What the project is for — this settles most questions on its own
+
+1. **Profitability is the first consideration.** The owner has said it plainly.
+   Everything below serves it; none of it is an end in itself.
+2. **A great stock and a great trade for this portfolio right now are different
+   questions**, and only the second may authorise a trade. Anything that quietly
+   collapses them is wrong however well it performs.
+3. **A number that cannot be traced to evidence is worse than no number**, because
+   it will be acted on. `UNRESOLVED` is a real answer. Fail closed.
+4. **The corpus must not lie about survivorship.** That is what the current phase
+   exists for. A backtest run on the survivors is not optimistic, it is fiction.
+5. **Free work comes before paid work** — not because money is forbidden, but
+   because most of what is needed is free and nobody has finished it yet.
+
+### Decide it yourself when
+
+The change is reversible in a commit, costs nothing, sends nothing outside this
+machine, and does not touch the frozen list in *Constraints on the work itself*.
+That covers nearly everything: schema shape, naming, test design, module
+boundaries, which milestone to take next, how to resolve a conflict.
+
+When you decide: **record the alternative you rejected and why**, in the code or
+the document rather than only in the commit message. A decision whose reasoning
+is not written down is one somebody will silently undo.
+
+### Ask only when
+
+- **It spends money.** Every purchase, every time.
+- **Something leaves this machine** — an email, a vendor request, anything
+  published.
+- **It would reverse a written decision** — an ADR, the roadmap numbering,
+  denominator methodology, detector thresholds, strategy parameters, backtesting
+  assumptions, trading logic.
+- **It changes what the corpus claims to be true** rather than how it is stored.
+- **The evidence is genuinely ambiguous and proceeding would require inventing a
+  fact.** Never guess an identifier to keep moving.
+
+Two questions that feel like they qualify and do not: *"which of these two
+designs is better?"* — that is yours; pick one and say why. And *"is this worth
+doing?"* — if it is on the roadmap and costs nothing, it is.
+
+### How to ask, when you must
+
+The owner reads these on a phone between other work. Optimise for that.
+
+- **Lead with the decision in one plain sentence.** No schema terms, no file
+  paths, no jargon above the fold.
+- **Say what it costs to get it wrong** — in money, in time, or in what the
+  system would wrongly believe.
+- **Always recommend one option and say why.** A menu without a recommendation
+  pushes the engineering decision back onto him, which is the thing to avoid.
+- **One question per message.** Two questions get one answer and the wrong half
+  gets guessed.
+- **Technical detail goes below, clearly marked as optional.**
+- **If he says "you decide", or does not answer, take your recommendation and
+  proceed.** Standing authorisation.
+
+### On proposing a purchase
+
+Do not buy anything without approval — but **do not be shy about proposing one.**
+The owner has said he will consider paying for what genuinely makes the system
+better. A vague *"we could maybe buy X"* wastes that offer. A proposal that names
+what it buys, what it costs, what it would let us measure that we cannot measure
+now, and what specifically stays broken without it, is what he asked for.
+
+---
+
 ## Check the state before doing anything
 
 ```
