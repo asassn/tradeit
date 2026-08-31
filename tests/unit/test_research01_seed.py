@@ -193,4 +193,4 @@ class TestTheCorpusFailsClosedUntilIntervalsAreCurated:
         assert result.landed == 0
         assert result.rejected[0].reason is RejectReason.NO_ALIAS
         # The refusal is reportable, which is what makes it not a silent failure.
-        assert result.summary()["unresolved_tickers"] == ["GM"]
+        assert result.summary()["unresolved_subjects"] == ["GM"]

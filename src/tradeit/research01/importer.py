@@ -62,6 +62,9 @@ class Resolution(StrEnum):
 
 class RejectReason(StrEnum):
     NO_ALIAS = "no_alias"
+    #: No issuer carries this registry identifier. Not a new issuer, and
+    #: emphatically not the issuer that merely has it as a *related* identity.
+    NO_ISSUER = "no_issuer"
     AMBIGUOUS_ALIAS = "ambiguous_alias"
     #: Already present at this exact revision. Re-running an import is a no-op.
     DUPLICATE = "duplicate"
@@ -94,8 +97,19 @@ class VendorBar:
 
 @dataclass(frozen=True, slots=True)
 class RejectedBar:
-    bar: VendorBar
+    """One rejected input, whatever kind of input it was.
+
+    ``payload`` is the original row -- a :class:`VendorBar` or a filing row --
+    kept whole so a caller can inspect or retry it. ``subject`` is what could
+    not be resolved, rendered by the importer that knows: a ticker for a price
+    bar, a namespaced identifier for a filing. Generalised from an earlier
+    ``ticker``-only field when filings arrived, rather than adding a second
+    result type that would have reported the same three outcomes differently.
+    """
+
+    payload: object
     reason: RejectReason
+    subject: str = ""
     detail: str = ""
 
 
@@ -115,10 +129,13 @@ class ImportResult:
 
     @property
     def unresolved(self) -> list[RejectedBar]:
+        """Everything identity could not place. **Not** duplicates, which are a
+        successful no-op rather than a failure to resolve."""
         return [
             r
             for r in self.rejected
-            if r.reason in {RejectReason.NO_ALIAS, RejectReason.AMBIGUOUS_ALIAS}
+            if r.reason
+            in {RejectReason.NO_ALIAS, RejectReason.AMBIGUOUS_ALIAS, RejectReason.NO_ISSUER}
         ]
 
     def summary(self) -> dict[str, object]:
@@ -130,7 +147,7 @@ class ImportResult:
             "rejected": len(self.rejected),
             "rejected_by_reason": counts,
             "securities_touched": sorted(self.securities_touched),
-            "unresolved_tickers": sorted({r.bar.ticker for r in self.unresolved}),
+            "unresolved_subjects": sorted({r.subject for r in self.unresolved}),
         }
 
 
@@ -182,6 +199,7 @@ def import_price_bars(session: Session, bars: list[VendorBar], delivery: Deliver
                 RejectedBar(
                     bar,
                     RejectReason.NO_ALIAS,
+                    bar.ticker,
                     f"no security evidenced for {bar.ticker!r} on {bar.session_date}",
                 )
             )
@@ -191,6 +209,7 @@ def import_price_bars(session: Session, bars: list[VendorBar], delivery: Deliver
                 RejectedBar(
                     bar,
                     RejectReason.AMBIGUOUS_ALIAS,
+                    bar.ticker,
                     f"{bar.ticker!r} claimed by more than one security on {bar.session_date}",
                 )
             )
@@ -222,7 +241,9 @@ def import_price_bars(session: Session, bars: list[VendorBar], delivery: Deliver
         ).first()
         if exists is not None:
             result.rejected.append(
-                RejectedBar(bar, RejectReason.DUPLICATE, "already present at this revision")
+                RejectedBar(
+                    bar, RejectReason.DUPLICATE, bar.ticker, "already present at this revision"
+                )
             )
             continue
 

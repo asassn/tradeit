@@ -7,6 +7,7 @@ being one thing. A shared importer would have re-joined them at the first
 convenient moment.
 """
 
+from tradeit.research01.filings import FilingRow, import_filings, resolve_issuer
 from tradeit.research01.importer import (
     Delivery,
     ImportResult,
@@ -22,6 +23,7 @@ from tradeit.research01.seed import NotEstablished, SeedReport, seed_identity
 
 __all__ = [
     "Delivery",
+    "FilingRow",
     "ImportResult",
     "KnowledgeTimeBasis",
     "NotEstablished",
@@ -30,8 +32,10 @@ __all__ = [
     "Resolution",
     "SeedReport",
     "VendorBar",
+    "import_filings",
     "import_price_bars",
     "knowledge_time_for",
+    "resolve_issuer",
     "resolve_security",
     "seed_identity",
 ]

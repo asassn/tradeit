@@ -196,7 +196,7 @@ class TestResolution:
         assert result.rejected[0].reason is RejectReason.NO_ALIAS
         assert db_session.scalars(select(Security)).all() == []
         assert db_session.scalars(select(SymbolAlias)).all() == []
-        assert result.summary()["unresolved_tickers"] == ["GHOST"]
+        assert result.summary()["unresolved_subjects"] == ["GHOST"]
 
     def test_two_securities_claiming_one_ticker_at_one_instant_is_ambiguous(
         self, db_session: Session
@@ -360,7 +360,7 @@ class TestNoSpliceAcrossAnIdentityBreak:
         )
 
         gap = {dt.date(2009, 7, 1), dt.date(2009, 8, 3)}
-        rejected_days = {r.bar.session_date for r in result.unresolved}
+        rejected_days = {r.payload.session_date for r in result.unresolved}
         assert rejected_days == gap
         assert all(r.reason is RejectReason.NO_ALIAS for r in result.unresolved)
 
