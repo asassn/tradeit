@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 
 from tradeit.research01.filings import resolve_issuer
 from tradeit.research01.importer import ImportResult, RejectedBar, RejectReason
-from tradeit.storage.tables import Security, SecurityFundamentalFact
+from tradeit.storage.tables import Filing, Security, SecurityFundamentalFact
 
 __all__ = ["FsdsFact", "FsdsSubmission", "import_fsds_quarter", "read_quarter"]
 
@@ -178,6 +178,18 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
             continue
         resolved[adsh] = _security_for_issuer(session, issuer_id)
 
+    # accession -> filing_id, for the filings we actually hold. The FSDS `adsh`
+    # IS the accession the full-index reports, so this is a join on the SEC's
+    # own identifier rather than on anything we derived.
+    filing_ids: dict[str, int] = {
+        accession: filing_id
+        for accession, filing_id in session.execute(
+            select(Filing.accession, Filing.filing_id).where(
+                Filing.accession.in_(list(submissions))
+            )
+        ).all()
+    }
+
     seen: set[tuple[int, str, int, str, int, dt.datetime]] = set()
     landed = 0
     for fact in facts:
@@ -210,6 +222,7 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
         session.add(
             SecurityFundamentalFact(
                 security_id=security_id,
+                filing_id=filing_ids.get(fact.adsh),
                 metric=fact.tag,
                 fiscal_year=fact.ddate.year,
                 fiscal_period=period_label,

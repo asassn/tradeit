@@ -8,7 +8,12 @@ convenient moment.
 """
 
 from tradeit.research01.actions import VendorAction, import_corporate_actions
-from tradeit.research01.filings import FilingRow, import_filings, resolve_issuer
+from tradeit.research01.filings import (
+    FilingRow,
+    import_filings,
+    import_filings_from_index,
+    resolve_issuer,
+)
 from tradeit.research01.fsds import FsdsFact, FsdsSubmission, import_fsds_quarter, read_quarter
 from tradeit.research01.importer import (
     Delivery,
@@ -25,6 +30,10 @@ from tradeit.research01.pit import (
     action_knowledge_time_for,
     knowledge_time_for,
 )
+from tradeit.research01.reconcile import (
+    ReconciliationReport,
+    reconcile_fundamentals_against_filings,
+)
 from tradeit.research01.seed import NotEstablished, SeedReport, seed_identity
 
 __all__ = [
@@ -35,6 +44,7 @@ __all__ = [
     "ImportResult",
     "KnowledgeTimeBasis",
     "NotEstablished",
+    "ReconciliationReport",
     "RejectReason",
     "RejectedBar",
     "Resolution",
@@ -44,10 +54,12 @@ __all__ = [
     "action_knowledge_time_for",
     "import_corporate_actions",
     "import_filings",
+    "import_filings_from_index",
     "import_fsds_quarter",
     "import_price_bars",
     "knowledge_time_for",
     "read_quarter",
+    "reconcile_fundamentals_against_filings",
     "resolve_issuer",
     "resolve_security",
     "seed_identity",

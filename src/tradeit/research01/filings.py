@@ -17,14 +17,21 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from tradeit.edgar.index import IndexQuarter, LocalFullIndexSource
 from tradeit.research01.importer import ImportResult, RejectedBar, RejectReason
 from tradeit.storage.tables import Filing, IssuerIdentifier
 
-__all__ = ["FilingRow", "import_filings", "resolve_issuer"]
+__all__ = [
+    "FilingRow",
+    "import_filings",
+    "import_filings_from_index",
+    "resolve_issuer",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,3 +102,47 @@ def import_filings(session: Session, rows: list[FilingRow], source: str) -> Impo
         result.securities_touched.add(issuer_id)
     session.flush()
     return result
+
+
+def import_filings_from_index(
+    session: Session,
+    *,
+    index_root: Path,
+    start: IndexQuarter,
+    end: IndexQuarter,
+) -> ImportResult:
+    """Load filings from the quarterly full-index, for issuers we already hold.
+
+    **Filtered while streaming, not after.** The index carries tens of millions
+    of rows and the seeded corpus is a few dozen registrants, so every row is
+    tested against the known CIK set as it is read and discarded if it does not
+    match. Materialising the index to filter it afterwards would need gigabytes
+    to end up with a few thousand rows.
+
+    The CIK set is read once, up front: an import may not grow the corpus, so
+    the set cannot change while the scan runs.
+    """
+    known: dict[int, int] = {
+        int(value): issuer_id
+        for value, issuer_id in session.execute(
+            select(IssuerIdentifier.value_normalized, IssuerIdentifier.issuer_id).where(
+                IssuerIdentifier.namespace == "sec_cik"
+            )
+        ).all()
+    }
+    if not known:
+        return ImportResult()
+
+    source = LocalFullIndexSource(root=index_root)
+    rows = [
+        FilingRow(
+            cik=row.cik,
+            form_type=row.form_type,
+            filed_at=row.filed_at,
+            accession=row.accession,
+            source_path=row.path,
+        )
+        for row in source.rows(start, end)
+        if row.cik in known
+    ]
+    return import_filings(session, rows, "edgar_full_index")
