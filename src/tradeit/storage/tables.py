@@ -3118,6 +3118,12 @@ class SecurityFundamentalFact(Base, TimestampMixin):
     metric: Mapped[str] = mapped_column(String(64), nullable=False)
     fiscal_year: Mapped[int] = mapped_column(Integer, nullable=False)
     fiscal_period: Mapped[str] = mapped_column(String(4), nullable=False)
+    #: How many quarters the value covers: 0 an instant, 1 a quarter, 4 a year.
+    #: **Part of identity**, because the same tag at the same period end appears
+    #: with different durations -- quarterly and annual ``Revenues`` both dated
+    #: 2014-12-31 -- and without it one silently overwrites the other. Nullable
+    #: because a source that does not state a duration may not have one invented.
+    duration_qtrs: Mapped[int | None] = mapped_column(Integer)
     period_end: Mapped[dt.date] = mapped_column(Date, nullable=False)
     event_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     knowledge_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -3134,6 +3140,7 @@ class SecurityFundamentalFact(Base, TimestampMixin):
             "metric",
             "fiscal_year",
             "fiscal_period",
+            "duration_qtrs",
             "basis",
             "knowledge_time",
             name="uq_security_fundamental_revision",

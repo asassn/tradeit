@@ -72,6 +72,7 @@ VERSIONS = Path(__file__).resolve().parents[2] / "migrations" / "versions"
 MIGRATIONS = (
     VERSIONS / "0013_research01_security_schema.py",
     VERSIONS / "0014_pit_basis_and_alias_overlap.py",
+    VERSIONS / "0015_fundamental_duration.py",
 )
 
 #: The twelve tables milestone 2 adds. Named explicitly rather than derived, so
@@ -125,6 +126,12 @@ class _OpRecorder:
         return None
 
     def create_check_constraint(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def drop_constraint(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def create_unique_constraint(self, *args: Any, **kwargs: Any) -> None:
         return None
 
     def drop_table(self, *args: Any, **kwargs: Any) -> None:

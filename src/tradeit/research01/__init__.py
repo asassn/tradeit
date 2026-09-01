@@ -9,6 +9,7 @@ convenient moment.
 
 from tradeit.research01.actions import VendorAction, import_corporate_actions
 from tradeit.research01.filings import FilingRow, import_filings, resolve_issuer
+from tradeit.research01.fsds import FsdsFact, FsdsSubmission, import_fsds_quarter, read_quarter
 from tradeit.research01.importer import (
     Delivery,
     ImportResult,
@@ -29,6 +30,8 @@ from tradeit.research01.seed import NotEstablished, SeedReport, seed_identity
 __all__ = [
     "Delivery",
     "FilingRow",
+    "FsdsFact",
+    "FsdsSubmission",
     "ImportResult",
     "KnowledgeTimeBasis",
     "NotEstablished",
@@ -41,8 +44,10 @@ __all__ = [
     "action_knowledge_time_for",
     "import_corporate_actions",
     "import_filings",
+    "import_fsds_quarter",
     "import_price_bars",
     "knowledge_time_for",
+    "read_quarter",
     "resolve_issuer",
     "resolve_security",
     "seed_identity",
