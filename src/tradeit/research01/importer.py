@@ -68,6 +68,10 @@ class RejectReason(StrEnum):
     AMBIGUOUS_ALIAS = "ambiguous_alias"
     #: Already present at this exact revision. Re-running an import is a no-op.
     DUPLICATE = "duplicate"
+    #: The row is missing the value its own action type requires -- a split
+    #: without a ratio, a dividend without an amount. Not defaulted, because a
+    #: split silently ratioed 1.0 is a split that does nothing and looks fine.
+    INCOMPLETE = "incomplete"
 
 
 @dataclass(frozen=True, slots=True)

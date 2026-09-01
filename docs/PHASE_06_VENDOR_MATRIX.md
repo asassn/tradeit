@@ -130,10 +130,11 @@ which is the completeness question the vendor already declined to certify.
 #### Third reply — the Commercial team, and the first coverage numbers
 
 From **Kristelle, EODHD Commercial team** (`kristelle@eodhistoricaldata.com`).
-**Date TO CONFIRM** — supplied as a screenshot timestamped 11:22 AM without a
-visible date. The day is not recorded here until the operator states it, because
-a guessed date on a vendor record is the same class of error as a guessed
-identifier.
+**Received 2026-08-31, 11:22.** The screenshot carried a time but no date; the
+day is the operator's, stated on 2026-08-31 and consistent with the message
+being "9 hours ago" in that screenshot. **Derived from those two statements
+rather than read off a mail header**, which is why the derivation is recorded
+beside it — a date nobody can check is provenance in name only.
 
 **Their numbering is theirs, not ours.** The reply answers items 1–12; our
 question set has 22. The mapping is **not assumed** — answers are recorded by

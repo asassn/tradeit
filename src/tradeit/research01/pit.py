@@ -46,7 +46,7 @@ from enum import StrEnum
 
 from tradeit.core.calendar import TradingCalendar, get_calendar
 
-__all__ = ["KnowledgeTimeBasis", "knowledge_time_for"]
+__all__ = ["KnowledgeTimeBasis", "action_knowledge_time_for", "knowledge_time_for"]
 
 
 class KnowledgeTimeBasis(StrEnum):
@@ -97,4 +97,37 @@ def knowledge_time_for(
     cal = calendar or get_calendar()
     if cal.is_session(session_date):
         return cal.close_instant(session_date), KnowledgeTimeBasis.SESSION_CLOSE
+    return delivered_at, KnowledgeTimeBasis.DELIVERY_UNESTABLISHED
+
+
+def action_knowledge_time_for(
+    *,
+    ex_date: dt.date,
+    delivered_at: dt.datetime,
+    calendar: TradingCalendar | None = None,
+) -> tuple[dt.datetime, KnowledgeTimeBasis]:
+    """When a corporate action became usable. Never earlier than its ex-date.
+
+    A corporate action is a fact about the world rather than a derived series,
+    so there is no ``COMPUTED_AT_DELIVERY`` case here: nothing about a split
+    ratio is recomputed at delivery the way an adjusted price is.
+
+    **An announcement date is deliberately not accepted, and the reason is a
+    real tension rather than an oversight.** A split is announced *before* its
+    ex-date, so an announcement instant would be a knowledge_time earlier than
+    the event_time it describes -- which ``ck_security_action_knowledge``
+    (``knowledge_time >= event_time``) forbids, and rightly, since that
+    invariant is what stops a fact being usable before it happened.
+
+    Resolving that properly means deciding whether a corporate action has two
+    events -- an announcement and an effect -- and the schema carries one
+    ``event_time``. That is a modelling decision with its own consequences and
+    is **deferred, not assumed**. Until it is taken, the ex-date is used, which
+    is *conservative*: we may credit ourselves with knowing later than we could
+    have, and never earlier. Under-informed is a safe direction; look-ahead is
+    not.
+    """
+    cal = calendar or get_calendar()
+    if cal.is_session(ex_date):
+        return cal.close_instant(ex_date), KnowledgeTimeBasis.SESSION_CLOSE
     return delivered_at, KnowledgeTimeBasis.DELIVERY_UNESTABLISHED
