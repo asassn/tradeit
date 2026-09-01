@@ -51,7 +51,10 @@ def main() -> int:
         return 1
 
     client = HttpEodhdClient(api_token=token)
+    # Three outcomes, kept apart on purpose: a span, "asked and got nothing",
+    # and "never asked". The third is not a finding about the vendor.
     spans: dict[str, tuple[dt.date, dt.date] | None] = {}
+    unasked: set[str] = set()
 
     for symbol in SYMBOLS:
         try:
@@ -60,7 +63,7 @@ def main() -> int:
             dividends = parse_dividends(symbol, client.dividends(symbol, START, END))
         except Exception as exc:
             print(f"{symbol:12s} FAILED  {type(exc).__name__}: {exc}")
-            spans[symbol] = None
+            unasked.add(symbol)
             continue
 
         raw = sorted({b.session_date for b in bars if b.adjustment_basis == "raw"})
@@ -75,10 +78,24 @@ def main() -> int:
         )
 
     print("\n--- what this establishes ---")
+    if unasked:
+        print(
+            f"NOTHING, for {len(unasked)} of {len(SYMBOLS)} symbols: the request never "
+            "completed.\nA failed call is not evidence about coverage. Fix the error above "
+            "and re-run."
+        )
+        for symbol in sorted(unasked):
+            print(f"  not asked: {symbol}")
+        if len(unasked) == len(SYMBOLS):
+            print(f"\napi calls issued: {client.calls}")
+            return 1
+        print()
     for symbol in ("ETYS.US", "WBVN.US"):
+        if symbol in unasked:
+            continue
         span = spans.get(symbol)
         if span is None:
-            print(f"{symbol}: no data. Coverage for this delisted name is NOT there.")
+            print(f"{symbol}: asked, and the vendor returned no bars. Coverage is NOT there.")
         elif span[0] <= dt.date(1999, 12, 31):
             print(f"{symbol}: reaches {span[0]} -- covers 1998-1999. Better than stated.")
         else:
@@ -86,11 +103,30 @@ def main() -> int:
 
     old, new = spans.get("GM_old.US"), spans.get("GM.US")
     print()
+    if {"GM.US", "GM_old.US"} & unasked:
+        print("GM: not asked -- the splice test did not run.")
+        print(f"\napi calls issued: {client.calls}")
+        return 1
     if old and new:
-        if old[1] >= BREAK and new[0] <= BREAK:
-            print("GM: BOTH symbols span the 2009 break -- OVERLAP. Investigate before trusting.")
+        # Compare the two spans to EACH OTHER. An earlier version of this check
+        # compared each span against a hardcoded 2009 date, which reported PASS
+        # on spans that plainly overlapped -- the expected-looking answer to a
+        # question it had not asked.
+        overlaps = old[0] <= new[1] and new[0] <= old[1]
+        if overlaps:
+            days = (min(old[1], new[1]) - max(old[0], new[0])).days
+            print(
+                f"GM: GM_old {old[0]}..{old[1]} and GM {new[0]}..{new[1]} OVERLAP by {days} days."
+            )
+            print(
+                "     Not automatically a splice: new GM listed while old GM was still\n"
+                "     winding down, so the two securities genuinely coexisted. What it\n"
+                "     DOES mean is that one ticker cannot be resolved by date alone here,\n"
+                "     and symbol_aliases must carry both with disjoint intervals decided\n"
+                "     from evidence rather than from the vendor's spans."
+            )
         else:
-            print(f"GM: GM_old ends {old[1]}, GM starts {new[0]} -- disjoint, no splice. PASS.")
+            print(f"GM: GM_old ends {old[1]}, GM starts {new[0]} -- disjoint. No overlap.")
     elif new and not old:
         print("GM: only GM.US returned. Check whether the pre-2009 company is under another name.")
     else:

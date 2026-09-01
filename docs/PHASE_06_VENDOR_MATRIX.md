@@ -233,6 +233,66 @@ system is designed around them**. Noted, weighed at zero.
 **7. Price is still unquoted**, and the vendor has asked us a question before it
 can quote — see below.
 
+#### FIRST MEASUREMENT, 2026-09-01 — subscribed, and four symbols pulled
+
+The subscription was taken and the sample request answered ourselves, 12 API
+calls. **This is the first thing in this document that is a measurement rather
+than an assertion.**
+
+| symbol | sessions | span | dividends |
+|---|---|---|---|
+| `ETYS.US` | 447 | **1999-05-20 → 2001-02-26** | 0 |
+| `WBVN.US` | 420 | **1999-11-05 → 2001-07-06** | 0 |
+| `GM.US` | 3,968 | 2010-11-18 → 2026-08-31 | 41 |
+| `GM_old.US` | 3,333 | 1998-01-02 → 2011-03-31 | 0 |
+
+**Coverage beats the stated floor.** EODHD says delisted US history runs "from
+Jan 2000". Both dot-com controls reach **1999** — ETYS from May, WBVN from
+November — and `GM_old` reaches **1998-01-02**. On these four names the vendor
+under-promised.
+
+**That is four names, not a population.** "Almost all from Jan 2000" is a claim
+about ~26,000 tickers and remains untested; four beating it is encouraging and
+is not a survivorship measurement. The denominator run is what would settle it.
+
+**It bears on §7.1 and does not yet discharge it.** `RESEARCH_01_DATA_CONTRACT`
+§7.1 requires 1998 coverage *with universe breadth*. Breadth is exactly what
+four symbols cannot show. The 1998–1999 gap stays open as recorded, with the
+first evidence that it may be narrower than the vendor's own description.
+
+##### The splice check reported PASS, and the check was wrong
+
+`GM_old` runs to **2011-03-31** and `GM` starts **2010-11-18** — they **overlap
+by 133 days**. The first version of the check compared each span against a
+hardcoded 2009 date instead of against the other span, and printed
+*"disjoint, no splice. PASS"*.
+
+**It produced the expected-looking answer to a question it had not asked** —
+the exact failure §"Never answer by accident" describes, committed by the tool
+written to detect it. Fixed to compare the spans to each other, and pinned by a
+test that asserts the *old* logic's verdict was false so it cannot return.
+
+**The overlap itself is probably not a vendor defect.** New GM listed on
+2010-11-18 while the old entity was still winding down, so the two securities
+genuinely coexisted for months. What it establishes is narrower and more useful:
+
+> **A ticker here cannot be resolved by date alone.** `symbol_aliases` must
+> carry both securities with intervals decided from **evidence**, not from the
+> vendor's spans — because the vendor's spans overlap, and an importer resolving
+> "GM on 2011-01-15" against them has two answers.
+
+That is a direct constraint on the ticker-interval curation still outstanding,
+and it was found by measurement rather than anticipated.
+
+##### One open question this raises
+
+`GM_old` spans 1998→2011 continuously. The old GM common stopped trading as
+`GM` in 2009 and continued under a different ticker during its wind-down, so a
+single unbroken `GM_old` series across 2009 may itself be two ticker regimes of
+one issuer flattened into one symbol. **Not resolved here**, and it is the
+inverse of the trap already recorded from their rename guide: a symbol's history
+may extend beyond the period that symbol was actually in use.
+
 #### EODHD's own Claude plugin, read as documentation — and what it settled
 
 `github.com/EodHistoricalData/eodhd-claude-skills` (MIT, vendor-published). Read

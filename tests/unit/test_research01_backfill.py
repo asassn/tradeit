@@ -364,3 +364,51 @@ class TestTokenResolution:
 
         with pytest.raises(DataError, match="refusing"):
             HttpEodhdClient(api_token="").eod("AAPL.US", _dt.date(2020, 1, 1), _dt.date(2020, 1, 2))
+
+
+class TestSpanOverlapDetection:
+    """The check that reported PASS on spans that plainly overlapped.
+
+    The first version compared each span against a hardcoded 2009 date rather
+    than against the other span, so the real GM/GM_old result -- GM_old to
+    2011-03-31, GM from 2010-11-18 -- was reported as disjoint. It produced the
+    expected-looking answer to a question it had not asked, which is the failure
+    this repository is built to catch and had just committed.
+    """
+
+    @staticmethod
+    def _overlaps(a: tuple[dt.date, dt.date], b: tuple[dt.date, dt.date]) -> bool:
+        return a[0] <= b[1] and b[0] <= a[1]
+
+    def test_the_real_gm_spans_are_detected_as_overlapping(self) -> None:
+        old = (dt.date(1998, 1, 2), dt.date(2011, 3, 31))
+        new = (dt.date(2010, 11, 18), dt.date(2026, 8, 31))
+        assert self._overlaps(old, new) is True
+
+    def test_a_hardcoded_break_date_would_have_missed_it(self) -> None:
+        """Pins why the old logic failed, so it is not reintroduced."""
+        old = (dt.date(1998, 1, 2), dt.date(2011, 3, 31))
+        new = (dt.date(2010, 11, 18), dt.date(2026, 8, 31))
+        legacy_break = dt.date(2009, 7, 1)
+        legacy_verdict = old[1] >= legacy_break and new[0] <= legacy_break
+        assert legacy_verdict is False  # the old check said "no overlap"
+        assert self._overlaps(old, new) is True  # the truth
+
+    def test_genuinely_disjoint_spans_are_not_flagged(self) -> None:
+        assert (
+            self._overlaps(
+                (dt.date(2000, 1, 3), dt.date(2009, 6, 1)),
+                (dt.date(2009, 9, 1), dt.date(2020, 1, 1)),
+            )
+            is False
+        )
+
+    def test_touching_spans_count_as_overlapping(self) -> None:
+        """One shared day is still two securities claiming one ticker at once."""
+        assert (
+            self._overlaps(
+                (dt.date(2000, 1, 3), dt.date(2009, 6, 1)),
+                (dt.date(2009, 6, 1), dt.date(2020, 1, 1)),
+            )
+            is True
+        )

@@ -83,7 +83,11 @@ def resolve_api_token(*, env_file: Path | None = None) -> str:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             name, _, value = line.partition("=")
-            if name.strip() in _TOKEN_VARS:
+            # An EMPTY value counts as absent. `.env.example` ships the key with
+            # no value, so the first thing anyone does -- copy the example --
+            # produces exactly this line, and returning "" from here handed the
+            # caller a token-shaped nothing and a confusing error further down.
+            if name.strip() in _TOKEN_VARS and value.strip().strip("\"'"):
                 return value.strip().strip("\"'")
 
     raise DataError(
