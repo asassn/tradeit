@@ -15,7 +15,8 @@ works even though most control tickers have no curated alias interval yet:
 
 Usage:
 
-    export EODHD_API_KEY="...."          # never paste the key anywhere else
+    # put EODHD_API_KEY=... in the repository's .env file (gitignored),
+    # or export it in your shell. Either works.
     PYTHONPATH=src .venv/bin/python scripts/eodhd_verify.py
 
 Costs 12 API calls (4 symbols x 3 endpoints) out of a 100,000/day allowance.
@@ -24,16 +25,17 @@ Costs 12 API calls (4 symbols x 3 endpoints) out of a 100,000/day allowance.
 from __future__ import annotations
 
 import datetime as dt
-import os
 import sys
 
 sys.path.insert(0, "src")
 
+from tradeit.errors import DataError
 from tradeit.research01.eodhd_client import (
     HttpEodhdClient,
     parse_bars,
     parse_dividends,
     parse_splits,
+    resolve_api_token,
 )
 
 SYMBOLS = ("ETYS.US", "WBVN.US", "GM.US", "GM_old.US")
@@ -42,10 +44,10 @@ BREAK = dt.date(2009, 7, 1)
 
 
 def main() -> int:
-    token = os.environ.get("EODHD_API_KEY", "")
-    if not token:
-        print("EODHD_API_KEY is not set.", file=sys.stderr)
-        print('  export EODHD_API_KEY="your-key"', file=sys.stderr)
+    try:
+        token = resolve_api_token()
+    except DataError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
 
     client = HttpEodhdClient(api_token=token)

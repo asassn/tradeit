@@ -305,3 +305,62 @@ class TestLandingUsesTheRealImporters:
         assert report.bars.landed == 0
         assert len(report.bars.unresolved) > 0
         assert db_session.scalars(select(Security)).all() == []
+
+
+class TestTokenResolution:
+    """Where the key lives, and the ways it must not leak."""
+
+    def test_the_environment_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tradeit.research01.eodhd_client import resolve_api_token
+
+        monkeypatch.setenv("EODHD_API_KEY", "from-env")
+        assert resolve_api_token() == "from-env"
+
+    def test_eodhd_s_own_variable_name_is_accepted_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """EODHD's docs and plugin say EODHD_API_TOKEN; this repo says
+        EODHD_API_KEY. A key that works everywhere except here is a support
+        question nobody should have to ask."""
+        from tradeit.research01.eodhd_client import resolve_api_token
+
+        monkeypatch.delenv("EODHD_API_KEY", raising=False)
+        monkeypatch.setenv("EODHD_API_TOKEN", "from-their-name")
+        assert resolve_api_token() == "from-their-name"
+
+    def test_a_dotenv_file_is_read_and_quotes_are_stripped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from tradeit.research01.eodhd_client import resolve_api_token
+
+        monkeypatch.delenv("EODHD_API_KEY", raising=False)
+        monkeypatch.delenv("EODHD_API_TOKEN", raising=False)
+        env = tmp_path / ".env"
+        env.write_text('# a comment\nTRADEIT_LOG_LEVEL=INFO\nEODHD_API_KEY="quoted-key"\n')
+        assert resolve_api_token(env_file=env) == "quoted-key"
+
+    def test_a_missing_token_names_the_variable_and_not_a_value(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The failure must be actionable without ever echoing a secret."""
+        from tradeit.errors import DataError
+        from tradeit.research01.eodhd_client import resolve_api_token
+
+        monkeypatch.delenv("EODHD_API_KEY", raising=False)
+        monkeypatch.delenv("EODHD_API_TOKEN", raising=False)
+        with pytest.raises(DataError) as caught:
+            resolve_api_token(env_file=tmp_path / "absent.env")
+        message = str(caught.value)
+        assert "EODHD_API_KEY" in message
+        assert "gitignored" in message
+
+    def test_the_client_refuses_an_empty_token_rather_than_calling(self) -> None:
+        """An unauthenticated call would return a 401 that reads like absent
+        data. Refusing locally keeps the two distinguishable."""
+        import datetime as _dt
+
+        from tradeit.errors import DataError
+        from tradeit.research01.eodhd_client import HttpEodhdClient
+
+        with pytest.raises(DataError, match="refusing"):
+            HttpEodhdClient(api_token="").eod("AAPL.US", _dt.date(2020, 1, 1), _dt.date(2020, 1, 2))

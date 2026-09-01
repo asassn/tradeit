@@ -29,20 +29,68 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Protocol
 
 from tradeit.errors import DataError
 from tradeit.research01.actions import VendorAction
 from tradeit.research01.importer import VendorBar
 
-__all__ = ["EodhdClient", "HttpEodhdClient", "parse_bars", "parse_dividends", "parse_splits"]
+__all__ = [
+    "EodhdClient",
+    "HttpEodhdClient",
+    "parse_bars",
+    "parse_dividends",
+    "parse_splits",
+    "resolve_api_token",
+]
 
 BASE = "https://eodhd.com/api"
+
+#: Checked in order. ``EODHD_API_KEY`` is this repository's convention, already
+#: used by ``acquisition/eodhd.py``; ``EODHD_API_TOKEN`` is the name EODHD's own
+#: documentation and plugin use. Both are accepted because a key that works
+#: everywhere except here is a support question nobody should have to ask.
+_TOKEN_VARS = ("EODHD_API_KEY", "EODHD_API_TOKEN")
+
+
+def resolve_api_token(*, env_file: Path | None = None) -> str:
+    """Find the API token, or say exactly how to provide one.
+
+    Looks in the environment first, then in a ``.env`` file at the repository
+    root. ``.env`` is gitignored, which is the reason it is the recommended
+    home: a token in a stray text file is one ``git add .`` away from being
+    published, and a published key cannot be unpublished.
+
+    **The value is never logged, printed or returned in an error.** The failure
+    message names the variable and not its contents.
+    """
+    for name in _TOKEN_VARS:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+
+    path = env_file or Path(__file__).resolve().parents[3] / ".env"
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name, _, value = line.partition("=")
+            if name.strip() in _TOKEN_VARS:
+                return value.strip().strip("\"'")
+
+    raise DataError(
+        "No EODHD API token found. Put it in the .env file at the repository "
+        "root as EODHD_API_KEY=... (that file is gitignored), or export "
+        "EODHD_API_KEY in your shell. The token itself is never logged."
+    )
 
 
 class EodhdClient(Protocol):
