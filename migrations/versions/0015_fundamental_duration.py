@@ -59,14 +59,15 @@ def upgrade() -> None:
     op.drop_constraint(
         "uq_security_fundamental_revision", "security_fundamental_facts", type_="unique"
     )
-    kwargs = {}
-    if op.get_bind().dialect.name == "postgresql":
-        # Without this PostgreSQL treats every NULL as distinct, so rows with no
-        # stated duration would stop conflicting -- a silent weakening of the
-        # constraint at exactly the point the data is least trustworthy.
-        kwargs["postgresql_nulls_not_distinct"] = True
+    # Declared unconditionally and identically to the ORM. Guarding it behind a
+    # dialect check makes the two descriptions differ, and Alembic compares the
+    # constraint rather than the SQL it renders -- which is drift CI catches and
+    # no amount of reading the DDL would reveal.
     op.create_unique_constraint(
-        "uq_security_fundamental_revision", "security_fundamental_facts", list(_NEW), **kwargs
+        "uq_security_fundamental_revision",
+        "security_fundamental_facts",
+        list(_NEW),
+        postgresql_nulls_not_distinct=True,
     )
 
 

@@ -3144,6 +3144,11 @@ class SecurityFundamentalFact(Base, TimestampMixin):
             "basis",
             "knowledge_time",
             name="uq_security_fundamental_revision",
+            # duration_qtrs is nullable, and without this PostgreSQL treats
+            # every NULL as distinct -- so two rows with no stated duration
+            # would stop conflicting, silently weakening the constraint at
+            # exactly the point the data is least trustworthy.
+            postgresql_nulls_not_distinct=True,
         ),
         Index(
             "ix_security_fundamental_pit",
