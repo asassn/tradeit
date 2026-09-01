@@ -245,10 +245,32 @@ can quote — see below.
 | **Internal Use** | used within a business entity; raw feeds, values and pricing not shared with non-employees. "If only calculated outputs are seen by your users" |
 | **External Use or Display** | data shared or displayed outside the organisation; requires a signed data services agreement and a display licence |
 
-**ANSWERED by the owner: Internal Use.** TradeIt is one operator on one
-machine; no raw feed, value or price is shared with a non-employee, and nothing
-is displayed to a third party. The reply to the vendor states this and states the
-condition under which it would change.
+**CORRECTED by the owner: personal use, not commercial.** The first answer
+given here was *Internal Use* — a **commercial** sub-category — and that was
+wrong about the facts.
+
+**The misclassification is ours, and it is traceable to our own wording.** The
+original send described the work as *"an internal, non-public research project"*
+and the reply was recorded as classifying *"internal, non-public **organisational**
+research"*. "Internal" and "organisational" are business words: they describe a
+company using data across its staff. TradeIt is **one individual, on one
+machine, researching his own investing**. There is no organisation, no
+employees, no colleagues, nothing shared and nothing displayed.
+
+A vendor classifies from the description it is given. We gave a description that
+implied a business, and were classified as one.
+
+**The correction states the facts and lets EODHD classify them** — it does not
+assert a category on our behalf. If those facts still read as commercial to
+them, that is their answer to give.
+
+**The condition that would genuinely change it is unchanged and still recorded.**
+Personal-use data is normally licensed to the individual and **cannot be carried
+over into commercial use later**. So if TradeIt ever manages anyone else's
+money, is sold, is shown to others with real prices, or becomes a product, the
+licence must be re-taken — and data acquired under a personal licence may have
+to be re-acquired. That is a real cost to weigh once, now, rather than discover
+later.
 
 **The condition matters and is recorded rather than left implicit.** The roadmap
 includes a dashboard, and a dashboard that ever shows a raw close to anyone other

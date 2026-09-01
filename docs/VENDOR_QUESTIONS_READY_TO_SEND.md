@@ -46,8 +46,18 @@ an email.
 > Hello,
 >
 > We are evaluating your data for a one-time historical backfill of US equity
-> daily data for an internal, non-public research project. We do not
-> redistribute, resell, publish or display data to third parties.
+> daily data. This is a personal project: I am one individual researching my own
+> investing on my own machine. There is no organisation and no other users. I do
+> not redistribute, resell, publish or display the data to anyone.
+
+> **Describe the actual situation and let the vendor classify it.** The first
+> version of this paragraph said *"an internal, non-public research project"*,
+> and EODHD read "internal" and "organisational" as a business using data across
+> its staff — which is what those words mean to a vendor — and classified us as
+> **commercial**. The facts had not changed; only our description of them was
+> wrong. **Never assert a licence category on our own behalf**, and never use
+> business vocabulary for a one-person project: state who uses it, on what, and
+> with whom it is shared, then let the vendor apply its own definitions.
 >
 > Before subscribing we need clear answers to the following.
 >
