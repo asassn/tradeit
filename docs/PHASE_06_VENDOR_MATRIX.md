@@ -353,6 +353,62 @@ symbols to securities — **is withdrawn on measurement rather than carried
 forward as a plan.** It would have worked for the names we already understand
 and failed on the ones we do not.
 
+#### The ticker-to-CIK problem, measured — 2026-09-01
+
+The full backfill is blocked on identity, not on downloading. EDGAR holds 90,548
+registrants keyed by **CIK with no ticker**; EODHD holds 32,907 delisted US
+common stocks keyed by **ticker with no CIK**. Three routes were measured.
+
+| route | result |
+|---|---|
+| `company_tickers.json` | **0.9%** of delisted names (44.5% of active). It lists *current filers*, exactly as `identity.py` warns |
+| vendor `Isin` | **31.1%** of delisted rows, and **none** of the four verified controls |
+| **normalised company name** | **54.5%** match exactly one CIK; 12.4% match several; 33.1% no match |
+
+Name matching is the only route with real reach, and
+**`MappingEvidence.NAME_MATCH` is already ranked weakest in this codebase and
+already declared insufficient alone.** Two firms called "Pacific Enterprises"
+are not one firm. Its value is that it narrows 90,548 registrants to one
+candidate, which is worth doing only if the narrowing is then attacked.
+
+**Refutation by span, measured on a 300-candidate sample: 7.3% destroyed.**
+A security trading 2019–2022 whose registrant filed only 2007–2016 cannot be
+that registrant. Examples: `CCYNF` (cyan AG), `XZJCF` (Mitsui Mining), `RPSOF`
+(Repsol) — foreign OTC lines that matched a same-named US filer.
+
+**Overlap is deliberately not treated as corroboration.** A registrant files
+before, during and after the period its security trades, so overlap is the
+expected shape for a *wrong* pairing too. Refutation is sound; confirmation is
+not, and the module only does the sound half.
+
+**Where that leaves it: ~16,600 surviving candidates and zero established
+identities.** Under the owner's ruling — verified identity only — candidates do
+not enter the corpus. What survives is a *worklist*, not a mapping.
+
+##### One normalisation bug, found by a test rather than by reading
+
+EDGAR appends the state of incorporation: `TJX COMPANIES INC /DE/`. Stripping
+punctuation first turned that into the token `DE`, so it normalised to `TJX DE`
+and failed to match the vendor's `TJX Companies, Inc.` → `TJX`. Fixed by
+stripping `/XX/` before punctuation. The test uses a real EDGAR name rather than
+an invented one, which is why it caught this.
+
+##### The CIK bridge exists at EODHD and is behind a tier — and buying it would not help
+
+`fundamentals/{symbol}` returns **403 Forbidden** on the EOD tier, exactly as
+their access table states. Its `General` block is where a `CIK` would be, and
+the ID Mapping API is described as covering `CUSIP/ISIN/FIGI/LEI/CIK ↔ symbol`.
+
+**The obvious move — buy the $59.99 Fundamentals tier to get CIKs — is rejected
+on the vendor's own statement.** Kristelle wrote that EODHD holds *"fundamental
+data for companies delisted since 2018"*. This corpus is about companies that
+died in **1998–2002**. A company delisted in 2001 has no fundamentals record,
+so no `General` block, so no CIK — and the tier that costs $40/month more would
+return nothing for the population the project exists for.
+
+**Not proposed as a purchase.** It would be paying for coverage the vendor has
+already said does not extend to our names.
+
 #### EODHD's own Claude plugin, read as documentation — and what it settled
 
 `github.com/EodHistoricalData/eodhd-claude-skills` (MIT, vendor-published). Read

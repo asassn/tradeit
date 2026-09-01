@@ -48,6 +48,13 @@ from tradeit.research01.reconcile import (
     reconcile_fundamentals_against_filings,
 )
 from tradeit.research01.seed import NotEstablished, SeedReport, seed_identity
+from tradeit.research01.ticker_cik import (
+    Candidate,
+    CandidateStatus,
+    normalise_company_name,
+    propose_candidates,
+    refute_by_span,
+)
 from tradeit.research01.vendor_aliases import (
     DerivedAlias,
     VendorAliasReport,
@@ -58,6 +65,8 @@ __all__ = [
     "BackfillPlan",
     "BackfillProgress",
     "BackfillReport",
+    "Candidate",
+    "CandidateStatus",
     "Delivery",
     "DerivedAlias",
     "EodhdClient",
@@ -84,11 +93,14 @@ __all__ = [
     "import_fsds_quarter",
     "import_price_bars",
     "knowledge_time_for",
+    "normalise_company_name",
     "parse_bars",
     "parse_dividends",
     "parse_splits",
+    "propose_candidates",
     "read_quarter",
     "reconcile_fundamentals_against_filings",
+    "refute_by_span",
     "resolve_issuer",
     "resolve_security",
     "run_backfill",
