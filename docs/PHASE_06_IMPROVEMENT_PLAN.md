@@ -318,7 +318,7 @@ otherwise be invisible.
 | 5 | EDGAR XBRL/FSDS fundamentals 2009+ | reconciled against filings | free |
 | 6 | Narrow EDGAR text parsing for the control universe only | headline metrics hand-checked | free |
 | 7 | Forward survivorship daemon | detects a real event end-to-end | existing |
-| 8 | Re-run the gate against `research-01` | survivorship result **reported with its measured limitations**, not asserted | none |
+| 8 | Re-run the gate against `research-01` | **RUN 2026-09-01. Result: `SURVIVOR_BIASED`** — the lowest class, and the correct one. 590 of 29,180 dated exits priced (2.02% matched, 0.65% bounded). **30/30 controls passed and did not rescue the grade**, exactly as designed. Reported with its limitations rather than asserted; see below | none |
 | **I** | **Intraday probe (H1–H12), written questions only** — runs in parallel, gates nothing | answers on file | **free** |
 
 Milestone **I** is deliberately unnumbered and off the critical path. Its written
@@ -328,6 +328,74 @@ decision waits on its answers.
 **Milestones 0a–0c can start now and cost nothing.** 0a and 0b are not merely
 preparation: they build the instrument that *measures* the vendor, so they must
 precede the probe rather than follow it.
+
+### Milestone 8 — the survivorship gate, run against `research-01`
+
+**Result: `SURVIVOR_BIASED`.** The lowest of the four classes, and the honest
+one.
+
+| measure | value |
+|---|---|
+| dated confirmed exits in the denominator | 29,180 |
+| of those, priced by `research-01` | **590** |
+| `matched_coverage` (optimistic bound) | **2.02%** |
+| `bounded_coverage` (pessimistic bound) | **0.65%** |
+| controls | 30 / 30 |
+
+**Coverage by exit year shows the cohort did what it was aimed at, and how
+narrow that is:**
+
+| exit year | priced / dated exits |
+|---|---|
+| 1998 | 10 / 985 — 1.02% |
+| **1999** | **150 / 1,111 — 13.50%** |
+| **2000** | **130 / 1,034 — 12.57%** |
+| **2001** | **127 / 1,044 — 12.16%** |
+| 2002 | 89 / 1,208 — 7.37% |
+| 2003 | 84 / 1,198 — 7.01% |
+| 2004 | 0 / 1,140 — 0% |
+| 2005 | 0 / 1,393 — 0% |
+
+The dot-com window is where the coverage is, because that is where the cohort
+was selected. **Even there it is one name in eight.**
+
+#### Three things this result establishes, none of them comfortable
+
+**1. The corpus is survivor-biased and the instrument says so.** A backtest run
+on `research-01` today would be fiction in the way §2 warns about. That the gate
+returns the lowest grade on a corpus we just spent a day building is the gate
+working, not failing.
+
+**2. Passing every control did not rescue the grade.** `classify_corpus` was
+written so that 30/30 is *necessary and not sufficient*, and this is the first
+time that design has been exercised against a real corpus rather than a
+synthetic one. It held.
+
+**3. The two bounds are three times apart** — 2.02% against 0.65% — and the
+truth is between them. Publishing only the first is the standard way this
+measurement is made to look better than it is, which is why `CoverageBounds` has
+no single-number accessor.
+
+#### Limitations, which are part of the result and not a footnote
+
+* **The denominator holds no exchange-listing evidence before 2006** (§7be).
+  For 1998–2001 its exits are Form 15 *reporting* exits, so the ratios above are
+  coverage of reporting exits, **not of delistings**. The window we care most
+  about is the window where the yardstick is weakest, and no ratio fixes that.
+* **The cohort was selected by name-matchability**, not at random. Companies
+  whose EDGAR name matched a vendor symbol are over-represented by construction,
+  so 13.5% in 1999 is not an estimate of what a random 1999 sample would show.
+* **A price bar is not a complete series.** Per-name completeness is not
+  measured here, so "priced" means "we hold at least one bar", which is a weaker
+  claim than it sounds.
+
+#### What would actually move it
+
+Not more downloading. 860 of 1,506 dot-com filings named no symbol we could
+confirm, and 10,904 delisted tickers matched no EDGAR name at all. **The binding
+constraint remains identity**, and the honest routes are the ones already named:
+document parsing beyond the 10-K cover page, and forms that state a symbol where
+the annual report does not.
 
 ### Status
 
