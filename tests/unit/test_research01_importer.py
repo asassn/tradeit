@@ -367,3 +367,103 @@ class TestNoSpliceAcrossAnIdentityBreak:
         landed_days = set(db_session.scalars(select(SecurityPriceFact.session_date)).all())
         assert landed_days.isdisjoint(gap)
         assert result.landed == 4
+
+
+class TestAliasKindIsActuallyHonoured:
+    """A parameter accepted and ignored is worse than one that does not exist.
+
+    `alias_kind` was added to `import_price_bars` and threaded no further,
+    because a reformat had collapsed the inner call onto one line before the
+    edit landed. The importer accepted `alias_kind="vendor_symbol"`, reported no
+    error, and resolved against `"ticker"` regardless -- 16,336 bars rejected
+    with the caller believing it had asked for something else.
+
+    It failed CLOSED, which was luck rather than design: had the default been
+    the weaker identity, the same bug would have silently attributed bars using
+    vendor spans while the caller believed it was using curated evidence.
+    """
+
+    def _security_with_vendor_alias(self, session: Session) -> Security:
+        issuer = Issuer(display_name="VENDOR ONLY", source="test")
+        session.add(issuer)
+        session.flush()
+        security = Security(
+            issuer_id=issuer.issuer_id,
+            security_type="common_stock",
+            currency="USD",
+            source="test",
+        )
+        session.add(security)
+        session.flush()
+        session.add(
+            SymbolAlias(
+                security_id=security.security_id,
+                alias_kind="vendor_symbol",
+                alias_value="ACME",
+                valid_from=dt.date(2000, 1, 1),
+                valid_to=None,
+                knowledge_time=KT,
+                knowledge_source="eodhd_symbol_span",
+                source="test",
+            )
+        )
+        session.flush()
+        return security
+
+    def test_the_default_does_not_see_a_vendor_alias(self, db_session: Session) -> None:
+        """Curated identity is the default and must not silently widen."""
+        self._security_with_vendor_alias(db_session)
+        result = import_price_bars(
+            db_session, [_bar("ACME", SESSION)], Delivery("eodhd", DELIVERED)
+        )
+        assert result.landed == 0
+        assert result.rejected[0].reason is RejectReason.NO_ALIAS
+
+    def test_asking_for_vendor_symbol_resolves(self, db_session: Session) -> None:
+        """And the weaker identity works only when explicitly requested."""
+        security = self._security_with_vendor_alias(db_session)
+        result = import_price_bars(
+            db_session,
+            [_bar("ACME", SESSION)],
+            Delivery("eodhd", DELIVERED),
+            alias_kind="vendor_symbol",
+        )
+        assert result.landed == 1
+        assert result.securities_touched == {security.security_id}
+
+    def test_a_ticker_alias_is_not_reachable_by_asking_for_vendor_symbol(
+        self, db_session: Session
+    ) -> None:
+        """The two kinds are separate claims, not fallbacks for each other."""
+        issuer = Issuer(display_name="CURATED", source="test")
+        db_session.add(issuer)
+        db_session.flush()
+        security = Security(
+            issuer_id=issuer.issuer_id,
+            security_type="common_stock",
+            currency="USD",
+            source="test",
+        )
+        db_session.add(security)
+        db_session.flush()
+        db_session.add(
+            SymbolAlias(
+                security_id=security.security_id,
+                alias_kind="ticker",
+                alias_value="ACME",
+                valid_from=dt.date(2000, 1, 1),
+                valid_to=None,
+                knowledge_time=KT,
+                knowledge_source="test",
+                source="test",
+            )
+        )
+        db_session.flush()
+
+        result = import_price_bars(
+            db_session,
+            [_bar("ACME", SESSION)],
+            Delivery("eodhd", DELIVERED),
+            alias_kind="vendor_symbol",
+        )
+        assert result.landed == 0

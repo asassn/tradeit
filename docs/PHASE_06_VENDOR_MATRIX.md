@@ -293,6 +293,66 @@ one issuer flattened into one symbol. **Not resolved here**, and it is the
 inverse of the trap already recorded from their rename guide: a symbol's history
 may extend beyond the period that symbol was actually in use.
 
+#### The delisted universe, measured — 2026-09-01
+
+Two calls: `/exchange-symbol-list/US` with and without `delisted=1`.
+
+**`delisted=1` returns *only* delisted names.** 51,149 codes without it, 59,920
+with it, and the intersection is **zero**. The two lists are disjoint sets, not
+one nested in the other — which the vendor's wording ("get the lists of delisted
+tickers with … `delisted=1`") left ambiguous and this settles.
+
+**The response omits `IsDelisted`.** EODHD's own plugin documents that field in
+the delisted guide's example; the live response does not carry it. The
+disjointness above is what establishes which list is which, not a flag.
+
+| Type | delisted |
+|---|---|
+| **Common Stock** | **32,907** |
+| FUND | 18,984 |
+| Mutual Fund | 3,402 |
+| ETF | 3,004 |
+| Preferred Stock | 1,238 |
+| Unit / Notes / Warrant / BOND / ETC | 384 |
+
+**32,907 delisted common stocks against a stated "26,000+".** The vendor
+under-promises again, consistently with the four symbol pull. This is a count of
+*rows offered*, not of series checked — it says the roster is bigger than
+advertised, and nothing yet about whether each has usable history.
+
+**Ticker reuse reaches five holders, not two.**
+
+| suffix | tickers |
+|---|---|
+| `_old` | 1,719 |
+| `_old1` | 93 |
+| `_old2` | 48 |
+| `_old3` | 3 |
+| `_old4` | **1** |
+
+**1,864 US tickers have been held by more than one company**, and at least one by
+**five**. `GM`/`GM_old` is the easy case. Any identity work that assumes a
+ticker maps to at most two issuers is wrong on 145 of them.
+
+##### The ISIN bridge is not viable, and that is the useful finding
+
+The symbol list carries `Isin`, which looked like a route to the ticker
+intervals the corpus lacks. Measured:
+
+| list | rows with an ISIN |
+|---|---|
+| active | 36,454 of 51,149 — **71.3%** |
+| **delisted** | 18,622 of 59,920 — **31.1%** |
+
+**ISIN coverage collapses on exactly the population this project exists for.**
+Worse for our purposes: **none of the four verified controls carries one** —
+`ETYS`, `WBVN`, `GM_old` and `GM` all return an empty ISIN.
+
+So the idea floated when reading their plugin — use ISIN to bridge vendor
+symbols to securities — **is withdrawn on measurement rather than carried
+forward as a plan.** It would have worked for the names we already understand
+and failed on the ones we do not.
+
 #### EODHD's own Claude plugin, read as documentation — and what it settled
 
 `github.com/EodHistoricalData/eodhd-claude-skills` (MIT, vendor-published). Read

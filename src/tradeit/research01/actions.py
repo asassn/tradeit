@@ -59,7 +59,11 @@ class VendorAction:
 
 
 def import_corporate_actions(
-    session: Session, actions: list[VendorAction], delivery: Delivery
+    session: Session,
+    actions: list[VendorAction],
+    delivery: Delivery,
+    *,
+    alias_kind: str = "ticker",
 ) -> ImportResult:
     """Land actions that resolve and are complete; report the rest.
 
@@ -68,7 +72,9 @@ def import_corporate_actions(
     """
     result = ImportResult()
     for action in actions:
-        security_id, resolution = resolve_security(session, ticker=action.ticker, on=action.ex_date)
+        security_id, resolution = resolve_security(
+            session, ticker=action.ticker, on=action.ex_date, alias_kind=alias_kind
+        )
         if resolution is Resolution.UNRESOLVED_NO_ALIAS:
             result.rejected.append(
                 RejectedBar(

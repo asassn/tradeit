@@ -187,8 +187,20 @@ def resolve_security(
     return current.pop(), Resolution.RESOLVED
 
 
-def import_price_bars(session: Session, bars: list[VendorBar], delivery: Delivery) -> ImportResult:
+def import_price_bars(
+    session: Session,
+    bars: list[VendorBar],
+    delivery: Delivery,
+    *,
+    alias_kind: str = "ticker",
+) -> ImportResult:
     """Land what resolves; report what does not. Never guess, never create.
+
+    ``alias_kind`` defaults to ``"ticker"`` -- evidence-backed identity. Passing
+    ``"vendor_symbol"`` resolves against spans derived from a vendor instead,
+    which is weaker and must therefore be **asked for at the call site** rather
+    than fallen back to. Nothing here silently widens the search when the
+    curated answer is absent.
 
     Idempotent: a bar already present at the same
     ``(security_id, session_date, adjustment_basis, knowledge_time)`` is
@@ -197,7 +209,9 @@ def import_price_bars(session: Session, bars: list[VendorBar], delivery: Deliver
     """
     result = ImportResult()
     for bar in bars:
-        security_id, resolution = resolve_security(session, ticker=bar.ticker, on=bar.session_date)
+        security_id, resolution = resolve_security(
+            session, ticker=bar.ticker, on=bar.session_date, alias_kind=alias_kind
+        )
         if resolution is Resolution.UNRESOLVED_NO_ALIAS:
             result.rejected.append(
                 RejectedBar(

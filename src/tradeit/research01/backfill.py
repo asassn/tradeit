@@ -138,6 +138,7 @@ def run_backfill(
     *,
     delivered_at: dt.datetime | None = None,
     dry_run: bool = False,
+    alias_kind: str = "ticker",
 ) -> BackfillReport:
     """Fetch and land each symbol, checkpointing as it goes.
 
@@ -176,8 +177,11 @@ def run_backfill(
 
         progress.calls_used += CALLS_PER_SYMBOL
         report.calls_issued += CALLS_PER_SYMBOL
-        _merge(report.bars, import_price_bars(session, bars, delivery))
-        _merge(report.actions, import_corporate_actions(session, actions, delivery))
+        _merge(report.bars, import_price_bars(session, bars, delivery, alias_kind=alias_kind))
+        _merge(
+            report.actions,
+            import_corporate_actions(session, actions, delivery, alias_kind=alias_kind),
+        )
         report.symbols_fetched += 1
         progress.completed.add(symbol)
         progress.save()

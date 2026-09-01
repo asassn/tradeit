@@ -80,3 +80,10 @@ htmlcov/
 # purpose: one root-anchored directory, chosen for output, ignored entirely.
 # ---------------------------------------------------------------------------
 /out/
+
+# The research-01 local corpus and its backfill checkpoint. Named exactly, not
+# globbed: `*.sqlite3` above does not cover `research01.sqlite`, which is how
+# a 16,000-row vendor corpus nearly became a tracked file. Downloaded vendor
+# data is never committed, and a checkpoint is operational state, not evidence.
+/research01.sqlite
+/.research01_backfill.json

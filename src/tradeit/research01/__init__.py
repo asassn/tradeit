@@ -48,12 +48,18 @@ from tradeit.research01.reconcile import (
     reconcile_fundamentals_against_filings,
 )
 from tradeit.research01.seed import NotEstablished, SeedReport, seed_identity
+from tradeit.research01.vendor_aliases import (
+    DerivedAlias,
+    VendorAliasReport,
+    derive_vendor_aliases,
+)
 
 __all__ = [
     "BackfillPlan",
     "BackfillProgress",
     "BackfillReport",
     "Delivery",
+    "DerivedAlias",
     "EodhdClient",
     "FilingRow",
     "FsdsFact",
@@ -68,8 +74,10 @@ __all__ = [
     "Resolution",
     "SeedReport",
     "VendorAction",
+    "VendorAliasReport",
     "VendorBar",
     "action_knowledge_time_for",
+    "derive_vendor_aliases",
     "import_corporate_actions",
     "import_filings",
     "import_filings_from_index",
