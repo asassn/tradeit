@@ -318,7 +318,7 @@ otherwise be invisible.
 | 5 | EDGAR XBRL/FSDS fundamentals 2009+ | reconciled against filings | free |
 | 6 | Narrow EDGAR text parsing for the control universe only | headline metrics hand-checked | free |
 | 7 | Forward survivorship daemon | detects a real event end-to-end | existing |
-| 8 | Re-run the gate against `research-01` | **RUN 2026-09-01. Result: `SURVIVOR_BIASED`** — the lowest class, and the correct one. 590 of 29,180 dated exits priced (2.02% matched, 0.65% bounded). **30/30 controls passed and did not rescue the grade**, exactly as designed. Reported with its limitations rather than asserted; see below | none |
+| 8 | Re-run the gate against `research-01` | **RUN TWICE 2026-09-01. Result both times: `SURVIVOR_BIASED`.** First: 590 of 29,180 dated exits priced (2.02% / 0.65%). After a bounded coverage push widening the window to 1998–2005 — 892 issuers, 1,874,666 price facts — **792 exits priced (2.71% / 0.87%) and the grade did not move.** 30/30 controls passed and did not rescue it, exactly as designed. Reported with limitations, not asserted | none |
 | **I** | **Intraday probe (H1–H12), written questions only** — runs in parallel, gates nothing | answers on file | **free** |
 
 Milestone **I** is deliberately unnumbered and off the critical path. Its written
@@ -358,6 +358,40 @@ narrow that is:**
 
 The dot-com window is where the coverage is, because that is where the cohort
 was selected. **Even there it is one name in eight.**
+
+#### Second run, after the bounded coverage push — the grade did not move
+
+The window was widened from 1999–2003 to **1998–2005**, adding 768 candidates.
+Both runs are recorded because the *difference* is the finding.
+
+| | first run | after the push |
+|---|---|---|
+| issuers | 663 | **892** |
+| price facts | 1,232,784 | **1,874,666** |
+| exits priced | 590 | **792** |
+| `matched_coverage` | 2.02% | **2.71%** |
+| `bounded_coverage` | 0.65% | **0.87%** |
+| **classification** | `SURVIVOR_BIASED` | **`SURVIVOR_BIASED`** |
+
+**Half again as much data moved coverage by seven tenths of a percentage
+point, and moved the grade not at all.** 0.87% against a 25% threshold is not a
+near miss; it is a different order of magnitude, and no amount of the same work
+closes it.
+
+**Confirmation yield fell as the window widened**: 42% on 1999–2003, **24.8%**
+on the 2004–2005 delta. The easy names were taken first, which is what
+diminishing returns look like when they are measured rather than assumed.
+
+**Where the new coverage landed tells the same story.** 2004 went 0% → 7.89% and
+2005 0% → 4.45%, while 1999–2001 barely moved (13.50% → 13.59%). The push
+extended the corpus *sideways* into years we had not touched rather than
+deepening the dot-com window it was aimed at — because the dot-com window's
+missing names are missing for want of identity, not for want of a wider date
+filter.
+
+> **The bounded push was worth running and the answer is that this route is
+> exhausted.** Widening the window again would add later years at falling yield.
+> The binding constraint was never the window.
 
 #### Three things this result establishes, none of them comfortable
 
