@@ -63,9 +63,39 @@ _BOUND_SYMBOL = re.compile(
 _STOPWORDS = frozenset({"THE", "FOR", "ON", "OF", "AND", "IN", "AT", "IS", "A", "AN", "OUR", "ITS"})
 
 
+#: EODHD disambiguates a reused ticker two ways: ``ABTC_old``, ``AVIR_old1``
+#: **and** a bare trailing digit, ``AAP1``, ``AED2``. Both mean "another company
+#: holds the plain symbol now" -- measured: 90.2% of trailing-digit tickers have
+#: a base that exists as a *different* company (``AAP1`` Amway Asia Pacific
+#: against ``AAP`` Advance Auto Parts).
+_VENDOR_DISAMBIGUATOR = re.compile(r"(?:_OLD\d*|\d+)$", re.IGNORECASE)
+
+
+def comparison_form(vendor_symbol: str) -> str:
+    """The symbol as the *filing* would write it, for comparison only.
+
+    A registrant's 10-K says ``AAP``; the vendor calls that series ``AAP1``
+    because a later company took the plain symbol. Comparing the vendor's label
+    to the filing therefore needs the disambiguator removed -- **and storing
+    that stripped form is a different thing entirely, and was a bug.**
+    """
+    return _VENDOR_DISAMBIGUATOR.sub("", vendor_symbol.strip().upper())
+
+
 @dataclass(frozen=True, slots=True)
 class Confirmation:
-    """A ticker bound to a CIK by a sentence, with that sentence kept verbatim."""
+    """A ticker bound to a CIK by a sentence, with that sentence kept verbatim.
+
+    ``ticker`` is the **vendor's full symbol**, because that is what the vendor
+    must be queried with. ``matched_as`` is the form the filing actually used.
+
+    **They are separate fields because collapsing them spliced 92 securities.**
+    An earlier version stored the comparison form, so ``ABTC_old`` -- a company
+    that died -- was recorded as ``ABTC``, and the backfill then fetched the
+    *living* ``ABTC`` and filed its prices under the dead registrant's CIK.
+    388,590 bars, 20.7% of the corpus, attributed to the wrong company by the
+    very code meant to prevent exactly that.
+    """
 
     ticker: str
     cik: int
@@ -73,6 +103,9 @@ class Confirmation:
     #: is not a filing, and a citation nobody can check is not provenance.
     citation: str
     accession: str
+    #: The form the filing used, after the vendor's disambiguator was removed.
+    #: Provenance for *why* this pairing was accepted; never used to query.
+    matched_as: str = ""
     evidence: MappingEvidence = MappingEvidence.FILING_DOCUMENT_TEXT
 
 
@@ -105,7 +138,8 @@ def confirm_ticker(
     three mean "not established", and distinguishing them would invite treating
     the near-misses as partial evidence.
     """
-    wanted = ticker.split("_")[0].strip().upper()
+    vendor_symbol = ticker.strip().upper()
+    wanted = comparison_form(vendor_symbol)
     if not wanted:
         return None
 
@@ -120,7 +154,11 @@ def confirm_ticker(
     for statement in extract.symbol_statements:
         if re.search(rf"\b{re.escape(wanted)}\b", statement.text.upper()):
             return Confirmation(
-                ticker=wanted, cik=cik, citation=statement.text.strip(), accession=accession
+                ticker=vendor_symbol,
+                cik=cik,
+                citation=statement.text.strip(),
+                accession=accession,
+                matched_as=wanted,
             )
     for row in extract.section_12b_rows:
         blob = " ".join(row.cells)

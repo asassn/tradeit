@@ -351,6 +351,13 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
 - Live trading is disabled by an interlock in `src/tradeit/config.py` requiring
   a machine-local authorisation file. Completing every roadmap phase does not by
   itself authorise it.
+- **No strategy result computed on `research-01` today is evidence of
+  profitability.** The survivorship gate has been run against it twice and
+  returns `SURVIVOR_BIASED` both times — 2.7% of the dated exits EDGAR knows
+  about. A backtest on it is missing the companies that failed, so a good
+  result means the failures are absent, not that the strategy works. Build the
+  machinery on it; **do not believe its numbers.** The rule lifts when the gate
+  says something other than `SURVIVOR_BIASED`, and not before.
 - **Goldbugger is a separate project.** Do not import its gold-specific
   architecture into TradeIt.
 

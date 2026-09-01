@@ -359,6 +359,55 @@ narrow that is:**
 The dot-com window is where the coverage is, because that is where the cohort
 was selected. **Even there it is one name in eight.**
 
+#### A splice, caused by the code written to prevent splices
+
+Investigating whether a trailing-digit fix was worth making surfaced a defect in
+work already committed. **92 securities held another company's prices — 388,590
+bars, 20.7% of the corpus.**
+
+`confirm_ticker` stripped the vendor's disambiguator before comparing a symbol
+to the filing, which is correct: EODHD writes `ABTC_old` where the registrant's
+10-K says `ABTC`. It then **stored the stripped form**, which is not. The
+backfill queried `ABTC.US` — a different, *living* company — and filed its
+prices under the dead registrant's CIK.
+
+**One value doing two jobs.** The comparison form and the queryable symbol are
+different things, and collapsing them produced exactly the failure the GM
+control exists to detect, from the opposite direction: not a vendor splicing two
+companies, but us splicing them while checking the vendor.
+
+**The measurement that found it also corrected the fix.** The trailing digit is
+not a typo to normalise away — **90.2% of trailing-digit tickers have a base
+that exists as a different company** (`AAP1` Amway Asia Pacific against `AAP`
+Advance Auto Parts; `AED1` Banco de Edwards, `AED2` Allied Domecq, `AED`
+Aegon). It means what `_old` means. Had the "fix" been applied as first
+conceived — strip the digit and store the base — it would have multiplied the
+splice rather than repaired it.
+
+**Repair, not patch.** The 92 aliases were corrected to the vendor's symbol,
+their price and action rows were **deleted** rather than relabelled — they were
+another company's data and a right-looking label on wrong rows is worse than the
+wrong label — and the 92 symbols were re-fetched. Verified afterwards: **zero
+aliases now disagree with their vendor symbol.**
+
+| | before repair | after |
+|---|---|---|
+| price facts | 1,874,666 | **1,651,570** |
+| exits priced | 792 | **796** |
+| `matched_coverage` | 2.71% | **2.73%** |
+| classification | `SURVIVOR_BIASED` | `SURVIVOR_BIASED` |
+
+**The corpus got smaller and more correct**, and coverage rose slightly because
+four of the corrected symbols reached registrants the wrong ones had not.
+
+**The test that would have caught it was already there and was asserting the
+bug.** `test_the_vendor_old_suffix_is_stripped_before_comparing` asserted
+`c.ticker == "ABDR"` for input `ABDR_old` — the defect, written down as the
+expected result, passing continuously while the corpus filled with the wrong
+company's prices. It is reworked rather than re-pinned: the invariant it reached
+for was that a disambiguator must not *block* a match, which is now what it
+says, with storage pinned separately.
+
 #### Second run, after the bounded coverage push — the grade did not move
 
 The window was widened from 1999–2003 to **1998–2005**, adding 768 candidates.

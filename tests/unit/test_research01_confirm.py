@@ -66,10 +66,21 @@ class TestConfirmation:
         # Verbatim. A summary of a filing is not a filing.
         assert c.citation == ABDR
 
-    def test_the_vendor_old_suffix_is_stripped_before_comparing(self) -> None:
-        """EODHD writes `ABDR_old`; the filing says `ABDR`."""
+    def test_the_vendor_old_suffix_does_not_prevent_a_match(self) -> None:
+        """EODHD writes `ABDR_old`; the filing says `ABDR`.
+
+        **Reworked, not re-pinned.** This test used to assert
+        ``c.ticker == "ABDR"`` -- it encoded the splice bug as the expected
+        result and would have gone on passing while the corpus filled with the
+        wrong company's prices. The invariant it was reaching for is that the
+        vendor's disambiguator must not *block* a match. What gets stored is a
+        separate question, pinned in
+        ``TestTheStoredSymbolIsTheVendorsNotTheComparisonForm``.
+        """
         c = confirm_ticker(ticker="ABDR_old", cik=1021080, accession="a", extract=_extract(ABDR))
-        assert c is not None and c.ticker == "ABDR"
+        assert c is not None
+        assert c.matched_as == "ABDR"
+        assert c.ticker == "ABDR_OLD"
 
     def test_a_different_symbol_does_not_confirm(self) -> None:
         assert (
@@ -110,3 +121,73 @@ class TestConfirmation:
         assert c is not None
         assert c.evidence is not MappingEvidence.MANUAL_FILING_CITATION
         assert c.evidence is MappingEvidence.FILING_DOCUMENT_TEXT
+
+
+class TestTheStoredSymbolIsTheVendorsNotTheComparisonForm:
+    """The bug that spliced 92 securities and 388,590 bars.
+
+    An earlier version used one value for both jobs. `ABTC_old` -- a company
+    that died -- was compared against a filing saying `ABTC` (correct) and then
+    **stored** as `ABTC` (wrong). The backfill queried `ABTC.US`, which is a
+    different, living company, and filed its prices under the dead registrant's
+    CIK. The code written to prevent splices caused one.
+
+    The two forms are now separate fields and this pins them apart.
+    """
+
+    @pytest.mark.parametrize(
+        ("vendor", "compares_as"),
+        [
+            ("ABTC_old", "ABTC"),
+            ("AVIR_old1", "AVIR"),
+            ("AAP1", "AAP"),  # Amway Asia Pacific; AAP is Advance Auto Parts
+            ("AED2", "AED"),  # Allied Domecq; AED is Aegon
+            ("GM_old", "GM"),
+            ("ETYS", "ETYS"),  # no disambiguator, unchanged
+        ],
+    )
+    def test_the_comparison_form_strips_the_vendor_disambiguator(
+        self, vendor: str, compares_as: str
+    ) -> None:
+        from tradeit.research01.confirm import comparison_form
+
+        assert comparison_form(vendor) == compares_as
+
+    def test_the_stored_ticker_keeps_the_disambiguator(self) -> None:
+        """Querying the vendor with the stripped form fetches another company."""
+        c = confirm_ticker(
+            ticker="ABTC_old",
+            cik=902476,
+            accession="a",
+            extract=_extract('the common stock trades under the symbol "ABTC"'),
+        )
+        assert c is not None
+        assert c.ticker == "ABTC_OLD", "must query the vendor with ITS symbol"
+        assert c.matched_as == "ABTC", "the filing used the plain form"
+
+    def test_a_trailing_digit_is_a_disambiguator_not_part_of_the_symbol(self) -> None:
+        """90.2% of trailing-digit tickers have a base that is a DIFFERENT
+        company, so the digit means the same thing `_old` does."""
+        c = confirm_ticker(
+            ticker="AAP1",
+            cik=914601,
+            accession="a",
+            extract=_extract('our common stock is traded under the symbol "AAP"'),
+        )
+        assert c is not None
+        assert c.ticker == "AAP1"
+        assert c.matched_as == "AAP"
+
+    def test_a_transposition_still_does_not_confirm(self) -> None:
+        """`FODG` against a filing saying `FOGD` is a different symbol, not a
+        disambiguator. Loosening the comparison to catch near-misses would start
+        confirming wrong companies, which is worse than confirming none."""
+        assert (
+            confirm_ticker(
+                ticker="FODG",
+                cik=1094323,
+                accession="a",
+                extract=_extract('trading under the symbol "FOGD"'),
+            )
+            is None
+        )
