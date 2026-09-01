@@ -314,7 +314,7 @@ otherwise be invisible.
 | 1 | ~~Kibot probe on a trial or single month~~ **VOID — vendor eliminated on price.** Replaced by: **select and probe a price vendor covering delisted securities**, held to the same acceptance rules | **your approval**, measured against [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md). A failed item G is still not overridden by a passed item A | **deferred to Phase 9** |
 | 2 | Schema: securities, symbol_aliases, security_relationships, price_facts, corporate_action_facts, filings, fundamental_facts + migration | migration/ORM drift green | none |
 | 3 | Importer + point-in-time policy for the new datasets | round-trip tests | none |
-| 4 | Bulk price backfill → `research-01` | control universe reconstructed; §G acceptance rules evaluated and *reported*, pass or fail | within the same billing month |
+| 4 | Bulk price backfill → `research-01` | **PARTIALLY DONE 2026-09-01.** Not the full 32,907-name universe — that is blocked on identity, not on downloading — but a **dot-com cohort confirmed from filings**: 633 registrants bound to a ticker by their own 10-K, 629 identities written, **1,232,784 price facts and 4,723 corporate actions landed with zero unresolved**. Coverage reaches **1990**. §G acceptance rules not yet evaluated | within the same billing month |
 | 5 | EDGAR XBRL/FSDS fundamentals 2009+ | reconciled against filings | free |
 | 6 | Narrow EDGAR text parsing for the control universe only | headline metrics hand-checked | free |
 | 7 | Forward survivorship daemon | detects a real event end-to-end | existing |

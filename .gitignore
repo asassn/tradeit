@@ -87,3 +87,5 @@ htmlcov/
 # data is never committed, and a checkpoint is operational state, not evidence.
 /research01.sqlite
 /.research01_backfill.json
+/.research01_confirm.json
+/.research01_confirmed_backfill.json
