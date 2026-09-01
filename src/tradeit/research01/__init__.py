@@ -8,6 +8,19 @@ convenient moment.
 """
 
 from tradeit.research01.actions import VendorAction, import_corporate_actions
+from tradeit.research01.backfill import (
+    BackfillPlan,
+    BackfillProgress,
+    BackfillReport,
+    run_backfill,
+)
+from tradeit.research01.eodhd_client import (
+    EodhdClient,
+    HttpEodhdClient,
+    parse_bars,
+    parse_dividends,
+    parse_splits,
+)
 from tradeit.research01.filings import (
     FilingRow,
     import_filings,
@@ -37,10 +50,15 @@ from tradeit.research01.reconcile import (
 from tradeit.research01.seed import NotEstablished, SeedReport, seed_identity
 
 __all__ = [
+    "BackfillPlan",
+    "BackfillProgress",
+    "BackfillReport",
     "Delivery",
+    "EodhdClient",
     "FilingRow",
     "FsdsFact",
     "FsdsSubmission",
+    "HttpEodhdClient",
     "ImportResult",
     "KnowledgeTimeBasis",
     "NotEstablished",
@@ -58,9 +76,13 @@ __all__ = [
     "import_fsds_quarter",
     "import_price_bars",
     "knowledge_time_for",
+    "parse_bars",
+    "parse_dividends",
+    "parse_splits",
     "read_quarter",
     "reconcile_fundamentals_against_filings",
     "resolve_issuer",
     "resolve_security",
+    "run_backfill",
     "seed_identity",
 ]
