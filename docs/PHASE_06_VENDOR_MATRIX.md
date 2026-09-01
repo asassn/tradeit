@@ -244,10 +244,18 @@ can quote — see below.
 | **Internal Use** | used within a business entity; raw feeds, values and pricing not shared with non-employees. "If only calculated outputs are seen by your users" |
 | **External Use or Display** | data shared or displayed outside the organisation; requires a signed data services agreement and a display licence |
 
-**This is a product decision, not an engineering one, and it is unanswered.**
-It determines the price, the contract, and whether TradeIt's eventual dashboard
-may show a raw close to anyone but the operator. It is recorded here as
-outstanding; nothing is assumed about the answer.
+**ANSWERED by the owner: Internal Use.** TradeIt is one operator on one
+machine; no raw feed, value or price is shared with a non-employee, and nothing
+is displayed to a third party. The reply to the vendor states this and states the
+condition under which it would change.
+
+**The condition matters and is recorded rather than left implicit.** The roadmap
+includes a dashboard, and a dashboard that ever shows a raw close to anyone other
+than the operator moves TradeIt into **External Use / Display** — a different
+licence, a signed data services agreement, and a different price. That is a
+licence boundary sitting inside a product feature, so it is written here: **if
+the dashboard is ever opened to another person with real prices visible, the
+licence class must be revisited before it is.**
 
 #### There is no trial. The thing we reframed the question to ask for does not exist
 

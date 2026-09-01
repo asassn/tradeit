@@ -277,6 +277,32 @@ is the entire objective. If a probed vendor reaches 1998-01-01 with universe
 breadth, the price spine ships; if none does, we are back to sourcing prices —
 not to moving the date.
 
+#### Owner's ruling, on EODHD's Jan 2000 delisted start
+
+EODHD asserts near-complete US **delisted** coverage from **January 2000**, and
+active US coverage "from the beginning" (`PHASE_06_VENDOR_MATRIX.md` §1.3). For
+1998 and 1999 it would therefore supply survivors and not the companies that
+died, which is survivorship bias in the two years the dot-com build-up occupies.
+
+Three options were put to the owner: hold §7.1 and treat EODHD as insufficient;
+amend §7.1 to 2000; or take EODHD for 2000+ and source 1998–1999 separately.
+
+> **Decision: the third. §7.1 is NOT amended and the 1998 target stands.**
+
+What that means in practice, stated so it cannot drift:
+
+- **EODHD is a candidate for the 2000-onward price spine**, subject to the
+  sample files and to price, neither of which is settled.
+- **1998–1999 delisted coverage remains an open sourcing requirement.** It is a
+  known, named gap rather than a silently shortened corpus.
+- **The corpus may not be described as reaching 1998 until that gap is filled.**
+  A `research-01` built on EODHD alone begins, for survivorship purposes, in
+  2000, and any survivorship claim about 1998–1999 made on it would be false.
+
+This is deliberately not the cheapest reading. Amending the date to 2000 would
+have been one line and would have quietly redefined the thing the corpus was
+built to show.
+
 ### 7.2 Pre-2009 fundamental *values* — three options, evaluated
 
 **A constraint that used to sit here has been removed.** It read that no
