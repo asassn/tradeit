@@ -127,6 +127,128 @@ regardless of price"* — across three emails. Nothing the vendor did caused tha
 says a delisted ticker can be looked up, not that any particular one is present,
 which is the completeness question the vendor already declined to certify.
 
+#### Third reply — the Commercial team, and the first coverage numbers
+
+From **Kristelle, EODHD Commercial team** (`kristelle@eodhistoricaldata.com`).
+**Date TO CONFIRM** — supplied as a screenshot timestamped 11:22 AM without a
+visible date. The day is not recorded here until the operator states it, because
+a guessed date on a vendor record is the same class of error as a guessed
+identifier.
+
+**Their numbering is theirs, not ours.** The reply answers items 1–12; our
+question set has 22. The mapping is **not assumed** — answers are recorded by
+content below, and where content does not unambiguously identify one of our
+questions it is left unmapped rather than aligned by position.
+
+**1. The coverage numbers, verbatim:**
+
+> "At the moment we have end of day data for more than 26,000 US delisted
+> stocks, almost all delisted companies from Jan 2000. Non-US companies are
+> covered, mostly, if they were delisted within the last 6-7 years - we have
+> 42,000+ tickers for such stocks. […] We also have fundamental data for
+> companies delisted since 2018."
+
+and separately:
+
+> "Data coverage depends on the specific API feed. For Historical EOD and
+> Fundamentals APIs, US stock coverage is from the beginning."
+
+**Read together, these say two different things about two different
+populations**, and the difference is the whole survivorship question:
+
+| population | US coverage, `VENDOR-STATED` |
+|---|---|
+| **active** stocks | "from the beginning" |
+| **delisted** stocks | **almost all from Jan 2000** |
+| delisted, with fundamentals | since 2018 |
+| non-US delisted | mostly last 6–7 years only |
+
+> **This is the answer the question had outlived three vendors waiting for, and
+> it is a partial pass.** For 2000 onward EODHD asserts near-complete US delisted
+> coverage. **For 1998 and 1999 it would supply survivors and not the companies
+> that died** — which is survivorship bias exactly, in the two years the
+> dot-com build-up occupies.
+
+**It collides with a written decision.** `RESEARCH_01_DATA_CONTRACT.md` §7.1
+says the price corpus *"reaches 1998 or it does not ship"*, and that if no vendor
+reaches 1998-01-01 **with universe breadth** we return to sourcing prices —
+*"not to moving the date"*. Jan 2000 delisted coverage does not meet that. **The
+date is not moved here.** Reversing §7.1 is the owner's decision and is put to
+him rather than absorbed.
+
+**2. Ticker reuse is handled by a naming convention, and it changes the GM test:**
+
+> "After delisting companies lose their ticker codes, newly traded companies are
+> free to reuse them. The system marks tickers with the index 'old'. For example,
+> ACR_old.US was traded as ACR before delisting and now another company trades
+> under ACR.US."
+
+and:
+
+> "Please note that for delisted tickers that are currently being reused by
+> another company or ETF, we add _old at the end (XXX_old)."
+
+> **The GM sample request is now the wrong shape, and would be misread.** We
+> asked for `GM`. Under this convention that returns `GM.US` — the *current*
+> registrant only, starting after 2009 — while the pre-2009 company lives at
+> `GM_old.US`. A short series is therefore the **correct** result, not missing
+> coverage, and the splice test cannot fire on one symbol.
+>
+> **Testing the splice needs both symbols.** The property to check becomes:
+> `GM.US` must not extend before the break, `GM_old.US` must not extend after
+> it, and neither may contain the other's bars. **Recorded before the files
+> arrive**, because the failure mode has inverted twice now and a reader without
+> this note would grade a correct short series as a coverage gap.
+
+**3. Identity, and what it is and is not worth:**
+
+> "Yes, via the ID Mapping API" — CUSIP / ISIN / FIGI / LEI / **CIK** ↔ symbol,
+> plus a **Stock Symbol Rename History API (US only)**.
+
+A symbol↔CIK mapping is directly relevant to the 33 unestablished ticker
+intervals in the seeded corpus. **It is a lead, not evidence.** A vendor
+reference file is categorically short of `MANUAL_VERIFIED` — the same reason
+`company_tickers.json` could not carry a control — so it may suggest an interval
+to verify against a filing and may never supply one.
+
+**4. Lifecycle dates, with a limitation stated by the vendor:**
+
+> "IPODate covers listing (there's no separate listing-date field distinct from
+> IPO date), and DelistedDate covers delisting — but only visible for US stocks
+> marked as delisted. Non-US delistings aren't covered by that field."
+
+**An IPO date is not a listing date** and the vendor says so plainly. For the
+`listings` table that means EODHD can supply a delisting date for US delisted
+stocks and cannot supply a venue-listing start.
+
+**5. Throughput:** all commercial subscriptions carry a base of **100k API calls
+per day**, `VENDOR-STATED`.
+
+**6. Out of scope, and recorded only so nobody re-asks.** The reply gives 30-day
+and 60-day termination notice periods. Per *Working with vendors*, licence
+retention and deletion terms are **not a selection criterion and no part of this
+system is designed around them**. Noted, weighed at zero.
+
+**7. Price is still unquoted**, and the vendor has asked us a question before it
+can quote — see below.
+
+#### The vendor is waiting on us: which licence class we are
+
+> "if the data is being shared between members of an organisation, being used
+> commercially and/ or any raw or derived data is displayed to any third parties
+> - then a commercial subscription is required. […] **Which of the above
+> categories best fits your use case?**"
+
+| class | applies when |
+|---|---|
+| **Internal Use** | used within a business entity; raw feeds, values and pricing not shared with non-employees. "If only calculated outputs are seen by your users" |
+| **External Use or Display** | data shared or displayed outside the organisation; requires a signed data services agreement and a display licence |
+
+**This is a product decision, not an engineering one, and it is unanswered.**
+It determines the price, the contract, and whether TradeIt's eventual dashboard
+may show a raw close to anyone but the operator. It is recorded here as
+outstanding; nothing is assumed about the answer.
+
 #### There is no trial. The thing we reframed the question to ask for does not exist
 
 `VENDOR-STATED`:
@@ -282,10 +404,10 @@ are not a criterion and no row records them.
 
 | # | criterion | **Kibot** | **Sharadar** | **EODHD** | **Polygon / Massive** | **Twelve Data** |
 |---|---|---|---|---|---|---|
-| 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | **US: "30+ years" — VENDOR-STATED 2026-08-30, and EODHD is NOT disqualified.** The "January 2000" figure is EU coverage, not US: the documentation was never self-contradictory and we misread it (§1.3). Delisted tickers "need to be checked individually" — untested | not established | "back to the first trading date" — CORROBORATED |
+| 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | **Two populations, two answers — VENDOR-STATED. ACTIVE US: "from the beginning" / "30+ years". DELISTED US: "almost all delisted companies from Jan 2000", 26,000+ names.** So 1998–1999 would be survivors only, which fails `RESEARCH_01_DATA_CONTRACT` §7.1 pending the owner's decision (§1.3). Fundamentals for delisted names only since 2018 | not established | "back to the first trading date" — CORROBORATED |
 | 2 | active **and** delisted | **active + delisted rosters, and a delisted-only roster — USER-VERIFIED (vendor claim); completeness UNTESTED** | yes — CORROBORATED | **existence YES — VENDOR-STATED in writing 2026-08-29, with separate dividends and splits endpoints. Completeness for the 1998+ US universe EXPLICITLY NOT CERTIFIED absent a paid requirements review (§1.3)** | **"spotty at best" — CORROBORATED** | not established |
 | 3 | delisted history truly downloadable | **UNTESTED — probe item A** | claimed — CORROBORATED | claimed — CORROBORATED | doubtful | unknown |
-| 4 | permanent identifier | **UNTESTED — probe item D. Expect none; expect ticker-keyed files** | `permaticker` — UNVERIFIED | not established | not established | not established |
+| 4 | permanent identifier | **UNTESTED — probe item D. Expect none; expect ticker-keyed files** | `permaticker` — UNVERIFIED | **ID Mapping API: CUSIP/ISIN/FIGI/LEI/CIK ↔ symbol — VENDOR-STATED.** A lead for the 33 unestablished ticker intervals, and categorically short of `MANUAL_VERIFIED`: a vendor reference file may suggest an interval, never supply one | not established | not established |
 | 5 | raw / unadjusted prices | **unadjusted, split-adjusted and fully-adjusted equity data — USER-VERIFIED (vendor claim); methodology UNTESTED — probe item E** | yes, three bases — CORROBORATED | not established | flat files — CORROBORATED | in use for `full-01` |
 | 7 | splits | **UNTESTED — probe item E** | `ACTIONS` — CORROBORATED | yes — CORROBORATED | yes | yes |
 | 8 | dividends | **UNTESTED — probe item E** | `ACTIONS` — CORROBORATED | yes — CORROBORATED | yes | yes |

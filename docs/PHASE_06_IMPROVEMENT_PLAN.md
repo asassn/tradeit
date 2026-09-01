@@ -47,7 +47,9 @@ operator's discretion, and are not a criterion here.
    — `VENDOR-STATED`, so the "least expensive access to measure it ourselves"
    that the reframe asks for is not a thing EODHD sells. It instead offered
    sample files for symbols of our choosing, unprompted and free; **ETYS, WBVN
-   and GM are requested and not received**
+   and GM are requested and not received** — and the GM request needs reissuing as
+   **`GM.US` *and* `GM_old.US`**, because EODHD suffixes a reused ticker's earlier
+   holder with `_old`, so one symbol cannot show a splice
    ([`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) §1.3).
    `KIBOT_DATA_PROBE.md` is retained as the acceptance standard — its rules were
    written before any data was seen, and the item most likely to fail is
