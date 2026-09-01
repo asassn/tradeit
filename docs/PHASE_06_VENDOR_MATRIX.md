@@ -233,6 +233,65 @@ system is designed around them**. Noted, weighed at zero.
 **7. Price is still unquoted**, and the vendor has asked us a question before it
 can quote — see below.
 
+#### EODHD's own Claude plugin, read as documentation — and what it settled
+
+`github.com/EodHistoricalData/eodhd-claude-skills` (MIT, vendor-published). Read
+in full, **not installed** — the reasoning for that is below. As *documentation*
+it settled three things the demo token could not, because
+`/exchange-symbol-list` requires a paid key:
+
+**1. `delisted=1` is confirmed, with its response shape.**
+
+```
+https://eodhd.com/api/exchange-symbol-list/US?api_token=...&delisted=1
+```
+returns `Code`, `Name`, `Country`, `Exchange`, `Currency`, `Type`, **`Isin`**,
+**`IsDelisted`**. The plugin's own *endpoint* doc omits `delisted` from its
+parameter table; only the delisted-tickers **guide** documents it. Worth
+recording: the vendor's own documentation is inconsistent about the single
+parameter this project most depends on.
+
+**2. Ticker reuse goes further than `_old`.** Reuse by a third or fourth holder
+produces `_old1`, `_old2`. `GM`/`GM_old` is the two-holder case, not the general
+one — a ticker may name **three or more unrelated companies**, and a symbol list
+that stopped at `_old` would silently drop the middle ones.
+
+**3. Coverage is independently corroborated.** "26,000+ US tickers (from Jan
+2000), 42,000+ non-US (latest 6-7 years)" — the same figures Kristelle gave, in
+a document written before our correspondence. That is corroboration of the
+*claim*, and still not a measurement.
+
+**A trap in their Scenario 1, recorded because it is not obvious.** On a plain
+rename with no delisting, EODHD *moves* history to the new symbol and the old
+code becomes inaccessible. So an absent symbol does not mean an absent company,
+and a ticker's history may begin before that ticker existed. Any interval we
+derive from a vendor symbol is a statement about the **symbol**, not the
+company.
+
+**The ISIN is worth noting.** The delisted symbol list carries `Isin` per symbol
+— a *security* identifier, which is what `security_identifiers` exists for. It
+is a candidate route to the ticker intervals the corpus lacks, and it would
+enter at `VENDOR-STATED`: usable for the broad universe, never sufficient to
+carry one of the 30 controls, which require a filing somebody read.
+
+**Why it is not installed.** The plugin's purpose is AI-generated analysis —
+company briefs, "trend analysis with key support/resistance levels" — and its
+own README says so: *"This plugin delivers AI-generated analysis on top of EODHD
+market data. Always verify figures."* That is the opposite of what this system's
+assistant is for, which is to explain **actual system evidence and provenance,
+never invented rationale**.
+
+The MCP server is the sharper objection. It would make a price fetchable
+mid-conversation, which routes around the importer — and the importer is where
+identity resolution, point-in-time stamping, splice refusal and
+`UNRESOLVED` live. **Every guarantee this corpus makes is enforced in that one
+path.** A convenient side-door around it is a risk rather than a feature, and
+the risk is that it would be used without anyone noticing the difference.
+
+Finally: **"survivorship" does not appear in any of its 146 documents.** That is
+not a criticism — it is simply not what the plugin is for, and it is a precise
+statement of why it does not replace anything here.
+
 #### The vendor is waiting on us: which licence class we are
 
 > "if the data is being shared between members of an organisation, being used
