@@ -14,6 +14,7 @@ from tradeit.research01.backfill import (
     BackfillReport,
     run_backfill,
 )
+from tradeit.research01.confirm import Confirmation, candidate_symbols, confirm_ticker
 from tradeit.research01.eodhd_client import (
     EodhdClient,
     HttpEodhdClient,
@@ -67,6 +68,7 @@ __all__ = [
     "BackfillReport",
     "Candidate",
     "CandidateStatus",
+    "Confirmation",
     "Delivery",
     "DerivedAlias",
     "EodhdClient",
@@ -86,6 +88,8 @@ __all__ = [
     "VendorAliasReport",
     "VendorBar",
     "action_knowledge_time_for",
+    "candidate_symbols",
+    "confirm_ticker",
     "derive_vendor_aliases",
     "import_corporate_actions",
     "import_filings",

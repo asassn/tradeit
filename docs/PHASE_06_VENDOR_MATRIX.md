@@ -409,6 +409,59 @@ return nothing for the population the project exists for.
 **Not proposed as a purchase.** It would be paying for coverage the vendor has
 already said does not extend to our names.
 
+#### Option C: confirming tickers from the filings themselves — feasible, 53%
+
+The owner ruled: verified identity only, and a narrow dot-com cohort rather than
+a parser built for 32,907 names. This measures whether that is possible.
+
+**The cohort, selected from data already held and costing no API calls.** A
+dot-com death is a registrant whose *last EDGAR filing* falls in 1999–2003 —
+a statement about the registrant, not about a vendor symbol.
+
+| window | name-matched candidates |
+|---|---|
+| last filing 2000–2002 | 1,231 |
+| **last filing 1999–2003** | **1,887** |
+| last filing 1998–2005 | 2,655 |
+
+Of a 400-candidate slice, **293 have a 10-K in that window** — the document that
+would state the symbol.
+
+**The route is `MappingEvidence.FILING_DOCUMENT_TEXT`**, which ranks above
+`NAME_MATCH` and, unlike it, is *not* in `_INSUFFICIENT_ALONE`. The registrant's
+own annual report saying which symbol its stock trades under is evidence in a
+way a matching name never is:
+
+> *"The Company's Common Stock is traded under the symbol "ABDR" in the Nasdaq
+> National Market System"* — CIK 1021080
+
+**Measured yield: 53% of 60 dot-com 10-Ks confirmed.** Extrapolated across the
+1,887-name cohort that is roughly **1,000 registrants** bound to a ticker by
+their own filing — against 34 today.
+
+**These would be `RESOLVED`, never `MANUAL_VERIFIED`.** A program that reads a
+filing has not satisfied the rule that a *person* read it. The 30 hand-verified
+controls remain a separate and stronger grade, and nothing here promotes them or
+dilutes them.
+
+##### The extractor that confirmed nothing, and why
+
+The first version scanned symbol sentences for capitalised tokens and refused
+any sentence naming more than one. It looked careful. **It confirmed 0 of 40
+real filings.**
+
+`The Company's Common Stock is traded under the symbol "ABDR"` tokenises to
+include **`S`** — from `Company's` — so every sentence named "two symbols" and
+every filing was rejected. The fix was not a longer stopword list, which is
+whack-a-mole against English, but asking the narrower question the filing
+already answers: **take the token bound to the word "symbol"**, not every word
+near it. Yield went 0% → 53%.
+
+Recorded because the failure was silent and in the safe direction: a confirmer
+that confirms nothing looks like rigour. It was measured against real filings
+rather than fixtures, which is the only reason it was caught — invented
+fixtures would have been written to pass.
+
 #### EODHD's own Claude plugin, read as documentation — and what it settled
 
 `github.com/EodHistoricalData/eodhd-claude-skills` (MIT, vendor-published). Read
