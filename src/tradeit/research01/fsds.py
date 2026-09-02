@@ -72,9 +72,18 @@ from tradeit.storage.tables import (
 
 __all__ = ["FsdsFact", "FsdsSubmission", "import_fsds_quarter", "read_quarter"]
 
-#: Rows per statement. Large enough that the round trips stop dominating, small
-#: enough that a failure does not discard an hour of work.
+#: Rows accumulated before a write. Large enough that round trips stop
+#: dominating, small enough that a failure does not discard an hour of work.
+#: **Not the size of a statement** -- see :data:`_MAX_BIND_PARAMS`.
 _BATCH = 5_000
+
+#: A statement is sized in **bound parameters, not rows**, because that is what
+#: the database actually limits. SQLite caps them at 32,766 and PostgreSQL at
+#: 65,535; a fourteen-column row means 5,000 of them is seventy thousand
+#: parameters, which SQLite refuses with "too many SQL variables" -- measured,
+#: on the first run against the seeded cohort. The margins below are deliberate:
+#: the cap is a build-time option in SQLite and older builds set it to 999.
+_MAX_BIND_PARAMS = {"sqlite": 30_000, "postgresql": 60_000}
 
 
 #: How ``qtrs`` renders into the four characters ``fiscal_period`` allows.
@@ -181,6 +190,10 @@ def read_quarter(path: Path) -> tuple[dict[str, FsdsSubmission], Iterator[FsdsFa
 def _write(session: Session, rows: list[dict[str, object]]) -> None:
     """Insert a batch, letting the database discard what it already holds.
 
+    Chunked by **bound parameters rather than rows**, since that is what the
+    database limits: fourteen columns times five thousand rows is seventy
+    thousand parameters and SQLite refuses above 32,766.
+
     ``ON CONFLICT DO NOTHING`` against ``uq_security_fundamental_revision``, so
     a re-run costs a rejected insert rather than an ``IntegrityError`` that
     aborts the transaction and loses the quarter. Both dialects this corpus runs
@@ -189,12 +202,20 @@ def _write(session: Session, rows: list[dict[str, object]]) -> None:
     production uses and a dialect-specific import would fail on exactly the
     side nobody exercised.
     """
-    if session.get_bind().dialect.name == "postgresql":
-        session.execute(pg_insert(SecurityFundamentalFact).values(rows).on_conflict_do_nothing())
-    else:
-        session.execute(
-            sqlite_insert(SecurityFundamentalFact).values(rows).on_conflict_do_nothing()
-        )
+    if not rows:
+        return
+    dialect = session.get_bind().dialect.name
+    per_statement = max(1, _MAX_BIND_PARAMS.get(dialect, 30_000) // len(rows[0]))
+    for start in range(0, len(rows), per_statement):
+        chunk = rows[start : start + per_statement]
+        if dialect == "postgresql":
+            session.execute(
+                pg_insert(SecurityFundamentalFact).values(chunk).on_conflict_do_nothing()
+            )
+        else:
+            session.execute(
+                sqlite_insert(SecurityFundamentalFact).values(chunk).on_conflict_do_nothing()
+            )
 
 
 def _naive(moment: dt.datetime) -> dt.datetime:

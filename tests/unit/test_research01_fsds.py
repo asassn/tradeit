@@ -306,3 +306,19 @@ class TestReRunningIsANoOp:
         result = import_fsds_quarter(db_session, path)
         assert result.landed == 1
         assert RejectReason.DUPLICATE in [r.reason for r in result.rejected]
+
+
+def test_a_batch_larger_than_the_parameter_limit_still_writes(
+    db_session: Session, tmp_path: Path
+) -> None:
+    """ "too many SQL variables", measured on the first run against 17,015 issuers.
+
+    A statement is sized in bound parameters, not rows: fourteen columns times
+    five thousand rows is seventy thousand parameters, and SQLite refuses above
+    32,766. The batch here is deliberately larger than one statement can carry.
+    """
+    _issuer_with_security(db_session, "320193")
+    numbers = [_num(f"Metric{i:05d}", "20141231", 1, "1.0") for i in range(9000)]
+    result = import_fsds_quarter(db_session, _zip(tmp_path, [_sub()], numbers))
+    assert result.landed == 9000
+    assert len(db_session.scalars(select(SecurityFundamentalFact.id)).all()) == 9000
