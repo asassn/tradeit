@@ -27,6 +27,16 @@ cross-sectional before 2011Q3 is therefore a sample of *large accelerated
 filers*, not of the market, and a screen run on it would be measuring company
 size. Recorded here because the number a reader reaches for is "2009".
 
+**A fact cannot be knowable before the event it describes, and some rows claim
+to be.** ``event_time`` is the period end and ``knowledge_time`` is the filing
+date, so a 10-Q filed on 3 November carrying
+``CommonStockDividendsPerShareDeclared`` for the quarter ending 31 December
+dates its own knowledge *before* its event. For a declared dividend that is
+real -- the declaration happened in November. For a reported result it would be
+look-ahead. **``num.txt`` does not say which**, and inventing a tag taxonomy to
+guess would be the fabrication this corpus exists to refuse, so such rows are
+skipped and counted under ``KNOWLEDGE_PRECEDES_EVENT``.
+
 **A known and recorded modelling gap.** Fundamentals are an *issuer's* facts —
 revenue belongs to a company, not to a share class — while this table keys on
 ``security_id``. Each seeded issuer currently holds exactly one security, so the
@@ -157,6 +167,17 @@ def read_quarter(path: Path) -> tuple[dict[str, FsdsSubmission], Iterator[FsdsFa
     return submissions, facts()
 
 
+def _naive(moment: dt.datetime) -> dt.datetime:
+    """Compare timestamps on one clock.
+
+    SQLite hands back naive datetimes and PostgreSQL hands back aware ones, so
+    a key built from a query and a key built in Python would never match on one
+    of the two backends -- and the one where it silently failed would be the one
+    the tests do not run on.
+    """
+    return moment.replace(tzinfo=None)
+
+
 def _security_for_issuer(session: Session, issuer_id: int) -> tuple[int | None, str]:
     rows = session.scalars(
         select(Security.security_id).where(Security.issuer_id == issuer_id)
@@ -210,8 +231,33 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
         ).all()
     }
 
-    seen: set[tuple[int, str, int, str, int, dt.datetime]] = set()
+    # **Re-running an import is a no-op, and this is what makes that true.**
+    # `RejectReason.DUPLICATE` has always promised it; for this importer the
+    # promise was false, because `seen` lived for one call while the uniqueness
+    # constraint lives in the database. Deleting a progress file and re-running
+    # -- exactly what a resumable job invites -- then re-inserted a quarter and
+    # died on an IntegrityError, which is a poor way to learn that a side file
+    # and the corpus can disagree.
+    #
+    # Scoped to the securities this quarter actually touches: the corpus-wide
+    # set would be millions of rows to answer a question about fifteen.
+    security_ids = {s for s, _ in resolved.values() if s is not None}
+    seen: set[tuple[int, str, int, str, int | None, dt.datetime]] = {
+        (sid, metric, year, period, qtrs, _naive(kt))
+        for sid, metric, year, period, qtrs, kt in session.execute(
+            select(
+                SecurityFundamentalFact.security_id,
+                SecurityFundamentalFact.metric,
+                SecurityFundamentalFact.fiscal_year,
+                SecurityFundamentalFact.fiscal_period,
+                SecurityFundamentalFact.duration_qtrs,
+                SecurityFundamentalFact.knowledge_time,
+            ).where(SecurityFundamentalFact.security_id.in_(security_ids))
+        ).all()
+    }
     landed = 0
+    early = 0
+    duplicates = 0
     for fact in facts:
         if limit is not None and landed >= limit:
             break
@@ -226,16 +272,29 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
 
         knowledge_time = dt.datetime.combine(submission.filed, dt.time.min, tzinfo=dt.UTC)
         event_time = dt.datetime.combine(fact.ddate, dt.time.min, tzinfo=dt.UTC)
+        if knowledge_time < event_time:
+            # The filing predates the period it describes. Legitimate for a
+            # declared dividend and a look-ahead defect for a reported result,
+            # and `num.txt` does not say which. `ck_security_fundamental_knowledge`
+            # would refuse the row anyway -- this refuses it by name, with a
+            # count, rather than as an IntegrityError halfway through a quarter.
+            early += 1
+            continue
         period_label = _PERIOD_LABEL.get(fact.qtrs, "D")
+        # Mirrors `uq_security_fundamental_revision` exactly. It deliberately
+        # does **not** include `period_end`: two ddates inside one fiscal year
+        # with the same duration are the same revision of the same claim, and
+        # adding the date here would let the database refuse what this admitted.
         key = (
             security_id,
             fact.tag,
             fact.ddate.year,
             period_label,
             fact.qtrs,
-            knowledge_time,
+            _naive(knowledge_time),
         )
         if key in seen:
+            duplicates += 1
             continue
         seen.add(key)
 
@@ -266,6 +325,24 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
     }
     for cik, why in unmapped.items():
         result.rejected.append(RejectedBar(None, RejectReason.NO_ISSUER, f"sec_cik:{cik}", why))
+    if duplicates:
+        result.rejected.append(
+            RejectedBar(
+                None,
+                RejectReason.DUPLICATE,
+                path.name,
+                f"{duplicates} facts already held at this exact revision",
+            )
+        )
+    if early:
+        result.rejected.append(
+            RejectedBar(
+                None,
+                RejectReason.KNOWLEDGE_PRECEDES_EVENT,
+                path.name,
+                f"{early} facts filed before the period they describe had ended",
+            )
+        )
     result.landed = landed
     result.securities_touched = {s for s, _ in resolved.values() if s is not None}
     session.flush()

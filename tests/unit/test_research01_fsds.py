@@ -25,7 +25,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from tradeit.research01 import import_fsds_quarter, read_quarter
+from tradeit.research01 import RejectReason, import_fsds_quarter, read_quarter
 from tradeit.storage.tables import Issuer, IssuerIdentifier, Security, SecurityFundamentalFact
 
 SUB_HEADER = "adsh\tcik\tname\tform\tperiod\tfy\tfp\tfiled\n"
@@ -206,3 +206,98 @@ class TestReader:
         assert submissions[ADSH].filed == dt.date(2015, 2, 4)
         assert not isinstance(facts, list)
         assert [f.tag for f in facts] == ["Revenues"]
+
+
+class TestKnowledgeCannotPrecedeItsEvent:
+    """A 10-Q filed on 3 November carrying a value for the quarter ending 31
+    December dates its own knowledge before its event.
+
+    Real for a declared dividend -- the declaration happened in November -- and
+    look-ahead for a reported result. `num.txt` says which it is nowhere, and
+    inventing a tag taxonomy to guess would be the fabrication this corpus
+    refuses. Caught on the first real import as an IntegrityError from
+    `ck_security_fundamental_knowledge`, halfway through 2010q4; now refused by
+    name, with a count.
+    """
+
+    def test_it_is_skipped_and_counted_while_the_rest_of_the_filing_lands(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        _issuer_with_security(db_session, "320193")
+        path = _zip(
+            tmp_path,
+            [_sub(filed="20101103", period="20101231")],
+            [
+                _num("CommonStockDividendsPerShareDeclared", "20101231", 1, "0.19"),
+                _num("Revenues", "20100930", 1, "20343000000.0000"),
+            ],
+        )
+        result = import_fsds_quarter(db_session, path)
+        assert result.landed == 1
+        assert RejectReason.KNOWLEDGE_PRECEDES_EVENT in [r.reason for r in result.rejected]
+        assert db_session.scalars(select(SecurityFundamentalFact.metric)).all() == ["Revenues"]
+
+    def test_a_fact_filed_on_the_period_end_itself_is_kept(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        """The boundary is `knowledge_time < event_time`, not `<=`.
+
+        A filing submitted on the closing date of the period it reports is
+        unusual and not impossible, and the check constraint admits it.
+        """
+        _issuer_with_security(db_session, "320193")
+        path = _zip(
+            tmp_path,
+            [_sub(filed="20141231", period="20141231")],
+            [_num("Revenues", "20141231", 1, "1.0")],
+        )
+        assert import_fsds_quarter(db_session, path).landed == 1
+
+
+class TestReRunningIsANoOp:
+    """`RejectReason.DUPLICATE` promises it; for this importer it was false.
+
+    `seen` lived for one call while `uq_security_fundamental_revision` lives in
+    the database, so deleting a progress file and re-running -- exactly what a
+    resumable job invites -- re-inserted a quarter and died on an
+    IntegrityError. A side file and the corpus must not be able to disagree.
+    """
+
+    def test_the_second_import_lands_nothing_and_counts_the_duplicates(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        _issuer_with_security(db_session, "320193")
+        path = _zip(
+            tmp_path,
+            [_sub()],
+            [
+                _num("Revenues", "20141231", 1, "1.0"),
+                _num("Revenues", "20141231", 4, "4.0"),
+            ],
+        )
+        assert import_fsds_quarter(db_session, path).landed == 2
+
+        again = import_fsds_quarter(db_session, path)
+        assert again.landed == 0
+        assert RejectReason.DUPLICATE in [r.reason for r in again.rejected]
+        assert len(db_session.scalars(select(SecurityFundamentalFact.id)).all()) == 2
+
+    def test_two_ddates_in_one_fiscal_year_are_one_revision(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        """The key mirrors the constraint, which omits `period_end` on purpose.
+
+        Including the date here would admit rows the database then refuses.
+        """
+        _issuer_with_security(db_session, "320193")
+        path = _zip(
+            tmp_path,
+            [_sub()],
+            [
+                _num("Revenues", "20140331", 1, "1.0"),
+                _num("Revenues", "20140630", 1, "2.0"),
+            ],
+        )
+        result = import_fsds_quarter(db_session, path)
+        assert result.landed == 1
+        assert RejectReason.DUPLICATE in [r.reason for r in result.rejected]

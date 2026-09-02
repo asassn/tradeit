@@ -72,6 +72,14 @@ class RejectReason(StrEnum):
     #: without a ratio, a dividend without an amount. Not defaulted, because a
     #: split silently ratioed 1.0 is a split that does nothing and looks fine.
     INCOMPLETE = "incomplete"
+    #: The source dates the fact as knowable **before the event it describes**.
+    #: A filing submitted in November carrying a value for the quarter ending
+    #: 31 December is either a forward declaration -- a dividend declared for a
+    #: period not yet closed, which really is knowable then -- or a look-ahead
+    #: defect in the source. Nothing in the row distinguishes them, and
+    #: inventing a tag taxonomy to guess would be exactly the fabrication this
+    #: corpus refuses, so the row is skipped and counted.
+    KNOWLEDGE_PRECEDES_EVENT = "knowledge_precedes_event"
 
 
 @dataclass(frozen=True, slots=True)
