@@ -8,6 +8,12 @@ convenient moment.
 """
 
 from tradeit.research01.actions import VendorAction, import_corporate_actions
+from tradeit.research01.adjudicate import (
+    Adjudication,
+    BoundaryEvidence,
+    Verdict,
+    adjudicate_series,
+)
 from tradeit.research01.backfill import (
     BackfillPlan,
     BackfillProgress,
@@ -53,6 +59,7 @@ from tradeit.research01.series import (
     AdjustedBar,
     Coherence,
     SplitAdjustment,
+    adjudicated_bound,
     known_splits,
     price_series,
     series_coherence,
@@ -71,10 +78,12 @@ from tradeit.research01.vendor_aliases import (
 )
 
 __all__ = [
+    "Adjudication",
     "AdjustedBar",
     "BackfillPlan",
     "BackfillProgress",
     "BackfillReport",
+    "BoundaryEvidence",
     "Candidate",
     "CandidateStatus",
     "Coherence",
@@ -98,7 +107,10 @@ __all__ = [
     "VendorAction",
     "VendorAliasReport",
     "VendorBar",
+    "Verdict",
     "action_knowledge_time_for",
+    "adjudicate_series",
+    "adjudicated_bound",
     "candidate_symbols",
     "confirm_ticker",
     "derive_vendor_aliases",

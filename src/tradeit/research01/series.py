@@ -34,15 +34,16 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from tradeit.storage.tables import SecurityCorporateActionFact, SecurityPriceFact
+from tradeit.storage.tables import SecurityCorporateActionFact, SecurityPriceFact, SymbolAlias
 
 __all__ = [
     "AdjustedBar",
     "Coherence",
     "SplitAdjustment",
+    "adjudicated_bound",
     "known_splits",
     "price_series",
     "series_coherence",
@@ -85,25 +86,66 @@ class AdjustedBar:
         return self.split_factor != 1
 
 
+def adjudicated_bound(session: Session, security_id: int) -> dt.date | None:
+    """The last session this security's ticker is evidenced to have meant it.
+
+    ``None`` when no interval has been closed, which is the ordinary case. A
+    closed interval is written only by ``adjudicate.py`` and only where evidence
+    located a boundary, so this reads a **recorded, cited fact** rather than
+    recomputing a heuristic at query time.
+
+    The earliest close wins where a security carries several ticker aliases:
+    each is an independent claim about when the symbol stopped meaning this
+    security, and the safe reading of two is the earlier one.
+    """
+    return session.scalar(
+        select(func.min(SymbolAlias.valid_to)).where(
+            SymbolAlias.security_id == security_id,
+            SymbolAlias.alias_kind == "ticker",
+            SymbolAlias.valid_to.is_not(None),
+        )
+    )
+
+
 def known_splits(
-    session: Session, security_id: int, *, as_of: dt.datetime
+    session: Session,
+    security_id: int,
+    *,
+    as_of: dt.datetime,
+    include_disputed: bool = False,
 ) -> list[SplitAdjustment]:
     """Splits for this security that were knowable at ``as_of``, oldest first.
 
     The ``knowledge_time`` bound is the whole point and is not optional.
+
+    **Actions are bounded by the adjudicated interval too, and leaving them
+    unbounded was a real defect.** Corporate actions were fetched under the same
+    symbol as the prices, so a series that turned out to hold two companies
+    holds two companies' splits. Cutting the bars alone left the successor's six
+    compounding reverse splits still dividing the registrant's prices, and
+    ``ASCX``'s $18.00 close in 2000 still read as three trillion dollars -- the
+    exact absurdity that set this whole investigation off, surviving the fix
+    meant to end it.
     """
+    conditions = [
+        SecurityCorporateActionFact.security_id == security_id,
+        SecurityCorporateActionFact.action_type.in_(_SPLIT_TYPES),
+        SecurityCorporateActionFact.knowledge_time <= as_of,
+        SecurityCorporateActionFact.ratio.is_not(None),
+    ]
+    if not include_disputed:
+        bound = adjudicated_bound(session, security_id)
+        if bound is not None:
+            # An ex-date after the boundary belongs to whoever held the symbol
+            # next, and their share count says nothing about ours.
+            conditions.append(SecurityCorporateActionFact.ex_date <= bound)
     rows = session.execute(
         select(
             SecurityCorporateActionFact.ex_date,
             SecurityCorporateActionFact.ratio,
             SecurityCorporateActionFact.knowledge_time,
         )
-        .where(
-            SecurityCorporateActionFact.security_id == security_id,
-            SecurityCorporateActionFact.action_type.in_(_SPLIT_TYPES),
-            SecurityCorporateActionFact.knowledge_time <= as_of,
-            SecurityCorporateActionFact.ratio.is_not(None),
-        )
+        .where(*conditions)
         .order_by(SecurityCorporateActionFact.ex_date)
     ).all()
     return [
@@ -120,6 +162,7 @@ def price_series(
     as_of: dt.datetime,
     start: dt.date | None = None,
     end: dt.date | None = None,
+    include_disputed: bool = False,
 ) -> list[AdjustedBar]:
     """The split-adjusted series for one security, as knowable at ``as_of``.
 
@@ -127,6 +170,17 @@ def price_series(
     session has several rows, the one with the latest ``knowledge_time`` at or
     before ``as_of`` wins. A later correction does not exist at an earlier
     as-of, which is the correct answer rather than a special case.
+
+    **Bars outside the ticker's adjudicated interval are excluded by default.**
+    That is a departure from :func:`series_coherence`, which reports and never
+    filters -- and the difference is the evidence. Coherence is a heuristic
+    about a shape; an adjudicated bound is a boundary that was established, cited
+    and written to the corpus. Filtering on the first would hide a splice;
+    filtering on the second is the corpus being read as it is recorded.
+
+    ``include_disputed=True`` returns everything, for a caller auditing the cut
+    rather than trading on it. It is spelled out at every call site so that
+    reading a known-contaminated series is never the accident.
     """
     conditions = [
         SecurityPriceFact.security_id == security_id,
@@ -137,6 +191,10 @@ def price_series(
         conditions.append(SecurityPriceFact.session_date >= start)
     if end is not None:
         conditions.append(SecurityPriceFact.session_date <= end)
+    if not include_disputed:
+        bound = adjudicated_bound(session, security_id)
+        if bound is not None:
+            conditions.append(SecurityPriceFact.session_date <= bound)
 
     rows = session.execute(
         select(
@@ -158,7 +216,7 @@ def price_series(
     for session_date, o, h, low, c, v, _kt in rows:
         latest[session_date] = (o, h, low, c, v)
 
-    splits = known_splits(session, security_id, as_of=as_of)
+    splits = known_splits(session, security_id, as_of=as_of, include_disputed=include_disputed)
 
     out: list[AdjustedBar] = []
     for session_date in sorted(latest):

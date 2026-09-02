@@ -91,6 +91,16 @@ cannot map to two securities at the same instant.** Ticker reuse then resolves
 correctly by construction — `ticker + as_of` yields exactly one `instrument_id`,
 or none.
 
+`valid_to` is where an adjudicated splice boundary is recorded, and it is
+**inclusive**: the date named is the last session that still belongs to this
+security. A filing binds a symbol to a registrant and says nothing about when
+that binding ended, so every alias seeded from filing text opens unbounded; a
+close is written only where evidence located one, and the boundary's provenance
+is *appended* to the citation rather than replacing it. The original clause is
+the filing sentence that made the binding and is still true — overwriting it
+would destroy the provenance of the binding in order to record the provenance of
+its end.
+
 ### Corporate lineage — separate again
 
 ```
@@ -191,6 +201,78 @@ the comparison is not evidence that it would have passed.
 and the storage bug that filed one company's prices under another. It affects
 roughly one security in eleven and was invisible until something tried to *read*
 the corpus rather than write to it.
+
+#### The adjudication: 58 of the 79 given a dated boundary
+
+`research01/adjudicate.py` is the next step and a **different act**. Coherence
+reports a shape; adjudication asks what the evidence establishes about each
+series, and where a boundary can be located it writes that boundary into
+`symbol_aliases.valid_to` with a citation. **Filtering on a cited, recorded
+interval is not filtering on a heuristic**, and that distinction is why these
+are two modules rather than one.
+
+The evidence, strongest first:
+
+| evidence | what it establishes | dates a boundary? |
+|---|---|---|
+| **no overlap** — no bar predates the registrant's exit era | the whole series is somebody else's | n/a: nothing survives |
+| **dormancy** — no vendor row at all for ≥ 180 days, then a substantial run | two occupants, and *where* they divide | **yes** |
+| **registry reuse** — `company_tickers.json` gives the plain ticker to a different CIK today | the symbol was re-issued | no |
+| **filed exit** — a confirmed dated exit in the EDGAR denominator | why the vendor lost the series | no, corroborates only |
+
+Dormancy is stronger than it looks: the vendor emits **zero-volume rows** for
+sessions in which a security did not trade — 19.7% of the corpus is such rows —
+so an absent row means an absent *security*, not a quiet one. The 180-day
+threshold is set far above any market closure: the longest in the modern US
+market is four sessions, which appears in this corpus as the seven-day hole
+after September 11th 2001 and **must never be read as a boundary**.
+
+Two rules exist because a first version got them wrong:
+
+* **The anchor is the *later* of the last filing and the filed exit, never the
+  earlier.** A registrant that filed until 2005 demonstrably existed until 2005
+  whatever a Form 25 from 2003 says, and anchoring on the Form 25 would licence
+  cutting away trading the company really did.
+* **Registry reuse is meaningless unless the series overruns.** Asking the
+  registry question of every series returned 36 securities as contaminated, and
+  **not one was among the 79** — every one was a vendor `_OLD` symbol, for which
+  "somebody else holds the plain ticker today" is true *by construction*. The
+  vendor had already separated them correctly. An answer arrived, and it was not
+  an answer to the question asked.
+
+Measured over all 862 priced securities:
+
+| verdict | securities |
+|---|---|
+| `coherent` — ends where the registrant did | 768 |
+| `splice_located` — dormancy, then a second company's run | 46 |
+| `tail_artefact` — dormancy, then a handful of stale prints | 7 |
+| `wholly_misattributed` — no bar in the registrant's lifetime at all | 6 |
+| `contaminated_boundary_unknown` — known wrong, **not repairable** | 1 |
+| `unresolved` — overruns, and no rule explains it | 34 |
+
+**58 of the 79 received a dated boundary**, placing **79,873 bars — 9.7% of the
+corpus — outside their security's interval.** The corpus's suspect count falls
+from 79 to 31.
+
+**Nothing was deleted.** The bars remain and the interval says which of them
+belong; discarding them would destroy the record of a defect that took three
+attempts to find. `price_series()` and `known_splits()` exclude them by default,
+and `include_disputed=True` returns them for an auditor checking the cut.
+
+**Bounding the bars alone was a half-fix.** Corporate actions were fetched under
+the same symbol as the prices, so a series holding two companies holds two
+companies' splits. With only the bars cut, `ASCX`'s $18.00 close in 2000 still
+read as **three trillion dollars** — the exact absurdity that set the
+investigation off, surviving the fix meant to end it. Actions are bounded by the
+same interval, and the close now reads $180.00 against a single 2001 reverse
+split that is genuinely the registrant's.
+
+**A located boundary is not a clean bill of health**, and 31 series still end
+more than seven years past their registrant: 21 that no rule could explain, and
+10 whose earliest qualifying dormancy was itself late. `coherent` says only that
+a series' *ending* does not betray a splice — one wholly inside the registrant's
+own lifetime would leave no trace in the shape at all.
 
 ### Point-in-time for a backfill, and the dependency it creates
 

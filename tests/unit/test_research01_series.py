@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from tradeit.research01 import (
     Coherence,
+    adjudicated_bound,
     known_splits,
     price_series,
     series_coherence,
@@ -28,10 +29,12 @@ from tradeit.storage.tables import (
     Security,
     SecurityCorporateActionFact,
     SecurityPriceFact,
+    SymbolAlias,
 )
 
 UTC = dt.UTC
 SPLIT_DAY = dt.date(2020, 8, 31)
+AS_OF = dt.datetime(2026, 9, 1, tzinfo=UTC)
 
 
 def _security(session: Session) -> Security:
@@ -234,3 +237,125 @@ class TestSeriesCoherence:
         )
         assert verdict is Coherence.SUSPECT_TICKER_REUSE
         assert gap is not None and gap > 24
+
+
+class TestAdjudicatedBound:
+    """A recorded boundary is honoured; an unrecorded suspicion is not.
+
+    The asymmetry with :class:`Coherence` above is the point of both. Coherence
+    is a shape and reports; an adjudicated bound is an established, cited fact
+    written into the alias interval, and reading the corpus as recorded is not
+    the same act as filtering on a hunch.
+    """
+
+    def _bound_series(self, session: Session, bound: dt.date | None) -> Security:
+        security = _security(session)
+        for day in (dt.date(2000, 1, 3), dt.date(2000, 1, 4), dt.date(2018, 1, 3)):
+            _bar(session, security.security_id, day, Decimal("10"))
+        session.add(
+            SymbolAlias(
+                security_id=security.security_id,
+                alias_kind="ticker",
+                alias_value="ZZZZ",
+                valid_from=dt.date(1990, 1, 1),
+                valid_to=bound,
+                knowledge_time=dt.datetime(2026, 1, 1, tzinfo=UTC),
+                knowledge_source="test",
+                source="test",
+            )
+        )
+        session.flush()
+        return security
+
+    def test_an_open_interval_returns_everything(self, db_session: Session) -> None:
+        security = self._bound_series(db_session, None)
+        bars = price_series(db_session, security.security_id, as_of=AS_OF)
+        assert len(bars) == 3
+        assert adjudicated_bound(db_session, security.security_id) is None
+
+    def test_a_closed_interval_excludes_bars_beyond_it(self, db_session: Session) -> None:
+        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        bars = price_series(db_session, security.security_id, as_of=AS_OF)
+        assert [b.session_date for b in bars] == [dt.date(2000, 1, 3), dt.date(2000, 1, 4)]
+
+    def test_the_bound_is_inclusive(self, db_session: Session) -> None:
+        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        bars = price_series(db_session, security.security_id, as_of=AS_OF)
+        assert bars[-1].session_date == dt.date(2000, 1, 4)
+
+    def test_include_disputed_returns_the_excluded_bars(self, db_session: Session) -> None:
+        """An auditor must be able to see what the cut removed."""
+        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        bars = price_series(db_session, security.security_id, as_of=AS_OF, include_disputed=True)
+        assert len(bars) == 3
+
+    def test_a_vendor_symbol_alias_does_not_bound_the_series(self, db_session: Session) -> None:
+        """Only the evidence-backed ``ticker`` kind carries an adjudicated claim.
+
+        A vendor span is the vendor's own bookkeeping about a symbol; treating
+        it as a boundary would let the vendor decide what our corpus believes.
+        """
+        security = _security(db_session)
+        _bar(db_session, security.security_id, dt.date(2018, 1, 3), Decimal("10"))
+        db_session.add(
+            SymbolAlias(
+                security_id=security.security_id,
+                alias_kind="vendor_symbol",
+                alias_value="ZZZZ",
+                valid_from=dt.date(1990, 1, 1),
+                valid_to=dt.date(2000, 1, 4),
+                knowledge_time=dt.datetime(2026, 1, 1, tzinfo=UTC),
+                knowledge_source="eodhd_symbol_span",
+                source="test",
+            )
+        )
+        db_session.flush()
+        assert adjudicated_bound(db_session, security.security_id) is None
+        assert len(price_series(db_session, security.security_id, as_of=AS_OF)) == 1
+
+    def test_the_earliest_close_wins_across_two_aliases(self, db_session: Session) -> None:
+        security = self._bound_series(db_session, dt.date(2018, 1, 3))
+        db_session.add(
+            SymbolAlias(
+                security_id=security.security_id,
+                alias_kind="ticker",
+                alias_value="YYYY",
+                valid_from=dt.date(1990, 1, 1),
+                valid_to=dt.date(2000, 1, 3),
+                knowledge_time=dt.datetime(2026, 1, 1, tzinfo=UTC),
+                knowledge_source="test",
+                source="test",
+            )
+        )
+        db_session.flush()
+        assert adjudicated_bound(db_session, security.security_id) == dt.date(2000, 1, 3)
+        assert len(price_series(db_session, security.security_id, as_of=AS_OF)) == 1
+
+    def test_a_split_after_the_bound_does_not_adjust_the_kept_bars(
+        self, db_session: Session
+    ) -> None:
+        """The half-fix that left ``ASCX``'s $18.00 reading as three trillion.
+
+        Corporate actions were fetched under the same symbol as the prices, so a
+        series holding two companies holds two companies' splits. Cutting only
+        the bars left the successor's six compounding reverse splits still
+        dividing the registrant's prices.
+        """
+        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        _split(db_session, security.security_id, dt.date(2006, 10, 13), Decimal("0.01"))
+        db_session.flush()
+        assert known_splits(db_session, security.security_id, as_of=AS_OF) == []
+        bars = price_series(db_session, security.security_id, as_of=AS_OF)
+        assert all(bar.split_factor == 1 for bar in bars)
+        assert bars[0].close == bars[0].raw_close
+
+    def test_include_disputed_restores_the_successors_splits_too(self, db_session: Session) -> None:
+        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        _split(db_session, security.security_id, dt.date(2006, 10, 13), Decimal("0.01"))
+        db_session.flush()
+        assert (
+            len(known_splits(db_session, security.security_id, as_of=AS_OF, include_disputed=True))
+            == 1
+        )
+        bars = price_series(db_session, security.security_id, as_of=AS_OF, include_disputed=True)
+        assert bars[0].split_factor == Decimal("0.01")
