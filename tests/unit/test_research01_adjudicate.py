@@ -15,10 +15,13 @@ import pytest
 from tradeit.research01.adjudicate import (
     DORMANCY_DAYS,
     MIN_SECOND_RUN,
+    REGIME_BREAK_THRESHOLD,
     Adjudication,
     BoundaryEvidence,
+    RegimeBreak,
     Verdict,
     adjudicate_series,
+    detect_regime_break,
 )
 
 D = dt.date
@@ -262,3 +265,113 @@ def test_coherent_is_not_a_certificate_that_the_series_is_clean() -> None:
     assert result.verdict is Verdict.COHERENT
     assert result.kept_bars == 400
     assert result.dropped_bars == 0
+
+
+class TestRegimeBreak:
+    """The last resort, for the shape that defeats every other rule.
+
+    A vendor that never stops emitting rows leaves no dormancy to find. What it
+    leaves instead is a series whose price level and traded volume both change
+    by a large factor at one date, with no split behind it.
+    """
+
+    def _bars(
+        self,
+        start: D,
+        count: int,
+        close: float,
+        volume: float,
+    ) -> list[tuple[D, float, float]]:
+        return [(start + dt.timedelta(days=i), close, volume) for i in range(count)]
+
+    def test_price_and_volume_must_BOTH_break(self) -> None:
+        """Taking the smaller of the two ratios is the whole design.
+
+        A penny stock's price triples routinely and a thin quote's volume goes
+        from nothing to something all the time. Either alone establishes nothing.
+        """
+        price_only = self._bars(D(2000, 1, 3), 80, 0.05, 1000) + self._bars(
+            D(2000, 3, 23), 80, 50.0, 1000
+        )
+        volume_only = self._bars(D(2000, 1, 3), 80, 1.0, 1) + self._bars(
+            D(2000, 3, 23), 80, 1.0, 100_000
+        )
+        assert detect_regime_break(price_only, after=D(2000, 1, 3)) is None
+        assert detect_regime_break(volume_only, after=D(2000, 1, 3)) is None
+
+    def test_both_breaking_together_is_found(self) -> None:
+        bars = self._bars(D(2000, 1, 3), 80, 0.05, 0) + self._bars(
+            D(2000, 3, 23), 80, 8.93, 130_000
+        )
+        found = detect_regime_break(bars, after=D(2000, 1, 3))
+        assert found is not None
+        assert found.session_date == D(2000, 3, 23)
+        assert found.score >= REGIME_BREAK_THRESHOLD
+
+    def test_a_break_beside_a_split_is_the_split(self) -> None:
+        bars = self._bars(D(2000, 1, 3), 80, 0.05, 0) + self._bars(
+            D(2000, 3, 23), 80, 8.93, 130_000
+        )
+        assert (
+            detect_regime_break(bars, after=D(2000, 1, 3), split_ex_dates=[D(2000, 3, 25)]) is None
+        )
+
+    def test_the_anchor_itself_is_a_candidate(self) -> None:
+        """A ticker that changed hands the moment its registrant went quiet
+        leaves no break *inside* the later run: the break is at the anchor."""
+        bars = self._bars(D(2000, 1, 3), 80, 0.05, 0) + self._bars(
+            D(2000, 3, 23), 80, 8.93, 130_000
+        )
+        found = detect_regime_break(bars, after=D(2000, 3, 23))
+        assert found is not None and found.session_date == D(2000, 3, 23)
+
+    def test_a_break_before_the_anchor_is_not_considered(self) -> None:
+        bars = self._bars(D(2000, 1, 3), 80, 0.05, 0) + self._bars(
+            D(2000, 3, 23), 80, 8.93, 130_000
+        )
+        assert detect_regime_break(bars, after=D(2001, 1, 1)) is None
+
+    def test_a_series_shorter_than_two_windows_yields_nothing(self) -> None:
+        assert detect_regime_break(self._bars(D(2000, 1, 3), 40, 1.0, 10), after=None) is None
+
+    def test_the_verdict_cuts_at_the_last_session_of_the_old_regime(self) -> None:
+        sessions = _run(D(2000, 1, 3), 80) + _run(D(2000, 3, 23), 80)
+        result = adjudicate_series(
+            sessions=sessions,
+            last_filing=D(1999, 3, 1),
+            regime_break=RegimeBreak(D(2000, 3, 23), 178.6, 0.05, 8.93, 0, 130_000),
+        )
+        assert result.verdict is Verdict.REGIME_BREAK
+        assert result.boundary == D(2000, 1, 3) + dt.timedelta(days=79)
+        assert result.kept_bars == 80
+        assert result.dropped_bars == 80
+        assert result.is_actionable
+
+    def test_dormancy_outranks_a_regime_break(self) -> None:
+        """Dormancy is direct evidence of absence; a regime break is inference
+        from behaviour. Where both are present the stronger one decides."""
+        era = _run(D(1999, 1, 4), 300)
+        later = _run(D(2016, 1, 4), 500)
+        result = adjudicate_series(
+            sessions=era + later,
+            last_filing=D(2000, 2, 1),
+            regime_break=RegimeBreak(later[100], 200.0, 1, 100, 0, 100),
+        )
+        assert result.verdict is Verdict.SPLICE_LOCATED
+        assert result.boundary == era[-1]
+
+    def test_a_break_at_or_before_the_anchor_is_refused_by_the_verdict(self) -> None:
+        sessions = _run(D(2000, 1, 3), 900)
+        result = adjudicate_series(
+            sessions=sessions,
+            last_filing=D(2000, 4, 1),
+            regime_break=RegimeBreak(D(2000, 3, 23), 178.6, 0.05, 8.93, 0, 130_000),
+        )
+        assert result.verdict is not Verdict.REGIME_BREAK
+
+    def test_the_verdict_is_not_called_a_splice(self) -> None:
+        """The cause may be a ticker changing hands -- or the vendor stitching
+        two sources, or re-denominating a quote. The evidence supports "not the
+        same tradable thing", and naming it a splice would claim more."""
+        assert Verdict.REGIME_BREAK.value == "regime_break"
+        assert "splice" not in Verdict.REGIME_BREAK.value

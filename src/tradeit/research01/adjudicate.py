@@ -50,6 +50,14 @@ The evidence, strongest first
     It never supplies the boundary by itself -- a company can be delisted and go
     on trading over the counter, which is precisely the case this must not cut.
 
+``REGIME_BREAK``
+    The price level and the traded volume both change by a large factor at one
+    session boundary, with no split to explain it. What lies either side is not
+    the same tradable thing. This is the last resort and the only rule that can
+    reach a series with **no dormancy at all** -- the shape that defeated every
+    other rule, because a vendor that never stops emitting rows leaves no hole
+    to find.
+
 **Absence of evidence closes nothing.** A series whose overrun no rule explains
 returns ``UNRESOLVED`` and is left exactly as it is. That is a real answer here
 in the same way ``UNRESOLVED`` is a real answer in the identity layer.
@@ -59,15 +67,17 @@ from __future__ import annotations
 
 import datetime as dt
 import itertools
-from collections.abc import Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 __all__ = [
     "Adjudication",
     "BoundaryEvidence",
+    "RegimeBreak",
     "Verdict",
     "adjudicate_series",
+    "detect_regime_break",
 ]
 
 
@@ -76,6 +86,7 @@ class BoundaryEvidence(StrEnum):
 
     NO_OVERLAP = "no_overlap"
     DORMANCY = "dormancy"
+    REGIME_BREAK = "regime_break"
     REGISTRY_REUSE = "registry_reuse"
     FILED_EXIT = "filed_exit"
 
@@ -97,6 +108,13 @@ class Verdict(StrEnum):
     #: A dormancy separates the registrant's era from a handful of prints.
     #: Same cut, different conclusion: a few stale rows, not a second company.
     TAIL_ARTEFACT = "tail_artefact"
+    #: Price level and traded volume both break by a large factor at one date,
+    #: with no split behind it. Deliberately **not** called a splice: the cause
+    #: may be a ticker changing hands, but it may equally be the vendor stitching
+    #: two sources or re-denominating a quote. What the evidence supports is that
+    #: the two sides are not the same tradable thing -- which is what the cut
+    #: needs -- and not a claim about which company each side is.
+    REGIME_BREAK = "regime_break"
     #: Another registrant demonstrably holds the symbol, but nothing dates the
     #: handover. The series is known to be wrong and cannot be repaired, which
     #: is worse than either of the located cases and is named separately so it
@@ -118,10 +136,145 @@ DORMANCY_DAYS = 180
 #: than a second company's trading history.
 MIN_SECOND_RUN = 20
 
+#: Sessions either side of a candidate break whose medians are compared. Three
+#: months: long enough that one bad print cannot move a median, short enough to
+#: place the break rather than smear it across a year.
+REGIME_WINDOW = 60
+
+#: How large the smaller of the two ratios -- price level, traded volume -- must
+#: be before a break is called.
+#:
+#: **Chosen from a null test, not from taste.** Run inside each registrant's own
+#: lifetime, where one company is there by construction, the detector scores at
+#: most 49.6 across all 768 coherent series in the corpus: 9.6% of them reach 3,
+#: 1.8% reach 5, one reaches 25, and **none reaches 50**. Fifty is the smallest
+#: round threshold with no false positive in that population. Nought out of 768
+#: bounds the false-positive rate below roughly 0.4% -- it does not establish
+#: zero, and this comment exists so nobody later reads it as though it did.
+REGIME_BREAK_THRESHOLD = 50.0
+
+#: A split changes price and volume by design, so a break within a few sessions
+#: of one is the corporate action and not a handover.
+REGIME_SPLIT_EXCLUSION_DAYS = 5
+
 #: How long after the anchor a resumption must fall before it can be read as a
 #: different occupant. A vendor coverage hole that merely straddles the last
 #: filing and resumes months later is a hole, not a handover.
 RESUMPTION_GRACE_DAYS = 365
+
+
+@dataclass(frozen=True, slots=True)
+class RegimeBreak:
+    """One session boundary at which the series stops being the same thing.
+
+    ``score`` is the **smaller** of the price-level ratio and the volume ratio,
+    and taking the smaller is the whole design. A penny stock's price triples
+    routinely and an illiquid quote's volume jumps from nothing to something all
+    the time; a series where *both* move by fifty times at one date is not one
+    security behaving oddly. Requiring the weaker of the two to clear the bar
+    means a large move in either alone establishes nothing.
+    """
+
+    session_date: dt.date
+    score: float
+    median_close_before: float
+    median_close_after: float
+    median_volume_before: float
+    median_volume_after: float
+
+    @property
+    def summary(self) -> str:
+        return (
+            f"price level {self.median_close_before:g} -> {self.median_close_after:g} and "
+            f"volume {self.median_volume_before:g} -> {self.median_volume_after:g} "
+            f"across {self.session_date} (score {self.score:.1f}, no split within "
+            f"{REGIME_SPLIT_EXCLUSION_DAYS} days)"
+        )
+
+
+def _ratio(before: float, after: float) -> float:
+    return max(after / before, before / after) if before > 0 and after > 0 else 0.0
+
+
+def detect_regime_break(
+    bars: Sequence[tuple[dt.date, float, float]],
+    *,
+    after: dt.date | None,
+    split_ex_dates: Collection[dt.date] = (),
+    window: int = REGIME_WINDOW,
+    threshold: float = REGIME_BREAK_THRESHOLD,
+) -> RegimeBreak | None:
+    """The strongest level-and-liquidity break at or after ``after``, if any.
+
+    ``bars`` are ``(session_date, close, volume)`` in date order, closes
+    positive. Medians are used rather than means throughout: one erroneous print
+    in a thin series moves a mean and does not move a median, and these are the
+    thinnest series in the corpus.
+
+    Candidates start at ``after`` itself, because a ticker that changed hands the
+    moment its registrant went quiet leaves no break *inside* the later run to
+    find -- the break is at the anchor. Restricting the scan to interior points
+    would miss exactly the cleanest case.
+    """
+    if len(bars) < 2 * window:
+        return None
+    excluded = dt.timedelta(days=REGIME_SPLIT_EXCLUSION_DAYS)
+    scored: list[tuple[float, int]] = []
+    for index in range(window, len(bars) - window + 1):
+        if after is not None and bars[index][0] < after:
+            continue
+        before = bars[index - window : index]
+        following = bars[index : index + window]
+        close_ratio = _ratio(_median(b[1] for b in before), _median(b[1] for b in following))
+        # Volumes are legitimately zero, so the ratio is taken on 1 + volume:
+        # nothing-to-something is a real regime change and must not divide by
+        # zero, while 0 -> 1 share must not read as infinite.
+        volume_ratio = _ratio(
+            1 + _median(b[2] for b in before), 1 + _median(b[2] for b in following)
+        )
+        scored.append((min(close_ratio, volume_ratio), index))
+    if not scored:
+        return None
+    best_score = max(score for score, _ in scored)
+    if best_score < threshold:
+        return None
+
+    # **Windows detect; the adjacent bar locates.** A median over a window that
+    # straddles a step keeps returning the majority side, so every candidate
+    # from half a window before the break to half a window after it scores
+    # identically. Taking the first of that plateau cuts up to sixty sessions
+    # early and the last cuts them late; the discontinuity itself is the only
+    # thing in the plateau that says where the break actually is.
+    plateau = [index for score, index in scored if score >= best_score]
+    index = max(plateau, key=lambda i: _ratio(bars[i - 1][1], bars[i][1]))
+
+    # A split anywhere in the plateau explains the whole step, so the break is
+    # refused outright rather than relocated to the plateau's edge -- which is
+    # what relocating would amount to.
+    span_lo, span_hi = bars[min(plateau)][0], bars[max(plateau)][0]
+    if any(span_lo - excluded <= ex <= span_hi + excluded for ex in split_ex_dates):
+        return None
+
+    before = bars[index - window : index]
+    following = bars[index : index + window]
+    return RegimeBreak(
+        session_date=bars[index][0],
+        score=best_score,
+        median_close_before=_median(b[1] for b in before),
+        median_close_after=_median(b[1] for b in following),
+        median_volume_before=_median(b[2] for b in before),
+        median_volume_after=_median(b[2] for b in following),
+    )
+
+
+def _median(values: Iterable[float]) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +308,7 @@ class Adjudication:
             Verdict.WHOLLY_MISATTRIBUTED,
             Verdict.SPLICE_LOCATED,
             Verdict.TAIL_ARTEFACT,
+            Verdict.REGIME_BREAK,
         }
 
 
@@ -177,6 +331,7 @@ def adjudicate_series(
     filed_exit: dt.date | None = None,
     registrant_cik: int | None = None,
     current_holder_cik: int | None = None,
+    regime_break: RegimeBreak | None = None,
     dormancy_days: int = DORMANCY_DAYS,
     min_second_run: int = MIN_SECOND_RUN,
 ) -> Adjudication:
@@ -261,7 +416,22 @@ def adjudicate_series(
             ),
         )
 
-    # 4. A reused symbol with no structural break: known wrong, not repairable.
+    # 4. No hole to find, because the vendor never stopped emitting rows. Ask
+    #    instead whether what it emitted stayed the same thing.
+    if regime_break is not None and regime_break.session_date > anchor:
+        successor = [d for d in ordered if d >= regime_break.session_date]
+        registrant = [d for d in ordered if d < regime_break.session_date]
+        if registrant and successor:
+            return Adjudication(
+                Verdict.REGIME_BREAK,
+                registrant[-1],
+                evidence=(BoundaryEvidence.REGIME_BREAK, *corroboration),
+                kept_bars=len(registrant),
+                dropped_bars=len(successor),
+                note=regime_break.summary,
+            )
+
+    # 5. A reused symbol with no structural break: known wrong, not repairable.
     if reused:
         return Adjudication(
             Verdict.CONTAMINATED_BOUNDARY_UNKNOWN,

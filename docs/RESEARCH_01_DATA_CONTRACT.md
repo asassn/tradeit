@@ -219,6 +219,7 @@ The evidence, strongest first:
 | **dormancy** — no vendor row at all for ≥ 180 days, then a substantial run | two occupants, and *where* they divide | **yes** |
 | **registry reuse** — `company_tickers.json` gives the plain ticker to a different CIK today | the symbol was re-issued | no |
 | **filed exit** — a confirmed dated exit in the EDGAR denominator | why the vendor lost the series | no, corroborates only |
+| **regime break** — price level *and* traded volume both break by ≥50× at one date, no split behind it | the two sides are not the same tradable thing | **yes** |
 
 Dormancy is stronger than it looks: the vendor emits **zero-volume rows** for
 sessions in which a security did not trade — 19.7% of the corpus is such rows —
@@ -240,6 +241,53 @@ Two rules exist because a first version got them wrong:
   vendor had already separated them correctly. An answer arrived, and it was not
   an answer to the question asked.
 
+#### The regime break, for series with no hole to find
+
+Twenty-one of the 79 had **no dormancy at all**: an unbroken daily series
+running 11–25 years past the registrant. Three explanations were tested against
+the data and two were refuted.
+
+**Refuted — a flatlined quote.** If the vendor were padding a dead symbol with
+stale rows, the tail would be zero-volume. Measured: 30 of the 35 residual
+series trade with real volume right up to their final bar. They are not
+carcasses.
+
+**Refuted as a discriminator — the exit type.** A registration termination or an
+exchange delisting might have been expected to separate "went dark and kept
+trading" from "ceased to exist". It does not, and `lifecycle.py` says why in its
+own words: *a delisted security can keep trading and a deregistered issuer can
+keep existing*. Even the derived `CONFIRMED_SECURITY_EXTINGUISHED` is delisting
+**and** deregistration, neither of which stops a Grey Market quote. The exit
+type is consistent with an overrun in every case, so it discriminates nothing.
+
+**What does work.** At the true boundary the **price level and the traded volume
+both change by a large factor** with no split behind it. `BWN` runs at $0.05
+with no volume and becomes $8.93 on 130,000 shares a day; `ZIPL` goes from
+$2.33 on 25,000 shares to half a cent on none. Taking the **smaller** of the two
+ratios is the whole design: a penny stock triples routinely and a thin quote's
+volume goes from nothing to something all the time, so either alone establishes
+nothing.
+
+**The threshold of 50× comes from a null test, not from taste.** Run inside each
+registrant's *own lifetime* — where one company is present by construction —
+the detector scores at most 49.6 across all 768 coherent series: 9.6% reach 3,
+1.8% reach 5, one reaches 25, and **none reaches 50**. Nought out of 768 bounds
+the false-positive rate below roughly 0.4%; it does not establish zero.
+
+Two details that took a wrong answer to find. A median over a window straddling
+a step keeps returning the majority side, so **every** candidate within half a
+window either side scores identically — windows detect, and the adjacent bar's
+own discontinuity locates. And the detector must be given the sessions with
+positive closes while **dormancy is given every session the vendor emitted**:
+filtering zero closes out of the dormancy input manufactured a hole, and with it
+a boundary, in one series.
+
+The verdict is deliberately **not** called a splice. The cause may be a ticker
+changing hands; it may equally be the vendor stitching two sources or
+re-denominating a quote. What the evidence supports is that the two sides are
+not the same tradable thing — which is what the cut needs — and not a claim
+about which company each side is.
+
 Measured over all 862 priced securities:
 
 | verdict | securities |
@@ -248,12 +296,17 @@ Measured over all 862 priced securities:
 | `splice_located` — dormancy, then a second company's run | 46 |
 | `tail_artefact` — dormancy, then a handful of stale prints | 7 |
 | `wholly_misattributed` — no bar in the registrant's lifetime at all | 6 |
+| `regime_break` — level and liquidity both break, no split | 5 |
 | `contaminated_boundary_unknown` — known wrong, **not repairable** | 1 |
-| `unresolved` — overruns, and no rule explains it | 34 |
+| `unresolved` — overruns, and no rule explains it | 29 |
 
-**58 of the 79 received a dated boundary**, placing **79,873 bars — 9.7% of the
+**63 of the 79 received a dated boundary**, placing **91,231 bars — 11.0% of the
 corpus — outside their security's interval.** The corpus's suspect count falls
-from 79 to 31.
+from 79 to 28.
+
+`ZIPL` is the worked example: 390 bars kept, running $12.38 in May 1999 to one
+cent in August 2001 — a dot-com dying exactly as one should — and **4,370 bars
+dropped**, belonging to whoever held the symbol through 2025.
 
 **Nothing was deleted.** The bars remain and the interval says which of them
 belong; discarding them would destroy the record of a defect that took three
@@ -268,9 +321,16 @@ investigation off, surviving the fix meant to end it. Actions are bounded by the
 same interval, and the close now reads $180.00 against a single 2001 reverse
 split that is genuinely the registrant's.
 
-**A located boundary is not a clean bill of health**, and 31 series still end
-more than seven years past their registrant: 21 that no rule could explain, and
-10 whose earliest qualifying dormancy was itself late. `coherent` says only that
+**A located boundary is not a clean bill of health**, and 28 series still end
+more than seven years past their registrant: 16 that no rule could explain, and
+12 whose located boundary was itself late — `BWN`'s cut in 2016 removes another
+company's run and leaves fifteen years of unexplained quiet quote behind it.
+
+**The remaining 16 need evidence this repository does not hold.** The route is to
+search EDGAR for whichever registrant later bound each ticker in its own filing
+text — the machinery that built these identities in the first place — and that
+needs `EDGAR_USER_AGENT`, which `acquire.py` refuses to default because a
+contact address in source is both a leak and wrong for whoever runs it next. `coherent` says only that
 a series' *ending* does not betray a splice — one wholly inside the registrant's
 own lifetime would leave no trace in the shape at all.
 

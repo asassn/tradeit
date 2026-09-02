@@ -37,11 +37,17 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.edgar.index import IndexQuarter
 from tradeit.edgar.pipeline import BuildOptions, build_denominator
-from tradeit.research01.adjudicate import Adjudication, Verdict, adjudicate_series
+from tradeit.research01.adjudicate import (
+    Adjudication,
+    Verdict,
+    adjudicate_series,
+    detect_regime_break,
+)
 from tradeit.research01.confirm import comparison_form
 from tradeit.storage.tables import (
     IssuerIdentifier,
     Security,
+    SecurityCorporateActionFact,
     SecurityPriceFact,
     SymbolAlias,
 )
@@ -151,23 +157,51 @@ def main() -> int:
 
     results: list[tuple[int, int, str | None, Adjudication]] = []
     for security_id, cik, ticker in _corpus(session):
-        sessions = list(
+        rows = session.execute(
+            select(
+                SecurityPriceFact.session_date,
+                SecurityPriceFact.close,
+                SecurityPriceFact.volume,
+            )
+            .where(
+                SecurityPriceFact.security_id == security_id,
+                SecurityPriceFact.adjustment_basis == "raw",
+            )
+            .distinct()
+            .order_by(SecurityPriceFact.session_date)
+        ).all()
+        # Dormancy asks whether the vendor emitted a row at all, so it must see
+        # EVERY session -- dropping a zero or absent close here would manufacture
+        # a hole and with it a boundary. The regime detector needs positive
+        # closes to take a ratio, and gets its own narrower list.
+        sessions = [row[0] for row in rows]
+        bars = [(d, float(c), float(v or 0)) for d, c, v in rows if c is not None and float(c) > 0]
+        anchor = last_seen.get(cik)
+        exit_date = exits.get(cik)
+        if anchor and exit_date:
+            anchor = max(anchor, exit_date)
+        elif exit_date:
+            anchor = exit_date
+        splits = list(
             session.scalars(
-                select(SecurityPriceFact.session_date)
-                .where(
-                    SecurityPriceFact.security_id == security_id,
-                    SecurityPriceFact.adjustment_basis == "raw",
+                select(SecurityCorporateActionFact.ex_date).where(
+                    SecurityCorporateActionFact.security_id == security_id,
+                    SecurityCorporateActionFact.action_type.in_(("split", "reverse_split")),
                 )
-                .distinct()
             ).all()
         )
         plain = comparison_form(ticker) if ticker else ""
         verdict = adjudicate_series(
             sessions=sessions,
             last_filing=last_seen.get(cik),
-            filed_exit=exits.get(cik),
+            filed_exit=exit_date,
             registrant_cik=cik,
             current_holder_cik=holders.get(plain),
+            regime_break=detect_regime_break(
+                bars,
+                after=anchor,
+                split_ex_dates=[d for d in splits if d is not None],
+            ),
         )
         results.append((security_id, cik, ticker, verdict))
 
@@ -178,8 +212,10 @@ def main() -> int:
 
     actionable = [r for r in results if r[3].is_actionable]
     dropped = sum(r[3].dropped_bars for r in actionable)
-    print(f"\nboundaries located: {len(actionable)}   bars they place outside the "
-          f"security's interval: {dropped:,}")
+    print(
+        f"\nboundaries located: {len(actionable)}   bars they place outside the "
+        f"security's interval: {dropped:,}"
+    )
 
     print("\n=== every located boundary ===")
     for security_id, cik, ticker, verdict in sorted(actionable, key=lambda r: -r[3].dropped_bars):

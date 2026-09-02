@@ -11,8 +11,10 @@ from tradeit.research01.actions import VendorAction, import_corporate_actions
 from tradeit.research01.adjudicate import (
     Adjudication,
     BoundaryEvidence,
+    RegimeBreak,
     Verdict,
     adjudicate_series,
+    detect_regime_break,
 )
 from tradeit.research01.backfill import (
     BackfillPlan,
@@ -99,6 +101,7 @@ __all__ = [
     "KnowledgeTimeBasis",
     "NotEstablished",
     "ReconciliationReport",
+    "RegimeBreak",
     "RejectReason",
     "RejectedBar",
     "Resolution",
@@ -114,6 +117,7 @@ __all__ = [
     "candidate_symbols",
     "confirm_ticker",
     "derive_vendor_aliases",
+    "detect_regime_break",
     "import_corporate_actions",
     "import_filings",
     "import_filings_from_index",
