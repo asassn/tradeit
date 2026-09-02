@@ -18,6 +18,15 @@ never summed into or confused with the consolidated figure of the same name.
 Flattening them would silently double-count exactly the headline metrics
 everything downstream reads.
 
+**Where the free fundamentals actually begin, measured rather than assumed.**
+The Data Sets are described as starting in 2009, and they do not. ``2009q1.zip``
+holds a header row and nothing else -- 223 bytes, zero submissions -- and the
+XBRL mandate phased in by filer size after it: 22 filings in 2009Q2, 435 in
+2009Q3, 1,412 in 2010Q3, and **7,102 in 2011Q3** where it settles. Anything
+cross-sectional before 2011Q3 is therefore a sample of *large accelerated
+filers*, not of the market, and a screen run on it would be measuring company
+size. Recorded here because the number a reader reaches for is "2009".
+
 **A known and recorded modelling gap.** Fundamentals are an *issuer's* facts —
 revenue belongs to a company, not to a share class — while this table keys on
 ``security_id``. Each seeded issuer currently holds exactly one security, so the
@@ -177,6 +186,17 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
             resolved[adsh] = (None, f"no issuer carries sec_cik:{sub.cik}")
             continue
         resolved[adsh] = _security_for_issuer(session, issuer_id)
+
+    if not any(security_id is not None for security_id, _ in resolved.values()):
+        # Not one filing in this quarter belongs to an issuer we hold, so every
+        # number in it would be skipped one at a time. `facts` is a lazy
+        # iterator and returning before it is touched leaves num.txt unread --
+        # half a gigabyte of CSV per quarter that nothing would have used.
+        for adsh, (_security_id, why) in resolved.items():
+            result.rejected.append(
+                RejectedBar(None, RejectReason.NO_ISSUER, f"sec_cik:{submissions[adsh].cik}", why)
+            )
+        return result
 
     # accession -> filing_id, for the filings we actually hold. The FSDS `adsh`
     # IS the accession the full-index reports, so this is a join on the SEC's
