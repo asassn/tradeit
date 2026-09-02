@@ -31,6 +31,22 @@ AK = (
     "our Common Stock became listed and began trading on the "
     'New York Stock Exchange under the symbol "AK"'
 )
+# Xplore Technologies Corp, 0001104659-07-061307, filed 2007-08-10. The symbol
+# is XPL; TSX is the Toronto Stock Exchange. Kept verbatim because the whole
+# point is that this reads like a binding sentence and is not one.
+XPLORE = (
+    "Xplore, whose common shares are listed for trading on the Toronto Stock "
+    "Exchange under the symbol TSX: XPL, has offices in Austin Texas and "
+    "Helsinki Finland"
+)
+# Silvermex Resources Inc, 0001062993-11-001823, filed 2011-05-03. The same
+# defect wearing a hyphen: the first fix refused `TSX:` and let `TSX-V:`
+# straight through, because the capture stops at the word boundary.
+SILVERMEX = (
+    "The Company's Common Shares were traded on the TSX Venture Exchange from "
+    "February 29, 1980 to January 20, 2008 under the symbol TSX-V: GGC and "
+    "began trading on the Toronto Stock Exchange on January 21, 2008"
+)
 
 
 def _extract(*statements: str, cells: tuple[str, ...] = ()) -> EvidenceExtract:
@@ -48,6 +64,54 @@ class TestExtractionIsBoundNotBroad:
     )
     def test_only_the_bound_symbol_is_extracted(self, sentence: str, expected: set[str]) -> None:
         assert candidate_symbols(_extract(sentence)) == expected
+
+    @pytest.mark.parametrize("sentence", [XPLORE, SILVERMEX])
+    def test_a_venue_qualified_symbol_does_not_bind_the_venue(self, sentence: str) -> None:
+        """`symbol TSX: XPL` and `symbol TSX-V: GGC` bind XPL and GGC.
+
+        Asked whether this filing bound ``TSX``, the pattern said yes, and a
+        successor search was one step from cutting seventeen years off a series
+        on the strength of it. Caught by reading the citation rather than
+        counting the hit. Twice: the first fix caught the colon form and let
+        the hyphenated one straight through.
+        """
+        assert "TSX" not in candidate_symbols(_extract(sentence))
+
+    def test_the_qualified_form_is_refused_rather_than_parsed(self) -> None:
+        """Returning nothing is the answer that cannot be wrong.
+
+        Capturing ``XPL`` out of it would be more useful and is a wider change
+        than a defect of this shape warrants.
+        """
+        assert candidate_symbols(_extract(XPLORE)) == set()
+
+    def test_the_venue_qualified_ticker_is_not_confirmed(self) -> None:
+        assert (
+            confirm_ticker(
+                ticker="TSX",
+                cik=1177845,
+                accession="0001104659-07-061307",
+                extract=_extract(XPLORE),
+            )
+            is None
+        )
+
+    def test_an_ordinary_binding_still_works_beside_a_colon(self) -> None:
+        """The lookahead must refuse `symbol X: Y` without refusing `symbol: X`."""
+        assert candidate_symbols(_extract("trading symbol: AAPL")) == {"AAPL"}
+        assert candidate_symbols(_extract("under the symbol XPL on the TSX")) == {"XPL"}
+
+    def test_a_colon_introducing_prose_still_binds(self) -> None:
+        """The text is upper-cased before matching, so without the stopword
+        narrowing "the" and a ticker are indistinguishable to the lookahead."""
+        assert candidate_symbols(_extract("under the symbol ABC: the shares are quoted daily")) == {
+            "ABC"
+        }
+
+    def test_the_stopword_alternation_is_word_bounded(self) -> None:
+        """Without `\\b`, `A` matches the start of `ABC` and the refusal
+        quietly stops working for every ticker beginning with a stopword."""
+        assert candidate_symbols(_extract("under the symbol TSX: ABC")) == set()
 
     def test_the_possessive_s_that_broke_the_first_version_is_not_a_symbol(self) -> None:
         """`Company's` -> `S`. A whole-sentence scan returned it alongside the

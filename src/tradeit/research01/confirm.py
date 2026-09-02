@@ -40,8 +40,39 @@ from tradeit.edgar.identity import MappingEvidence
 
 __all__ = ["Confirmation", "candidate_symbols", "confirm_ticker"]
 
+#: Words that can follow "symbol" without being one -- "symbol for", "symbol
+#: on the New York Stock Exchange". Short now, and short *because* extraction is
+#: precise: the long list this replaced was compensating for a regex that read
+#: whole sentences.
+_STOPWORDS = frozenset({"THE", "FOR", "ON", "OF", "AND", "IN", "AT", "IS", "A", "AN", "OUR", "ITS"})
+
+
 #: How a filing actually binds a symbol: the word "symbol" (or "ticker"), then
 #: optional punctuation and quoting, then the symbol itself.
+#:
+#: **The trailing lookahead refuses a venue-qualified form, and it is there
+#: because this returned a wrong answer on two real filings.** Xplore
+#: Technologies wrote "listed for trading on the Toronto Stock Exchange under
+#: the symbol TSX: XPL"; Silvermex Resources wrote "under the symbol TSX-V:
+#: GGC". In both the symbol is the half after the colon and ``TSX`` is the
+#: exchange. Asked whether either filing bound ``TSX``, the pattern said yes,
+#: and a successor search was one step from cutting seventeen years off a series
+#: on the strength of it.
+#:
+#: The first attempt at this refused only ``TSX:`` and let ``TSX-V:`` straight
+#: through, because the capture stops at the word boundary before the hyphen --
+#: so the lookahead skips a bounded run of venue characters before demanding the
+#: colon. A token followed by *any* venue tail and a colon and another symbol is
+#: the venue half of ``VENUE: TICKER``, and never the ticker.
+#:
+#: The refusal is narrowed by ``_STOPWORDS`` so that a colon introducing
+#: ordinary prose -- "under the symbol ABC: the shares are ..." -- still binds
+#: ``ABC``. The whole text is upper-cased before matching, so without that
+#: narrowing "the" and "TICKER" are indistinguishable to the lookahead.
+#:
+#: The qualified form is **refused rather than parsed**. Capturing ``XPL`` from
+#: it would be more useful and is a wider change than a defect of this shape
+#: warrants; returning nothing is the answer that cannot be wrong.
 #:
 #: **Extracting the bound token rather than every capitalised word in the
 #: sentence** is what makes this usable. A whole-sentence scan of
@@ -53,14 +84,11 @@ __all__ = ["Confirmation", "candidate_symbols", "confirm_ticker"]
 _BOUND_SYMBOL = re.compile(
     r"(?:TICKER\s+)?SYMBOLS?\s*[:\-,]?\s*"
     r"[\"\u201c\u2018']?\s*([A-Z]{1,6}(?:\.[A-Z]{1,2})?)\b"
+    # The stopword alternation needs \b or `A` matches the start of `ABC` and
+    # the refusal quietly stops working for every ticker beginning with a
+    # stopword's first letters.
+    rf"(?!\s*[-.A-Z0-9]{{0,8}}\s*:\s*(?!(?:{'|'.join(sorted(_STOPWORDS))})\b)[A-Z])"
 )
-
-
-#: Words that can follow "symbol" without being one -- "symbol for", "symbol
-#: on the New York Stock Exchange". Short now, and short *because* extraction is
-#: precise: the long list this replaced was compensating for a regex that read
-#: whole sentences.
-_STOPWORDS = frozenset({"THE", "FOR", "ON", "OF", "AND", "IN", "AT", "IS", "A", "AN", "OUR", "ITS"})
 
 
 #: EODHD disambiguates a reused ticker two ways: ``ABTC_old``, ``AVIR_old1``

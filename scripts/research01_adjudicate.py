@@ -41,6 +41,7 @@ from tradeit.research01.adjudicate import (
     Adjudication,
     Verdict,
     adjudicate_series,
+    close_alias_interval,
     detect_regime_break,
 )
 from tradeit.research01.confirm import comparison_form
@@ -270,13 +271,12 @@ def _apply(
     last_seen: dict[int, dt.date],
     as_of: dt.date,
 ) -> int:
-    """Close each located interval, keeping the binding citation intact.
+    """Close each located interval, citing how the boundary was reached.
 
-    The boundary evidence is **appended** to the citation rather than replacing
-    it. The original clause is the filing sentence that bound this symbol to
-    this registrant and is still true; what has changed is that we now know when
-    it stopped being true. Overwriting it would destroy the provenance of the
-    binding to record the provenance of its end.
+    The refusals -- never widen an existing close, never write an empty
+    interval, never replace a citation -- live in ``close_alias_interval``
+    beside the rules, because the successor search writes boundaries too and
+    two copies would be two places for them to be forgotten.
     """
     written = 0
     for security_id, cik, _ticker, verdict in actionable:
@@ -285,24 +285,14 @@ def _apply(
         boundary = verdict.boundary or last_seen.get(cik)
         if boundary is None:
             continue
-        for alias in session.scalars(
-            select(SymbolAlias).where(
-                SymbolAlias.security_id == security_id,
-                SymbolAlias.alias_kind == "ticker",
-            )
-        ).all():
-            if alias.valid_to is not None and alias.valid_to <= boundary:
-                continue
-            if boundary <= alias.valid_from:
-                continue
-            alias.valid_to = boundary
-            alias.citation = (
-                f"{alias.citation} | interval closed {boundary} on {as_of} by "
-                f"research01.adjudicate ({verdict.verdict.value}; "
-                f"evidence {'+'.join(e.value for e in verdict.evidence)}): "
-                f"{verdict.note}"
-            )
-            written += 1
+        written += close_alias_interval(
+            session,
+            security_id,
+            boundary,
+            f"interval closed {boundary} on {as_of} by research01.adjudicate "
+            f"({verdict.verdict.value}; evidence "
+            f"{'+'.join(e.value for e in verdict.evidence)}): {verdict.note}",
+        )
     return written
 
 

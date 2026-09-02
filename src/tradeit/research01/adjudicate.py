@@ -71,12 +71,18 @@ from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from tradeit.storage.tables import SymbolAlias
+
 __all__ = [
     "Adjudication",
     "BoundaryEvidence",
     "RegimeBreak",
     "Verdict",
     "adjudicate_series",
+    "close_alias_interval",
     "detect_regime_break",
 ]
 
@@ -455,3 +461,43 @@ def adjudicate_series(
             f"with no dormancy of {dormancy_days} days or more to separate two occupants"
         ),
     )
+
+
+def close_alias_interval(
+    session: Session, security_id: int, boundary: dt.date, citation: str
+) -> int:
+    """Close this security's ticker intervals at ``boundary``. Returns how many moved.
+
+    **The writer lives beside the rules rather than in a script** because two
+    scripts now record boundaries -- the structural adjudication and the EDGAR
+    successor search -- and a second copy of this is a second place for the
+    invariants below to be forgotten. Which of them is right would then be
+    decided by whichever ran last.
+
+    Three refusals, each protecting something:
+
+    * an interval already closed at or before ``boundary`` is **left alone**, so
+      the earliest established close wins and re-running never widens a cut;
+    * a boundary at or before ``valid_from`` is refused rather than written,
+      because ``ck_alias_interval`` requires ``valid_to > valid_from`` and an
+      empty interval is not a claim anybody can act on;
+    * the citation is **appended**, never replacing what is there. The existing
+      clause is the filing sentence that made the binding and is still true;
+      overwriting it would destroy the provenance of the binding in order to
+      record the provenance of its end.
+    """
+    moved = 0
+    for alias in session.scalars(
+        select(SymbolAlias).where(
+            SymbolAlias.security_id == security_id,
+            SymbolAlias.alias_kind == "ticker",
+        )
+    ).all():
+        if alias.valid_to is not None and alias.valid_to <= boundary:
+            continue
+        if boundary <= alias.valid_from:
+            continue
+        alias.valid_to = boundary
+        alias.citation = f"{alias.citation} | {citation}"
+        moved += 1
+    return moved

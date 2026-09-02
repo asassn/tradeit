@@ -326,13 +326,94 @@ more than seven years past their registrant: 16 that no rule could explain, and
 12 whose located boundary was itself late — `BWN`'s cut in 2016 removes another
 company's run and leaves fifteen years of unexplained quiet quote behind it.
 
-**The remaining 16 need evidence this repository does not hold.** The route is to
-search EDGAR for whichever registrant later bound each ticker in its own filing
-text — the machinery that built these identities in the first place — and that
-needs `EDGAR_USER_AGENT`, which `acquire.py` refuses to default because a
-contact address in source is both a leak and wrong for whoever runs it next. `coherent` says only that
-a series' *ending* does not betray a splice — one wholly inside the registrant's
-own lifetime would leave no trace in the shape at all.
+`coherent` says only that a series' *ending* does not betray a splice — one
+wholly inside the registrant's own lifetime would leave no trace in the shape at
+all.
+
+#### The EDGAR successor search: 0 of 30, and what that is worth
+
+`research01_successor.py` asks EDGAR who else claimed each unbounded ticker.
+Full-text search proposes; `confirm_ticker` — the same function that established
+these identities — disposes, with the same refusals and **no laxer variant to
+raise the hit rate**. A false negative costs coverage; a false positive would cut
+away a registrant's real trading on a coincidence.
+
+**A zero from an unvalidated pipeline is worthless, so the pipeline validates
+itself first.** This repository has already had one "confirmed 0 of 40" that was
+a bug in the extractor rather than a fact about the filings. Before any search
+runs, a self-test fetches Apple's most recent 10-K and requires it to bind
+`AAPL` to CIK 320193 through the same fetch, strip, extract and confirm path. If
+that fails, nothing runs.
+
+**A bare-token search cannot answer for a common token, and the first run did
+not notice.** `AWS` returns over ten thousand filings — Amazon Web Services —
+and the hundred that relevance ranks first are a needle in a haystack. The
+phrase `"symbol AWS"` returns **zero**, which is an answer. So the search climbs
+a ladder of narrowing phrases and uses the first whose *entire* result set fits
+inside 300 hits, unioning in the bare token whenever it too can be exhausted:
+
+| rung | when |
+|---|---|
+| `"symbol X"`, all forms | ≤ 300 hits |
+| `"under the symbol X"`, all forms | if the above is still too broad |
+| `"symbol X"`, 10-K family | last resort — `TSX` needs it, being how every Canadian filer writes the Toronto exchange |
+| **+ bare token** | whenever *it* is exhaustible; it is the rung that catches a Section 12(b) table |
+
+Restricting to the 10-K family was itself a mistake, found by reading the
+counters: Item 5 is where an *established* registrant states its symbol, but a
+successor that has just taken a ticker says so first in a registration statement
+or an 8-K and may never file a 10-K. `"symbol BIR"` returns one 10-K and
+**thirty-three filings overall**.
+
+**Result: 0 of 30. 633 filings read and parsed, 822 unable to bind, and every
+query rung exhausted** — no negative here rests on a truncated result set.
+
+#### Two false positives, and why this route may not write
+
+Both findings this search has ever produced were wrong, and both were the same
+construct:
+
+> "listed for trading on the Toronto Stock Exchange under the symbol **TSX: XPL**"
+> — Xplore Technologies, 0001104659-07-061307
+>
+> "under the symbol **TSX-V: GGC**" — Silvermex Resources, 0001062993-11-001823
+
+The symbol is the half *after* the colon; `TSX` is the exchange. `_BOUND_SYMBOL`
+read the venue as the ticker, and a cut of seventeen years was one step away.
+**The fix for the first let the second straight through** — the capture stops at
+the word boundary before the hyphen — and was only caught because it was checked
+rather than assumed. The lookahead now skips a bounded run of venue characters
+before demanding the colon, and is narrowed by `_STOPWORDS` so a colon
+introducing prose still binds. The qualified form is **refused, not parsed**:
+capturing `XPL` would be more useful and is a wider change than a defect of this
+shape warrants.
+
+The corpus was checked for the same contamination: **zero** of its 859 ticker
+aliases were bound through the venue half, and only one alias equals an exchange
+abbreviation at all.
+
+**This route therefore proposes and never applies.** The structural rules write
+boundaries themselves because each carries a null test — the regime-break
+detector fires on none of 768 single-company lifetimes, so its false-positive
+rate is measured. This one has no such number and an observed rate of two out of
+two. Findings are written to JSON with their citations for a person to read,
+which is the rule `acquire.py` already enforces structurally: a program that
+reads a filing has not satisfied the requirement that a *person* read it.
+
+#### What the zero does and does not license
+
+It does **not** clear these 16 series. It says no SEC filing since each
+registrant went quiet binds its ticker to anyone else, within a search whose
+every hit was examined — and **EDGAR full-text search begins in 2001**, so a
+handover completed before then is invisible to it. `NOT ESTABLISHED` here means
+*this search could not show it*, never *it did not happen*.
+
+What it does do is shift the leading explanation. With no successor found and no
+dormancy and no regime break, the remaining hypothesis for most of these is not
+a splice at all but **an issuer that deregistered and whose shares went on
+trading** — which `lifecycle.py` says in its own words is exactly what a
+registration termination permits. That is a hypothesis and is recorded as one:
+the series stay flagged, uncut, and excluded from nothing.
 
 ### Point-in-time for a backfill, and the dependency it creates
 

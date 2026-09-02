@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
+from sqlalchemy.orm import Session
 
 from tradeit.research01.adjudicate import (
     DORMANCY_DAYS,
@@ -21,8 +22,10 @@ from tradeit.research01.adjudicate import (
     RegimeBreak,
     Verdict,
     adjudicate_series,
+    close_alias_interval,
     detect_regime_break,
 )
+from tradeit.storage.tables import Issuer, Security, SymbolAlias
 
 D = dt.date
 
@@ -375,3 +378,74 @@ class TestRegimeBreak:
         same tradable thing", and naming it a splice would claim more."""
         assert Verdict.REGIME_BREAK.value == "regime_break"
         assert "splice" not in Verdict.REGIME_BREAK.value
+
+
+class TestCloseAliasInterval:
+    """The single writer both scripts use, and the three things it refuses.
+
+    Two scripts record boundaries now -- the structural adjudication and the
+    EDGAR successor search -- so a second copy of this would be a second place
+    for these invariants to be forgotten, with whichever ran last deciding.
+    """
+
+    def _alias(
+        self, session: Session, *, valid_to: dt.date | None = None
+    ) -> tuple[int, SymbolAlias]:
+        issuer = Issuer(display_name="T", source="test")
+        session.add(issuer)
+        session.flush()
+        security = Security(
+            issuer_id=issuer.issuer_id, security_type="common_stock", currency="USD", source="test"
+        )
+        session.add(security)
+        session.flush()
+        alias = SymbolAlias(
+            security_id=security.security_id,
+            alias_kind="ticker",
+            alias_value="ZZZZ",
+            valid_from=dt.date(1990, 1, 1),
+            valid_to=valid_to,
+            knowledge_time=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+            knowledge_source="edgar_filing_text",
+            citation="symbol bound to CIK 1 by 0000-00-000000",
+            source="test",
+        )
+        session.add(alias)
+        session.flush()
+        return security.security_id, alias
+
+    def test_an_open_interval_is_closed(self, db_session: Session) -> None:
+        security_id, alias = self._alias(db_session)
+        assert close_alias_interval(db_session, security_id, D(2001, 6, 1), "why") == 1
+        assert alias.valid_to == D(2001, 6, 1)
+
+    def test_the_citation_is_appended_not_replaced(self, db_session: Session) -> None:
+        security_id, alias = self._alias(db_session)
+        close_alias_interval(db_session, security_id, D(2001, 6, 1), "because")
+        assert alias.citation.startswith("symbol bound to CIK 1")
+        assert alias.citation.endswith("because")
+
+    def test_an_earlier_close_is_never_widened(self, db_session: Session) -> None:
+        """Re-running must not undo a cut, so the earliest established one wins."""
+        security_id, alias = self._alias(db_session, valid_to=D(2000, 1, 1))
+        assert close_alias_interval(db_session, security_id, D(2005, 1, 1), "later") == 0
+        assert alias.valid_to == D(2000, 1, 1)
+
+    def test_a_later_close_is_tightened(self, db_session: Session) -> None:
+        security_id, alias = self._alias(db_session, valid_to=D(2005, 1, 1))
+        assert close_alias_interval(db_session, security_id, D(2000, 1, 1), "earlier") == 1
+        assert alias.valid_to == D(2000, 1, 1)
+
+    def test_an_empty_interval_is_refused(self, db_session: Session) -> None:
+        """``ck_alias_interval`` requires valid_to > valid_from, and an interval
+        nobody can act on is not a claim worth writing."""
+        security_id, alias = self._alias(db_session)
+        assert close_alias_interval(db_session, security_id, D(1990, 1, 1), "empty") == 0
+        assert alias.valid_to is None
+
+    def test_a_vendor_symbol_alias_is_not_touched(self, db_session: Session) -> None:
+        security_id, alias = self._alias(db_session)
+        alias.alias_kind = "vendor_symbol"
+        db_session.flush()
+        assert close_alias_interval(db_session, security_id, D(2001, 6, 1), "why") == 0
+        assert alias.valid_to is None
