@@ -13,10 +13,10 @@ authorisation.
 | 4 | Pattern recognition | ✅ Complete |
 | 5 | Breakout detection & confirmation | ✅ Complete |
 | — | Empirical data access & validation gate | ✅ Complete (Outcome B) |
-| 6 | Fundamentals & earnings quality | In progress. **Milestone 0b complete — 30/30 controls fully adjudicated.** **No price vendor is selected and none will be bought before Phase 9**: Kibot is eliminated on price (the archive is $990–$2,400, not the ~$14/month assumed), and no remaining candidate — Sharadar, EODHD, Twelve Data, FMP, Tiingo — has been probed against the acceptance rules. Prices are the only dataset here that costs money — filing dates, delisting events, 2009+ fundamentals and macro are free. **The live thread is 0a: the delisting denominator is implemented, wired to the curated control identity, and has never been run against real EDGAR data.** It is also the instrument that would *evaluate* any vendor, so it precedes every purchase question |
+| 6 | Fundamentals & earnings quality | In progress. **The denominator has been built and run** — 90,548 registrant timelines, 29,180 confirmed dated exits — and the survivorship gate returns **`SURVIVOR_BIASED`**, twice. `research-01` holds **1,651,570 price facts** (825,785 raw + 825,785 vendor-adjusted) over 862 securities and 5,173 corporate actions, with identity for 892 securities established from filing text. **EODHD is subscribed** (personal use, $19.99/month) and supplies every price bar and corporate action; everything else is free SEC EDGAR. Its fundamentals endpoint returns 403 on this plan. **The fundamentals spine does not exist yet**: `security_fundamental_facts` is empty, the 70 quarterly Financial Statement Data Set archives are downloaded (5.3 GB, 2009Q1+) and unimported, and `listings`, `filings` and `security_identifiers` are declared and empty. Splice adjudication has placed 91,231 bars (11.0%) outside their security's interval; 16 series remain unresolved. See [`RESEARCH_01_DATA_CONTRACT.md`](RESEARCH_01_DATA_CONTRACT.md) |
 | — | **Multi-Timeframe & Portfolio Mandate Architecture** | **Not started.** May overlap Phase 6; **must complete before Phase 7** |
 | — | **Strategy Definition / Builder Architecture** | **Not started.** Follows the multi-timeframe gate; **must complete before Phase 7** |
-| 7 | Opportunity scoring | Not started |
+| 7 | Opportunity scoring | **Built out of order.** The three scores and the portfolio veto exist and are tested (`src/tradeit/opportunity/`), committed before either gate above. **The gates still bind and are still owed**: a score built without them cannot be a *mandate-scoped* score, and cannot rank strategies that have no definition. Recorded here rather than corrected away — the ordering was authorised and was crossed, and pretending otherwise would hide which part rests on nothing |
 | 8 | Portfolio construction, risk & compounding | Not started |
 | 9 | Portfolio backtesting & Monte Carlo analysis — **includes signal research and indicator ranking** | Not started |
 | 10 | Dashboard / research interface — **includes valuation callout, multi-horizon ticker panel, live news & attention, onboard AI assistant** | Not started |
@@ -46,7 +46,7 @@ Complete technical architecture, the 41-table schema **as it stood at Phase 2**
 validated against PostgreSQL 16 with partitioning, six provider interfaces, the
 domain interface set, content-addressed reproducibility, versioned
 configuration, 22-job schedule. Later phases added to it: the current count is
-**57**, measured from `tables.py`. See [`PHASE_02.md`](PHASE_02.md) and
+**69**, measured from `tables.py`. See [`PHASE_02.md`](PHASE_02.md) and
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Phase 3 — Market analytics foundation ✅
@@ -141,8 +141,13 @@ Growth, quality and balance-sheet screens on as-filed data, with
 REIT-appropriate metrics for REIT-tagged instruments. Earnings surprise and
 revision history.
 
-*Blocked by:* the data vendor decision. See
-[`VENDOR_EVALUATION.md`](VENDOR_EVALUATION.md).
+*No longer blocked by the vendor decision.* EODHD is subscribed and supplies
+prices and corporate actions; SEC EDGAR supplies identity, filing dates and the
+delisting denominator, free. What blocks the *fundamentals* work is that nothing
+has imported them: `security_fundamental_facts` is empty and the Financial
+Statement Data Sets sit on disk unread. See
+[`VENDOR_EVALUATION.md`](VENDOR_EVALUATION.md) and
+[`PHASE_06_IMPROVEMENT_PLAN.md`](PHASE_06_IMPROVEMENT_PLAN.md).
 
 ## Multi-Timeframe & Portfolio Mandate Architecture
 

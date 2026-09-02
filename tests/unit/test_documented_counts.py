@@ -65,6 +65,10 @@ def test_the_orm_defines_the_table_count_the_docs_quote() -> None:
     claims = {
         REPO / "README.md": r"\*\*A (\d+)-table schema\*\*",
         REPO / "docs" / "DATA_MODEL.md": r"\*\*(\d+) tables are defined\*\*",
+        # ROADMAP was quoting 57 while the ORM defined 69, and had been for two
+        # phases. It is the document this test was written about and the one it
+        # did not scan -- the same rot, in the blind spot of its own guard.
+        REPO / "docs" / "ROADMAP.md": r"the current count is\n\*\*(\d+)\*\*",
     }
     for path, pattern in claims.items():
         found = re.search(pattern, path.read_text(encoding="utf-8"))
