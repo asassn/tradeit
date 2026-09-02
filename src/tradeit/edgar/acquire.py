@@ -525,15 +525,34 @@ def _latest_row(
 # ---------------------------------------------------------------------------
 
 
-def resolve_user_agent(explicit: str | None = None, env: dict[str, str] | None = None) -> str:
+def resolve_user_agent(
+    explicit: str | None = None,
+    env: dict[str, str] | None = None,
+    *,
+    env_file: Path | None = None,
+) -> str:
     """The SEC identification string, from the operator. Never from source.
 
     Fails loudly when absent rather than sending a default: an unidentified
     automated request is the one the SEC is entitled to block, and discovering
     that through a block is expensive.
+
+    Looks in the environment, then in the gitignored ``.env`` at the repository
+    root -- the same two places, in the same order, as the EODHD token. A
+    contact address is not a secret the way a key is, but it is still the
+    operator's and still must not reach a commit, and one home for both means
+    one thing to set up rather than two.
+
+    **The file is consulted only when no explicit ``env`` mapping was given.** A
+    caller that supplies ``env`` is stating the environment exhaustively, and
+    reaching past it to a file on disk would contradict that -- which would also
+    make a test's outcome depend on whether the machine running it happened to
+    have a ``.env``.
     """
     value = explicit or (env if env is not None else dict(os.environ)).get(USER_AGENT_ENV) or ""
     value = value.strip()
+    if not value and env is None:
+        value = _from_env_file(env_file or Path(__file__).resolve().parents[3] / ".env")
     if not value:
         raise ConfigError(
             "SEC requests must identify the requester. Set the "
@@ -544,6 +563,25 @@ def resolve_user_agent(explicit: str | None = None, env: dict[str, str] | None =
             "both a leak and wrong for whoever runs it next."
         )
     return value
+
+
+def _from_env_file(path: Path) -> str:
+    """``EDGAR_USER_AGENT`` out of a ``.env`` file, or empty.
+
+    An empty value counts as absent, exactly as it does for the API token: the
+    first thing anyone does is copy the example file, and returning "" from
+    here would hand the caller a contact-address-shaped nothing.
+    """
+    if not path.exists():
+        return ""
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, raw = line.partition("=")
+        if name.strip() == USER_AGENT_ENV:
+            return raw.strip().strip("\"'")
+    return ""
 
 
 def filing_path(filings_root: Path, cik: int, accession: str) -> Path:

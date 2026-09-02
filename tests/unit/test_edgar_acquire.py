@@ -1584,3 +1584,45 @@ def test_a_registration_submission_still_fails_closed_on_a_bad_envelope(
 
     assert report.outcome is Outcome.VALIDATION_FAILED
     assert report.evidence is None
+
+
+class TestUserAgentFromEnvFile:
+    """The gitignored ``.env`` is a second home for the operator's contact string.
+
+    Same two places, same order, as the EODHD token: one thing to set up rather
+    than two, and neither of them a committed file.
+    """
+
+    def test_it_is_read_from_the_env_file(self, tmp_path: Path) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text(f"EODHD_API_KEY=x\n{USER_AGENT_ENV}=TradeIt research (a@b.c)\n")
+        assert resolve_user_agent(env_file=env_file) == "TradeIt research (a@b.c)"
+
+    def test_an_empty_value_in_the_file_counts_as_absent(self, tmp_path: Path) -> None:
+        """Copying the example file must not hand back a contact-shaped nothing."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(f"{USER_AGENT_ENV}=\n")
+        with pytest.raises(ConfigError):
+            resolve_user_agent(env_file=env_file)
+
+    def test_an_explicit_env_mapping_is_exhaustive_and_the_file_is_not_consulted(
+        self, tmp_path: Path
+    ) -> None:
+        """Otherwise a test's outcome would depend on whether the machine
+        running it happened to have a ``.env``."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(f"{USER_AGENT_ENV}=TradeIt research (a@b.c)\n")
+        with pytest.raises(ConfigError):
+            resolve_user_agent(None, env={}, env_file=env_file)
+
+    def test_the_environment_still_wins_over_the_file(self, tmp_path: Path) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text(f"{USER_AGENT_ENV}=from-file\n")
+        assert (
+            resolve_user_agent(None, env={USER_AGENT_ENV: "from-env"}, env_file=env_file)
+            == "from-env"
+        )
+
+    def test_a_missing_file_is_not_an_error_it_is_an_absence(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigError):
+            resolve_user_agent(env_file=tmp_path / "nope.env")
