@@ -49,6 +49,14 @@ from tradeit.research01.reconcile import (
     reconcile_fundamentals_against_filings,
 )
 from tradeit.research01.seed import NotEstablished, SeedReport, seed_identity
+from tradeit.research01.series import (
+    AdjustedBar,
+    Coherence,
+    SplitAdjustment,
+    known_splits,
+    price_series,
+    series_coherence,
+)
 from tradeit.research01.ticker_cik import (
     Candidate,
     CandidateStatus,
@@ -63,11 +71,13 @@ from tradeit.research01.vendor_aliases import (
 )
 
 __all__ = [
+    "AdjustedBar",
     "BackfillPlan",
     "BackfillProgress",
     "BackfillReport",
     "Candidate",
     "CandidateStatus",
+    "Coherence",
     "Confirmation",
     "Delivery",
     "DerivedAlias",
@@ -84,6 +94,7 @@ __all__ = [
     "RejectedBar",
     "Resolution",
     "SeedReport",
+    "SplitAdjustment",
     "VendorAction",
     "VendorAliasReport",
     "VendorBar",
@@ -97,10 +108,12 @@ __all__ = [
     "import_fsds_quarter",
     "import_price_bars",
     "knowledge_time_for",
+    "known_splits",
     "normalise_company_name",
     "parse_bars",
     "parse_dividends",
     "parse_splits",
+    "price_series",
     "propose_candidates",
     "read_quarter",
     "reconcile_fundamentals_against_filings",
@@ -109,4 +122,5 @@ __all__ = [
     "resolve_security",
     "run_backfill",
     "seed_identity",
+    "series_coherence",
 ]

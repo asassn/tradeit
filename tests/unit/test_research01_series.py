@@ -1,0 +1,236 @@
+"""Reconstructing a price series as it could have been known on a given day.
+
+`pit.py` established that a vendor-delivered adjusted series carries the
+vendor's adjustment epoch and is unusable for historical work, and that the only
+valid route is to derive our own from raw bars plus the actions known at the
+instant being asked about. **That derivation did not exist**, so the corpus
+offered a choice between raw bars that jump at every split and adjusted bars
+that contain the future. This is it.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from decimal import Decimal
+
+import pytest
+from sqlalchemy.orm import Session
+
+from tradeit.research01 import (
+    Coherence,
+    known_splits,
+    price_series,
+    series_coherence,
+)
+from tradeit.storage.tables import (
+    Issuer,
+    IssuerIdentifier,
+    Security,
+    SecurityCorporateActionFact,
+    SecurityPriceFact,
+)
+
+UTC = dt.UTC
+SPLIT_DAY = dt.date(2020, 8, 31)
+
+
+def _security(session: Session) -> Security:
+    issuer = Issuer(display_name="TEST", source="test")
+    session.add(issuer)
+    session.flush()
+    session.add(
+        IssuerIdentifier(
+            issuer_id=issuer.issuer_id,
+            namespace="sec_cik",
+            value="1",
+            value_normalized="1",
+            role="primary",
+            citation="t",
+            source="test",
+        )
+    )
+    security = Security(
+        issuer_id=issuer.issuer_id, security_type="common_stock", currency="USD", source="test"
+    )
+    session.add(security)
+    session.flush()
+    return security
+
+
+def _bar(session: Session, sid: int, day: dt.date, close: Decimal, basis: str = "raw") -> None:
+    moment = dt.datetime.combine(day, dt.time(20), tzinfo=UTC)
+    session.add(
+        SecurityPriceFact(
+            security_id=sid,
+            session_date=day,
+            adjustment_basis=basis,
+            event_time=moment,
+            knowledge_time=moment,
+            knowledge_time_basis="session_close",
+            knowledge_source="test",
+            open=close,
+            high=close,
+            low=close,
+            close=close,
+            volume=Decimal(100),
+            volume_adjusted=False,
+            source="test",
+        )
+    )
+
+
+def _split(session: Session, sid: int, ex: dt.date, ratio: Decimal) -> None:
+    moment = dt.datetime.combine(ex, dt.time(20), tzinfo=UTC)
+    session.add(
+        SecurityCorporateActionFact(
+            security_id=sid,
+            action_type="split",
+            ex_date=ex,
+            event_time=moment,
+            knowledge_time=moment,
+            knowledge_source="test",
+            ratio=ratio,
+            source="test",
+        )
+    )
+
+
+class TestTheAdjustmentIsPointInTime:
+    """The property the whole module exists for."""
+
+    def _corpus(self, session: Session) -> int:
+        security = _security(session)
+        sid = security.security_id
+        _bar(session, sid, dt.date(2020, 8, 27), Decimal("500.04"))
+        _bar(session, sid, dt.date(2020, 9, 1), Decimal("124.81"))
+        _split(session, sid, SPLIT_DAY, Decimal(4))
+        session.flush()
+        return sid
+
+    def test_standing_after_the_split_the_earlier_bar_is_adjusted(
+        self, db_session: Session
+    ) -> None:
+        """AAPL's real 4-for-1: 500.04 before becomes 125.01, comparable with
+        the 124.81 that follows it."""
+        sid = self._corpus(db_session)
+        bars = price_series(db_session, sid, as_of=dt.datetime(2021, 1, 1, tzinfo=UTC))
+        pre = next(b for b in bars if b.session_date == dt.date(2020, 8, 27))
+        assert pre.close == Decimal("125.01")
+        assert pre.raw_close == Decimal("500.04")
+        assert pre.split_factor == 4
+
+    def test_standing_before_the_split_it_does_not_exist(self, db_session: Session) -> None:
+        """Applying it would put the future into the past."""
+        sid = self._corpus(db_session)
+        bars = price_series(db_session, sid, as_of=dt.datetime(2020, 8, 28, tzinfo=UTC))
+        pre = next(b for b in bars if b.session_date == dt.date(2020, 8, 27))
+        assert pre.close == Decimal("500.04")
+        assert pre.split_factor == 1
+        assert known_splits(db_session, sid, as_of=dt.datetime(2020, 8, 28, tzinfo=UTC)) == []
+
+    def test_the_same_bar_reads_differently_from_two_vantage_points(
+        self, db_session: Session
+    ) -> None:
+        """Not a bug -- the definition of point-in-time."""
+        sid = self._corpus(db_session)
+        after = price_series(db_session, sid, as_of=dt.datetime(2021, 1, 1, tzinfo=UTC))[0]
+        before = price_series(db_session, sid, as_of=dt.datetime(2020, 8, 28, tzinfo=UTC))[0]
+        assert after.session_date == before.session_date
+        assert before.close == after.close * 4
+
+    def test_a_bar_on_the_ex_date_is_not_adjusted(self, db_session: Session) -> None:
+        """The split has already taken effect in that day's print. Adjusting it
+        again would halve a price that was never doubled."""
+        security = _security(db_session)
+        sid = security.security_id
+        _bar(db_session, sid, SPLIT_DAY, Decimal("125.00"))
+        _split(db_session, sid, SPLIT_DAY, Decimal(4))
+        db_session.flush()
+        bar = price_series(db_session, sid, as_of=dt.datetime(2021, 1, 1, tzinfo=UTC))[0]
+        assert bar.close == Decimal("125.00")
+        assert bar.split_factor == 1
+
+
+class TestMechanics:
+    def test_volume_moves_opposite_to_price(self, db_session: Session) -> None:
+        """A split multiplies the share count. Adjusting price without volume
+        silently breaks every turnover and liquidity measure."""
+        security = _security(db_session)
+        sid = security.security_id
+        _bar(db_session, sid, dt.date(2020, 8, 27), Decimal("500.00"))
+        _split(db_session, sid, SPLIT_DAY, Decimal(4))
+        db_session.flush()
+        bar = price_series(db_session, sid, as_of=dt.datetime(2021, 1, 1, tzinfo=UTC))[0]
+        assert bar.close == Decimal("125.00")
+        assert bar.volume == Decimal(400)
+
+    def test_a_reverse_split_multiplies_the_price(self, db_session: Session) -> None:
+        """A 1-for-10 arrives as ratio 0.1; the earlier price must go UP."""
+        security = _security(db_session)
+        sid = security.security_id
+        _bar(db_session, sid, dt.date(2001, 5, 9), Decimal("2.86"))
+        _split(db_session, sid, dt.date(2001, 5, 10), Decimal("0.1"))
+        db_session.flush()
+        bar = price_series(db_session, sid, as_of=dt.datetime(2002, 1, 1, tzinfo=UTC))[0]
+        assert bar.close == Decimal("28.60")
+
+    def test_successive_splits_compound(self, db_session: Session) -> None:
+        security = _security(db_session)
+        sid = security.security_id
+        _bar(db_session, sid, dt.date(2020, 1, 1), Decimal("100"))
+        _split(db_session, sid, dt.date(2020, 6, 1), Decimal(2))
+        _split(db_session, sid, dt.date(2021, 6, 1), Decimal(5))
+        db_session.flush()
+        bar = price_series(db_session, sid, as_of=dt.datetime(2022, 1, 1, tzinfo=UTC))[0]
+        assert bar.split_factor == 10
+        assert bar.close == Decimal(10)
+
+    def test_vendor_adjusted_bars_are_never_read(self, db_session: Session) -> None:
+        """Feeding a `total` bar through this would adjust an already adjusted
+        number twice, with the vendor's delivery epoch still inside it."""
+        security = _security(db_session)
+        sid = security.security_id
+        _bar(db_session, sid, dt.date(2020, 8, 27), Decimal("121.15"), basis="total")
+        db_session.flush()
+        assert price_series(db_session, sid, as_of=dt.datetime(2021, 1, 1, tzinfo=UTC)) == []
+
+
+class TestSeriesCoherence:
+    """Measured on the corpus: 89.3% coherent, 9.2% more than seven years out.
+
+    Bimodal rather than a tail, which is why the threshold is where it is.
+    """
+
+    @pytest.mark.parametrize(
+        ("years_after", "expected"),
+        [
+            (0.0, Coherence.COHERENT),
+            (0.5, Coherence.COHERENT),
+            (2.0, Coherence.QUESTIONABLE),
+            (10.0, Coherence.SUSPECT_TICKER_REUSE),
+            (24.8, Coherence.SUSPECT_TICKER_REUSE),
+        ],
+    )
+    def test_the_gap_decides_the_verdict(self, years_after: float, expected: Coherence) -> None:
+        last_filing = dt.date(2001, 1, 1)
+        verdict, gap = series_coherence(
+            last_session=last_filing + dt.timedelta(days=round(years_after * 365.25)),
+            last_filing=last_filing,
+        )
+        assert verdict is expected
+        assert gap is not None
+
+    def test_an_unknown_filing_span_is_not_coherent(self) -> None:
+        """Absence of the comparison is not evidence that it would pass."""
+        verdict, gap = series_coherence(last_session=dt.date(2020, 1, 1), last_filing=None)
+        assert verdict is Coherence.UNKNOWN
+        assert gap is None
+
+    def test_it_reports_rather_than_filters(self) -> None:
+        """Truncating here would discard legitimate post-delisting trading;
+        dropping would hide a splice instead of naming it."""
+        verdict, gap = series_coherence(
+            last_session=dt.date(2026, 1, 1), last_filing=dt.date(2001, 1, 1)
+        )
+        assert verdict is Coherence.SUSPECT_TICKER_REUSE
+        assert gap is not None and gap > 24

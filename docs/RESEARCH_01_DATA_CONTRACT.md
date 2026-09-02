@@ -140,6 +140,58 @@ Rules:
 4. Adjusted series are **derived** (§6), carry a `derivation_version`, and are
    recomputed rather than patched.
 
+### The reconstruction, built — and an anomaly it exposed
+
+The dependency named below is now closed. ``research01/series.py`` derives a
+split-adjusted series from raw bars plus the actions **known at the as-of
+instant**, which is the only valid route to an adjusted price for a past date.
+
+The factor for a bar is the product of every split whose ex-date is after that
+bar **and** whose ``knowledge_time`` is at or before the as-of. Both conditions,
+always — dropping the second is how a backtest quietly learns tomorrow's
+corporate actions. Volume moves opposite to price, because a split multiplies
+the share count and adjusting one without the other breaks every turnover
+measure. A bar **on** the ex-date is not adjusted: the split is already in that
+day's print.
+
+Only ``raw`` bars are read. Feeding a vendor ``total`` bar through this would
+adjust an already-adjusted number twice, with the vendor's delivery epoch still
+inside it.
+
+#### 9.2% of series outlive their registrant by more than seven years
+
+Testing the reconstruction on real data surfaced something the corpus had not
+been asked before. Comparing where each series ends to where its registrant
+stopped filing with the SEC:
+
+| gap | securities |
+|---|---|
+| ends within 1 year of the last filing | **770 — 89.3%** |
+| 1–7 years after | 13 — 1.5% |
+| **more than 7 years after** | **79 — 9.2%** |
+
+**Bimodal, not a tail.** The worst run 22–25 years past their registrant's final
+filing: `Advanced Switching Communications` last filed in 2001 and has prices to
+2020, with six compounding reverse splits along the way.
+
+A delisted company can trade over the counter for a while without filing, so a
+short overrun is a question. A quarter of a century is not — it is far more
+likely to be **a second company that took the ticker**. The vendor marks a
+reused ticker `_old`, but confirmation binds the *plain* symbol to whichever
+registrant the filing named, and the plain symbol's history then runs on into
+the next holder's.
+
+``series_coherence()`` reports this and **does not filter**. Truncating would
+discard legitimate post-delisting trading; dropping would hide a splice rather
+than name it. The verdict is returned and the caller decides — with
+``UNKNOWN`` for a security whose filing span is not known, because absence of
+the comparison is not evidence that it would have passed.
+
+**This is a third distinct splice shape**, after the vendor's own ticker reuse
+and the storage bug that filed one company's prices under another. It affects
+roughly one security in eleven and was invisible until something tried to *read*
+the corpus rather than write to it.
+
 ### Point-in-time for a backfill, and the dependency it creates
 
 **A vendor file delivered today containing a 1999 bar is not a bar we recorded in
