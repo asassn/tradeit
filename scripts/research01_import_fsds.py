@@ -7,13 +7,17 @@ exist was anything that called them**, which is why
 archives sat on disk. This is that runner.
 
 **Measure the yield before believing it.** Only CIKs already carrying evidenced
-identity resolve -- the corpus is never grown by an import -- and research-01's
-identity is a dot-com cohort that stopped filing between 1998 and 2005. The
-Data Sets begin in 2009. Fifteen of the corpus's 891 CIKs appear in them at
-all, and they are the large survivors: Apple, Microsoft, Amazon, Cisco, GM.
-**A fundamentals set consisting entirely of survivors, attached to a corpus
-built to avoid survivorship bias, is worse than none** -- so what lands here is
-labelled for what it is and is not a fundamentals spine.
+identity resolve -- the corpus is never grown by an import, here or anywhere.
+The first run of this reached **fifteen** securities, because research-01's
+identity was a dot-com cohort that stopped filing between 1998 and 2005 while
+the Data Sets begin in 2009, and the fifteen were the large survivors. A
+fundamentals set consisting entirely of survivors, attached to a corpus built
+to avoid survivorship bias, is worse than none.
+
+``research01_seed_xbrl_cohort.py`` fixed the cause rather than the symptom:
+17,015 registrants seeded from the SEC's own submission index, of which 7,255
+carry a confirmed dated EDGAR exit and 7,261 are still filing. This now runs
+against that population.
 
 Resumable per quarter, because 24.5 GB of uncompressed ``num.txt`` is long
 enough that an interruption should not cost the run.
@@ -102,9 +106,10 @@ def main() -> int:
     print(f"\nlanded this run: {landed_total:,}")
     print(f"security_fundamental_facts now: {rows:,} rows over {secs} securities")
     print(
-        "\nWhat this is and is not: only issuers with evidenced identity resolve, and "
-        "research-01's identity is a cohort that stopped filing before the Data Sets "
-        "begin. These rows are the surviving controls, not a fundamentals spine."
+        "\nWhat this is and is not: only issuers with evidenced identity resolve. "
+        "Holding a fundamental fact for a registrant is not holding a PRICE for it -- "
+        "no ticker was evidenced for the seeded cohort, so the survivorship gate, "
+        "which counts CIKs with a price bar, does not move on this alone."
     )
     return 0
 

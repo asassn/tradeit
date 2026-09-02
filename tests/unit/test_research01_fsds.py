@@ -263,9 +263,15 @@ class TestReRunningIsANoOp:
     IntegrityError. A side file and the corpus must not be able to disagree.
     """
 
-    def test_the_second_import_lands_nothing_and_counts_the_duplicates(
-        self, db_session: Session, tmp_path: Path
-    ) -> None:
+    def test_the_second_import_adds_no_rows(self, db_session: Session, tmp_path: Path) -> None:
+        """The invariant is that the corpus does not grow, not that a counter reads zero.
+
+        ``landed`` counted rows *landed* while a Python set held every existing
+        key; it now counts rows **offered**, because holding a hundred and fifty
+        million keys in memory to answer precisely was never going to scale. The
+        database discards the repeats, so the assertion that matters is the row
+        count -- which was what this test was really about.
+        """
         _issuer_with_security(db_session, "320193")
         path = _zip(
             tmp_path,
@@ -276,10 +282,9 @@ class TestReRunningIsANoOp:
             ],
         )
         assert import_fsds_quarter(db_session, path).landed == 2
+        assert len(db_session.scalars(select(SecurityFundamentalFact.id)).all()) == 2
 
-        again = import_fsds_quarter(db_session, path)
-        assert again.landed == 0
-        assert RejectReason.DUPLICATE in [r.reason for r in again.rejected]
+        import_fsds_quarter(db_session, path)
         assert len(db_session.scalars(select(SecurityFundamentalFact.id)).all()) == 2
 
     def test_two_ddates_in_one_fiscal_year_are_one_revision(

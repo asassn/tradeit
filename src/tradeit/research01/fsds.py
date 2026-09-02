@@ -58,13 +58,24 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from tradeit.research01.filings import resolve_issuer
 from tradeit.research01.importer import ImportResult, RejectedBar, RejectReason
-from tradeit.storage.tables import Filing, Security, SecurityFundamentalFact
+from tradeit.storage.tables import (
+    Filing,
+    IssuerIdentifier,
+    Security,
+    SecurityFundamentalFact,
+)
 
 __all__ = ["FsdsFact", "FsdsSubmission", "import_fsds_quarter", "read_quarter"]
+
+#: Rows per statement. Large enough that the round trips stop dominating, small
+#: enough that a failure does not discard an hour of work.
+_BATCH = 5_000
+
 
 #: How ``qtrs`` renders into the four characters ``fiscal_period`` allows.
 #: Anything else keeps its own duration in ``duration_qtrs`` and is labelled
@@ -167,6 +178,25 @@ def read_quarter(path: Path) -> tuple[dict[str, FsdsSubmission], Iterator[FsdsFa
     return submissions, facts()
 
 
+def _write(session: Session, rows: list[dict[str, object]]) -> None:
+    """Insert a batch, letting the database discard what it already holds.
+
+    ``ON CONFLICT DO NOTHING`` against ``uq_security_fundamental_revision``, so
+    a re-run costs a rejected insert rather than an ``IntegrityError`` that
+    aborts the transaction and loses the quarter. Both dialects this corpus runs
+    on support it; the statement is built from whichever is connected rather
+    than assuming one, because the backend the tests use is not the backend
+    production uses and a dialect-specific import would fail on exactly the
+    side nobody exercised.
+    """
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(pg_insert(SecurityFundamentalFact).values(rows).on_conflict_do_nothing())
+    else:
+        session.execute(
+            sqlite_insert(SecurityFundamentalFact).values(rows).on_conflict_do_nothing()
+        )
+
+
 def _naive(moment: dt.datetime) -> dt.datetime:
     """Compare timestamps on one clock.
 
@@ -189,24 +219,58 @@ def _security_for_issuer(session: Session, issuer_id: int) -> tuple[int | None, 
     return rows[0], ""
 
 
+def _securities_by_cik(session: Session) -> tuple[dict[int, int], set[int]]:
+    """Every CIK with exactly one security, and the CIKs that have several.
+
+    One query rather than one per filing. The corpus now holds 17,892 issuers
+    and a quarter carries about seven thousand filings, so resolving each in
+    turn was half a million round trips to answer a question with a fixed
+    answer.
+    """
+    rows = session.execute(
+        select(IssuerIdentifier.value_normalized, Security.security_id)
+        .join(Security, Security.issuer_id == IssuerIdentifier.issuer_id)
+        .where(IssuerIdentifier.namespace == "sec_cik")
+    ).all()
+    counts: dict[int, list[int]] = {}
+    for value, security_id in rows:
+        counts.setdefault(int(value), []).append(security_id)
+    single = {cik: ids[0] for cik, ids in counts.items() if len(ids) == 1}
+    several = {cik for cik, ids in counts.items() if len(ids) > 1}
+    return single, several
+
+
 def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = None) -> ImportResult:
     """Load one quarterly ZIP for issuers we have evidenced identity for.
 
     Everything else is reported. Only CIKs already in ``issuer_identifiers``
     resolve -- the corpus is not grown by an import, here or anywhere.
+
+    **``result.landed`` counts rows OFFERED to the database**, after removing
+    duplicates within this quarter. Rows already held at the same revision are
+    discarded by ``uq_security_fundamental_revision`` itself, which is what
+    makes a re-run a no-op at any scale; the exact table total is a count away
+    and the runner reports it. An earlier version kept every existing key in a
+    Python set to answer this precisely, which was correct for fifteen
+    securities and would have been a hundred and fifty million tuples in memory
+    for seventeen thousand.
     """
     submissions, facts = read_quarter(path)
     result = ImportResult()
 
-    # CIK -> security, resolved once per filing rather than per number: a
-    # quarter holds millions of numbers across a few thousand filings.
+    single, several = _securities_by_cik(session)
     resolved: dict[str, tuple[int | None, str]] = {}
     for adsh, sub in submissions.items():
-        issuer_id = resolve_issuer(session, namespace="sec_cik", value=str(sub.cik))
-        if issuer_id is None:
+        security_id = single.get(sub.cik)
+        if security_id is not None:
+            resolved[adsh] = (security_id, "")
+        elif sub.cik in several:
+            resolved[adsh] = (
+                None,
+                "issuer holds several securities; fundamentals are issuer-level",
+            )
+        else:
             resolved[adsh] = (None, f"no issuer carries sec_cik:{sub.cik}")
-            continue
-        resolved[adsh] = _security_for_issuer(session, issuer_id)
 
     if not any(security_id is not None for security_id, _ in resolved.values()):
         # Not one filing in this quarter belongs to an issuer we hold, so every
@@ -231,33 +295,12 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
         ).all()
     }
 
-    # **Re-running an import is a no-op, and this is what makes that true.**
-    # `RejectReason.DUPLICATE` has always promised it; for this importer the
-    # promise was false, because `seen` lived for one call while the uniqueness
-    # constraint lives in the database. Deleting a progress file and re-running
-    # -- exactly what a resumable job invites -- then re-inserted a quarter and
-    # died on an IntegrityError, which is a poor way to learn that a side file
-    # and the corpus can disagree.
-    #
-    # Scoped to the securities this quarter actually touches: the corpus-wide
-    # set would be millions of rows to answer a question about fifteen.
-    security_ids = {s for s, _ in resolved.values() if s is not None}
-    seen: set[tuple[int, str, int, str, int | None, dt.datetime]] = {
-        (sid, metric, year, period, qtrs, _naive(kt))
-        for sid, metric, year, period, qtrs, kt in session.execute(
-            select(
-                SecurityFundamentalFact.security_id,
-                SecurityFundamentalFact.metric,
-                SecurityFundamentalFact.fiscal_year,
-                SecurityFundamentalFact.fiscal_period,
-                SecurityFundamentalFact.duration_qtrs,
-                SecurityFundamentalFact.knowledge_time,
-            ).where(SecurityFundamentalFact.security_id.in_(security_ids))
-        ).all()
-    }
+    seen: set[tuple[int, str, int, str, int | None, dt.datetime]] = set()
+    batch: list[dict[str, object]] = []
     landed = 0
     early = 0
     duplicates = 0
+
     for fact in facts:
         if limit is not None and landed >= limit:
             break
@@ -280,6 +323,7 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
             # count, rather than as an IntegrityError halfway through a quarter.
             early += 1
             continue
+
         period_label = _PERIOD_LABEL.get(fact.qtrs, "D")
         # Mirrors `uq_security_fundamental_revision` exactly. It deliberately
         # does **not** include `period_end`: two ddates inside one fiscal year
@@ -298,40 +342,39 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
             continue
         seen.add(key)
 
-        session.add(
-            SecurityFundamentalFact(
-                security_id=security_id,
-                filing_id=filing_ids.get(fact.adsh),
-                metric=fact.tag,
-                fiscal_year=fact.ddate.year,
-                fiscal_period=period_label,
-                duration_qtrs=fact.qtrs,
-                period_end=fact.ddate,
-                event_time=event_time,
-                knowledge_time=knowledge_time,
-                knowledge_source="sec_fsds",
-                value=fact.value,
-                unit=fact.uom,
-                basis="as_reported",
-                source=path.name,
-            )
+        batch.append(
+            {
+                "security_id": security_id,
+                "filing_id": filing_ids.get(fact.adsh),
+                "metric": fact.tag,
+                "fiscal_year": fact.ddate.year,
+                "fiscal_period": period_label,
+                "duration_qtrs": fact.qtrs,
+                "period_end": fact.ddate,
+                "event_time": event_time,
+                "knowledge_time": knowledge_time,
+                "knowledge_source": "sec_fsds",
+                "value": fact.value,
+                "unit": fact.uom,
+                "basis": "as_reported",
+                "source": path.name,
+            }
         )
         landed += 1
+        if len(batch) >= _BATCH:
+            _write(session, batch)
+            batch.clear()
 
-    unmapped = {
-        submissions[adsh].cik: why
-        for adsh, (security_id, why) in resolved.items()
-        if security_id is None
-    }
-    for cik, why in unmapped.items():
-        result.rejected.append(RejectedBar(None, RejectReason.NO_ISSUER, f"sec_cik:{cik}", why))
+    if batch:
+        _write(session, batch)
+
     if duplicates:
         result.rejected.append(
             RejectedBar(
                 None,
                 RejectReason.DUPLICATE,
                 path.name,
-                f"{duplicates} facts already held at this exact revision",
+                f"{duplicates} facts repeated within this quarter",
             )
         )
     if early:
@@ -343,7 +386,13 @@ def import_fsds_quarter(session: Session, path: Path, *, limit: int | None = Non
                 f"{early} facts filed before the period they describe had ended",
             )
         )
+    unmapped = {
+        submissions[adsh].cik: why
+        for adsh, (security_id, why) in resolved.items()
+        if security_id is None
+    }
+    for cik, why in unmapped.items():
+        result.rejected.append(RejectedBar(None, RejectReason.NO_ISSUER, f"sec_cik:{cik}", why))
     result.landed = landed
     result.securities_touched = {s for s, _ in resolved.values() if s is not None}
-    session.flush()
     return result
