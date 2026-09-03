@@ -14,7 +14,14 @@ query, it is a corpus that cannot answer the question it was built for.
 first, then the period range, then the point-in-time bound. Adding
 ``security_id`` would not help -- it is the column the read does not have.
 
-Revision ID: 0016_fundamental_cross_section_index
+**The revision id is short on purpose.** Alembic stores it in
+``alembic_version.version_num``, a ``varchar(32)``. SQLite does not enforce a
+varchar length and PostgreSQL does, so ``0016_fundamental_cross_section_index``
+-- thirty-six characters -- passed the whole local suite and failed every
+PostgreSQL integration test in CI. ``test_migration_revision_ids_fit_the_column``
+now asserts the bound.
+
+Revision ID: 0016_fundamental_cross_index
 Revises: 0015_fundamental_duration
 """
 
@@ -24,7 +31,7 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0016_fundamental_cross_section_index"
+revision: str = "0016_fundamental_cross_index"
 down_revision: str | None = "0015_fundamental_duration"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
