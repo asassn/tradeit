@@ -474,6 +474,99 @@ resolution. Disagreement is data; picking a winner silently is not.
 
 ## 6. Fundamentals — the three-date rule
 
+### What is actually loaded, measured
+
+`security_fundamental_facts` held **zero rows** until 2026-09-02. It now holds
+**92,022,159 as-reported facts** over **17,000 securities** and **482,780
+distinct metrics**, from all 70 quarterly Financial Statement Data Set
+archives. Zero rows violate `knowledge_time >= event_time`; zero duplicate
+revisions exist. The database is 45.4 GB.
+
+**The cohort was the whole problem, and the fix was the cohort.** The first
+import reached **fifteen** securities — Apple, Microsoft, Amazon, Cisco, GM —
+because `research-01`'s identity was a dot-com cohort that stopped filing
+between 1998 and 2005 while the Data Sets begin in 2009. *A fundamentals set
+consisting entirely of survivors, attached to a corpus built to avoid
+survivorship bias, is worse than none.* So 17,015 registrants were seeded from
+the SEC's own submission index:
+
+| | |
+|---|---|
+| CIKs with fundamentals | **17,000** |
+| — with a confirmed dated EDGAR exit | **7,253 (42.7%)** |
+| — that exit falling 2009 or later | 7,251 |
+
+**Forty-three per cent dead**, against 2.71% coverage of dated exits on the
+price side. This is the first part of the corpus that is survivorship-*measurable*
+rather than survivorship-*biased* — and it is fundamentals only. Holding a
+fundamental fact for a registrant is **not** holding a price for it: no ticker
+was evidenced for the seeded cohort, so the survivorship gate, which counts CIKs
+with a price bar, does not move on this at all.
+
+The honest ceiling: only **48.1%** of the 15,086 confirmed dated exits from 2009
+onward filed XBRL. This route cannot reach the other half.
+
+### The free fundamentals do not begin in 2009
+
+Measured across all seventy archives. `2009q1.zip` holds a header row and
+nothing else — 223 bytes, zero submissions — and the XBRL mandate phased in by
+filer size after it:
+
+| quarter | filings | | period | facts loaded |
+|---|---|---|---|---|
+| 2009q2 | 22 | | 2008 | 313,475 |
+| 2009q3 | 435 | | 2009 | 1,092,581 |
+| 2010q3 | 1,412 | | 2010 | 3,302,599 |
+| **2011q3** | **7,102** | | 2011 | 5,967,278 |
+| 2026q2 | 7,714 | | 2012 | 6,655,444 |
+
+**Anything cross-sectional before 2011Q3 is a sample of large accelerated
+filers, not of the market**, and a screen run on it would be measuring company
+size. The number a reader reaches for is "2009", and it is wrong by two and a
+half years.
+
+### Three refusals the import makes, each found by running it
+
+**A fact cannot be knowable before the event it describes.** The first real run
+died on `ck_security_fundamental_knowledge`:
+`CommonStockDividendsPerShareDeclared` for the quarter ending 2010-12-31, in a
+filing submitted 2010-11-03. For a *declared* dividend that date is genuine; on
+a reported result the same shape is look-ahead. `num.txt` does not say which,
+and inventing a tag taxonomy to guess would be fabrication, so such rows are
+skipped and counted under `KNOWLEDGE_PRECEDES_EVENT`. The boundary is tested:
+filed *on* the period end is kept, because the rule is `<`, not `<=`.
+
+**Only consolidated rows.** A row with `segments` or `coreg` populated is a
+dimensional breakdown — revenue by geography, by business unit — and is skipped
+and counted, never summed into the consolidated figure of the same name.
+
+**Re-running adds nothing.** `RejectReason.DUPLICATE` always promised this and
+for this importer it was false: the dedupe set lived for one call while
+`uq_security_fundamental_revision` lives in the database, so clearing a progress
+file re-inserted a quarter and died. Writes are now batched
+`INSERT … ON CONFLICT DO NOTHING`, sized in **bound parameters rather than rows**
+— fourteen columns times five thousand rows is seventy thousand parameters and
+SQLite refuses above 32,766.
+
+### A known source defect, recorded rather than cleaned
+
+**571 rows carry a `period_end` outside 1990–2030**, including year 1011 and
+1932. They are what the SEC's own file says and are kept, because discarding
+them would hide a source defect rather than record it; every one links to the
+filing it came from. **A consumer must bound its own period range** — 571 in
+92,022,159 is 0.0006%, and one of them in an unbounded screen is still wrong.
+
+### The index that made it usable
+
+`ix_security_fundamental_pit` leads with `security_id` and serves "this
+company's history of this metric". **A screen makes the opposite read** — this
+metric, for every company, for periods in a range, as knowable on a date — and
+filters on no security at all, so the planner fell back to `SCAN`. Measured on
+92M rows: **3 minutes 30 seconds** for one cross-section.
+`ix_security_fundamental_cross_section` on `(metric, period_end,
+knowledge_time)` takes the same query to **3.1 seconds**, for 7.8 GB.
+
+
 ```
 filings                          the causal anchor
   instrument_id, cik

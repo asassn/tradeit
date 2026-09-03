@@ -3157,6 +3157,18 @@ class SecurityFundamentalFact(Base, TimestampMixin):
             "knowledge_time",
             "period_end",
         ),
+        # **The cross-sectional read, which the one above cannot serve.** A
+        # screen asks "this metric, for every company, for periods in this
+        # range, as knowable on this date" and filters on no security at all,
+        # so an index leading with ``security_id`` is unusable and SQLite falls
+        # back to a scan. Measured on 92,022,159 rows: 3 minutes 30 seconds for
+        # one cross-section, which is not a slow query but an unusable corpus.
+        Index(
+            "ix_security_fundamental_cross_section",
+            "metric",
+            "period_end",
+            "knowledge_time",
+        ),
         CheckConstraint("knowledge_time >= event_time", name="ck_security_fundamental_knowledge"),
         CheckConstraint(
             "basis IN ('as_reported', 'restated')", name="ck_security_fundamental_basis"
