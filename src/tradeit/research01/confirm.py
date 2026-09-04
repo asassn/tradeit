@@ -44,7 +44,41 @@ __all__ = ["Confirmation", "candidate_symbols", "confirm_ticker"]
 #: on the New York Stock Exchange". Short now, and short *because* extraction is
 #: precise: the long list this replaced was compensating for a regex that read
 #: whole sentences.
-_STOPWORDS = frozenset({"THE", "FOR", "ON", "OF", "AND", "IN", "AT", "IS", "A", "AN", "OUR", "ITS"})
+_STOPWORDS = frozenset(
+    {
+        "THE",
+        "FOR",
+        "ON",
+        "OF",
+        "AND",
+        "IN",
+        "AT",
+        "IS",
+        "A",
+        "AN",
+        "OUR",
+        "ITS",
+        # The Section 12(b) cover table's own header: "Title of each class |
+        # Trading Symbol | Name of exchange on which registered". Reading it as
+        # a binding produced the ticker "NAME" for seven registrants, because
+        # the pattern matched "Symbol" followed by "Name". A header is a header
+        # in either direction, so these belong here rather than in a caller.
+        "NAME",
+        "NAMES",
+        "TITLE",
+        "EACH",
+        "CLASS",
+        "REGISTERED",
+        "EXCHANGE",
+        "TRADING",
+        "SYMBOL",
+        "SYMBOLS",
+        "MARKET",
+        "WHICH",
+        "NONE",
+        "NOT",
+    }
+)
 
 
 #: How a filing actually binds a symbol: the word "symbol" (or "ticker"), then

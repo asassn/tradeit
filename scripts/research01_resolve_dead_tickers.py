@@ -42,6 +42,35 @@ Seven refusals, because coverage bought by guessing is worth nothing
    ``series_coherence`` and ``adjudicate.py`` are what catch the splice if one
    exists -- they found 63 of 79 in the dot-com cohort.
 
+The prune, and the defect that made it necessary
+------------------------------------------------
+
+A filing states a symbol; it does not state that the symbol is **its own**. Four
+Clayton Williams drilling partnerships each filed a 10-K describing their
+sponsor -- *"CWEI is an oil and gas company based in Midland, Texas, and its
+common stock is traded ... under the symbol CWEI"* -- and five PDC Energy
+partnerships each said *"The common stock of **PDC** is traded ..."*. Operating
+partnerships quote their general partner: *"The **General Partner's** common
+stock is listed for trading on the NYSE"*. Every one of those is a true sentence
+about somebody else.
+
+**The discriminator is not how many registrants claim a symbol -- it is whether
+they claim it in the same words.** Two registrants holding one symbol a decade
+apart is ticker reuse, which this corpus exists to represent: ``ALTR`` was
+Altera until 2015 and Altair afterwards, and both bindings are right. Measured
+over the 3,814 bindings, the shared symbols split cleanly: 104 pairs with
+*different* sentences, spread three to fourteen years apart, and 28 groups whose
+sentences are **character-identical**, which means the same document language
+was copied and at most one filer is its subject.
+
+So two rules, both fail-closed:
+
+* a symbol claimed by **three or more** registrants is refused for all of them;
+* a symbol claimed by registrants using an **identical sentence** is refused for
+  all of them.
+
+Neither guesses which claimant is right, because nothing here can tell.
+
     EDGAR_USER_AGENT=... PYTHONPATH=src .venv/bin/python \\
       scripts/research01_resolve_dead_tickers.py --limit 50
 """
@@ -52,6 +81,7 @@ import argparse
 import collections
 import datetime as dt
 import json
+import re
 import sys
 import time
 import urllib.request
@@ -117,6 +147,14 @@ NOT_A_SYMBOL = frozenset(
 #: SEC fair access. The published ceiling is ten a second; this stays well under.
 PAUSE_S = 0.12
 MAX_DOCUMENT_BYTES = 30 * 1024 * 1024
+
+#: Pulls the filing's own sentence back out of a stored citation. **A citation
+#: that does not parse yields a value unique to its row**, so an unreadable
+#: citation can never be mistaken for a match with another -- the first version
+#: split on a delimiter that is not in the format and silently compared whole
+#: citations, which differ by CIK and so never matched at all. It reported zero
+#: identical sentences over data known to contain twenty-eight groups of them.
+_QUOTED = re.compile(r'filed \d{4}-\d\d-\d\d: "(.*?)"\. Interval', re.S)
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,14 +243,63 @@ def _self_test(user_agent: str) -> bool:
     return True
 
 
+def _prune(session: Session, *, apply: bool) -> dict[str, int]:
+    """Remove bindings that cannot be attributed to one registrant.
+
+    Applied to what is already stored as well as to a fresh run, because the
+    rules were learned from the data the first run produced.
+    """
+    rows = session.execute(
+        select(SymbolAlias.id, SymbolAlias.alias_value, SymbolAlias.citation).where(
+            SymbolAlias.alias_kind == "ticker",
+            SymbolAlias.knowledge_source == KNOWLEDGE_SOURCE,
+            SymbolAlias.valid_to.is_not(None),
+        )
+    ).all()
+    by_symbol: dict[str, list[tuple[int, str]]] = {}
+    for alias_id, symbol, citation in rows:
+        found = _QUOTED.search(citation or "")
+        quoted = found.group(1) if found else f"__unparsed__{alias_id}"
+        by_symbol.setdefault(symbol, []).append((alias_id, quoted))
+
+    doomed: set[int] = set()
+    tally = {"many_claimants": 0, "identical_sentence": 0}
+    for _symbol, claims in by_symbol.items():
+        if len(claims) < 2:
+            continue
+        if len(claims) >= 3:
+            doomed.update(alias_id for alias_id, _ in claims)
+            tally["many_claimants"] += len(claims)
+            continue
+        if len({sentence for _, sentence in claims}) == 1:
+            doomed.update(alias_id for alias_id, _ in claims)
+            tally["identical_sentence"] += len(claims)
+
+    if apply and doomed:
+        for alias in session.scalars(
+            select(SymbolAlias).where(SymbolAlias.id.in_(sorted(doomed)))
+        ).all():
+            session.delete(alias)
+        session.commit()
+    tally["total"] = len(doomed)
+    return tally
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--prune-only", action="store_true", help="apply the rules to stored bindings")
     ap.add_argument("--db", default="sqlite:///research01.sqlite")
     ap.add_argument("--edgar-cache", required=True)
     ap.add_argument("--progress", default=".research01_dead_tickers.json")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+
+    session_only: Session = sessionmaker(bind=create_engine(args.db, future=True), future=True)()
+    if args.prune_only:
+        tally = _prune(session_only, apply=not args.dry_run)
+        print(f"pruned: {tally}")
+        return 0
 
     user_agent = resolve_user_agent()
     if not _self_test(user_agent):
@@ -300,9 +387,12 @@ def main() -> int:
     print(f"\nattempted {attempted:,}: {dict(tally)}")
     rate = 100 * tally["resolved"] / attempted if attempted else 0.0
     print(f"resolved {tally['resolved']:,} ({rate:.1f}%)")
+    if not args.dry_run:
+        print(f"prune: {_prune(session, apply=True)}")
     print(
         "\nEvery binding carries the filing's own sentence and the accession it came "
-        "from. Nothing was resolved from a filing naming more than one symbol."
+        "from. Nothing was resolved from a filing naming more than one symbol, and "
+        "nothing survives that two registrants claimed in the same words."
     )
     return 0
 
