@@ -140,7 +140,11 @@ def main() -> int:
     ap.add_argument("--progress", default=".research01_dead_backfill.json")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--edgar-cache", required=True, help="first_seen per CIK")
+    ap.add_argument(
+        "--edgar-cache",
+        default="/Users/ericsasson/Documents/TradeItData/out/edgar_facts.json",
+        help="first_seen per CIK; built by research01_adjudicate.py",
+    )
     args = ap.parse_args()
 
     first_seen = {

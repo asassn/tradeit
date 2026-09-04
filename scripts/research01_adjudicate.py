@@ -56,6 +56,12 @@ from tradeit.storage.tables import (
 DEFAULT_INDEX = "/Users/ericsasson/Documents/TradeItData/edgar/full-index"
 DEFAULT_TICKERS = "/Users/ericsasson/Documents/TradeItData/edgar/reference/company_tickers.json"
 
+#: **Not under /tmp.** macOS clears it on reboot, and this cache costs a
+#: twenty-minute pass over the whole EDGAR index to rebuild -- which is exactly
+#: what an unplugged machine cost once already. The diagnostics directory is
+#: outside the repository and survives.
+DEFAULT_CACHE = "/Users/ericsasson/Documents/TradeItData/out/edgar_facts.json"
+
 
 def _current_holders(path: Path) -> dict[str, int]:
     """Plain ticker -> the CIK that holds it today, from the SEC's own file.
@@ -74,7 +80,7 @@ def _current_holders(path: Path) -> dict[str, int]:
 
 def _edgar_facts(
     index_root: Path, as_of: dt.date, cache: Path | None = None
-) -> tuple[dict[int, dt.date], dict[int, dt.date]]:
+) -> tuple[dict[int, dt.date], dict[int, dt.date], dict[int, dt.date]]:
     """One pass over the index: last lifecycle filing, and confirmed dated exits.
 
     The pass takes minutes and its inputs do not move between runs, so ``cache``
@@ -87,6 +93,7 @@ def _edgar_facts(
         return (
             {int(k): dt.date.fromisoformat(v) for k, v in blob["last_seen"].items()},
             {int(k): dt.date.fromisoformat(v) for k, v in blob["exits"].items()},
+            {int(k): dt.date.fromisoformat(v) for k, v in blob.get("first_seen", {}).items()},
         )
     denominator = build_denominator(
         BuildOptions(
@@ -97,6 +104,10 @@ def _edgar_facts(
         )
     )
     last_seen = {cik: t.last_seen for cik, t in denominator.timelines.items()}
+    # The registrant's FIRST filing, which bounds a price request at the other
+    # end: a US issuer registers before it lists, so this precedes its first
+    # trade. Without it a reused ticker's PREDECESSOR arrives unnoticed.
+    first_seen = {cik: t.first_seen for cik, t in denominator.timelines.items()}
     exits = {
         r.cik: r.evidence_date
         for r in denominator.resolutions
@@ -108,10 +119,11 @@ def _edgar_facts(
                 {
                     "last_seen": {str(k): str(v) for k, v in last_seen.items()},
                     "exits": {str(k): str(v) for k, v in exits.items()},
+                    "first_seen": {str(k): str(v) for k, v in first_seen.items()},
                 }
             )
         )
-    return last_seen, exits
+    return last_seen, exits, first_seen
 
 
 def _corpus(session: Session) -> list[tuple[int, int, str | None]]:
@@ -140,7 +152,9 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="write the located boundaries")
     ap.add_argument("--out", default="", help="write the full per-security verdicts as JSON")
     ap.add_argument(
-        "--edgar-cache", default="", help="cache the index pass here; delete it to remeasure"
+        "--edgar-cache",
+        default=DEFAULT_CACHE,
+        help="cache the index pass here; delete it to remeasure",
     )
     args = ap.parse_args()
 
@@ -151,7 +165,7 @@ def main() -> int:
     print(f"company_tickers.json: {len(holders):,} symbols listed today")
 
     print("one pass over the EDGAR index (last filing + confirmed dated exits) ...")
-    last_seen, exits = _edgar_facts(
+    last_seen, exits, _first_seen = _edgar_facts(
         Path(args.index_root), as_of, Path(args.edgar_cache) if args.edgar_cache else None
     )
     print(f"  timelines {len(last_seen):,}   confirmed dated exits {len(exits):,}")
