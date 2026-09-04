@@ -468,3 +468,40 @@ class TestPerSymbolWindows:
             BackfillProgress(path=tmp_path / "progress.json"),
         )
         assert asked == [("DEAD.US", dt.date(1990, 1, 1), dt.date(2011, 3, 4))]
+
+
+class TestTheCheckpointCannotOutrunTheCommit:
+    """494 symbols checkpointed, 472 with nothing behind them.
+
+    ``run_backfill`` committed once at the end of the run while writing its
+    checkpoint after every symbol, so a power cut rolled back every row and left
+    a progress file claiming they were all done. A resume would have skipped
+    each one. The same rule the FSDS importer learned: a side file and the
+    corpus must not be able to disagree.
+    """
+
+    def test_each_symbol_is_committed_before_it_is_checkpointed(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        order: list[str] = []
+        real_commit = db_session.commit
+
+        def watched_commit() -> None:
+            order.append("commit")
+            real_commit()
+
+        class Watched(BackfillProgress):
+            def save(self) -> None:
+                order.append("checkpoint")
+                super().save()
+
+        progress = Watched(path=tmp_path / "p.json")
+        db_session.commit = watched_commit  # type: ignore[method-assign]
+
+        run_backfill(
+            db_session,
+            FakeClient(eod=[], splits=[], dividends=[]),
+            BackfillPlan(symbols=("DEAD.US",), start=dt.date(1990, 1, 1), end=dt.date(2011, 3, 4)),
+            progress,
+        )
+        assert order == ["commit", "checkpoint"], order

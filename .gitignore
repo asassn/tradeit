@@ -91,3 +91,4 @@ htmlcov/
 /.research01_confirmed_backfill.json
 /.research01_fsds.json
 /.research01_dead_tickers.json
+/.research01_dead_backfill.json

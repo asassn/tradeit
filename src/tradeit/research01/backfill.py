@@ -162,7 +162,7 @@ def run_backfill(
 
     A symbol that raises is recorded and the run continues: one bad response
     should not cost the remaining symbols in a paid month. A symbol is marked
-    complete only after its rows are landed, so an interruption mid-symbol
+    complete only after its rows are **committed**, so an interruption mid-symbol
     re-fetches it rather than skipping it.
     """
     report = BackfillReport(planned=len(plan.symbols))
@@ -201,6 +201,18 @@ def run_backfill(
             report.actions,
             import_corporate_actions(session, actions, delivery, alias_kind=alias_kind),
         )
+        # **Commit BEFORE the checkpoint, and the order is the whole point.**
+        # Rows were landed into the session; only a commit puts them on disk.
+        # An earlier version committed once at the end of the run, so a power
+        # cut at symbol 494 rolled back every row while the checkpoint went on
+        # claiming all 494 were done -- 472 symbols marked complete with
+        # nothing behind them, and a resume that would have skipped every one.
+        #
+        # Committing first means a failure between the two costs a re-fetch of
+        # one symbol. The reverse costs the data, silently. This is the same
+        # rule the FSDS importer learned: a side file and the corpus must not
+        # be able to disagree.
+        session.commit()
         report.symbols_fetched += 1
         progress.completed.add(symbol)
         progress.save()
