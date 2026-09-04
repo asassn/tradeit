@@ -139,6 +139,10 @@ def main() -> int:
     ap.add_argument("--db", default="sqlite:///research01.sqlite")
     ap.add_argument("--progress", default=".research01_dead_backfill.json")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument(
+        "--failures",
+        default="/Users/ericsasson/Documents/TradeItData/out/dead_backfill_failures.json",
+    )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
         "--edgar-cache",
@@ -247,6 +251,15 @@ def main() -> int:
     after = session.scalar(select(func.count()).select_from(SecurityPriceFact)) or 0
 
     print(json.dumps(report.summary(), indent=1))
+    if report.failures:
+        # **The summary counts failures; it does not keep them.** 194 symbols
+        # failed in the first full run and the reasons went to nothing but an
+        # integer, so "which ones, and why" could not be answered without
+        # paying for the whole fetch again. A paid run's failures are evidence.
+        Path(args.failures).write_text(
+            json.dumps([{"symbol": s_, "error": e} for s_, e in report.failures], indent=1)
+        )
+        print(f"wrote {len(report.failures)} failures to {args.failures}")
     print(
         json.dumps(
             {

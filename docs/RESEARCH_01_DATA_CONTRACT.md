@@ -119,6 +119,45 @@ explicitly; the default is that the security ended.
 
 ## 4. Prices
 
+### Measured coverage of the dead, 2026-09-04
+
+The survivorship gate has been run against the corpus after the dead-registrant
+backfill. **The grade is unchanged and the numbers moved by a factor of five.**
+
+| | before | after |
+|---|---|---|
+| CIKs with at least one price bar | 862 | **4,017** |
+| dated confirmed exits we can price | 791 | **3,950** |
+| `matched_coverage` | 2.71% | **13.54%** |
+| `bounded_coverage` | 0.87% | **4.36%** |
+| classification | `SURVIVOR_BIASED` | **`SURVIVOR_BIASED`** |
+
+`bounded_coverage 0.044 below 0.25` is the gate's own reason. Controls remain
+30/30, which does not rescue the grade and was never meant to.
+
+**Coverage is concentrated where the cohort was built, and the shape says so:**
+
+| exit era | priced | of | |
+|---|---|---|---|
+| 1994–1997 | 0 | 1,333 | no XBRL, no cohort |
+| 1998–2005 | 796 | 9,113 | the dot-com cohort, 8.7% |
+| 2006–2008 | 1 | 3,648 | **a hole: after the dot-com work, before XBRL** |
+| 2009–2026 | 3,153 | 15,086 | **20.9%** |
+| 2024 · 2025 | 251 · 281 | 701 · 664 | **35.8% · 42.3%** |
+
+The 2006–2008 window is the honest weak point: it belongs to neither cohort.
+The recent years are the strongest the corpus has ever been.
+
+**The standing rule does not lift.** No strategy result computed on this corpus
+is evidence of profitability, and it stays that way until the gate returns
+something other than `SURVIVOR_BIASED` — which needs `bounded_coverage` above
+0.25, roughly five times again what is held now.
+
+**16,348,733 bars landed from 3,534 of 3,728 symbols**, with 5,126 bars refused
+as unresolvable and 194 symbols failing outright. Every request was bounded at
+both ends of the registrant's evidenced life.
+
+
 **Store the vendor's raw facts. Derive everything else.**
 
 ```
