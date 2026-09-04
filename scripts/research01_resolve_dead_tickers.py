@@ -95,6 +95,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.edgar.acquire import extract_identity_evidence, resolve_user_agent, strip_html
 from tradeit.research01.confirm import candidate_symbols
+from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import Issuer, IssuerIdentifier, Security, SymbolAlias
 
 SUBMISSIONS = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
@@ -295,7 +296,9 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    session_only: Session = sessionmaker(bind=create_engine(args.db, future=True), future=True)()
+    session_only: Session = sessionmaker(
+        bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
+    )()
     if args.prune_only:
         tally = _prune(session_only, apply=not args.dry_run)
         print(f"pruned: {tally}")
@@ -309,7 +312,9 @@ def main() -> int:
     exits = {int(k): dt.date.fromisoformat(v) for k, v in facts["exits"].items()}
     last_seen = {int(k): dt.date.fromisoformat(v) for k, v in facts["last_seen"].items()}
 
-    session: Session = sessionmaker(bind=create_engine(args.db, future=True), future=True)()
+    session: Session = sessionmaker(
+        bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
+    )()
     have = set(
         session.scalars(
             select(SymbolAlias.security_id).where(SymbolAlias.alias_kind == "ticker")

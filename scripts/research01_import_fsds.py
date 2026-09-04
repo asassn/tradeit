@@ -40,6 +40,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from tradeit.research01.fsds import import_fsds_quarter, read_quarter
+from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import IssuerIdentifier, SecurityFundamentalFact
 
 DEFAULT_FSDS = "/Users/ericsasson/Documents/TradeItData/edgar/fsds"
@@ -53,7 +54,9 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="report the yield, write nothing")
     args = ap.parse_args()
 
-    session = sessionmaker(bind=create_engine(args.db, future=True), future=True)()
+    session = sessionmaker(
+        bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
+    )()
     ours = {
         int(v)
         for v in session.scalars(

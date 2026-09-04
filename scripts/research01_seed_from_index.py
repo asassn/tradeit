@@ -51,6 +51,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.edgar.index import IndexQuarter, LocalFullIndexSource
+from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import Filing, Issuer, IssuerIdentifier, Security
 
 DEFAULT_INDEX = "/Users/ericsasson/Documents/TradeItData/edgar/full-index"
@@ -120,7 +121,9 @@ def main() -> int:
         int(cik): dt.date.fromisoformat(value)
         for cik, value in json.loads(Path(args.edgar_cache).read_text())["exits"].items()
     }
-    session: Session = sessionmaker(bind=create_engine(args.db, future=True), future=True)()
+    session: Session = sessionmaker(
+        bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
+    )()
     held = {
         int(v)
         for v in session.scalars(

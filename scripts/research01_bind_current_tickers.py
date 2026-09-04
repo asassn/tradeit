@@ -46,6 +46,7 @@ sys.path.insert(0, "src")
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import IssuerIdentifier, Security, SymbolAlias
 
 DEFAULT_TICKERS = "/Users/ericsasson/Documents/TradeItData/edgar/reference/company_tickers.json"
@@ -89,7 +90,9 @@ def main() -> int:
     current, multi_class = _current(path)
     exits = set(json.loads(Path(args.edgar_cache).read_text())["exits"])
 
-    session: Session = sessionmaker(bind=create_engine(args.db, future=True), future=True)()
+    session: Session = sessionmaker(
+        bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
+    )()
     rows = session.execute(
         select(IssuerIdentifier.value_normalized, Security.security_id)
         .join(Security, Security.issuer_id == IssuerIdentifier.issuer_id)

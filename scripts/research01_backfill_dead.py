@@ -48,11 +48,12 @@ from pathlib import Path
 
 sys.path.insert(0, "src")
 
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.research01.backfill import BackfillPlan, BackfillProgress, run_backfill
 from tradeit.research01.eodhd_client import HttpEodhdClient, resolve_api_token
+from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import (
     IssuerIdentifier,
     Security,
@@ -156,22 +157,9 @@ def main() -> int:
         for cik, value in json.loads(Path(args.edgar_cache).read_text())["first_seen"].items()
     }
 
-    engine = create_engine(args.db, future=True)
-
-    @event.listens_for(engine, "connect")
-    def _wait_for_the_lock(dbapi_connection: object, _record: object) -> None:
-        """Wait rather than die when something else holds the database.
-
-        SQLite's default busy timeout is **zero**: any concurrent reader turns
-        a write into ``database is locked`` immediately. A ``pragma
-        integrity_check`` left running after the power cut killed this run on
-        its second symbol -- a multi-hour paid fetch ended by a read.
-        """
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-        cursor.execute("PRAGMA busy_timeout = 300000")
-        cursor.close()
-
-    session: Session = sessionmaker(bind=engine, future=True)()
+    session: Session = sessionmaker(
+        bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
+    )()
 
     tightened, purged = _apply_floors(session, first_seen, apply=not args.dry_run)
     print(f"alias floors written           : {tightened:,}")
