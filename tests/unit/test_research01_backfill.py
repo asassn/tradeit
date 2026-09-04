@@ -412,3 +412,59 @@ class TestSpanOverlapDetection:
             )
             is True
         )
+
+
+class TestPerSymbolWindows:
+    """A dead registrant's ticker is often held by somebody else today.
+
+    Requesting its whole history returns the successor's bars too. Those would
+    be rejected on the way in -- ``resolve_security`` resolves per bar date --
+    but rejection is detection, and not asking is prevention.
+    """
+
+    def test_a_symbol_with_a_window_is_fetched_only_over_it(self) -> None:
+        plan = BackfillPlan(
+            symbols=("AKRX.US", "AAPL.US"),
+            start=dt.date(1990, 1, 1),
+            end=dt.date(2026, 9, 1),
+            windows={"AKRX.US": (dt.date(1990, 1, 1), dt.date(2020, 5, 20))},
+        )
+        assert plan.window_for("AKRX.US") == (dt.date(1990, 1, 1), dt.date(2020, 5, 20))
+
+    def test_a_symbol_without_one_uses_the_plan(self) -> None:
+        plan = BackfillPlan(
+            symbols=("AAPL.US",), start=dt.date(1990, 1, 1), end=dt.date(2026, 9, 1)
+        )
+        assert plan.window_for("AAPL.US") == (dt.date(1990, 1, 1), dt.date(2026, 9, 1))
+
+    def test_the_client_is_asked_for_the_narrow_window(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        asked: list[tuple[str, dt.date, dt.date]] = []
+
+        class Recording:
+            def eod(self, symbol: str, start: dt.date, end: dt.date) -> list[dict[str, object]]:
+                asked.append((symbol, start, end))
+                return []
+
+            def splits(self, symbol: str, start: dt.date, end: dt.date) -> list[dict[str, object]]:
+                return []
+
+            def dividends(
+                self, symbol: str, start: dt.date, end: dt.date
+            ) -> list[dict[str, object]]:
+                return []
+
+        plan = BackfillPlan(
+            symbols=("DEAD.US",),
+            start=dt.date(1990, 1, 1),
+            end=dt.date(2026, 9, 1),
+            windows={"DEAD.US": (dt.date(1990, 1, 1), dt.date(2011, 3, 4))},
+        )
+        run_backfill(
+            db_session,
+            Recording(),  # type: ignore[arg-type]
+            plan,
+            BackfillProgress(path=tmp_path / "progress.json"),
+        )
+        assert asked == [("DEAD.US", dt.date(1990, 1, 1), dt.date(2011, 3, 4))]

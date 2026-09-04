@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,14 +43,32 @@ CALLS_PER_SYMBOL = 3
 
 @dataclass(frozen=True, slots=True)
 class BackfillPlan:
+    """What to fetch, and for each symbol, over what window.
+
+    **A per-symbol window is a safety mechanism, not a convenience.** A dead
+    registrant's plain ticker is often held by a different company today, so a
+    request for the whole history returns the successor's bars as well as this
+    registrant's. Those bars would be rejected on the way in -- ``resolve_security``
+    resolves per bar date against the alias interval -- but rejection is
+    detection, and not asking for them at all is prevention. It also keeps the
+    unresolved count meaningful: what remains is genuinely unmappable rather
+    than merely out of interval.
+    """
+
     symbols: tuple[str, ...]
     start: dt.date
     end: dt.date
+    #: Symbol -> (start, end), overriding the plan's own window. Absent symbols
+    #: use the plan's, so an unbounded backfill is written exactly as before.
+    windows: Mapping[str, tuple[dt.date, dt.date]] = field(default_factory=dict)
     vendor: str = "eodhd"
     #: EODHD states 100,000 calls/day on commercial tiers. Kept as a parameter
     #: rather than a constant: it is the vendor's number, not ours, and a plan
     #: that hard-codes someone else's limit is wrong the day they change it.
     daily_call_budget: int = 100_000
+
+    def window_for(self, symbol: str) -> tuple[dt.date, dt.date]:
+        return self.windows.get(symbol, (self.start, self.end))
 
     @property
     def estimated_calls(self) -> int:
@@ -167,10 +185,11 @@ def run_backfill(
             report.symbols_fetched += 1
             continue
 
+        window_start, window_end = plan.window_for(symbol)
         try:
-            bars = parse_bars(symbol, client.eod(symbol, plan.start, plan.end))
-            actions = parse_splits(symbol, client.splits(symbol, plan.start, plan.end))
-            actions += parse_dividends(symbol, client.dividends(symbol, plan.start, plan.end))
+            bars = parse_bars(symbol, client.eod(symbol, window_start, window_end))
+            actions = parse_splits(symbol, client.splits(symbol, window_start, window_end))
+            actions += parse_dividends(symbol, client.dividends(symbol, window_start, window_end))
         except Exception as exc:
             report.failures.append((symbol, f"{type(exc).__name__}: {exc}"))
             continue
