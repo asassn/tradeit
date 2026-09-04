@@ -417,7 +417,9 @@ class TestCloseAliasInterval:
     def test_an_open_interval_is_closed(self, db_session: Session) -> None:
         security_id, alias = self._alias(db_session)
         assert close_alias_interval(db_session, security_id, D(2001, 6, 1), "why") == 1
-        assert alias.valid_to == D(2001, 6, 1)
+        # The boundary session BELONGS to the security and valid_to is
+        # exclusive, so the stored value is the day after it.
+        assert alias.valid_to == D(2001, 6, 2)
 
     def test_the_citation_is_appended_not_replaced(self, db_session: Session) -> None:
         security_id, alias = self._alias(db_session)
@@ -434,13 +436,13 @@ class TestCloseAliasInterval:
     def test_a_later_close_is_tightened(self, db_session: Session) -> None:
         security_id, alias = self._alias(db_session, valid_to=D(2005, 1, 1))
         assert close_alias_interval(db_session, security_id, D(2000, 1, 1), "earlier") == 1
-        assert alias.valid_to == D(2000, 1, 1)
+        assert alias.valid_to == D(2000, 1, 2)
 
     def test_an_empty_interval_is_refused(self, db_session: Session) -> None:
         """``ck_alias_interval`` requires valid_to > valid_from, and an interval
         nobody can act on is not a claim worth writing."""
         security_id, alias = self._alias(db_session)
-        assert close_alias_interval(db_session, security_id, D(1990, 1, 1), "empty") == 0
+        assert close_alias_interval(db_session, security_id, D(1989, 12, 31), "empty") == 0
         assert alias.valid_to is None
 
     def test_a_vendor_symbol_alias_is_not_touched(self, db_session: Session) -> None:

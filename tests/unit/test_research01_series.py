@@ -274,18 +274,26 @@ class TestAdjudicatedBound:
         assert adjudicated_bound(db_session, security.security_id) is None
 
     def test_a_closed_interval_excludes_bars_beyond_it(self, db_session: Session) -> None:
-        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        security = self._bound_series(db_session, dt.date(2000, 1, 5))
         bars = price_series(db_session, security.security_id, as_of=AS_OF)
         assert [b.session_date for b in bars] == [dt.date(2000, 1, 3), dt.date(2000, 1, 4)]
 
-    def test_the_bound_is_inclusive(self, db_session: Session) -> None:
+    def test_the_bound_is_EXCLUSIVE(self, db_session: Session) -> None:
+        """Half-open ``[valid_from, valid_to)``, as every interval table here declares.
+
+        ``ck_alias_interval`` and its four siblings require
+        ``valid_to > valid_from``, and ``resolve_security`` -- which decides
+        what may enter the corpus at all -- tests ``valid_to > on``. This read
+        the same column as inclusive, so a bar on the boundary was admitted
+        here and rejected there. The invariant is one column, one meaning.
+        """
         security = self._bound_series(db_session, dt.date(2000, 1, 4))
         bars = price_series(db_session, security.security_id, as_of=AS_OF)
-        assert bars[-1].session_date == dt.date(2000, 1, 4)
+        assert [b.session_date for b in bars] == [dt.date(2000, 1, 3)]
 
     def test_include_disputed_returns_the_excluded_bars(self, db_session: Session) -> None:
         """An auditor must be able to see what the cut removed."""
-        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        security = self._bound_series(db_session, dt.date(2000, 1, 5))
         bars = price_series(db_session, security.security_id, as_of=AS_OF, include_disputed=True)
         assert len(bars) == 3
 
@@ -314,21 +322,23 @@ class TestAdjudicatedBound:
         assert len(price_series(db_session, security.security_id, as_of=AS_OF)) == 1
 
     def test_the_earliest_close_wins_across_two_aliases(self, db_session: Session) -> None:
-        security = self._bound_series(db_session, dt.date(2018, 1, 3))
+        security = self._bound_series(db_session, dt.date(2018, 1, 4))
         db_session.add(
             SymbolAlias(
                 security_id=security.security_id,
                 alias_kind="ticker",
                 alias_value="YYYY",
                 valid_from=dt.date(1990, 1, 1),
-                valid_to=dt.date(2000, 1, 3),
+                valid_to=dt.date(2000, 1, 4),
                 knowledge_time=dt.datetime(2026, 1, 1, tzinfo=UTC),
                 knowledge_source="test",
                 source="test",
             )
         )
         db_session.flush()
-        assert adjudicated_bound(db_session, security.security_id) == dt.date(2000, 1, 3)
+        assert adjudicated_bound(db_session, security.security_id) == dt.date(2000, 1, 4)
+        # Bars are 2000-01-03, 2000-01-04 and 2018-01-03; the earlier close is
+        # exclusive of 2000-01-04, so only the first survives.
         assert len(price_series(db_session, security.security_id, as_of=AS_OF)) == 1
 
     def test_a_split_after_the_bound_does_not_adjust_the_kept_bars(
@@ -341,7 +351,7 @@ class TestAdjudicatedBound:
         the bars left the successor's six compounding reverse splits still
         dividing the registrant's prices.
         """
-        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        security = self._bound_series(db_session, dt.date(2000, 1, 5))
         _split(db_session, security.security_id, dt.date(2006, 10, 13), Decimal("0.01"))
         db_session.flush()
         assert known_splits(db_session, security.security_id, as_of=AS_OF) == []
@@ -350,7 +360,7 @@ class TestAdjudicatedBound:
         assert bars[0].close == bars[0].raw_close
 
     def test_include_disputed_restores_the_successors_splits_too(self, db_session: Session) -> None:
-        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        security = self._bound_series(db_session, dt.date(2000, 1, 5))
         _split(db_session, security.security_id, dt.date(2006, 10, 13), Decimal("0.01"))
         db_session.flush()
         assert (

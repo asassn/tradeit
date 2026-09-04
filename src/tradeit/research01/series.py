@@ -87,7 +87,15 @@ class AdjustedBar:
 
 
 def adjudicated_bound(session: Session, security_id: int) -> dt.date | None:
-    """The last session this security's ticker is evidenced to have meant it.
+    """The date at which this security's ticker stops meaning it. **Exclusive.**
+
+    Half-open ``[valid_from, valid_to)``, which is how every interval table in
+    this schema declares itself -- ``ck_alias_interval`` and its four siblings
+    all require ``valid_to > valid_from``, and ``resolve_security``, which
+    decides what may enter the corpus at all, tests ``valid_to > on``. An
+    earlier version of this function read the same column as inclusive, so a
+    bar on the boundary date was admitted here and rejected there. One column,
+    one meaning.
 
     ``None`` when no interval has been closed, which is the ordinary case. A
     closed interval is written only by ``adjudicate.py`` and only where evidence
@@ -136,9 +144,9 @@ def known_splits(
     if not include_disputed:
         bound = adjudicated_bound(session, security_id)
         if bound is not None:
-            # An ex-date after the boundary belongs to whoever held the symbol
-            # next, and their share count says nothing about ours.
-            conditions.append(SecurityCorporateActionFact.ex_date <= bound)
+            # An ex-date at or after the boundary belongs to whoever held the
+            # symbol next, and their share count says nothing about ours.
+            conditions.append(SecurityCorporateActionFact.ex_date < bound)
     rows = session.execute(
         select(
             SecurityCorporateActionFact.ex_date,
@@ -194,7 +202,7 @@ def price_series(
     if not include_disputed:
         bound = adjudicated_bound(session, security_id)
         if bound is not None:
-            conditions.append(SecurityPriceFact.session_date <= bound)
+            conditions.append(SecurityPriceFact.session_date < bound)
 
     rows = session.execute(
         select(

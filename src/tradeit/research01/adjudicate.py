@@ -287,8 +287,10 @@ def _median(values: Iterable[float]) -> float:
 class Adjudication:
     """The verdict on one series, with what it rests on and what it costs.
 
-    ``boundary`` is the **last session that still belongs to the registrant**,
-    so an interval closed at it is inclusive. ``None`` means no boundary was
+    ``boundary`` is the **last session that still belongs to the registrant**.
+    Writing it into a half-open ``valid_to`` therefore stores ``boundary + 1``
+    -- see :func:`close_alias_interval`, which does that conversion in one
+    place so no caller has to remember it. ``None`` means no boundary was
     located, which is a different statement from "there is none".
     """
 
@@ -493,11 +495,17 @@ def close_alias_interval(
             SymbolAlias.alias_kind == "ticker",
         )
     ).all():
-        if alias.valid_to is not None and alias.valid_to <= boundary:
+        # `boundary` is the last session that BELONGS to this security, and
+        # `valid_to` is exclusive, so the stored value is the day after it.
+        # Converted here rather than at each call site: two callers write
+        # boundaries now, and an off-by-one in an interval is invisible until
+        # something at the edge is silently missing.
+        closes = boundary + dt.timedelta(days=1)
+        if alias.valid_to is not None and alias.valid_to <= closes:
             continue
-        if boundary <= alias.valid_from:
+        if closes <= alias.valid_from:
             continue
-        alias.valid_to = boundary
+        alias.valid_to = closes
         alias.citation = f"{alias.citation} | {citation}"
         moved += 1
     return moved
