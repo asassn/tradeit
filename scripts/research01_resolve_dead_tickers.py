@@ -321,7 +321,13 @@ def main() -> int:
             select(IssuerIdentifier.value_normalized, Security.security_id)
             .join(Security, Security.issuer_id == IssuerIdentifier.issuer_id)
             .join(Issuer, Issuer.issuer_id == IssuerIdentifier.issuer_id)
-            .where(IssuerIdentifier.namespace == "sec_cik", Issuer.source == "sec_fsds_sub")
+            .where(
+                IssuerIdentifier.namespace == "sec_cik",
+                # Both seeded cohorts, because the second exists precisely to
+                # reach registrants the first could not: 2006-2008 has 3,648
+                # dated exits and the Data Sets contain none of them.
+                Issuer.source.in_(("sec_fsds_sub", "edgar_full_index")),
+            )
         ).all()
         if security_id not in have
     ]
