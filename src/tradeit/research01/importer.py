@@ -72,6 +72,16 @@ class RejectReason(StrEnum):
     #: without a ratio, a dividend without an amount. Not defaulted, because a
     #: split silently ratioed 1.0 is a split that does nothing and looks fine.
     INCOMPLETE = "incomplete"
+    #: The bar is not a bar: its high is below its open or close, its low is
+    #: above one of them, or its volume is negative. EODHD returns
+    #: ``open=high=low=0`` with a non-zero close for thinly traded delisted
+    #: names -- measured on the first real run, where it killed the job through
+    #: ``ck_security_price_high`` after 65 symbols.
+    #:
+    #: **Rejected, never repaired.** Setting the high to the close would invent
+    #: a price that nobody printed, and a fabricated bar is worse than a
+    #: missing one precisely because it looks usable.
+    INCOHERENT_BAR = "incoherent_bar"
     #: The source dates the fact as knowable **before the event it describes**.
     #: A filing submitted in November carrying a value for the quarter ending
     #: 31 December is either a forward declaration -- a dividend declared for a
@@ -195,6 +205,25 @@ def resolve_security(
     return current.pop(), Resolution.RESOLVED
 
 
+def _incoherent(bar: VendorBar) -> str:
+    """Why this row is not a price bar, or empty if it is.
+
+    Mirrors the four check constraints on ``security_price_facts`` exactly. They
+    would refuse the row anyway -- as an ``IntegrityError`` that aborts the
+    transaction and loses the rest of a paid fetch. This refuses it by name,
+    with a count, and lets the run continue.
+    """
+    if bar.high < bar.low:
+        return f"high {bar.high} below low {bar.low}"
+    if bar.high < bar.open or bar.high < bar.close:
+        return f"high {bar.high} below open {bar.open} or close {bar.close}"
+    if bar.low > bar.open or bar.low > bar.close:
+        return f"low {bar.low} above open {bar.open} or close {bar.close}"
+    if bar.volume < 0:
+        return f"negative volume {bar.volume}"
+    return ""
+
+
 def import_price_bars(
     session: Session,
     bars: list[VendorBar],
@@ -242,6 +271,11 @@ def import_price_bars(
             continue
 
         assert security_id is not None
+        why = _incoherent(bar)
+        if why:
+            result.rejected.append(RejectedBar(bar, RejectReason.INCOHERENT_BAR, bar.ticker, why))
+            continue
+
         knowledge_time, basis = knowledge_time_for(
             adjustment_basis=bar.adjustment_basis,
             session_date=bar.session_date,

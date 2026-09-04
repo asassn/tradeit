@@ -14,11 +14,13 @@ import datetime as dt
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tradeit.research01 import (
     Coherence,
     adjudicated_bound,
+    adjudicated_window,
     known_splits,
     price_series,
     series_coherence,
@@ -369,3 +371,53 @@ class TestAdjudicatedBound:
         )
         bars = price_series(db_session, security.security_id, as_of=AS_OF, include_disputed=True)
         assert bars[0].split_factor == Decimal("0.01")
+
+    def test_bars_before_the_interval_opens_are_excluded_too(self, db_session: Session) -> None:
+        """A reused ticker has two neighbours, and the corpus met both.
+
+        ``AAAB`` arrived carrying bars from 1999 to 2003 under a registrant that
+        did not exist until 2011: the end bound stops the successor and does
+        nothing about the predecessor.
+        """
+        security = self._bound_series(db_session, dt.date(2018, 1, 4))
+        alias = db_session.scalars(
+            select(SymbolAlias).where(SymbolAlias.security_id == security.security_id)
+        ).one()
+        alias.valid_from = dt.date(2000, 1, 4)
+        db_session.flush()
+
+        bars = price_series(db_session, security.security_id, as_of=AS_OF)
+        assert [b.session_date for b in bars] == [dt.date(2000, 1, 4), dt.date(2018, 1, 3)]
+
+    def test_the_window_is_the_narrowest_of_several_aliases(self, db_session: Session) -> None:
+        security = self._bound_series(db_session, dt.date(2018, 1, 4))
+        db_session.add(
+            SymbolAlias(
+                security_id=security.security_id,
+                alias_kind="ticker",
+                alias_value="YYYY",
+                valid_from=dt.date(2000, 1, 4),
+                valid_to=dt.date(2001, 1, 1),
+                knowledge_time=dt.datetime(2026, 1, 1, tzinfo=UTC),
+                knowledge_source="test",
+                source="test",
+            )
+        )
+        db_session.flush()
+        assert adjudicated_window(db_session, security.security_id) == (
+            dt.date(2000, 1, 4),
+            dt.date(2001, 1, 1),
+        )
+
+    def test_nothing_outside_the_window_is_deleted(self, db_session: Session) -> None:
+        """The bars remain; the interval says which belong.
+
+        Deleting them would destroy the record of the defect, which is the
+        decision the splice adjudication already took and recorded.
+        """
+        security = self._bound_series(db_session, dt.date(2000, 1, 4))
+        assert len(price_series(db_session, security.security_id, as_of=AS_OF)) == 1
+        assert (
+            len(price_series(db_session, security.security_id, as_of=AS_OF, include_disputed=True))
+            == 3
+        )

@@ -14,6 +14,7 @@ below pins the property before any real file arrives.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -467,3 +468,62 @@ class TestAliasKindIsActuallyHonoured:
             alias_kind="vendor_symbol",
         )
         assert result.landed == 0
+
+
+class TestAnIncoherentBarIsRefusedNotRepaired:
+    """`open=high=low=0` with a non-zero close, from EODHD, on a thin delisted name.
+
+    Measured on the first real fetch of the dead cohort: it killed the job
+    through `ck_security_price_high` after 65 symbols, losing the rest of a
+    paid run. The constraints were right; raising was the wrong way to say so.
+    """
+
+    @pytest.mark.parametrize(
+        ("field", "value", "fragment"),
+        # Values chosen to trip ONE constraint each. The checks run in the
+        # order the table declares them, so a high of 0 reports "below low"
+        # rather than "below open" -- the first violation, not every one.
+        [
+            ("high", Decimal("10.2"), "below open"),
+            ("low", Decimal("10.2"), "above open"),
+            ("high", Decimal("0"), "below low"),
+            ("volume", Decimal("-1"), "negative volume"),
+        ],
+    )
+    def test_it_is_rejected_by_name_and_the_run_continues(
+        self, db_session: Session, field: str, value: Decimal, fragment: str
+    ) -> None:
+        _alias(
+            db_session,
+            _security(db_session, _issuer(db_session, "Dead Co", "1")),
+            "DEAD",
+            dt.date(1990, 1, 1),
+            None,
+        )
+        good = _bar("DEAD", dt.date(2011, 10, 10))
+        bad = replace(_bar("DEAD", dt.date(2011, 10, 11)), **{field: value})
+        result = import_price_bars(db_session, [bad, good], Delivery("eodhd", DELIVERED))
+
+        assert result.landed == 1
+        reasons = [(r.reason, r.detail) for r in result.rejected]
+        assert any(r is RejectReason.INCOHERENT_BAR for r, _ in reasons)
+        assert any(fragment in detail for _, detail in reasons)
+
+    def test_the_high_is_never_raised_to_make_the_bar_fit(self, db_session: Session) -> None:
+        """Setting the high to the close would invent a price nobody printed."""
+        _alias(
+            db_session,
+            _security(db_session, _issuer(db_session, "Dead Co", "1")),
+            "DEAD",
+            dt.date(1990, 1, 1),
+            None,
+        )
+        bad = replace(
+            _bar("DEAD", dt.date(2011, 10, 11)),
+            open=Decimal("0"),
+            high=Decimal("0"),
+            low=Decimal("0"),
+            close=Decimal("0.85"),
+        )
+        assert import_price_bars(db_session, [bad], Delivery("eodhd", DELIVERED)).landed == 0
+        assert db_session.scalars(select(SecurityPriceFact.id)).all() == []

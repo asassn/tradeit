@@ -44,6 +44,7 @@ __all__ = [
     "Coherence",
     "SplitAdjustment",
     "adjudicated_bound",
+    "adjudicated_window",
     "known_splits",
     "price_series",
     "series_coherence",
@@ -84,6 +85,30 @@ class AdjustedBar:
     @property
     def is_adjusted(self) -> bool:
         return self.split_factor != 1
+
+
+def adjudicated_window(session: Session, security_id: int) -> tuple[dt.date | None, dt.date | None]:
+    """The interval this security's ticker is evidenced to have meant it.
+
+    **Both ends, because a reused ticker has two neighbours.** The end keeps out
+    whoever took the symbol next; the start keeps out whoever held it before,
+    which the corpus learned the expensive way -- ``AAAB`` arrived carrying bars
+    from 1999 to 2003 under a registrant that did not exist until 2011.
+
+    Half-open ``[valid_from, valid_to)``, matching ``resolve_security``. The
+    widest ``valid_from`` and the earliest ``valid_to`` win where a security
+    carries several aliases: each is an independent claim about when the symbol
+    meant this security, and the safe reading of two is the narrower one.
+    """
+    row = session.execute(
+        select(func.max(SymbolAlias.valid_from), func.min(SymbolAlias.valid_to)).where(
+            SymbolAlias.security_id == security_id,
+            SymbolAlias.alias_kind == "ticker",
+        )
+    ).one_or_none()
+    if row is None:
+        return None, None
+    return row[0], row[1]
 
 
 def adjudicated_bound(session: Session, security_id: int) -> dt.date | None:
@@ -200,9 +225,11 @@ def price_series(
     if end is not None:
         conditions.append(SecurityPriceFact.session_date <= end)
     if not include_disputed:
-        bound = adjudicated_bound(session, security_id)
-        if bound is not None:
-            conditions.append(SecurityPriceFact.session_date < bound)
+        opens, closes = adjudicated_window(session, security_id)
+        if opens is not None:
+            conditions.append(SecurityPriceFact.session_date >= opens)
+        if closes is not None:
+            conditions.append(SecurityPriceFact.session_date < closes)
 
     rows = session.execute(
         select(
