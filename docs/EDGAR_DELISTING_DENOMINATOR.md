@@ -1172,6 +1172,80 @@ between only raises and never assigns, and no earlier implementation of the
 command exists. No cause is claimed. It is written down here so that a future
 recurrence is recognised as a second occurrence rather than a first.
 
+## 7d. MEASURED 2026-09-05 — 368 registrants the denominator calls dead and
+the SEC lists today
+
+**A finding, not a change.** Denominator methodology is not altered here; §7d
+records what was measured and what it would take to act on it.
+
+### The test
+
+SEC's own `company_tickers.json` names every CIK that currently holds a ticker.
+Intersecting it with the denominator's confirmed dated exits is a direct
+falsification test: a registrant in both is one the denominator says died and
+the SEC says is listed.
+
+```
+company_tickers.json entries           7,995
+confirmed dated exits                 29,180
+in both — called dead, listed today      368   (1.26%)
+```
+
+### Three causes, not one
+
+Reading the most recent form on record for each conflicting registrant
+separates them cleanly, and the split is not what "observation-window artefact"
+suggests:
+
+| claimed exit | n | most recent form on record | what it is |
+|---|---:|---|---|
+| 2023+ | 220 | `10-Q` 121, `20-F` 37, `10-K` 13, `40-F` 6, `6-K` 5 | **actively filing** |
+| pre-2023 | 148 | `NPORT-P` 28, `D` 20, `10-Q` 15, `N-CSRS` 5, `20-F` 5 | funds, private placements, active filers |
+
+1. **Foreign private issuers.** `20-F`, `40-F` and `6-K` appear 48 times.
+   These issuers file annually on `20-F`/`40-F` rather than `10-K`, so a rule
+   keyed to the domestic annual cadence sees dormancy between filings that are
+   perfectly on time.
+2. **Investment companies.** `NPORT-P` and `N-CSR(S)` appear 33 times, and the
+   named examples are closed-end funds still trading today — Gabelli Equity
+   Trust, Royce Small-Cap Trust, General American Investors, Templeton
+   Emerging Markets Income Fund. They report under the Investment Company Act,
+   a form family the Exchange Act cadence does not count.
+3. **The window.** 101 of the conflicts claim an exit in 2026, the current
+   year, and are still filing `10-Q`. A gap that has not had time to close is
+   not an exit.
+
+### Direction of the error, which is the part that matters
+
+A registrant falsely marked dead **inflates the denominator**. Coverage is
+matched exits over total exits, so 368 spurious exits make coverage look
+**worse than it is**, never better. The gate cannot be made to pass by this
+defect, only to fail more than it should — which is the safe direction and the
+reason this is recorded rather than rushed.
+
+It is also immaterial at present scale: removing all 368 moves the denominator
+by 1.26%, against a bounded-coverage gap between roughly 4% and the 25%
+threshold. **Nothing currently depends on fixing it.**
+
+### What acting on it would require
+
+An explicit scoped proposition, because every option changes what the corpus
+claims to be true:
+
+* **Regulator-neutral cadence** — count `20-F`/`40-F` as annual reports and
+  `N-CSR`/`NPORT-P` as continued reporting, so an issuer is dormant only when
+  its *own* form family goes quiet. Most principled, and consistent with the
+  regulator-neutral identity architecture built for FRC.
+* **Falsification pass** — subtract any exit whose CIK appears in the current
+  `company_tickers.json`. Cheap and effective on today's data; it silently
+  becomes wrong for a registrant that genuinely delists later, and it makes the
+  denominator depend on a file that changes weekly.
+* **Trailing-window exclusion** — refuse to date an exit inside the last N
+  months. Fixes cause 3 alone and leaves 1 and 2 untouched.
+
+Recommended if it is ever taken up: the first, with the third as a cheap
+partial. Not taken up now.
+
 ## 8. Build order
 
 | step | output | cost |
