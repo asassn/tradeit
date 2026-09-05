@@ -199,6 +199,48 @@ earned evidence, and placing them on it would make "promotion to paused"
 expressible. `mandate` is a field on the version rather than on a run, per §7 —
 editing parameters does not turn a swing strategy into a day strategy.
 
+### 5.3 `DRAFT → VALIDATED`, and what it caught
+
+`src/tradeit/strategy/validate.py` performs §5's first gate — *does everything
+it references exist?* — against three registries: `PatternType` for the
+vocabulary, `DetectorRegistry` for what can actually be produced, and the
+mandate for §7's rule that a strategy *may select within its mandate's eligible
+hierarchy and not outside it*.
+
+**The vocabulary is deliberately wider than the detector set.** Three storable
+pattern types have no detector, because the enum must stay able to interpret an
+old row whose family was later removed. Naming one in a strategy is still a
+defect, and a distinct one: an unproducible pattern does not error, it silently
+makes the strategy smaller and still reports a number.
+
+**Decision timeframes and construction inputs are different questions.**
+`enabled` and `intraday_enabled` are what the strategy decides on and the
+mandate governs them; `base_timeframe` and `intraday_base` are what higher
+timeframes are aggregated *from*. A swing strategy building 15-minute bars out
+of 1-minute bars is not making a 1-minute decision, and 1m is outside the swing
+mandate — so checking construction inputs against the mandate would forbid
+building 15-minute bars correctly. They are checked only for existence and for
+not being coarser than the group they build, **each paired with its own
+group**: a first version pooled them and reported that a daily base could not
+build 15-minute bars, which is neither its job nor true.
+
+*What it found.* Run against the default `StrategyConfig`, all three mandates
+refuse it, and every finding is real:
+
+| mandate | why |
+|---|---|
+| Day | `timeframes.enabled` names `1w`, above its ceiling |
+| Swing | `intraday_enabled` names `4h`, which §3.2 withholds |
+| Retirement | `intraday_enabled` is entirely below its floor of `1d` |
+
+That is the expected answer, not a bug to fix in the defaults: **there is no
+mandate-scoped strategy configuration yet**, and the default is one generic
+config while §7 says a version belongs to exactly one mandate. The defaults are
+left alone deliberately — changing them is a strategy-parameter change and
+needs a scoped proposition, not a commit.
+
+---
+
 ### 5.2 The corpus condition on `VALIDATED`
 
 The one condition §5 places between `VALIDATED` and the rungs above it is that
