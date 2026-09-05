@@ -250,6 +250,47 @@ under. It is checkable: every pattern row already carries `timeframe`, and every
 run already carries `scan_run_id`, so a population that mixes them can be
 detected rather than argued about.
 
+### 4.1 What of this is enforced in code
+
+`src/tradeit/portfolio/mandate.py` carries the §4 table as data rather than as
+prose, so a mandate's properties are read from one place and cannot drift
+between a document and an implementation.
+
+| claim above | how it is enforced |
+|---|---|
+| three mandates, three populations | `Mandate` has three members and no aggregate |
+| eligible timeframe sets | `MandateSpec.eligible`; `require_timeframe` raises `TimeframeNotEligible` |
+| `4h` is in no mandate (§3.2) | asserted directly, because it *cannot be inferred* — detector families do support `4h`, and a test pins that tension so the exclusion stays deliberate |
+| a timeframe alone never identifies a role | `TimeframeHierarchy.roles_of` returns a tuple: `1d` is Swing's context **and** setup, and is Swing's setup while being Retirement's trigger |
+| the separation rule | `check_population` / `require_population` against a declared `UnitOfStudy` |
+
+Three decisions inside that module, recorded here because each rejected a
+simpler alternative:
+
+**Eligibility is broader than the hierarchy, and they are separate fields.**
+`30m` is eligible for the Day mandate and appears in none of its three
+hierarchy rows. The hierarchy is where a mandate ordinarily looks; eligibility
+is what it is permitted to look at. Collapsing them into one set would have
+been tidier and would have forbidden legitimate work.
+
+**Survivorship posture is named in the §4 table and is deliberately absent from
+the code.** It belongs to a corpus's own contract, and writing it down in two
+places is how the two copies come to disagree. `Corpus` names which corpus a
+mandate draws on and stops there; `intraday-01` must declare its own posture
+per §6.4.
+
+**A declared mixture is permitted and stays labelled.** The rule's escape
+clause — *unless the combination is itself the declared unit of study* — is
+only honest if the declaration is made in advance and remains visible
+afterwards, so `PopulationReport.combined` carries through from the
+declaration. Without it the escape is a laundering route: declare widely, pool
+freely, report as though the population were clean. An empty population is
+refused for the same reason rather than passing vacuously.
+
+*Not included, per the placement note above:* no coordinator, no cross-timeframe
+score, and no retrofit of the Phase 7 scores — a mandate-scoped opportunity
+score is Phase 7's own work, and this gate supplies the vocabulary it will need.
+
 ---
 
 ## 5. Live incomplete-bar semantics
