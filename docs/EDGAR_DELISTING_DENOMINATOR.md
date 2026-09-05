@@ -1172,79 +1172,105 @@ between only raises and never assigns, and no earlier implementation of the
 command exists. No cause is claimed. It is written down here so that a future
 recurrence is recognised as a second occurrence rather than a first.
 
-## 7d. MEASURED 2026-09-05 — 368 registrants the denominator calls dead and
-the SEC lists today
+## 7d. MEASURED 2026-09-05 — 1,875 registrants that kept reporting after the
+denominator says they exited
 
-**A finding, not a change.** Denominator methodology is not altered here; §7d
-records what was measured and what it would take to act on it.
+**A finding, not a change.** Methodology is not altered here.
 
-### The test
+### The first version of this test was too weak, and is recorded as such
 
-SEC's own `company_tickers.json` names every CIK that currently holds a ticker.
-Intersecting it with the denominator's confirmed dated exits is a direct
-falsification test: a registrant in both is one the denominator says died and
-the SEC says is listed.
+The test first run intersected the dated exits with SEC's
+`company_tickers.json` and found 368 (1.26%). **That test does not support the
+claim made of it.** `company_tickers.json` carries `cik_str`, `ticker` and
+`title` and *no exchange field* — it is SEC's CIK-to-ticker map for filers, not
+a listing register. A registrant that left an exchange, still trades OTC and
+still files keeps its entry, so membership is not evidence of listing. The 368
+is left written down because a weak test presented as a strong one is the
+error worth remembering, not because the number means what it appeared to.
+
+### The test that does hold
+
+A registrant that files its own periodic report **after** the date it is said
+to have exited contradicts the exit directly, and needs no external file: the
+EDGAR full index already holds both facts.
+
+Restricted to the 21,116 dated exits whose filing history in this corpus is
+complete — issuers seeded from the full index, for which every index row was
+inserted — and counting only forms in which the registrant itself reports:
 
 ```
-company_tickers.json entries           7,995
-confirmed dated exits                 29,180
-in both — called dead, listed today      368   (1.26%)
+dated exits on complete filing data                21,116
+...that filed a periodic report after their exit    1,875   (8.88%)
+      still reporting 1 year later                    685
+      still reporting 2 years later                   506
+      still reporting 5 years later                   309
+median continuation 0.6 years; longest 29.6 years
 ```
 
-### Three causes, not one
+**The restriction matters and is not cosmetic.** The XBRL-cohort issuers
+(`sec_fsds_sub`) have incomplete filing rows — 7,169 of 7,255 show a last
+filing earlier than their own exit date, because the index seeder skipped
+issuers already held and never inserted their filings. Measuring across all
+sources gives a similar percentage for the wrong reason, and would be an
+artefact of what was stored rather than of what was filed.
 
-Reading the most recent form on record for each conflicting registrant
-separates them cleanly, and the split is not what "observation-window artefact"
-suggests:
+### Why it happens
 
-| claimed exit | n | most recent form on record | what it is |
-|---|---:|---|---|
-| 2023+ | 220 | `10-Q` 121, `20-F` 37, `10-K` 13, `40-F` 6, `6-K` 5 | **actively filing** |
-| pre-2023 | 148 | `NPORT-P` 28, `D` 20, `10-Q` 15, `N-CSRS` 5, `20-F` 5 | funds, private placements, active filers |
+| family of the contradicting filing | n | |
+|---|---:|---|
+| domestic (`10-K`, `10-Q`, `8-K`) | 1,037 | cause not yet diagnosed |
+| fund (`NPORT-P`, `N-CSR(S)`, `N-CEN`) | 781 | reports under the Investment Company Act |
+| foreign (`20-F`, `40-F`, `6-K`) | 162 | annual cadence is `20-F`, not `10-K` |
 
-1. **Foreign private issuers.** `20-F`, `40-F` and `6-K` appear 48 times.
-   These issuers file annually on `20-F`/`40-F` rather than `10-K`, so a rule
-   keyed to the domestic annual cadence sees dormancy between filings that are
-   perfectly on time.
-2. **Investment companies.** `NPORT-P` and `N-CSR(S)` appear 33 times, and the
-   named examples are closed-end funds still trading today — Gabelli Equity
-   Trust, Royce Small-Cap Trust, General American Investors, Templeton
-   Emerging Markets Income Fund. They report under the Investment Company Act,
-   a form family the Exchange Act cadence does not count.
-3. **The window.** 101 of the conflicts claim an exit in 2026, the current
-   year, and are still filing `10-Q`. A gap that has not had time to close is
-   not an exit.
+An exit is dated at the registrant's last filing *of a form the lifecycle logic
+weighs*. Where that form set is narrower than the set in which a registrant
+actually reports, a live issuer looks dormant. That explains the fund and
+foreign families cleanly; the domestic 1,037 are the largest group and the
+least understood, and no cause is claimed for them here.
 
-### Direction of the error, which is the part that matters
+A later `Form 4`, `Schedule 13G/A`, `D` or `EFFECT` is **not** a contradiction —
+those are filed by insiders, holders or the registration process rather than by
+the registrant reporting — and they are excluded from the count above. 7,451
+index-seeded exits have some later filing of that kind, which is expected and
+is not a defect.
 
-A registrant falsely marked dead **inflates the denominator**. Coverage is
-matched exits over total exits, so 368 spurious exits make coverage look
-**worse than it is**, never better. The gate cannot be made to pass by this
-defect, only to fail more than it should — which is the safe direction and the
-reason this is recorded rather than rushed.
+### Direction of the error
 
-It is also immaterial at present scale: removing all 368 moves the denominator
-by 1.26%, against a bounded-coverage gap between roughly 4% and the 25%
-threshold. **Nothing currently depends on fixing it.**
+A registrant falsely marked dead **inflates the denominator**, so coverage
+looks *worse* than it is and never better. The gate cannot be made to pass by
+this defect, only to fail harder than it should.
+
+It is still not material at present scale. Re-dating every one of the 1,875
+shrinks the denominator by at most ~6% — and by less, since some of them
+genuinely exited later — against a bounded-coverage gap between roughly 4% and
+the 25% threshold. **Nothing currently depends on fixing it.**
 
 ### What acting on it would require
 
-An explicit scoped proposition, because every option changes what the corpus
+An explicit scoped proposition, because each option changes what the corpus
 claims to be true:
 
-* **Regulator-neutral cadence** — count `20-F`/`40-F` as annual reports and
-  `N-CSR`/`NPORT-P` as continued reporting, so an issuer is dormant only when
-  its *own* form family goes quiet. Most principled, and consistent with the
-  regulator-neutral identity architecture built for FRC.
-* **Falsification pass** — subtract any exit whose CIK appears in the current
-  `company_tickers.json`. Cheap and effective on today's data; it silently
-  becomes wrong for a registrant that genuinely delists later, and it makes the
-  denominator depend on a file that changes weekly.
-* **Trailing-window exclusion** — refuse to date an exit inside the last N
-  months. Fixes cause 3 alone and leaves 1 and 2 untouched.
+1. **Regulator-neutral cadence.** Weigh `20-F`/`40-F`/`6-K` and
+   `N-CSR`/`NPORT-P`/`N-CEN` as reporting, so a registrant is dormant only when
+   *its own* form family goes quiet. Fixes the cause. Consistent with the
+   regulator-neutral identity architecture FRC forced. **Reaches 943 of 1,875
+   (~50%)** and leaves the domestic group untouched.
+2. **Re-date from the registrant's own last periodic filing.** Apply the test
+   above as a correction pass: where a periodic report post-dates the exit,
+   the exit date is wrong and the later filing is the better one. **Reaches all
+   1,875 by construction**, including the undiagnosed domestic group, and uses
+   only the EDGAR index already held. Re-dates rather than deletes, so a
+   registrant that genuinely exited later keeps an exit.
+3. **Trailing-window exclusion.** Refuse to date an exit within N months of the
+   corpus end. Cheap, and reaches only the recent tail — 127 of the original
+   368 at 12 months. Fixes neither family cause.
 
-Recommended if it is ever taken up: the first, with the third as a cheap
-partial. Not taken up now.
+**Recommended: 2, with 1 as its definition of "periodic report."** They are not
+really alternatives — 1 says which forms count, 2 says what to do when one of
+them post-dates an exit — and 1 alone leaves the largest group unfixed. 3 is a
+band-aid on the smallest cause and is not worth a methodology change on its own.
+
+**Not applied.**
 
 ## 8. Build order
 
