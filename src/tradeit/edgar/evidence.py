@@ -158,8 +158,59 @@ EIGHT_K_ITEM_NUMBERING_FROM = dt.date(2004, 8, 23)
 ELECTRONIC_FORM_25_FROM = dt.date(2005, 4, 24)
 
 #: Periodic reports whose absence is what "cessation" means. Nothing else.
+#:
+#: **The set is regulator-neutral by necessity, not by taste.** A registrant is
+#: dormant only when *its own* form family goes quiet, and three families report
+#: on three different forms: domestic issuers on ``10-K``/``10-Q``, foreign
+#: private issuers on ``20-F``/``40-F``, and registered investment companies
+#: under the Investment Company Act. Judging a fund by the Exchange Act cadence
+#: reads a perfectly punctual filer as silent — measured 2026-09-05, that
+#: mistake dated 645 exits before a periodic report the registrant had itself
+#: filed, and the supersession rule could not catch them because the forms it
+#: weighs did not include theirs. See ``EDGAR_DELISTING_DENOMINATOR.md`` §7d.
+#:
+#: Three fund-shaped families are deliberately **excluded**, and each exclusion
+#: is a claim:
+#:
+#: * ``N-8F`` and its notice and order variants are the *application to
+#:   deregister an investment company*. One filed after an exit date
+#:   corroborates that exit; admitting it here would let a fund's own death
+#:   certificate supersede its death.
+#: * ``NT 10-K`` and ``NT 10-Q`` notify the SEC that a report will be late.
+#:   A promise to report is not a report, and treating it as one would let a
+#:   delinquent registrant look current.
+#: * ``N-PX`` records how a fund voted proxies rather than how the fund itself
+#:   stands, and can be filed while winding down. Its absence is not what
+#:   cessation means.
 PERIODIC_FORMS: frozenset[str] = frozenset(
-    {"10-K", "10-K405", "10-KSB", "10-K/A", "10-Q", "10-QSB", "10-Q/A", "20-F", "40-F"}
+    {
+        # Domestic issuers, Exchange Act.
+        "10-K",
+        "10-K405",
+        "10-KSB",
+        "10-K/A",
+        "10-Q",
+        "10-QSB",
+        "10-Q/A",
+        # Foreign private issuers. 6-K is excluded for the same reason 8-K is:
+        # a current report is not a periodic one.
+        "20-F",
+        "40-F",
+        # Registered investment companies, Investment Company Act. N-30D and
+        # N-Q are the retired predecessors of N-CSR and NPORT-P and are kept
+        # because the corpus starts in 1994, when they were what funds filed.
+        "N-CSR",
+        "N-CSR/A",
+        "N-CSRS",
+        "N-CSRS/A",
+        "N-CEN",
+        "N-CEN/A",
+        "NPORT-P",
+        "NPORT-P/A",
+        "N-Q",
+        "N-Q/A",
+        "N-30D",
+    }
 )
 
 

@@ -1270,7 +1270,50 @@ really alternatives — 1 says which forms count, 2 says what to do when one of
 them post-dates an exit — and 1 alone leaves the largest group unfixed. 3 is a
 band-aid on the smallest cause and is not worth a methodology change on its own.
 
-**Not applied.**
+### Applied 2026-09-05, on the owner's authorisation
+
+**Option 2 with option 1's form set**, as recommended — and implementing it
+showed the two halves were less separable than the proposition assumed.
+
+**Option 2's mechanism already existed.** `assert_exit_not_contradicted` and
+the supersession rule in `lifecycle.py` already refuse to date an exit before
+the registrant's own last periodic report; they were added after the first real
+run, when `INTEL CORP` was dated 1994 while filing to this day. Measured
+against the *current* `PERIODIC_FORMS`, the number of contradicted exits is
+**zero**. The machinery was sound.
+
+**What was missing was only the form set.** `PERIODIC_FORMS` held the Exchange
+Act cadence and the foreign one — `20-F` and `40-F` were already there — and
+not the Investment Company Act. A fund reporting punctually on `N-CSR` and
+`NPORT-P` was invisible to the rule, so its exit could be dated before filings
+it had itself made. **645 of the 21,116 index-seeded exits, 3.05%.**
+
+So the change is one set, widened, and the existing supersession rule does the
+rest — which is what "option 2 with option 1's form set" turned out to mean
+literally.
+
+**Corrections to the numbers above, both mine.** The 368 was measured with a
+file that cannot support the claim, as §7d already records. The 1,875 that
+replaced it counted `8-K` and `6-K` as registrant reports; they are current
+reports, not periodic ones, and the design excludes `8-K` deliberately. Under
+the set the code actually uses, the figure is **645**.
+
+**Three exclusions, each a claim rather than an oversight**, and each pinned by
+a test:
+
+* `N-8F` and its notice and order variants are a fund's *application to
+  deregister*. One filed after an exit date corroborates that exit. Admitting
+  it would let a fund's own death certificate supersede its death — 161
+  registrants file one after their exit date, and every one of them would have
+  been un-dated by the mistake.
+* `NT 10-K` / `NT 10-Q` notify the SEC that a report will be late. A promise to
+  report is not a report, and counting one would let a delinquent registrant
+  look current indefinitely.
+* `N-PX` records how a fund voted proxies, not how the fund stands, and can be
+  filed while winding down.
+
+`N-Q` and `N-30D`, the retired predecessors of `NPORT-P` and `N-CSR`, are
+included: the corpus starts in 1994, when they were what funds filed.
 
 ## 8. Build order
 
