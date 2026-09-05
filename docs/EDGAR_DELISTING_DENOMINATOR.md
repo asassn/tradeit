@@ -1315,6 +1315,55 @@ a test:
 `N-Q` and `N-30D`, the retired predecessors of `NPORT-P` and `N-CSR`, are
 included: the corpus starts in 1994, when they were what funds filed.
 
+### The rebuild, and the half of the fix that is still open
+
+Rebuilt against the widened set, `build_denominator` **did not raise** — the
+supersession rule absorbed every case, which is the evidence that the existing
+machinery was the right machinery.
+
+```
+timelines   90,548 -> 96,197   (+5,649, almost all investment companies
+                                that previously filed nothing the classifier weighed)
+exits       29,180 -> 28,553   (-627)
+   no longer dated  627      newly dated  0      re-dated  29
+```
+
+The 627 are unambiguously the predicted population — First Trust, Invesco,
+BNY Mellon Municipal Income, Delaware Investments, Natixis ETF Trust, Northern
+Lights Fund Trust II. Investment companies are **1.9% of dated exits**, so the
+denominator is not composed of funds and there is no composition problem.
+
+**But 336 of the 627 filed an `N-8F` — the application to deregister an
+investment company — so they genuinely exited, and the corpus now carries no
+date for them.** The exclusion of `N-8F` from `PERIODIC_FORMS` was right; what
+is missing is the other half, because `classify_form("N-8F")` returns
+`IRRELEVANT`. The Investment Company Act's exit forms are recognised **nowhere**.
+
+**The direction of this error is the opposite of the one just fixed, and is the
+unsafe one.** A dated exit that becomes undated leaves the denominator, and a
+smaller denominator makes coverage read *better* than it is. It is small —
+627 of 29,180, about 2% — but its sign is wrong, and this project's first
+constraint is that the corpus must not overstate itself.
+
+The evidence splits cleanly along the grain the rest of this document already
+uses:
+
+| form | what it is | proposed |
+|---|---|---|
+| `N-8F ORDR` | the SEC's **order granting** deregistration — 305 of the 336 | confirming; `CONFIRMED_REGISTRATION_TERMINATION` at the order date |
+| `N-8F`, `N-8F/A` | the **application**, which can be withdrawn — 31 have no order | candidate; no date |
+| `N-8F NTC` | notice that an application was filed | candidate; no date |
+
+This is the Investment Company Act analogue of Form 15, and the
+application-versus-order distinction is the same one already drawn between a
+filing that says something and a filing that asks for something.
+
+**Not applied — awaiting authorisation, and the corpus is held in the safe
+state meanwhile.** The rebuilt cache is written to `edgar_facts_v2.json` and
+has **not** been swapped in; the pipeline continues on the old one, where those
+336 exits are counted at dates that are wrong but present. A wrong date is
+conservative here and no date is not, so holding is the fail-closed choice.
+
 ## 8. Build order
 
 | step | output | cost |
