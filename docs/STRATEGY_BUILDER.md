@@ -158,6 +158,52 @@ the new version back to `DRAFT`; it does not inherit the parent's evidence.
 That is the whole point of separating the states. Live trading additionally
 remains behind the `ADR-0004` interlock and outside the roadmap.
 
+### 5.1 What of this is enforced in code
+
+`src/tradeit/strategy/lifecycle.py` carries the nine states and the transitions
+between them. `StrategyConfig` was already the versioned, digest-identified
+definition §2 and §3 describe; what did not exist was any notion of what a
+version had *earned*, which is what makes the sentence above enforceable rather
+than aspirational.
+
+Three rules, each of which rejected a simpler shape:
+
+**Promotion is one rung; demotion is any distance.** Evidence accrues one claim
+at a time — passing out-of-sample says nothing about paper trading — so a
+promotion that skipped a rung would assert a claim nobody tested. A demotion is
+the opposite kind of fact: a contaminated backtest invalidates everything built
+on it, so `LIVE → DRAFT` is a single legitimate move. Symmetric transitions
+would have been simpler and would have left demotion too weak to express what a
+discovered flaw means. `may_follow(BACKTESTING, LIVE)` refuses, and a test walks
+every state to prove `LIVE` is reachable only from `ELIGIBLE_FOR_CAPITAL` or by
+resuming a pause.
+
+**Evidence is required to climb, and never inherited.** Every promotion carries
+a citation; a demotion does not, because refusing to record a discovered flaw
+until paperwork exists would leave a known-bad version at its old rung.
+`StrategyVersion.edit` returns a **new version at `DRAFT` with empty history**,
+since the parent's backtest was run on the parent's parameters. `has_reached`
+is kept separate from `state` so a version demoted from paper trading stays
+distinguishable from one that was never tested — a comparison that cannot tell
+them apart treats a failure as a fresh start.
+
+**`LIVE` is refused by default and cannot be argued into.** It requires a
+`LiveAuthorisation`, which has no constructor that does not consult the
+ADR-0004 interlock, and the interlock is *not* reimplemented — this module asks
+`Settings` whether it passed. A test climbs every rung with a flawless record
+and confirms the refusal still stands, because the interlock is not a function
+of evidence.
+
+`PAUSED` and `RETIRED` are deliberately off the ladder: they are not degrees of
+earned evidence, and placing them on it would make "promotion to paused"
+expressible. `mandate` is a field on the version rather than on a run, per §7 —
+editing parameters does not turn a swing strategy into a day strategy.
+
+*Not included, per §6 and the placement note:* no thresholds, no comparison
+metric, no claim about **when** a version deserves promotion. A state machine
+that decided that would be inventing exactly the thresholds §6 says are not
+computed yet. It decides only what may follow what.
+
 ---
 
 ## 6. Comparison and learning — architecture only
