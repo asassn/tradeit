@@ -348,8 +348,22 @@ More than expected, and it is the right foundation:
    distinguishes *closed above on a live bar* from *closed above on a completed
    bar*. Today the system avoids the problem by only ever being fed completed
    bars, which is correct and is not a live design.
-4. **Nothing prevents an incomplete bar being persisted.** The discipline is in
-   the feed, not in the schema.
+4. **Nothing in the *schema* prevents an incomplete bar being persisted**, and
+   the code-level position is better than this section originally credited.
+   Re-measured 2026-09-05:
+
+   * `to_ohlcv_bars` (`analytics/timeframes.py`) **refuses** to convert an
+     incomplete `AggregatedBar`, on the stated ground that the result "would
+     look indistinguishable from a finished one". That refusal predates this
+     document by a week and was missed when §5 was written.
+   * `AggregatedBar` is imported by **no module outside `analytics/timeframes.py`**,
+     so today there is no path at all from an aggregate to storage.
+
+   What remains true, and is the narrower real gap: **`OhlcvBar` cannot
+   represent partiality** — neither the domain model nor the table has a
+   completeness field — so a bar arriving mid-session from a vendor, rather
+   than through the aggregation path, is unmarked and unmarkable. The
+   safeguards are two code gates and no structural one.
 
 **Proposed, not implemented:**
 
@@ -362,6 +376,22 @@ persisted to the historical corpus and never enter a detection population.** Liv
 consumers read them from a separate live-state surface that is explicitly
 non-durable. A replay of any historical window then cannot see one, by
 construction rather than by care.
+
+**Still proposed, and deliberately not built as of 2026-09-05.** Three reasons,
+recorded so the deferral is a decision rather than an omission:
+
+* The system ingests only completed bars, so the column would be constant for
+  every row it could currently hold. §5 says as much itself — today's avoidance
+  of the problem "is correct and is not a live design" — and a field with one
+  value proves nothing about a path nobody exercises.
+* It changes the **core bar type** and both its domain and storage forms. That
+  ripple is worth taking when a live feed exists to justify it and not before.
+* A migration against the price corpus while the backfill is writing to it is
+  precisely the clash worth avoiding; the write pipeline must be idle first.
+
+The two code gates above hold in the meantime, and the gap they leave is
+recorded rather than papered over: a mid-session vendor bar bypassing the
+aggregation path is unmarked.
 
 ---
 
