@@ -199,6 +199,40 @@ earned evidence, and placing them on it would make "promotion to paused"
 expressible. `mandate` is a field on the version rather than on a run, per §7 —
 editing parameters does not turn a swing strategy into a day strategy.
 
+### 5.2 The corpus condition on `VALIDATED`
+
+The one condition §5 places between `VALIDATED` and the rungs above it is that
+a version runs *on a corpus whose classification permits the claim*.
+`src/tradeit/strategy/admissibility.py` applies it, and the line it draws is
+**run versus believe**:
+
+> A version **may enter `BACKTESTING`** on a survivor-biased corpus, because
+> building and exercising the machinery is what that corpus is for. It **may
+> not leave `BACKTESTING` upward**, because every rung above asserts that the
+> results meant something.
+
+That is a transcription rather than a decision. The threshold, the
+classification and the sentence that lifts the rule are all already written:
+*build the machinery on it; do not believe its numbers — the rule lifts when
+the gate says something other than `SURVIVOR_BIASED`, and not before.* A test
+puts a 41% CAGR in the citation and confirms the refusal is unchanged, because
+the refusal is about the corpus and not about the number.
+
+Two things left out deliberately. **No finer gradation:** nothing says
+`PARTIALLY_SURVIVORSHIP_CORRECTED` permits paper trading but not capital, and
+inventing that distinction would be a backtesting assumption needing a scoped
+proposition rather than a commit — so all three non-biased classes are treated
+alike until somebody decides otherwise on purpose. **No corpus binding:**
+a version is not tied to the corpus it ran on, because persistence does not
+exist yet; the caller passes the classification it measured, and passing a
+stale one is the failure this cannot catch. `CorpusAdmissibility.measured_at`
+records the age so the staleness is at least visible.
+
+Demotions are exempt. A biased corpus must never block recording that something
+went wrong.
+
+---
+
 *Not included, per §6 and the placement note:* no thresholds, no comparison
 metric, no claim about **when** a version deserves promotion. A state machine
 that decided that would be inventing exactly the thresholds §6 says are not
