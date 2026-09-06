@@ -61,6 +61,7 @@ __all__ = [
     "ValidationReport",
     "producible_patterns",
     "require_valid",
+    "timeframes_by_pattern",
     "validate",
     "validated",
 ]
@@ -82,6 +83,9 @@ class Defect(StrEnum):
     BASE_COARSER_THAN_TARGET = "base_coarser_than_target"
     #: Nothing enabled. Valid by every field constraint and unable to trade.
     NOTHING_ENABLED = "nothing_enabled"
+    #: A pattern family whose detectors are defined at no timeframe this
+    #: strategy decides on. Producible, admitted, and still unable to fire.
+    PATTERN_TIMEFRAME_MISMATCH = "pattern_timeframe_mismatch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +122,21 @@ class StrategyInvalid(ValueError):
     def __init__(self, report: ValidationReport) -> None:
         super().__init__(report.describe())
         self.report = report
+
+
+def timeframes_by_pattern() -> dict[PatternType, frozenset[Bartimeframe]]:
+    """Where each pattern family's definition is meaningful, keyed by family.
+
+    ``SUPPORTED_TIMEFRAMES`` is keyed by *detector*, and a detector is not a
+    pattern type — the registry deliberately carries both, because one family
+    may be emitted by more than one detector. The union is taken across the
+    detectors that emit a family: a family is meaningful at a timeframe if any
+    of its detectors is defined there.
+    """
+    out: dict[PatternType, set[Bartimeframe]] = {}
+    for entry in DetectorRegistry.from_config().entries.values():
+        out.setdefault(entry.pattern_type, set()).update(entry.timeframes)
+    return {family: frozenset(frames) for family, frames in out.items()}
 
 
 def producible_patterns() -> frozenset[PatternType]:
@@ -215,6 +234,36 @@ def validate(config: StrategyConfig, mandate: Mandate) -> ValidationReport:
                         f"the {mandate.value} mandate admits "
                         f"{[t.value for t in admitted]}; a strategy may select within "
                         "its mandate's eligible hierarchy, not outside it",
+                    )
+                )
+
+    # §2: "a detector on a timeframe its family is not defined for is invalid".
+    # The config pairs no pattern with a specific timeframe, so the checkable
+    # form of that rule is the weaker one the data supports: a family must be
+    # meaningful at *some* timeframe the strategy decides on. Requiring every
+    # family at every timeframe would refuse an ordinary strategy that runs
+    # cup-and-handle daily and bull flags intraday, which is correct practice.
+    # When the config gains explicit pattern-timeframe pairing, the stricter
+    # reading becomes expressible and should replace this.
+    supported = timeframes_by_pattern()
+    decided = {f for frames in decisions.values() for f in frames}
+    if decided:
+        for name in config.patterns.enabled_patterns:
+            try:
+                family = PatternType(name)
+            except ValueError:
+                continue  # already reported as UNKNOWN_PATTERN
+            meaningful = supported.get(family)
+            if meaningful is None:
+                continue  # already reported as UNPRODUCIBLE_PATTERN
+            if not (meaningful & decided):
+                findings.append(
+                    Finding(
+                        Defect.PATTERN_TIMEFRAME_MISMATCH,
+                        f"patterns.enabled_patterns/{name}",
+                        f"defined at {sorted(t.value for t in meaningful)}, and this "
+                        f"strategy decides on {sorted(t.value for t in decided)}; it "
+                        "could never fire",
                     )
                 )
 

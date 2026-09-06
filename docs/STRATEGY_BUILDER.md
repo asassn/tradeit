@@ -241,6 +241,29 @@ needs a scoped proposition, not a commit.
 
 ---
 
+### 2.1 What the registries can and cannot refuse today
+
+§2 requires that *a detector on a timeframe its family is not defined for is
+invalid*. `validate.py` performs it via `timeframes_by_pattern()`, which unions
+`SUPPORTED_TIMEFRAMES` across the detectors that emit each family — the
+registry keys detectors, and a detector is not a pattern type.
+
+**The checkable form is weaker than §2's wording, and deliberately so.** The
+configuration pairs no pattern with a specific timeframe, so the rule the data
+supports is that a family must be meaningful at *some* timeframe the strategy
+decides on. Requiring every family at every timeframe would refuse a strategy
+running cup-and-handle daily and bull flags intraday, which is correct practice
+rather than a defect. When the configuration gains explicit pattern-timeframe
+pairing, the stricter reading becomes expressible and should replace this.
+
+**Indicators are not string references and so cannot dangle.** `IndicatorConfig`
+declares periods on named fields — `rsi_period`, `macd_fast` — rather than
+naming indicators to look up, so "an indicator that does not exist" is not a
+reachable state and no registry lookup is invented for it. That changes if the
+builder ever accepts indicator names as data.
+
+---
+
 ### 5.2 The corpus condition on `VALIDATED`
 
 The one condition §5 places between `VALIDATED` and the rungs above it is that

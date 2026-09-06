@@ -172,3 +172,73 @@ def test_the_mandate_comes_from_the_version_not_the_caller() -> None:
     with pytest.raises(StrategyInvalid) as raised:
         validated(version, config)
     assert raised.value.report.mandate is Mandate.RETIREMENT
+
+
+# -- §2: a detector on a timeframe its family is not defined for ------------
+
+
+def test_pattern_families_map_to_the_timeframes_they_are_defined_at() -> None:
+    """`SUPPORTED_TIMEFRAMES` is keyed by *detector* and a detector is not a
+    pattern type; the registry carries both deliberately. The mapping unions
+    across the detectors that emit a family."""
+    from tradeit.strategy.validate import timeframes_by_pattern
+
+    mapping = timeframes_by_pattern()
+    assert mapping[PatternType.CUP_WITH_HANDLE] == frozenset({Bartimeframe.D1, Bartimeframe.W1})
+    assert Bartimeframe.M15 in mapping[PatternType.BULL_FLAG]
+
+
+def test_a_pattern_defined_at_no_decided_timeframe_is_a_defect() -> None:
+    """A cup is an accumulation process measured in months. Enabling it on a
+    strategy that only decides intraday is producible, admitted, and unable to
+    fire — the same class of silent failure as an unproducible pattern."""
+    config = StrategyConfig(
+        name="intraday-cup",
+        patterns={"enabled_patterns": ("cup_with_handle",)},
+        timeframes={
+            "base_timeframe": "1h",
+            "enabled": ("1h",),
+            "intraday_enabled": ("15m",),
+            "intraday_base": "1m",
+        },
+    )
+    findings = [
+        f
+        for f in validate(config, Mandate.SWING).findings
+        if f.defect is Defect.PATTERN_TIMEFRAME_MISMATCH
+    ]
+    assert findings
+    assert "1d" in findings[0].detail and "15m" in findings[0].detail
+
+
+def test_one_supported_timeframe_is_enough() -> None:
+    """Requiring every family at every timeframe would refuse an ordinary
+    strategy running cup-and-handle daily and bull flags intraday, which is
+    correct practice rather than a defect."""
+    config = StrategyConfig(
+        name="mixed",
+        patterns={"enabled_patterns": ("cup_with_handle", "bull_flag")},
+        timeframes={
+            "base_timeframe": "1d",
+            "enabled": ("1d",),
+            "intraday_enabled": ("15m", "1h"),
+            "intraday_base": "1m",
+        },
+    )
+    assert not [
+        f
+        for f in validate(config, Mandate.SWING).findings
+        if f.defect is Defect.PATTERN_TIMEFRAME_MISMATCH
+    ]
+
+
+def test_the_cross_check_does_not_double_report_an_unknown_pattern() -> None:
+    """A name outside the vocabulary is one defect, not two."""
+    config = StrategyConfig(
+        name="s",
+        patterns={"enabled_patterns": ("moon_phase",)},
+        timeframes={"enabled": ("1d",), "intraday_enabled": ()},
+    )
+    defects = [f.defect for f in validate(config, Mandate.SWING).findings]
+    assert defects.count(Defect.UNKNOWN_PATTERN) == 1
+    assert Defect.PATTERN_TIMEFRAME_MISMATCH not in defects
