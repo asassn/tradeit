@@ -1558,6 +1558,73 @@ This is Milestone 0a in `PHASE_06_IMPROVEMENT_PLAN.md` and it is the work that
 should start first, because it is the instrument every later judgement depends
 on.
 
+## 7g. MEASURED 2026-09-06 — 1,800 of the 1,811 never traded on an exchange
+
+**Correcting §7d.** When the `N-8F` recognition was applied, this document
+recorded that the 1,811 registrants it added were *"listed, tradeable securities
+with tickers, so this is work rather than a permanent floor."* **That was
+asserted, not measured, and it is wrong.**
+
+The ticker resolver was run over all 1,811: **0 resolved, 1,809
+`no_annual_report`.** Investment companies file `N-CSR` and `NPORT-P`, never
+`10-K`, so the annual-report route cannot reach them by construction. Six fund
+filings were then sampled — `N-CSR`, `N-CSRS`, `N-1A`, `497` — and **not one
+contains the word "symbol"**. The registrant names say why: *TCW Spirit Direct
+Lending LLC*, *Variable Annuity Account Ten*, *AOG Institutional Diversified
+Master Fund*. These have no ticker because they never traded.
+
+`8-A12B` turns out to answer this, in the role §7 of the data contract found it
+useless for. It carries no trading symbol — but its **presence** is evidence
+that a class was registered on a named exchange:
+
+```
+registrants the N-8F recognition added        1,811
+  ever filed 8-A12B (exchange registration)      11   (0.6%)
+  8-A12G only                                     0
+  neither                                     1,800   (99.4%)
+exit decade: 2000s 168, 2010s 1,181, 2020s 462
+```
+
+**Every one is electronic-era**, so absence of an 8-A is meaningful for this
+population in a way it would not be for a company listed in 1985 and delisted in
+1999, whose Form 8-A was filed on paper. That caveat bounds the test to exactly
+the group it is being applied to.
+
+### What this means, stated carefully
+
+These 1,800 are **denominator that can never have a numerator**. They are not a
+coverage failure and not survivorship bias; they are a different population that
+a price-based corpus could never hold, and including them depresses coverage for
+a reason unrelated to the question the gate asks.
+
+This is **not** an argument for optimism. It is the opposite of the §7e
+situation: there, a mis-specified ratio made the corpus look worse for no
+reason; here, a mis-specified *population* does the same. Both are measurement
+errors, and a measurement error that flatters nothing is still a measurement
+error — the discipline is that the denominator must be the population the
+numerator could in principle cover, whichever direction the mistake runs.
+
+### Open, not applied
+
+Three options, none taken:
+
+1. **Require evidence of exchange listing** for a denominator entry — an
+   `8-A12B`, or a Form 25, or a filing naming an exchange. Principled, and
+   blind to pre-EDGAR listings, so it would wrongly drop genuinely listed
+   companies that delisted early. **Unsafe in the old window this project cares
+   most about.**
+2. **Exclude registered investment companies** from the denominator, keeping the
+   `N-8F` recognition so their exits are still dated and available for a fund
+   corpus later. Narrower and safer than (1), and reverses none of the identity
+   work.
+3. **Leave it.** The denominator stays 5% larger and permanently un-coverable by
+   that margin.
+
+Recommended: **2**, scoped to registrants whose only periodic filings are
+Investment Company Act forms — which is a fact in the archive rather than a
+judgement — and only with an explicit authorisation, because it changes what the
+corpus claims to be true.
+
 ## 7f. MEASURED 2026-09-05 — 1994–1997 is unreachable from filing text
 
 The 1,333 registrants with dated exits in 1994–1997 were seeded from the full
