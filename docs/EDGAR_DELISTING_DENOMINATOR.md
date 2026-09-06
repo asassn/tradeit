@@ -1492,6 +1492,46 @@ corpus approaches the threshold this becomes a decision that has to be made
 rather than deferred, because the gate would then be refusing on a ratio no
 threshold was chosen against. §7e stays open for that day.
 
+### MEASURED 2026-09-05, after the decision — the threshold is effectively
+unreachable under the reading that was kept
+
+The decision above rested on *"nothing depends on the number while the corpus is
+short under either reading"*. That was true of the classification. It is **not**
+true of reachability, which was not measured at the time and is now:
+
+```
+dated exits 30,646   with a ticker 7,200   priced 5,423
+price-hit rate on tickered exits: 75.3%
+```
+
+| | matched needed for 0.25 | ceiling if **every** exit were resolved | verdict |
+|---|---:|---:|---|
+| kept reading (÷ 96,822 resolutions) | 24,206 | 23,082 → **23.8%** | **short even at perfect resolution** |
+| §5 reading (÷ 30,646 entries) | 7,662 | 23,082 → 75.3% | reachable; needs ~2,240 more |
+
+**Under the kept reading, resolving a ticker for every one of the 30,646 dated
+exits and pricing them at the observed rate still lands at 23.8%, below the
+threshold.** Passing would additionally require the price-hit rate to exceed
+79.0%, against 75.3% observed — and the observed rate is measured on the
+registrants that were *easiest* to resolve, so the true ceiling for the
+remaining 23,435 is lower, not higher.
+
+Two further reasons the gap does not close on its own:
+
+* The denominator is **`len(resolutions)`, one per registrant ever seen**, so it
+  grows every quarter as EDGAR grows. The 24,206 target rises with it while the
+  numerator can only draw on exits.
+* §7f establishes that 1994–1997's 1,333 entries can contribute denominator and
+  no numerator by this route, and §7be that the pre-2006 window holds no
+  exchange-listing evidence at all.
+
+**This is recorded, not acted on.** The decision to keep the pessimistic reading
+stands until the owner revisits it. What has changed is only the premise: the
+choice between the two readings is not a cosmetic difference in a number that is
+failing either way — it determines whether the gate is *capable* of passing. A
+gate that cannot pass cannot demote either, and a control that can only ever
+return one answer has stopped being a measurement.
+
 ### What closes the remaining gap, under the §5 reading
 
 Reaching `bounded_coverage` 0.25 needs 7,662 priced dead registrants against
