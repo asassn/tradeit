@@ -1358,11 +1358,49 @@ This is the Investment Company Act analogue of Form 15, and the
 application-versus-order distinction is the same one already drawn between a
 filing that says something and a filing that asks for something.
 
-**Not applied — awaiting authorisation, and the corpus is held in the safe
-state meanwhile.** The rebuilt cache is written to `edgar_facts_v2.json` and
-has **not** been swapped in; the pipeline continues on the old one, where those
-336 exits are counted at dates that are wrong but present. A wrong date is
-conservative here and no date is not, so holding is the fail-closed choice.
+### Both halves, applied 2026-09-05
+
+`N-8F ORDR` — the SEC's **order granting** deregistration — is now
+`EXIT_CONFIRMING` at `FORM_DIRECT` strength; the application (`N-8F`,
+`N-8F/A`, `N-8F NTC`) is a candidate that dates nothing, because 31 of the 336
+have no order on record and an application can be withdrawn. The signal table
+had already recognised domestic deregistration (`15-12B`, `15-12G`) and foreign
+(`15F-12B`, `15F-12G`); investment companies had nothing, and that pre-existing
+gap is what the widened periodic set exposed.
+
+| build | exits | timelines |
+|---|---:|---:|
+| original | 29,180 | 90,548 |
+| periodic set widened only | 28,553 | 96,197 |
+| **both halves** | **30,646** | **96,822** |
+
+```
+no longer dated   345      newly dated  1,811      re-dated  450
+```
+
+**The direction inverted, which is the answer to the concern that opened this
+section.** Widening the periodic set alone shrank the denominator by 627 and
+made coverage read better than it should. Recognising the exit form more than
+reverses it: 1,811 fund closures that carried **no date at all** — evidenced
+nowhere, because no form the classifier weighed said so — are now counted. The
+denominator is 5% larger than it started, so coverage now reads *worse* and
+more honestly. The 345 still undated are funds that went quiet without an
+order, which is a cessation candidate and correctly dateless.
+
+By decade the newly dated run 2010s 1,181, 2020s 462, 2000s 168 — the shape
+`NPORT-P` and `N-CEN` availability predicts.
+
+**Two consequences to carry forward, neither a defect:**
+
+* **None of the 1,811 has identity in `research-01`.** They were never seeded,
+  because they were not exits when the seeding ran. Until they are, they are
+  unmatched numerator with matched denominator and they depress coverage. They
+  are listed, tradeable securities with tickers, so this is work rather than a
+  permanent floor.
+* **The denominator now spans three regulators on both sides** — reporting and
+  exit — for the first time. Every count that follows is a claim about a wider
+  population than any count published before it, and the two are not
+  comparable without saying so.
 
 ## 8. Build order
 
