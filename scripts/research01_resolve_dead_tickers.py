@@ -107,6 +107,24 @@ KNOWLEDGE_SOURCE = "edgar_filing_text"
 #: never does.
 ANNUAL = ("10-K", "10-K405", "10-KSB", "10-K/A", "20-F", "40-F")
 
+#: The issuer's **own** offering prospectus, read only when no annual report
+#: binds a symbol. Its cover states where the stock is listed and under what
+#: symbol -- verified 2026-09-06 on a 1994 424B1: *"The Company's Class A common
+#: stock is listed on the New York Stock Exchange, Inc. under the symbol
+#: \"HFI.\""*
+#:
+#: **424B2, 424B3 and 424B5 are deliberately excluded.** They are resale, merger
+#: and shelf-takedown documents that describe *other parties*: one sampled
+#: 424B3 yielded LPS, FNF and BKFS, none necessarily the filer's. A filing
+#: naming several symbols already fails closed here; the hazard is the one
+#: naming exactly one that belongs to somebody else, which binds silently and
+#: wrongly. Restricting to the issuer's own offering is what removes it.
+OFFERING = ("424B1", "424B4", "424A")
+
+#: Offering prospectuses are large and the symbol is on the cover, so the
+#: earliest is preferred -- it is the offering that put the stock on the tape.
+MAX_OFFERING_ATTEMPTS = 2
+
 #: How many annual reports to try before giving up on a registrant. The most
 #: recent is preferred because it is the symbol the series ends under.
 MAX_ATTEMPTS = 3
@@ -177,7 +195,9 @@ def _get(url: str, user_agent: str, *, timeout: int = 60) -> bytes | None:
         return None
 
 
-def _annual_reports(cik: int, user_agent: str) -> list[tuple[str, str, dt.date]]:
+def _annual_reports(
+    cik: int, user_agent: str, forms: tuple[str, ...] = ANNUAL
+) -> list[tuple[str, str, dt.date]]:
     """(accession, primary document, filed) for this registrant's annual reports.
 
     The SEC's own submissions index names the primary document, which is the
@@ -192,7 +212,7 @@ def _annual_reports(cik: int, user_agent: str) -> list[tuple[str, str, dt.date]]
         return []
     out: list[tuple[str, str, dt.date]] = []
     for index, form in enumerate(recent.get("form", [])):
-        if form not in ANNUAL:
+        if form not in forms:
             continue
         # An empty primaryDocument is not an absent filing. Every pre-2001
         # submission is a single .txt with no primary document named, so
@@ -251,6 +271,23 @@ def _self_test(user_agent: str) -> bool:
         print(f"SELF-TEST FAILED: Apple's {filed} 10-K yielded {found!r}; no run will start")
         return False
     print(f"SELF-TEST passed: {accession} ({filed}) yields AAPL")
+
+    # The offering route needs its own proof. It reaches a different form set
+    # through a different document path -- these filings name no primary
+    # document, so they exercise the complete-submission fallback as well.
+    # CIK 786617's 1994 and 1995 offering prospectuses both state: "The
+    # Company's Class A common stock is listed on the New York Stock Exchange
+    # under the symbol \"HFI\"".
+    offerings = _annual_reports(786617, user_agent, OFFERING)
+    if not offerings:
+        print("SELF-TEST: could not list CIK 786617's offering prospectuses")
+        return False
+    accession, document, filed = offerings[-1]
+    found = _symbol_from(786617, accession, document, user_agent)
+    if found is None or found[0] != "HFI":
+        print(f"SELF-TEST FAILED: the {filed} 424B1 yielded {found!r}; no run will start")
+        return False
+    print(f"SELF-TEST passed: {accession} ({filed}) yields HFI via the offering route")
     return True
 
 
@@ -363,13 +400,24 @@ def main() -> int:
         attempted += 1
         reports = _annual_reports(cik, user_agent)
         time.sleep(PAUSE_S)
+        # The issuer's own offering prospectus is a fallback, never a
+        # preference: an annual report names the symbol the series *ends*
+        # under, a prospectus the one it *starts* under, and where both exist
+        # the later statement is the one that describes the series we price.
+        route = "annual"
+        if not reports:
+            reports = _annual_reports(cik, user_agent, OFFERING)[-MAX_OFFERING_ATTEMPTS:]
+            route = "offering"
+            time.sleep(PAUSE_S)
         if not reports:
             tally["no_annual_report"] += 1
             done.add(str(cik))
             continue
 
         found = None
-        for accession, document, filed in reports[:MAX_ATTEMPTS]:
+        for accession, document, filed in reports[
+            : MAX_ATTEMPTS if route == "annual" else MAX_OFFERING_ATTEMPTS
+        ]:
             found = _symbol_from(cik, accession, document, user_agent)
             time.sleep(PAUSE_S)
             if found is not None:
@@ -388,10 +436,10 @@ def main() -> int:
                         ),
                     )
                 )
-                tally["resolved"] += 1
+                tally[f"resolved_{route}"] += 1
                 break
         if found is None:
-            tally["not_established"] += 1
+            tally[f"not_established_{route}"] += 1
         done.add(str(cik))
 
         if attempted % 50 == 0:
