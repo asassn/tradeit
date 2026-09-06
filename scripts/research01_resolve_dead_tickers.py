@@ -194,9 +194,14 @@ def _annual_reports(cik: int, user_agent: str) -> list[tuple[str, str, dt.date]]
     for index, form in enumerate(recent.get("form", [])):
         if form not in ANNUAL:
             continue
-        document = recent["primaryDocument"][index]
-        if not document:
-            continue
+        # An empty primaryDocument is not an absent filing. Every pre-2001
+        # submission is a single .txt with no primary document named, so
+        # skipping these reported "no annual report" for registrants that
+        # filed several -- measured 2026-09-06: 3,488 untickered dead
+        # registrants have their latest annual report before 2001. The empty
+        # string is carried through and _symbol_from falls back to the
+        # complete submission text file.
+        document = recent["primaryDocument"][index] or ""
         try:
             filed = dt.date.fromisoformat(recent["filingDate"][index])
         except ValueError:
@@ -210,7 +215,12 @@ def _symbol_from(
     cik: int, accession: str, document: str, user_agent: str
 ) -> tuple[str, str] | None:
     """The single symbol this filing binds, and the sentence that binds it."""
-    url = f"{ARCHIVES}/{cik}/{accession.replace('-', '')}/{document}"
+    stem = f"{ARCHIVES}/{cik}/{accession.replace('-', '')}"
+    # The complete submission is the fallback, never the preference: it
+    # concatenates every exhibit, so a symbol in an exhibit could be read as
+    # the filing's own statement. It is used only where the SEC names no
+    # primary document, which is every pre-2001 filing.
+    url = f"{stem}/{document}" if document else f"{stem}/{accession}.txt"
     raw = _get(url, user_agent, timeout=90)
     if raw is None or len(raw) > MAX_DOCUMENT_BYTES:
         return None

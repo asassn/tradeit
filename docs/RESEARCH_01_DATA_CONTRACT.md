@@ -905,3 +905,58 @@ magnitude smaller than the form counts implied.
 **Do not re-investigate `8-A12B`, `25`, `DEF 14A` or `10-Q` for ticker binding.**
 The answer is recorded here so the next reading of the form counts does not
 start the same search again.
+
+## Why a dead registrant has no ticker — measured 2026-09-06
+
+Two causes were assumed to be one. Separating them changes what is worth
+building.
+
+### Cause 1: a defect. The document could not be addressed
+
+`_annual_reports` read `primaryDocument` from the SEC submissions index and
+skipped any filing where it was empty. **Every pre-2001 submission is a single
+`.txt` with no primary document named**, so those filings were reported as
+`no_annual_report` — a registrant that filed three annual reports was counted
+as having filed none.
+
+```
+untickered dead registrants with an annual report in the index   9,472
+  latest annual report before 2001 (primaryDocument always empty) 3,488
+```
+
+Fixed: an empty `primaryDocument` now falls back to the complete submission
+text file at `.../<accession>/<accession>.txt`. **The fallback is not the
+preference** — a complete submission concatenates every exhibit, so a symbol
+appearing in an exhibit could be misread as the filing's own statement. It is
+used only where the SEC names no primary document.
+
+### Cause 2: not a defect. The registrant had no listed stock
+
+Two of the recovered pre-2001 annual reports were then read in full, and the
+extractor's silence turned out to be correct:
+
+| registrant | what the filing says |
+|---|---|
+| `AMERICAN RESTAURANT GROUP HOLDINGS INC`, 10-K405 1997 | *"Securities registered pursuant to Section 12(b): … **None**. Section 12(g): **None**"*. The words "symbol", "traded", "listed on" and "Nasdaq" appear **zero** times in 99,766 characters |
+| `FIDELITY LEASING INCOME FUND III LP`, 10-K 1998 | 12(b) *"Not applicable"*; 12(g) *"Limited Partnership Interests"* |
+
+The first files a 10-K because it has **registered public debt**; the second is
+a **limited partnership**. Neither has an exchange-listed equity, so neither has
+a ticker, and no extractor improvement will produce one.
+
+This is the fund lesson in a second guise. A registrant filing Exchange Act
+annual reports is **not** thereby a listed equity: debt-only issuers,
+partnerships and bond-registering subsidiaries all file them. The
+`reporting_regime` split (§7g) removed investment companies from the coverage
+denominator; it does not remove these, and they are the same kind of entry —
+denominator that can never have a numerator.
+
+**The measurement that would settle it is in the filings already fetched.** A
+10-K cover page states its Section 12(b) securities, and *"None"* is positive
+evidence of no listed class rather than an absence of evidence. Recording that
+verdict per registrant would separate *"we have not found the ticker"* from
+*"there was never a ticker to find"* — the same distinction `UNRESOLVED` draws
+everywhere else in this system.
+
+**Not built and not applied.** Scoping the denominator by it would change what
+the corpus claims to be true and needs authorisation, as the fund scoping did.
