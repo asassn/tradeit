@@ -96,6 +96,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from tradeit.edgar.acquire import extract_identity_evidence, resolve_user_agent, strip_html
 from tradeit.edgar.evidence import ReportingRegime, reporting_regime
 from tradeit.research01.confirm import candidate_symbols
+from tradeit.research01.registered_classes import (
+    RegisteredClasses,
+    read_registered_classes,
+)
 from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import (
     Filing,
@@ -238,10 +242,27 @@ def _annual_reports(
     return out
 
 
-def _symbol_from(
-    cik: int, accession: str, document: str, user_agent: str
-) -> tuple[str, str] | None:
-    """The single symbol this filing binds, and the sentence that binds it."""
+@dataclass(frozen=True, slots=True)
+class DocumentRead:
+    """What one filing yielded: a bound symbol, and what its cover declares.
+
+    The two travel together because they come from the same parse. Reading the
+    document twice to answer them separately would double the cost of the
+    slowest step in the run for no gain.
+    """
+
+    symbol: str | None
+    statement: str
+    classes: RegisteredClasses
+
+
+def _symbol_from(cik: int, accession: str, document: str, user_agent: str) -> DocumentRead | None:
+    """Read one filing. ``None`` only when it could not be fetched or parsed.
+
+    A read that finds no symbol is still a result — its ``classes`` may say the
+    registrant declared no registered securities at all, which closes the
+    question rather than leaving it open.
+    """
     stem = f"{ARCHIVES}/{cik}/{accession.replace('-', '')}"
     # The complete submission is the fallback, never the preference: it
     # concatenates every exhibit, so a symbol in an exhibit could be read as
@@ -251,19 +272,23 @@ def _symbol_from(
     raw = _get(url, user_agent, timeout=90)
     if raw is None or len(raw) > MAX_DOCUMENT_BYTES:
         return None
-    extract = extract_identity_evidence(strip_html(raw.decode("latin-1")))
+    text = strip_html(raw.decode("latin-1"))
+    classes = read_registered_classes(text)
+    extract = extract_identity_evidence(text)
     symbols = {s for s in candidate_symbols(extract) if s not in NOT_A_SYMBOL}
     if len(symbols) != 1:
-        return None
+        # Ambiguous or silent. The cover-page verdict is still worth carrying:
+        # "declared no registered class" is a finding, not a failure.
+        return DocumentRead(symbol=None, statement="", classes=classes)
     symbol = symbols.pop()
     for statement in extract.symbol_statements:
         if symbol in statement.text.upper():
-            return symbol, statement.text.strip()
+            return DocumentRead(symbol, statement.text.strip(), classes)
     for row in extract.section_12b_rows:
         blob = " ".join(row.cells)
         if symbol in blob.upper():
-            return symbol, blob.strip()
-    return None
+            return DocumentRead(symbol, blob.strip(), classes)
+    return DocumentRead(symbol=None, statement="", classes=classes)
 
 
 def _self_test(user_agent: str) -> bool:
@@ -274,7 +299,7 @@ def _self_test(user_agent: str) -> bool:
         return False
     accession, document, filed = reports[0]
     found = _symbol_from(320193, accession, document, user_agent)
-    if found is None or found[0] != "AAPL":
+    if found is None or found.symbol != "AAPL":
         print(f"SELF-TEST FAILED: Apple's {filed} 10-K yielded {found!r}; no run will start")
         return False
     print(f"SELF-TEST passed: {accession} ({filed}) yields AAPL")
@@ -291,7 +316,7 @@ def _self_test(user_agent: str) -> bool:
         return False
     accession, document, filed = offerings[-1]
     found = _symbol_from(786617, accession, document, user_agent)
-    if found is None or found[0] != "HFI":
+    if found is None or found.symbol != "HFI":
         print(f"SELF-TEST FAILED: the {filed} 424B1 yielded {found!r}; no run will start")
         return False
     print(f"SELF-TEST passed: {accession} ({filed}) yields HFI via the offering route")
@@ -458,6 +483,12 @@ def main() -> int:
 
     progress = Path(args.progress)
     done = set(json.loads(progress.read_text())) if progress.exists() else set()
+    # The cover-page verdict per registrant, beside the progress file rather
+    # than in the database: eight shards are writing to SQLite concurrently and
+    # a migration under them is the clash worth avoiding. A sidecar is durable,
+    # mergeable and costs no lock. Its home is a column once the run is idle.
+    verdict_path = progress.with_name(progress.stem + "_classes.json")
+    verdicts: dict[str, str] = json.loads(verdict_path.read_text()) if verdict_path.exists() else {}
     tally: collections.Counter[str] = collections.Counter()
     resolved: list[Resolution] = []
     attempted = 0
@@ -490,29 +521,43 @@ def main() -> int:
         ]:
             found = _symbol_from(cik, accession, document, user_agent)
             time.sleep(PAUSE_S)
-            if found is not None:
+            if found is not None and route == "annual":
+                # Recorded from the first annual report read, whether or not it
+                # bound a symbol: the cover page is the registrant's own
+                # statement about what it registered, and the newest filing is
+                # the one whose answer describes the security we would price.
+                verdicts.setdefault(str(cik), found.classes.value)
+            if found is not None and found.symbol is not None:
                 anchor = max(filter(None, (last_seen.get(cik), exits.get(cik))), default=filed)
                 resolved.append(
                     Resolution(
                         cik=cik,
                         security_id=security_id,
-                        ticker=found[0],
+                        ticker=found.symbol,
                         accession=accession,
                         filed=filed,
                         citation=(
                             f"symbol bound to CIK {cik} by {accession} filed {filed}: "
-                            f'"{found[1][:400]}". Interval start NOT evidenced by the filing; '
+                            f'"{found.statement[:400]}". Interval start NOT '
+                            "evidenced by the filing; "
                             f"closed at {anchor}, the registrant's last evidenced activity."
                         ),
                     )
                 )
                 tally[f"resolved_{route}"] += 1
                 break
-        if found is None:
-            tally[f"not_established_{route}"] += 1
+        if found is None or found.symbol is None:
+            verdict = verdicts.get(str(cik), RegisteredClasses.UNDETERMINED.value)
+            if verdict == RegisteredClasses.NONE_AT_ALL.value:
+                # Not a failure. The registrant declared no registered class,
+                # so there is no ticker to find and the question is closed.
+                tally["no_registered_class"] += 1
+            else:
+                tally[f"not_established_{route}"] += 1
         done.add(str(cik))
 
         if attempted % 50 == 0:
+            verdict_path.write_text(json.dumps(verdicts))
             if not args.dry_run:
                 _write(session, resolved, last_seen, exits)
                 resolved.clear()
@@ -522,10 +567,21 @@ def main() -> int:
     if not args.dry_run:
         _write(session, resolved, last_seen, exits)
         progress.write_text(json.dumps(sorted(done)))
+    verdict_path.write_text(json.dumps(verdicts))
 
     print(f"\nattempted {attempted:,}: {dict(tally)}")
-    rate = 100 * tally["resolved"] / attempted if attempted else 0.0
-    print(f"resolved {tally['resolved']:,} ({rate:.1f}%)")
+    # Summed across routes: the tally is split by route so the two are never
+    # averaged, and a summary reading tally["resolved"] would silently print
+    # zero now that no key by that name exists.
+    resolved_total = tally["resolved_annual"] + tally["resolved_offering"]
+    rate = 100 * resolved_total / attempted if attempted else 0.0
+    print(f"resolved {resolved_total:,} ({rate:.1f}%)")
+    closed = tally["no_registered_class"]
+    if closed:
+        print(
+            f"no registered class on the cover: {closed:,} "
+            f"({100 * closed / attempted:.1f}%) -- the registrant states it has none"
+        )
     if not args.dry_run:
         print(f"prune: {_prune(session, apply=True)}")
     print(
