@@ -23,13 +23,17 @@ from tradeit.opportunity.fit import (
     VetoReason,
     score_fit,
 )
+from tradeit.opportunity.slate import Contender, Slate, build_slate
 
 __all__ = [
+    "Contender",
     "FinalOpportunityScore",
     "FitComponent",
     "PortfolioContext",
     "PortfolioFit",
+    "Slate",
     "VetoReason",
+    "build_slate",
     "combine",
     "score_fit",
 ]
