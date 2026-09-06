@@ -94,9 +94,16 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.edgar.acquire import extract_identity_evidence, resolve_user_agent, strip_html
+from tradeit.edgar.evidence import ReportingRegime, reporting_regime
 from tradeit.research01.confirm import candidate_symbols
 from tradeit.storage.session import install_sqlite_busy_timeout
-from tradeit.storage.tables import Issuer, IssuerIdentifier, Security, SymbolAlias
+from tradeit.storage.tables import (
+    Filing,
+    Issuer,
+    IssuerIdentifier,
+    Security,
+    SymbolAlias,
+)
 
 SUBMISSIONS = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 ARCHIVES = "https://www.sec.gov/Archives/edgar/data"
@@ -291,6 +298,37 @@ def _self_test(user_agent: str) -> bool:
     return True
 
 
+def _fund_only(security_ids: set[int], session: Session) -> set[int]:
+    """Securities whose issuer reports only under the Investment Company Act.
+
+    One grouped query rather than a lookup per registrant: the archive already
+    holds every form type, and asking it 20,000 times would cost more than the
+    SEC requests it saves.
+    """
+    # Grouped by issuer and filtered in Python rather than with an IN clause:
+    # the target set runs to tens of thousands and SQLite's bind-parameter cap
+    # is 32,766, which is the fragility that already broke the fundamentals
+    # import once. A query whose size depends on the caller is one that fails
+    # on a bigger corpus.
+    by_issuer: dict[int, set[str]] = {}
+    for issuer_id, form_type in session.execute(
+        select(Filing.issuer_id, Filing.form_type).distinct()
+    ).all():
+        by_issuer.setdefault(issuer_id, set()).add(form_type)
+    fund_issuers = {
+        issuer_id
+        for issuer_id, kinds in by_issuer.items()
+        if reporting_regime(kinds) is ReportingRegime.INVESTMENT_COMPANY
+    }
+    return {
+        security_id
+        for security_id, issuer_id in session.execute(
+            select(Security.security_id, Security.issuer_id)
+        ).all()
+        if issuer_id in fund_issuers and security_id in security_ids
+    }
+
+
 def _prune(session: Session, *, apply: bool) -> dict[str, int]:
     """Remove bindings that cannot be attributed to one registrant.
 
@@ -340,6 +378,16 @@ def main() -> int:
     ap.add_argument("--edgar-cache", required=True)
     ap.add_argument("--progress", default=".research01_dead_tickers.json")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument(
+        "--shard",
+        default="",
+        metavar="I/N",
+        help=(
+            "process only registrants where cik %% N == I. Shards are disjoint by "
+            "construction, so N processes cover the scope exactly once between them "
+            "with no coordination. Each needs its own --progress file."
+        ),
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -385,6 +433,28 @@ def main() -> int:
     ]
     targets = sorted(t for t in targets if t[0] in exits)
     print(f"dead registrants without a ticker: {len(targets):,}")
+
+    # Registrants whose only periodic filings are Investment Company Act forms
+    # never traded (§7g: 11 of 1,811 had ever registered a class on an
+    # exchange). Spending SEC requests on them cannot produce a ticker, so they
+    # are skipped rather than attempted and reported separately -- an
+    # unreachable target counted as a failure would look like a coverage gap.
+    fund_only = _fund_only({t[1] for t in targets}, session)
+    before = len(targets)
+    targets = [t for t in targets if t[1] not in fund_only]
+    if before != len(targets):
+        print(
+            f"  skipped, Investment Company Act reporting only: {before - len(targets):,} "
+            "(never traded; see EDGAR_DELISTING_DENOMINATOR.md §7g)"
+        )
+
+    if args.shard:
+        index, _, count = args.shard.partition("/")
+        shard_i, shard_n = int(index), int(count)
+        if not 0 <= shard_i < shard_n:
+            raise SystemExit(f"--shard {args.shard} is not a valid I/N")
+        targets = [t for t in targets if t[0] % shard_n == shard_i]
+        print(f"  shard {shard_i}/{shard_n}: {len(targets):,} of this scope")
 
     progress = Path(args.progress)
     done = set(json.loads(progress.read_text())) if progress.exists() else set()
