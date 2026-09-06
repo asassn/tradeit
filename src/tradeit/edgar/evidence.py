@@ -312,6 +312,59 @@ _SIGNALS: tuple[FormSignal, ...] = (
         False,
         "foreign private issuer deregistration",
     ),
+    # --- investment company deregistration, the third regulator ------------
+    #
+    # The Investment Company Act analogue of Form 15, and the completion of the
+    # regulator-neutral principle already applied to periodic reporting and, on
+    # the exit side, to foreign private issuers via 15F-12B above. Without it a
+    # fund's closure is evidenced nowhere: measured 2026-09-05, 336 registrants
+    # whose exits the widened PERIODIC_FORMS correctly un-dated had filed one of
+    # these and would have carried no exit date at all. See §7d.
+    #
+    # The application and the order are deliberately different claims. An
+    # application can be withdrawn or denied; 31 of the 336 have no order on
+    # record. Only the SEC's grant ends the registration, which is the same
+    # distinction this table already draws between a filing that says something
+    # and one that asks for something.
+    FormSignal(
+        "N-8F ORDR",
+        FormRole.EXIT_CONFIRMING,
+        LifecycleScope.SEC_REPORTING,
+        EvidenceType.CONFIRMED_REGISTRATION_TERMINATION,
+        EvidenceStrength.FORM_DIRECT,
+        False,
+        "SEC order granting deregistration of a registered investment company "
+        "under section 8(f); the grant, not the request",
+    ),
+    FormSignal(
+        "N-8F",
+        FormRole.EXIT_CANDIDATE,
+        LifecycleScope.SEC_REPORTING,
+        None,
+        EvidenceStrength.NONE,
+        False,
+        "application to deregister an investment company; may be withdrawn or "
+        "denied, so it dates nothing on its own",
+    ),
+    FormSignal(
+        "N-8F/A",
+        FormRole.EXIT_CANDIDATE,
+        LifecycleScope.SEC_REPORTING,
+        None,
+        EvidenceStrength.NONE,
+        False,
+        "amended application to deregister; still an application",
+    ),
+    FormSignal(
+        "N-8F NTC",
+        FormRole.EXIT_CANDIDATE,
+        LifecycleScope.SEC_REPORTING,
+        None,
+        EvidenceStrength.NONE,
+        False,
+        "notice that a deregistration application was filed; announces the "
+        "request rather than its outcome",
+    ),
     # --- candidates that need the document --------------------------------
     FormSignal(
         "8-K",

@@ -107,3 +107,48 @@ def test_every_periodic_form_classifies_as_periodic() -> None:
     table, so a form added to both would silently take whichever wins."""
     for form in PERIODIC_FORMS:
         assert _role(form) is FormRole.PERIODIC, form
+
+
+# -- the third regulator's exit forms --------------------------------------
+
+
+def test_the_sec_order_granting_deregistration_confirms_an_exit() -> None:
+    """N-8F ORDR is the Investment Company Act analogue of Form 15, and the
+    completion of the regulator-neutral principle already applied to foreign
+    private issuers via 15F-12B."""
+    from tradeit.edgar.evidence import EvidenceStrength, EvidenceType, LifecycleScope
+
+    signal = classify_form("N-8F ORDR", WHEN)
+    assert signal.role is FormRole.EXIT_CONFIRMING
+    assert signal.evidence_type is EvidenceType.CONFIRMED_REGISTRATION_TERMINATION
+    assert signal.strength is EvidenceStrength.FORM_DIRECT
+    assert signal.scope is LifecycleScope.SEC_REPORTING
+
+
+@pytest.mark.parametrize("form", ["N-8F", "N-8F/A", "N-8F NTC"])
+def test_the_application_to_deregister_dates_nothing(form: str) -> None:
+    """An application can be withdrawn or denied. Only the SEC's grant ends the
+    registration, which is the distinction the signal table already draws
+    between a filing that says something and one that asks for something."""
+    signal = classify_form(form, WHEN)
+    assert signal.role is FormRole.EXIT_CANDIDATE
+    assert signal.evidence_type is None
+
+
+def test_the_fund_exit_forms_are_not_periodic() -> None:
+    """The two halves must not collide: N-8F is excluded from PERIODIC_FORMS so
+    a fund's own death certificate cannot supersede its death, and recognised
+    as an exit signal so the death is dated."""
+    assert not {"N-8F", "N-8F ORDR", "N-8F/A", "N-8F NTC"} & PERIODIC_FORMS
+
+
+def test_all_three_regulators_have_an_exit_form() -> None:
+    """Domestic, foreign and investment-company deregistration each resolve to
+    a confirmed registration termination. A gap here is what left 336 fund
+    closures evidenced nowhere."""
+    from tradeit.edgar.evidence import EvidenceType
+
+    for form in ("15-12G", "15F-12G", "N-8F ORDR"):
+        assert classify_form(form, WHEN).evidence_type is (
+            EvidenceType.CONFIRMED_REGISTRATION_TERMINATION
+        ), form
