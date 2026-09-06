@@ -38,6 +38,7 @@ from sqlalchemy.orm import sessionmaker
 from tradeit.edgar.denominator import CoverageBounds, classify_corpus
 from tradeit.edgar.index import IndexQuarter
 from tradeit.edgar.pipeline import BuildOptions, build_denominator
+from tradeit.research01.completeness import assess_series, summarise
 from tradeit.storage.tables import (
     IssuerIdentifier,
     Security,
@@ -106,6 +107,41 @@ def main() -> int:
         f"({100 * len(covered) / len(dated_exits):.2f}%)"
     )
 
+    # Holding a price bar is not holding a complete series. Measured rather
+    # than disclaimed: a company that failed in 2005 whose prices stop in 2001
+    # passes the coverage test while hiding the years that killed it.
+    print("\n=== completeness of the series we do hold ===")
+    sessions_by_cik: dict[int, list[dt.date]] = collections.defaultdict(list)
+    for cik_text, session_date in session.execute(
+        select(IssuerIdentifier.value_normalized, SecurityPriceFact.session_date)
+        .join(Security, Security.issuer_id == IssuerIdentifier.issuer_id)
+        .join(SecurityPriceFact, SecurityPriceFact.security_id == Security.security_id)
+        .where(IssuerIdentifier.namespace == "sec_cik")
+        .distinct()
+    ).all():
+        sessions_by_cik[int(cik_text)].append(session_date)
+    assessed = [
+        got
+        for cik, days in sessions_by_cik.items()
+        if cik in dated_exits
+        and (
+            got := assess_series(
+                days,
+                exit_date=dated_exits[cik].evidence_date,
+            )
+        )
+        is not None
+    ]
+    completeness = summarise(assessed)
+    print(json.dumps(completeness, indent=1, default=str))
+    if assessed:
+        records = completeness["records_the_death"]
+        assert isinstance(records, int)
+        print(
+            f"  series that record the death: {records:,} of {len(assessed):,} "
+            f"({records / len(assessed):.1%})"
+        )
+
     print("\n=== coverage of dated exits, by exit year ===")
     by_year: dict[int, list[int]] = collections.defaultdict(list)
     for cik, r in dated_exits.items():
@@ -136,8 +172,9 @@ def main() -> int:
     print("    the ratio above is coverage of REPORTING exits, not delistings.")
     print("  * The cohort was selected by name-matchability, not at random, so")
     print("    its coverage is not an estimate of coverage over the population.")
-    print("  * Holding a price bar is not the same as holding a COMPLETE series;")
-    print("    completeness per name is not measured here.")
+    print("  * Completeness IS measured above, and correctness is not: a dense")
+    print("    series reaching the exit can still be another company's data")
+    print("    spliced in, which the alias intervals and adjudication address.")
     print("  * Registrants reporting only under the Investment Company Act are")
     print("    excluded from the coverage denominator and remain dated (§7g).")
     return 0
