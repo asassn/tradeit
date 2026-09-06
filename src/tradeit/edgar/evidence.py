@@ -38,13 +38,16 @@ index, stated rather than papered over.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
 __all__ = [
     "EIGHT_K_ITEM_NUMBERING_FROM",
     "ELECTRONIC_FORM_25_FROM",
+    "EXCHANGE_ACT_PERIODIC_FORMS",
     "FORM_SIGNALS",
+    "INVESTMENT_COMPANY_PERIODIC_FORMS",
     "PERIODIC_FORMS",
     "EvidenceStrength",
     "EvidenceType",
@@ -52,7 +55,9 @@ __all__ = [
     "FormSignal",
     "LifecycleEvidence",
     "LifecycleScope",
+    "ReportingRegime",
     "classify_form",
+    "reporting_regime",
 ]
 
 
@@ -159,6 +164,10 @@ ELECTRONIC_FORM_25_FROM = dt.date(2005, 4, 24)
 
 #: Periodic reports whose absence is what "cessation" means. Nothing else.
 #:
+#: Split into two statutes below and re-joined as :data:`PERIODIC_FORMS`;
+#: every consumer of the supersession rule uses the union, so dating an
+#: exit is unaffected by the split.
+#:
 #: **The set is regulator-neutral by necessity, not by taste.** A registrant is
 #: dormant only when *its own* form family goes quiet, and three families report
 #: on three different forms: domestic issuers on ``10-K``/``10-Q``, foreign
@@ -182,7 +191,9 @@ ELECTRONIC_FORM_25_FROM = dt.date(2005, 4, 24)
 #: * ``N-PX`` records how a fund voted proxies rather than how the fund itself
 #:   stands, and can be filed while winding down. Its absence is not what
 #:   cessation means.
-PERIODIC_FORMS: frozenset[str] = frozenset(
+#: The Exchange Act cadence: domestic issuers and foreign private issuers.
+#: These are the registrants whose securities a price corpus can hold.
+EXCHANGE_ACT_PERIODIC_FORMS: frozenset[str] = frozenset(
     {
         # Domestic issuers, Exchange Act.
         "10-K",
@@ -196,8 +207,22 @@ PERIODIC_FORMS: frozenset[str] = frozenset(
         # a current report is not a periodic one.
         "20-F",
         "40-F",
-        # Registered investment companies, Investment Company Act. N-30D and
-        # N-Q are the retired predecessors of N-CSR and NPORT-P and are kept
+    }
+)
+
+#: The Investment Company Act cadence, split out from the Exchange Act one.
+#:
+#: **Why the split exists.** Both are periodic reporting and both must count for
+#: the supersession rule, which is why :data:`PERIODIC_FORMS` is their union and
+#: nothing about dating an exit changes. What differs is whether the registrant
+#: is a security a price corpus could ever hold. Measured 2026-09-06: of the
+#: 1,811 registrants the ``N-8F`` recognition added to the denominator, **11
+#: had ever registered a class on an exchange and 1,800 had not** — variable
+#: annuity accounts, direct-lending LLCs and institutional master funds, which
+#: have no ticker because they never traded. See §7g.
+INVESTMENT_COMPANY_PERIODIC_FORMS: frozenset[str] = frozenset(
+    {
+        # N-30D and N-Q are the retired predecessors of N-CSR and NPORT-P, kept
         # because the corpus starts in 1994, when they were what funds filed.
         "N-CSR",
         "N-CSR/A",
@@ -212,6 +237,48 @@ PERIODIC_FORMS: frozenset[str] = frozenset(
         "N-30D",
     }
 )
+
+
+class ReportingRegime(StrEnum):
+    """Which statute a registrant actually reports under.
+
+    Derived from the forms in the archive rather than asserted, so it is a fact
+    about the record and not a judgement about the entity.
+    """
+
+    #: Files 10-K/10-Q, or 20-F/40-F. A security a price corpus can hold.
+    EXCHANGE_ACT = "exchange_act"
+    #: Files only Investment Company Act reports. Overwhelmingly never traded.
+    INVESTMENT_COMPANY = "investment_company"
+    #: Both — a registrant that reported under each at different times.
+    BOTH = "both"
+    #: Filed no periodic report at all under either statute.
+    NEITHER = "neither"
+
+
+def reporting_regime(form_types: Iterable[str]) -> ReportingRegime:
+    """Classify a registrant by the periodic forms it actually filed.
+
+    ``BOTH`` is deliberately not collapsed into ``EXCHANGE_ACT``: a registrant
+    that reported under each is a real and different case from one that only
+    ever did the former, and a caller filtering the denominator should decide
+    which it wants rather than have this decide for it.
+    """
+    keys = {form.strip().upper() for form in form_types}
+    exchange = bool(keys & EXCHANGE_ACT_PERIODIC_FORMS)
+    fund = bool(keys & INVESTMENT_COMPANY_PERIODIC_FORMS)
+    if exchange and fund:
+        return ReportingRegime.BOTH
+    if exchange:
+        return ReportingRegime.EXCHANGE_ACT
+    if fund:
+        return ReportingRegime.INVESTMENT_COMPANY
+    return ReportingRegime.NEITHER
+
+
+#: The union. Every rule about cessation and supersession uses this, so a
+#: registrant reporting punctually under either statute is never read as silent.
+PERIODIC_FORMS: frozenset[str] = EXCHANGE_ACT_PERIODIC_FORMS | INVESTMENT_COMPANY_PERIODIC_FORMS
 
 
 @dataclass(frozen=True, slots=True)

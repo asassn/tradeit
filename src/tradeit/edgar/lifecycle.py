@@ -48,6 +48,8 @@ from tradeit.edgar.evidence import (
     FormRole,
     LifecycleEvidence,
     LifecycleScope,
+    ReportingRegime,
+    reporting_regime,
 )
 from tradeit.errors import DataError
 
@@ -105,7 +107,26 @@ class ExitResolution:
     last_periodic: dt.date | None = None
     #: Confirming filings the registrant kept reporting after. Never a date source.
     superseded: tuple[LifecycleEvidence, ...] = ()
+    #: Which statute the registrant reported under, from its own filings.
+    #:
+    #: Carried here so a consumer can scope a coverage denominator without
+    #: rebuilding timelines. **It never affects whether or how an exit is
+    #: dated** — a fund's exit is resolved exactly as any other registrant's,
+    #: which is what keeps these available for a fund corpus later.
+    regime: ReportingRegime = ReportingRegime.NEITHER
     note: str = ""
+
+    @property
+    def is_exchange_act(self) -> bool:
+        """Did this registrant ever report under the Exchange Act?
+
+        The test a price-based coverage denominator wants: an entity that only
+        ever filed Investment Company Act reports is overwhelmingly one that
+        never traded, so it can contribute denominator and never numerator.
+        ``BOTH`` counts as true — a registrant that reported under each did
+        report under this one.
+        """
+        return self.regime in (ReportingRegime.EXCHANGE_ACT, ReportingRegime.BOTH)
 
     @property
     def is_confirmed(self) -> bool:
@@ -137,6 +158,7 @@ class ExitResolution:
             "evidence_date": self.evidence_date.isoformat() if self.evidence_date else None,
             "effective_date": self.effective_date.isoformat() if self.effective_date else None,
             "last_periodic": self.last_periodic.isoformat() if self.last_periodic else None,
+            "regime": str(self.regime),
             "accessions": [e.accession for e in self.supporting],
             "superseded_accessions": [e.accession for e in self.superseded],
             "note": self.note,
@@ -166,6 +188,15 @@ class IssuerTimeline:
     @property
     def last_seen(self) -> dt.date:
         return max(e.evidence_date for e in self.evidence)
+
+    @property
+    def reporting_regime(self) -> ReportingRegime:
+        """Which statute this registrant actually reported under.
+
+        Read from the periodic filings in the archive, so it is a fact about
+        the record rather than a judgement about the entity.
+        """
+        return reporting_regime(e.form_type for e in self.evidence if e.role is FormRole.PERIODIC)
 
     @property
     def listing_start(self) -> dt.date | None:
@@ -261,6 +292,7 @@ def resolve_exit(
             return ExitResolution(
                 cik=timeline.cik,
                 company_name=timeline.company_name,
+                regime=timeline.reporting_regime,
                 evidence_type=EvidenceType.NON_EXIT_REGISTRANT_STILL_REPORTING,
                 # Derived by combining the confirming filings with the periodic
                 # reports that outlive them; no single form says this.
@@ -291,6 +323,7 @@ def resolve_exit(
             return ExitResolution(
                 cik=timeline.cik,
                 company_name=timeline.company_name,
+                regime=timeline.reporting_regime,
                 evidence_type=EvidenceType.CONFIRMED_SECURITY_EXTINGUISHED,
                 strength=EvidenceStrength.FORM_INFERRED,
                 scopes=scopes,
@@ -328,6 +361,7 @@ def resolve_exit(
         return ExitResolution(
             cik=timeline.cik,
             company_name=timeline.company_name,
+            regime=timeline.reporting_regime,
             evidence_type=primary.evidence_type,
             strength=EvidenceStrength.FORM_DIRECT,
             scopes=scopes,
@@ -353,6 +387,7 @@ def resolve_exit(
             return ExitResolution(
                 cik=timeline.cik,
                 company_name=timeline.company_name,
+                regime=timeline.reporting_regime,
                 evidence_type=EvidenceType.POSSIBLE_EXIT_FILING_CESSATION,
                 strength=EvidenceStrength.CESSATION_ONLY,
                 scopes=frozenset({LifecycleScope.SEC_REPORTING}),
@@ -371,6 +406,7 @@ def resolve_exit(
     return ExitResolution(
         cik=timeline.cik,
         company_name=timeline.company_name,
+        regime=timeline.reporting_regime,
         evidence_type=EvidenceType.UNRESOLVED_EXIT,
         strength=EvidenceStrength.NONE,
         scopes=frozenset(),

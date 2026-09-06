@@ -152,3 +152,86 @@ def test_all_three_regulators_have_an_exit_form() -> None:
         assert classify_form(form, WHEN).evidence_type is (
             EvidenceType.CONFIRMED_REGISTRATION_TERMINATION
         ), form
+
+
+# -- reporting regime: scoping the denominator without dropping the exit ----
+
+
+def test_the_two_statute_sets_are_disjoint_and_their_union_is_periodic() -> None:
+    """The supersession rule uses the union, so splitting them must not change
+    what counts as a registrant reporting."""
+    from tradeit.edgar.evidence import (
+        EXCHANGE_ACT_PERIODIC_FORMS,
+        INVESTMENT_COMPANY_PERIODIC_FORMS,
+    )
+
+    assert not (EXCHANGE_ACT_PERIODIC_FORMS & INVESTMENT_COMPANY_PERIODIC_FORMS)
+    assert EXCHANGE_ACT_PERIODIC_FORMS | INVESTMENT_COMPANY_PERIODIC_FORMS == PERIODIC_FORMS
+
+
+@pytest.mark.parametrize(
+    ("forms", "expected"),
+    [
+        (["10-K", "10-Q"], "exchange_act"),
+        (["20-F"], "exchange_act"),
+        (["N-CSR", "NPORT-P"], "investment_company"),
+        (["N-30D"], "investment_company"),
+        (["10-K", "N-CSR"], "both"),
+        (["8-K", "25", "N-8F"], "neither"),
+        ([], "neither"),
+    ],
+)
+def test_reporting_regime_reads_the_forms_actually_filed(forms: list[str], expected: str) -> None:
+    from tradeit.edgar.evidence import reporting_regime
+
+    assert reporting_regime(forms).value == expected
+
+
+def test_a_registrant_reporting_under_both_counts_as_exchange_act() -> None:
+    """BOTH is kept distinct from EXCHANGE_ACT so a caller can tell them apart,
+    but for the question "could a price corpus hold this", both are yes."""
+    from tradeit.edgar.evidence import ReportingRegime
+    from tradeit.edgar.lifecycle import ExitResolution
+
+    def _res(regime: ReportingRegime) -> ExitResolution:
+        from tradeit.edgar.evidence import EvidenceStrength, EvidenceType
+
+        return ExitResolution(
+            cik=1,
+            company_name="X",
+            evidence_type=EvidenceType.CONFIRMED_REGISTRATION_TERMINATION,
+            strength=EvidenceStrength.FORM_DIRECT,
+            scopes=frozenset(),
+            evidence_date=dt.date(2020, 1, 1),
+            effective_date=None,
+            supporting=(),
+            regime=regime,
+        )
+
+    assert _res(ReportingRegime.EXCHANGE_ACT).is_exchange_act
+    assert _res(ReportingRegime.BOTH).is_exchange_act
+    assert not _res(ReportingRegime.INVESTMENT_COMPANY).is_exchange_act
+    assert not _res(ReportingRegime.NEITHER).is_exchange_act
+
+
+def test_a_fund_only_registrant_keeps_its_dated_exit() -> None:
+    """The whole point of scoping rather than dropping: the exit stays resolved
+    and dated so a fund corpus can use it later."""
+    from tradeit.edgar.evidence import EvidenceStrength, EvidenceType, ReportingRegime
+    from tradeit.edgar.lifecycle import ExitResolution
+
+    fund = ExitResolution(
+        cik=42,
+        company_name="Some Municipal Income Trust",
+        evidence_type=EvidenceType.CONFIRMED_REGISTRATION_TERMINATION,
+        strength=EvidenceStrength.FORM_DIRECT,
+        scopes=frozenset(),
+        evidence_date=dt.date(2018, 5, 4),
+        effective_date=None,
+        supporting=(),
+        regime=ReportingRegime.INVESTMENT_COMPANY,
+    )
+    assert fund.is_confirmed
+    assert fund.evidence_date == dt.date(2018, 5, 4)
+    assert not fund.is_exchange_act
+    assert fund.summary()["regime"] == "investment_company"

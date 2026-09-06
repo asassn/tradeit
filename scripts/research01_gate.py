@@ -80,10 +80,25 @@ def main() -> int:
         )
     )
 
-    dated_exits = {
+    all_dated = {
         r.cik: r for r in denom.resolutions if r.is_confirmed and r.evidence_date is not None
     }
-    print(f"denominator dated confirmed exits: {len(dated_exits):,}")
+    # Registrants whose only periodic filings are Investment Company Act forms
+    # are scoped OUT of the coverage denominator and stay fully dated. Measured
+    # 2026-09-06 (§7g): of the 1,811 the N-8F recognition added, 11 had ever
+    # registered a class on an exchange and 1,800 had not. They are denominator
+    # that can never have a numerator -- not a coverage failure, a different
+    # population -- and counting them depresses coverage for a reason unrelated
+    # to survivorship. Their exits remain resolved and dated so a fund corpus
+    # can use them; only this ratio excludes them.
+    dated_exits = {cik: r for cik, r in all_dated.items() if r.is_exchange_act}
+    funds = len(all_dated) - len(dated_exits)
+    print(f"denominator dated confirmed exits: {len(all_dated):,}")
+    print(
+        f"  scoped out, Investment Company Act reporting only: {funds:,} "
+        f"({funds / len(all_dated):.1%}) -- still dated, see §7g"
+    )
+    print(f"  coverage denominator (Exchange Act reporters): {len(dated_exits):,}")
 
     covered = priced & set(dated_exits)
     print(
@@ -103,6 +118,9 @@ def main() -> int:
         hit = len(set(names) & priced)
         print(f"  {year}  {hit:>5,} of {len(names):>6,}  ({100 * hit / len(names):5.2f}%)")
 
+    # full_denominator stays len(denom.resolutions) by the owner's decision of
+    # 2026-09-05 (§7e): the pessimistic reading is kept deliberately, and this
+    # script does not quietly change it.
     bounds = CoverageBounds(
         matched_numerator=len(covered),
         resolved_denominator=len(dated_exits),
@@ -120,6 +138,8 @@ def main() -> int:
     print("    its coverage is not an estimate of coverage over the population.")
     print("  * Holding a price bar is not the same as holding a COMPLETE series;")
     print("    completeness per name is not measured here.")
+    print("  * Registrants reporting only under the Investment Company Act are")
+    print("    excluded from the coverage denominator and remain dated (§7g).")
     return 0
 
 
