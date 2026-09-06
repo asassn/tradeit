@@ -1402,7 +1402,84 @@ By decade the newly dated run 2010s 1,181, 2020s 462, 2000s 168 — the shape
   population than any count published before it, and the two are not
   comparable without saying so.
 
-## 8. Build order
+## 7e. MEASURED 2026-09-05 — the gate divides by a different denominator than
+§5 defines
+
+**A finding, not a change. Nothing here is applied**, and the direction matters:
+this correction would make the corpus look **better**, which is the direction
+that deserves the most scrutiny.
+
+### The discrepancy
+
+§5 defines the two bounds over **denominator entries partitioned by identity
+state**:
+
+```
+matched_coverage  = numerator / RESOLVED entries
+bounded_coverage  = numerator / (RESOLVED + AMBIGUOUS + UNRESOLVED entries)
+```
+
+`scripts/research01_gate.py` instead passes:
+
+```python
+resolved_denominator = len(dated_exits)        # every dated exit
+full_denominator     = len(denom.resolutions)  # every REGISTRANT
+```
+
+`denom.resolutions` holds one entry per CIK, so it counts every registrant
+EDGAR has ever seen — including the roughly two thirds that never exited. The
+script's own docstring says the opposite of what it does: *"The denominator
+counts registrants that EDGAR shows exiting… Dividing the second by the first
+measures how much of the dead population we can actually price."*
+
+### Both readings, computed 2026-09-05
+
+From the rebuilt denominator cache and the corpus, using ticker presence as the
+proxy for a RESOLVED identity state:
+
+```
+dated exits (denominator entries)        30,646
+  identity resolved to a ticker           6,999
+  priced — the numerator                  4,568
+all registrant resolutions               96,822
+```
+
+| | matched_coverage | bounded_coverage | vs the 0.25 threshold |
+|---|---:|---:|---|
+| as the gate computes it | 4,568 / 30,646 = **14.91%** | 4,568 / 96,822 = **4.72%** | 5.3× short |
+| as §5 defines it | 4,568 / 6,999 = **65.27%** | 4,568 / 30,646 = **14.91%** | 1.7× short |
+
+The §5 reading also produces a statement that means something: **of the dead
+companies whose ticker has been established, 65% are priced.** The current
+reading's 4.72% is the fraction of *all registrants ever* that are both dead and
+priced, which no threshold was chosen against.
+
+### Why this is not obviously a bug fix to apply unilaterally
+
+It changes the number the survivorship classification is computed from, in the
+flattering direction, and `bounded_coverage >= 0.25` is a written threshold.
+Three cautions:
+
+* The figures above use **ticker presence** as the RESOLVED proxy. §4 defines
+  four identity states with stricter evidence rules, and `NAME_MATCH` alone can
+  never resolve. The true RESOLVED count is at most 6,999 and may be lower,
+  which would raise `matched_coverage` further and leave `bounded_coverage`
+  unchanged.
+* `bounded_coverage` is the **pessimistic** bound by design — it assumes no
+  unresolved entry would have matched. Under the §5 reading it stays
+  pessimistic; under the current reading it is pessimistic about a different
+  population.
+* Whichever reading stands, the corpus is **still short of the threshold** and
+  the standing rule on `research-01` is unaffected today.
+
+### What closes the remaining gap, under the §5 reading
+
+Reaching `bounded_coverage` 0.25 needs 7,662 priced dead registrants against
+30,646 entries. The corpus holds 4,568, so roughly **3,100 more**. At the
+observed 65% price-per-resolved rate that is about **4,800 further ticker
+resolutions** — against 23,647 dated exits that currently have no ticker at
+all. The resolver's recent hit rate is 12–15%, so this is a real but not
+obviously reachable target from filing text alone.
 
 | step | output | cost |
 |---|---|---|
