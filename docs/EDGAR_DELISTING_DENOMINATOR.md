@@ -1472,6 +1472,26 @@ Three cautions:
 * Whichever reading stands, the corpus is **still short of the threshold** and
   the standing rule on `research-01` is unaffected today.
 
+### DECIDED 2026-09-05: keep the pessimistic reading
+
+**The owner chose to leave the gate as it is.** `bounded_coverage` continues to
+be reported as the numerator over every registrant resolution, not over
+denominator entries, and continues to read **4.72%** rather than 14.91%.
+
+The reasoning that makes this the defensible choice, recorded so it is not
+silently reversed later: the discrepancy errs toward **under-claiming**, and
+the correction would have moved the headline in the flattering direction.
+Nothing depends on the number today — the corpus is short of the 0.25 threshold
+under either reading, so the standing rule on `research-01` binds identically.
+A measurement that understates itself costs nothing while it is short; one that
+overstates itself costs everything at the moment it stops being short.
+
+**The consequence to remember:** the published `bounded_coverage` is *not* the
+quantity §5 defines, and the two must never be quoted as if they were. When the
+corpus approaches the threshold this becomes a decision that has to be made
+rather than deferred, because the gate would then be refusing on a ratio no
+threshold was chosen against. §7e stays open for that day.
+
 ### What closes the remaining gap, under the §5 reading
 
 Reaching `bounded_coverage` 0.25 needs 7,662 priced dead registrants against
@@ -1480,6 +1500,44 @@ observed 65% price-per-resolved rate that is about **4,800 further ticker
 resolutions** — against 23,647 dated exits that currently have no ticker at
 all. The resolver's recent hit rate is 12–15%, so this is a real but not
 obviously reachable target from filing text alone.
+
+| step | output | cost |
+|---|---|---|
+| 1 | ingest full-index 1994 Q3 → present; row per filing | free |
+| 2 | birth/death events per CIK; cessation rule with the 8-quarter window | free |
+| 3 | termination counts by year × evidence strength — **the first publishable number** | free |
+| 4 | cohort survival curves from EDGAR alone (§6) | free |
+| 5 | identity mapping pass; four states; `MANUAL_VERIFIED` for the 30 controls | free + human time |
+| 6 | *(after vendor access)* match the roster; publish both coverage bounds | — |
+
+**Steps 1–5 need no vendor, no purchase and no permission**, and step 4 produces
+a genuinely useful artefact — the real survival curve of US registrants,
+1994–2026 — whether or not any vendor is ever bought.
+
+This is Milestone 0a in `PHASE_06_IMPROVEMENT_PLAN.md` and it is the work that
+should start first, because it is the instrument every later judgement depends
+on.
+
+## 7f. MEASURED 2026-09-05 — 1994–1997 is unreachable from filing text
+
+The 1,333 registrants with dated exits in 1994–1997 were seeded from the full
+index and put through the ticker resolver. **1,333 attempted, 0 resolved, and
+every one for the same reason: `no_annual_report`.**
+
+Not a failure of the method but a fact about the era. EDGAR's full index begins
+1994 Q3 and mandatory electronic filing was phased in through 1993–1996, so a
+registrant that exited in 1995 may have filed its last annual report on paper.
+The resolver reads a filing's own words to bind a ticker; where there is no
+filing there is nothing to read, and a guess would be exactly the fabrication
+the identity rules exist to forbid.
+
+This corroborates §7be from the other direction: the window is not merely blind
+to *exchange* delistings, it is largely blind to the registrants themselves.
+1994–1997 contributes 1,333 entries to the denominator and can contribute no
+numerator by this route. Any future coverage there needs a source outside EDGAR
+filing text.
+
+## 8. Build order
 
 | step | output | cost |
 |---|---|---|
