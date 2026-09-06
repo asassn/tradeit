@@ -856,3 +856,52 @@ rather than discovered:
   exchange and continued OTC is treated as ended: a recorded modelling decision.
 - **Delisting reasons are frequently absent.** `delisting_reason = unknown` is a
   first-class value and its prevalence is published.
+
+## Which filings can bind a ticker — measured 2026-09-06, mostly negative
+
+The ticker resolver reads **annual reports only** (`10-K`, `10-K405`, `10-KSB`,
+`10-K/A`, `20-F`, `40-F`). 53% of dead registrants never filed one, so the
+obvious question is which other filings name a trading symbol. Counting which
+forms exist is not an answer to that question, and treating it as one produced a
+57% estimate that collapsed to 9% the moment real documents were opened.
+
+**Twelve fetches, four families, three dead ends.** Each was sampled at three
+points across its date range before any extractor was written.
+
+| family | untickered dead registrants holding one | carries a trading symbol? |
+|---|---:|---|
+| `8-A12B` / `8-A12G` | 3,982 | **No.** Registers a *class* on a *named exchange* — "Title of each class", "Name of each exchange". Samples from 1995, 1999 and 2020 contain the word "symbol" **zero times** |
+| `25` / `25-NSE` | 1,243 | **No.** A 1.5–3.6 KB administrative delisting notice. No symbol in any sample |
+| `DEF 14A` | 6,213 | **No.** One sample's only match was *"any logo or symbol authorized by the Sub-Adviser"* — a trademark sense, and precisely the false positive `confirm.py`'s stopword list exists to refuse |
+| `424B*` | 6,315 | **Sometimes**, and in the right shape: *"The Company's Class A common stock is listed on the New York Stock Exchange, Inc. under the symbol \"HFI.\""* |
+| `10-Q` | 7,217 | **No, in practice.** The cover page carries the 12(b) table only from 2019; **30** of the 7,217 filed a 10-Q that late. These registrants died first |
+
+`8-A12B` was the most promising on paper — it is the form that puts a class on an
+exchange, and `evidence.py` already classifies it as a birth form — and it is
+useless for this purpose. Three fetches established that, against an extractor
+that would have taken a day to write and would have returned nothing.
+
+### What remains, and the split that matters within it
+
+`424B` divides on whose offering the document describes, and the distinction is
+not cosmetic:
+
+```
+424B1 / 424B4 / 424A  — the issuer's own offering        1,782
+424B2 / 424B3 / 424B5 — resale, merger, shelf takedown   4,533
+```
+
+A `424B3` for a merger or spin-off describes **the other party**. One sample
+yielded three symbols — `LPS`, `FNF`, `BKFS` — none of which was necessarily the
+filer's. `confirm.py` refuses a filing naming several distinct symbols, so that
+case fails closed; the danger is the document that names exactly one, belonging
+to somebody else. That binds silently and wrongly.
+
+**So the safe pool is 1,782 registrants, not the 11,311 the form counts
+suggested.** At the annual-report route's observed rates that is a few hundred
+further identities — real, evidenced, and worth having, but an order of
+magnitude smaller than the form counts implied.
+
+**Do not re-investigate `8-A12B`, `25`, `DEF 14A` or `10-Q` for ticker binding.**
+The answer is recorded here so the next reading of the form counts does not
+start the same search again.
