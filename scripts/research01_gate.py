@@ -32,13 +32,14 @@ from pathlib import Path
 
 sys.path.insert(0, "src")
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, distinct, func, select
 from sqlalchemy.orm import sessionmaker
 
+from tradeit.core.calendar import TradingCalendar
 from tradeit.edgar.denominator import CoverageBounds, classify_corpus
 from tradeit.edgar.index import IndexQuarter
 from tradeit.edgar.pipeline import BuildOptions, build_denominator
-from tradeit.research01.completeness import assess_series, summarise
+from tradeit.research01.completeness import assess_span, summarise
 from tradeit.storage.tables import (
     IssuerIdentifier,
     Security,
@@ -111,23 +112,34 @@ def main() -> int:
     # than disclaimed: a company that failed in 2005 whose prices stop in 2001
     # passes the coverage test while hiding the years that killed it.
     print("\n=== completeness of the series we do hold ===")
-    sessions_by_cik: dict[int, list[dt.date]] = collections.defaultdict(list)
-    for cik_text, session_date in session.execute(
-        select(IssuerIdentifier.value_normalized, SecurityPriceFact.session_date)
+    # Aggregated in SQL, not in Python. The first version pulled every distinct
+    # (cik, session_date) pair into a dict -- 23 million price facts as Python
+    # date objects -- and the gate was killed outright. The measurement needs a
+    # count and two endpoints, which the database produces without loading a row.
+    spans = session.execute(
+        select(
+            IssuerIdentifier.value_normalized,
+            func.count(distinct(SecurityPriceFact.session_date)),
+            func.min(SecurityPriceFact.session_date),
+            func.max(SecurityPriceFact.session_date),
+        )
         .join(Security, Security.issuer_id == IssuerIdentifier.issuer_id)
         .join(SecurityPriceFact, SecurityPriceFact.security_id == Security.security_id)
         .where(IssuerIdentifier.namespace == "sec_cik")
-        .distinct()
-    ).all():
-        sessions_by_cik[int(cik_text)].append(session_date)
+        .group_by(IssuerIdentifier.value_normalized)
+    ).all()
+    calendar = TradingCalendar()
     assessed = [
         got
-        for cik, days in sessions_by_cik.items()
-        if cik in dated_exits
+        for cik_text, held, first, last in spans
+        if int(cik_text) in dated_exits
         and (
-            got := assess_series(
-                days,
-                exit_date=dated_exits[cik].evidence_date,
+            got := assess_span(
+                held,
+                first,
+                last,
+                exit_date=dated_exits[int(cik_text)].evidence_date,
+                calendar=calendar,
             )
         )
         is not None

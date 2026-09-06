@@ -46,6 +46,7 @@ __all__ = [
     "Reach",
     "SeriesCompleteness",
     "assess_series",
+    "assess_span",
     "summarise",
 ]
 
@@ -156,6 +157,34 @@ def assess_series(
         first=first,
         last=last,
         sessions_expected=expected,
+        exit_date=exit_date,
+    )
+
+
+def assess_span(
+    sessions_held: int,
+    first: dt.date,
+    last: dt.date,
+    *,
+    exit_date: dt.date | None,
+    calendar: TradingCalendar | None = None,
+) -> SeriesCompleteness | None:
+    """Measure a series from its shape rather than from its dates.
+
+    :func:`assess_series` needs every session date in memory, which is fine for
+    one series and fatal for a corpus: 23 million price facts materialised as
+    Python dates killed the gate outright. The count and the two endpoints are
+    all the measurement uses, and a database can produce those with
+    ``count(distinct session_date), min(...), max(...)`` without loading a row.
+    """
+    if sessions_held <= 0 or last < first:
+        return None
+    cal = calendar or TradingCalendar()
+    return SeriesCompleteness(
+        sessions_held=sessions_held,
+        first=first,
+        last=last,
+        sessions_expected=len(cal.sessions_between(first, last)),
         exit_date=exit_date,
     )
 

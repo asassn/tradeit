@@ -142,3 +142,26 @@ def test_summarise_reports_both_failures_without_merging_them() -> None:
     assert got["records_the_death"] == 2
     assert got["below_dense_enough"] == 1
     assert got["by_reach"] == {"reaches_exit": 2, "stops_years_early": 1}
+
+
+# -- the memory-safe path --------------------------------------------------
+
+
+def test_assess_span_agrees_with_assess_series() -> None:
+    """The two must not drift: one is used by tests and one by the corpus."""
+    from tradeit.research01.completeness import assess_span
+
+    days = _sessions(dt.date(2001, 1, 2), dt.date(2004, 12, 31), keep=3)
+    exit_date = dt.date(2005, 1, 10)
+    from_dates = assess_series(days, exit_date=exit_date)
+    from_span = assess_span(len(days), days[0], days[-1], exit_date=exit_date)
+    assert from_dates == from_span
+
+
+def test_assess_span_refuses_an_impossible_shape() -> None:
+    """Zero sessions is not a series, and a last before a first is corrupt
+    input rather than a zero-length one."""
+    from tradeit.research01.completeness import assess_span
+
+    assert assess_span(0, dt.date(2004, 1, 1), dt.date(2004, 6, 1), exit_date=None) is None
+    assert assess_span(5, dt.date(2004, 6, 1), dt.date(2004, 1, 1), exit_date=None) is None
