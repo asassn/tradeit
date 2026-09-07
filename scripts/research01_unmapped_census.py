@@ -34,6 +34,7 @@ import sqlite3
 import statistics
 import sys
 import time
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, "src")
@@ -75,7 +76,11 @@ def main() -> int:
     if args.shard:
         index, _, count = args.shard.partition("/")
         i, n = int(index), int(count)
-        targets = [r for r in targets if hash(r["Code"]) % n == i]
+        # zlib.crc32, not hash(): Python salts string hashing per process, so
+        # hash(code) % n gives a different partition in every shard and the
+        # shards overlap instead of dividing. That produced duplicate rows the
+        # first time this ran.
+        targets = [r for r in targets if zlib.crc32(r["Code"].encode()) % n == i]
         suffix = f"_{i}"
         print(f"  shard {i}/{n}: {len(targets):,}", flush=True)
     if args.limit:
@@ -98,11 +103,14 @@ def main() -> int:
             if not bars:
                 empty += 1
                 continue
-            dollars = [
-                float(b.get("close") or 0) * float(b.get("volume") or 0)
-                for b in bars
-                if b.get("close") and b.get("volume")
-            ]
+            # Every bar, including the untraded ones. The first version kept
+            # only bars where close and volume were both truthy -- and a volume
+            # of zero is falsy, so it dropped exactly the days that make a
+            # security illiquid and reported the survivors' median. That ranked
+            # a series with three traded days above a real company.
+            volumes = [float(b.get("volume") or 0) for b in bars]
+            closes = [float(b.get("close") or 0) for b in bars]
+            dollars = [c * v for c, v in zip(closes, volumes, strict=True)]
             handle.write(
                 json.dumps(
                     {
@@ -114,6 +122,15 @@ def main() -> int:
                         "bars": len(bars),
                         "first": bars[0]["date"],
                         "last": bars[-1]["date"],
+                        # Kept apart so an implausible product is attributable.
+                        # SSW-P-D returns a close of 4,945 for a preferred
+                        # share; multiplied by volume that is a number nobody
+                        # can sanity-check, and separated it is obvious.
+                        "median_close": statistics.median(closes) if closes else 0.0,
+                        "median_volume": statistics.median(volumes) if volumes else 0.0,
+                        "zero_volume_share": (
+                            sum(1 for v in volumes if v == 0) / len(volumes) if volumes else 1.0
+                        ),
                         "median_dollar_volume": statistics.median(dollars) if dollars else 0.0,
                     }
                 )
