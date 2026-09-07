@@ -1678,3 +1678,60 @@ def test_the_statutory_heading_still_ends_the_table_after_the_fix() -> None:
     joined = " ".join(cell for row in extract.section_12b_rows for cell in row.cells)
     assert "None" not in joined.split()
     assert "12(g)" not in joined
+
+
+BERKSHIRE_COVER_HTML = """
+<p>Securities registered pursuant to Section 12(b) of the Act:</p>
+<table>
+<tr><td>Title of each class</td><td>Trading Symbol(s)</td>
+ <td>Name of each exchange on which registered</td></tr>
+<tr>
+ <td>Class A Common Stock</td><td>Class B Common Stock</td>
+ <td>1.125% Senior Notes due 2027</td>
+ <td>BRK.A</td><td>BRK.B</td><td>BRK27</td>
+ <td>New York Stock Exchange</td><td>New York Stock Exchange</td>
+ <td>New York Stock Exchange</td>
+</tr></table>
+<p>Securities registered pursuant to Section 12(g) of the Act: None</p>
+"""
+
+
+def test_a_column_major_table_is_read_as_rows_not_as_one_row() -> None:
+    """Berkshire's cover produces no row breaks at all: the segment holds every
+    class title, then every symbol, then every exchange. Read row-major it is
+    one long row naming nothing; read column-major it is the table."""
+    extract = extract_identity_evidence(BERKSHIRE_COVER_HTML)
+    pairs = {(row.cells[0], row.cells[1]) for row in extract.section_12b_rows}
+    assert ("Class A Common Stock", "BRK.A") in pairs
+    assert ("Class B Common Stock", "BRK.B") in pairs
+    for row in extract.section_12b_rows:
+        assert len(row.cells) == 3, "a transposed row has one cell per column"
+
+
+def test_the_transposition_is_reported_rather_than_silent() -> None:
+    """A table read in a different orientation than it was written is a fact a
+    reader needs, not an implementation detail."""
+    extract = extract_identity_evidence(BERKSHIRE_COVER_HTML)
+    assert any("column-major" in note for note in extract.notes)
+
+
+def test_a_wide_block_of_prose_is_not_transposed_into_rows() -> None:
+    """Shape alone is not enough to act on: a wide prose segment has the same
+    arithmetic as a column-major table. The columns must look like a 12(b)
+    table's columns — ticker-shaped symbols and venue names — or the segment is
+    left exactly as it was, because a misread table is worse than an unread one.
+    """
+    prose = """
+    <p>Securities registered pursuant to Section 12(b) of the Act:</p>
+    <table><tr>
+     <td>Title of each class</td><td>Trading Symbol</td><td>Name of exchange</td>
+     <td>Indicate by check mark if the registrant is a well-known issuer</td>
+     <td>Yes No</td><td>Indicate by check mark whether the registrant has filed</td>
+     <td>all reports required to be filed by Section 13 or 15(d)</td>
+     <td>during the preceding 12 months</td><td>Yes No</td>
+    </tr></table>
+    """
+    extract = extract_identity_evidence(prose)
+    for row in extract.section_12b_rows:
+        assert not any(cell in {"Yes No"} for cell in row.cells[:1])
+    assert not any("column-major" in note for note in extract.notes)

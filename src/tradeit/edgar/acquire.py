@@ -890,6 +890,45 @@ def _cells(segment: str) -> list[str]:
     return [_clean(c) for c in segment.split(_CELL) if _clean(c)]
 
 
+_TICKER_CELL = re.compile(r"^[A-Z][A-Z0-9]{0,7}(?:[.\-][A-Z0-9]{1,3})?$")
+_VENUE_CELL = re.compile(r"exchange|market|nasdaq|nyse|cboe|arca|bats", re.IGNORECASE)
+
+#: The em dash a filing puts in the symbol column for a security that has no
+#: ticker -- registered notes, mostly. It is a value, not a missing cell.
+_NO_SYMBOL = {"\u2014", "\u2013", "-", "N/A", "None"}
+
+
+def _transpose_column_major(cells: list[str], width: int) -> list[list[str]] | None:
+    """A whole table that arrived as one segment, column by column.
+
+    Berkshire Hathaway's cover page renders its ten registered securities so
+    that the markup produces no row breaks at all: the segment holds ten class
+    titles, then ten trading symbols, then ten exchange names, in that order and
+    in one list. Read row-major it is a single thirty-cell row naming nothing;
+    read column-major it is exactly the table.
+
+    **Shape alone is not enough to act on**, because a wide segment of prose has
+    the same arithmetic. So the transposition is only applied when the columns
+    look like the columns of a 12(b) table: one whose every entry is
+    ticker-shaped or the em dash a filing uses for an unlisted note, and a last
+    one whose every entry names a venue. A segment that does not match is
+    returned as ``None`` and left exactly as it was, because a misread table is
+    worse than an unread one.
+    """
+    if width < 2 or len(cells) < 2 * width or len(cells) % width:
+        return None
+    depth = len(cells) // width
+    columns = [cells[i * depth : (i + 1) * depth] for i in range(width)]
+    symbol_like = any(
+        all(cell in _NO_SYMBOL or _TICKER_CELL.match(cell) for cell in column)
+        for column in columns[1:]
+    )
+    venue_like = all(_VENUE_CELL.search(cell) for cell in columns[-1])
+    if not (symbol_like and venue_like):
+        return None
+    return [[column[row] for column in columns] for row in range(depth)]
+
+
 def _collect_rows(region: str, *, width: int) -> tuple[list[Section12bRow], list[str]]:
     """Rows of the Section 12(b) table, stopping where the table stops.
 
@@ -958,7 +997,16 @@ def _collect_rows(region: str, *, width: int) -> tuple[list[Section12bRow], list
                     )
                     break
                 continue
-            rows.append(Section12bRow(cells=tuple(cells)))
+            transposed = _transpose_column_major(cells, width)
+            if transposed is not None:
+                notes.append(
+                    "the table arrived as one column-major segment and was read "
+                    f"as {len(transposed)} rows of {width}"
+                )
+                for row in transposed[: 8 - len(rows)]:
+                    rows.append(Section12bRow(cells=tuple(row)))
+            else:
+                rows.append(Section12bRow(cells=tuple(cells)))
             if len(rows) >= 8:
                 break
 
