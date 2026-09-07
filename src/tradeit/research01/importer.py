@@ -264,6 +264,50 @@ class AliasResolver:
         return current.pop(), Resolution.RESOLVED
 
 
+class _KnownFacts:
+    """The keys already stored for a security, read once instead of per bar.
+
+    The duplicate check asks whether one ``(security, session, basis,
+    knowledge_time)`` row exists. For a security being imported for the first
+    time the answer is no, nine thousand times over, and each no costs a query.
+
+    Loading the security's existing keys once turns that into a set membership
+    test. Newly inserted keys are added as they go, so a duplicate *within* one
+    delivery is still refused -- which the per-bar query caught by seeing the
+    flushed row, and a set that only knew about pre-existing rows would miss.
+    """
+
+    __slots__ = ("_known", "_session")
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+        self._known: dict[int, set[tuple[dt.date, str, dt.datetime]]] = {}
+
+    def _keys(self, security_id: int) -> set[tuple[dt.date, str, dt.datetime]]:
+        held = self._known.get(security_id)
+        if held is None:
+            held = {
+                (session_date, basis, known)
+                for session_date, basis, known in self._session.execute(
+                    select(
+                        SecurityPriceFact.session_date,
+                        SecurityPriceFact.adjustment_basis,
+                        SecurityPriceFact.knowledge_time,
+                    ).where(SecurityPriceFact.security_id == security_id)
+                ).all()
+            }
+            self._known[security_id] = held
+        return held
+
+    def seen(self, security_id: int, session_date: dt.date, basis: str, known: dt.datetime) -> bool:
+        return (session_date, basis, known) in self._keys(security_id)
+
+    def record(
+        self, security_id: int, session_date: dt.date, basis: str, known: dt.datetime
+    ) -> None:
+        self._keys(security_id).add((session_date, basis, known))
+
+
 def _incoherent(bar: VendorBar) -> str:
     """Why this row is not a price bar, or empty if it is.
 
@@ -305,6 +349,7 @@ def import_price_bars(
     """
     result = ImportResult()
     resolver = AliasResolver(session, alias_kind=alias_kind)
+    known_facts = _KnownFacts(session)
     for bar in bars:
         security_id, resolution = resolver.resolve(bar.ticker, bar.session_date)
         if resolution is Resolution.UNRESOLVED_NO_ALIAS:
@@ -349,15 +394,7 @@ def import_price_bars(
             else min(knowledge_time, _session_instant(bar.session_date))
         )
 
-        exists = session.scalars(
-            select(SecurityPriceFact.id).where(
-                SecurityPriceFact.security_id == security_id,
-                SecurityPriceFact.session_date == bar.session_date,
-                SecurityPriceFact.adjustment_basis == bar.adjustment_basis,
-                SecurityPriceFact.knowledge_time == knowledge_time,
-            )
-        ).first()
-        if exists is not None:
+        if known_facts.seen(security_id, bar.session_date, bar.adjustment_basis, knowledge_time):
             result.rejected.append(
                 RejectedBar(
                     bar, RejectReason.DUPLICATE, bar.ticker, "already present at this revision"
@@ -365,6 +402,7 @@ def import_price_bars(
             )
             continue
 
+        known_facts.record(security_id, bar.session_date, bar.adjustment_basis, knowledge_time)
         session.add(
             SecurityPriceFact(
                 security_id=security_id,

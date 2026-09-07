@@ -267,6 +267,23 @@ class TestRoundTrip:
         assert second.rejected[0].reason is RejectReason.DUPLICATE
         assert len(db_session.scalars(select(SecurityPriceFact)).all()) == 1
 
+    def test_the_same_bar_twice_in_one_delivery_lands_once(self, db_session: Session) -> None:
+        """The within-delivery duplicate, which the cross-delivery test above
+        does not reach. The per-bar query caught it by seeing the flushed row;
+        the cached key set has to add each insert as it goes, or a vendor that
+        repeats a row would double it."""
+        security = _security(db_session, _issuer(db_session, "ACME", "1"))
+        _alias(db_session, security, "ACME", dt.date(2000, 1, 1), None)
+        delivery = Delivery("eodhd", DELIVERED, "acme.csv")
+
+        result = import_price_bars(
+            db_session, [_bar("ACME", SESSION), _bar("ACME", SESSION)], delivery
+        )
+
+        assert result.landed == 1
+        assert [r.reason for r in result.rejected] == [RejectReason.DUPLICATE]
+        assert len(db_session.scalars(select(SecurityPriceFact)).all()) == 1
+
     def test_the_three_bases_land_as_three_rows_with_different_knowledge_times(
         self, db_session: Session
     ) -> None:
