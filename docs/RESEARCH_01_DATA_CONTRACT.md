@@ -1039,3 +1039,73 @@ could plausibly be recovered is **on the order of thirty registrants**, not
 splice-preventing fetch is not a coverage deficit. It is the number of times
 the system refused to guess, and it should be read alongside *why* each refusal
 happened before anybody plans work against it.
+
+## Verifying 60.5 million bars — 2026-09-07
+
+Coverage and completeness were already measured. **Correctness was not**, and
+the gate says so in its own limitations. These are the checks run after the
+live universe landed.
+
+### What held
+
+| check | result |
+|---|---|
+| OHLC coherence (the four check constraints) | **0** incoherent bars in 60,508,185 |
+| duplicate `(security, session, basis, knowledge_time)` | **0** |
+| bars that failed to resolve to a security | **0** of 36,548,491 newly landed |
+| known splits at the right date and ratio | **7 of 8** — AAPL 4:1 and 7:1, TSLA 5:1 and 3:1, NVDA 10:1 and 4:1, AMZN 20:1 |
+
+### Aggregate history, reconstructed blind
+
+Nothing in the pipeline knows about market events. Ranking months by the
+**median** daily return on the adjusted basis reproduces them anyway:
+
+```
+2008-10   -0.260%/day     Lehman aftermath -- the worst month
+2018-12   -0.210%/day     December 2018 selloff
+2022-09   -0.151%/day     worst month of the 2022 bear
+1990-08   -0.148%/day     Iraq invades Kuwait
+2018-10   -0.076%/day     October 2018 correction
+```
+
+**The first version of this test was wrong and is recorded as such.** It used
+the *mean* on the *raw* basis and reported +72,159%/day for 2020-03 and
++3,302,269%/day for 2006-05. Those are reverse splits: a 1-for-1000 reverse
+split multiplies an unadjusted price by a thousand in one session, and a mean
+is defenceless against it. The months it ranked "worst" happened to look
+plausible, which is exactly what makes the error dangerous — **a broken metric
+that agrees with your expectations is harder to catch than one that does not.**
+Use the median, and the adjusted basis, or the statistic measures corporate
+actions rather than markets.
+
+### What did not hold
+
+**3,930 bars (0.0065%) fall on dates the US market was closed** — July 4th,
+Labor Day, Thanksgiving, Juneteenth, Good Friday, and 2025-01-09, the national
+day of mourning. Roughly eight to ten dates a year, every year. The vendor
+emits them; nothing in the import refuses them. `TradingCalendar` already knows
+the real schedule, so this is a check that can be added rather than a fact that
+must be tolerated.
+
+**12.8% of adjusted bars close identical to the previous session and 5.8% carry
+zero volume**, consistently across every era. That is not an error — it is what
+a full universe including microcaps and OTC names looks like — but it means
+**a liquidity filter is a precondition for any backtest**, not a refinement of
+one. A median daily return of exactly 0.000% in months like 2020-03 is that
+population showing through.
+
+### The coverage hole this exposed: multi-class issuers
+
+Alphabet is absent from the corpus — no ticker, no bars — and it is **not** an
+identity failure. CIK 1652044 is held. It carries **two** tickers, `GOOGL`
+(Class A) and `GOOG` (Class C), and `research01_bind_current_tickers.py`
+refuses any CIK holding more than one, because the corpus stores **one
+placeholder security per issuer with a NULL `class_label`**. Binding both
+classes to one row would conflate two securities that trade at different
+prices.
+
+**The refusal is right and the model is incomplete.** 1,158 registrants are in
+this state, including some of the largest US companies and most closed-end
+funds with preferred classes. Reaching them needs one security per share class
+with an evidenced label — an identity question, not a fetching one, and the
+next real piece of architecture on the data side.
