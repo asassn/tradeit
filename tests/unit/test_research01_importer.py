@@ -527,3 +527,88 @@ class TestAnIncoherentBarIsRefusedNotRepaired:
         )
         assert import_price_bars(db_session, [bad], Delivery("eodhd", DELIVERED)).landed == 0
         assert db_session.scalars(select(SecurityPriceFact.id)).all() == []
+
+
+# -- the cached resolver must not become a second rule ----------------------
+
+
+def test_resolver_agrees_with_resolve_security(db_session: Session) -> None:
+    """Two implementations of one rule that can disagree are two rules.
+
+    ``AliasResolver`` hoists the query out of the per-bar loop; it must not
+    change a single answer. Every alias shape that matters is exercised: a
+    plain interval, an open-ended one, a reused ticker with disjoint
+    intervals, an ambiguous overlap, and a revision that supersedes.
+    """
+    from tradeit.research01.importer import AliasResolver
+
+    issuer = Issuer(display_name="X", source="test")
+    db_session.add(issuer)
+    db_session.flush()
+    ids = []
+    for _ in range(3):
+        security = Security(issuer_id=issuer.issuer_id, security_type="common_stock", source="test")
+        db_session.add(security)
+        db_session.flush()
+        ids.append(security.security_id)
+
+    early = dt.datetime(2020, 1, 1, tzinfo=dt.UTC)
+    later = dt.datetime(2021, 1, 1, tzinfo=dt.UTC)
+    rows = [
+        # REUSE: disjoint intervals on one ticker
+        ("REUSE", ids[0], dt.date(1995, 1, 1), dt.date(2000, 1, 1), early),
+        ("REUSE", ids[1], dt.date(2005, 1, 1), dt.date(2010, 1, 1), early),
+        # OPEN: no closing bound
+        ("OPEN", ids[0], dt.date(1998, 1, 1), None, early),
+        # AMBIG: two securities, same interval, same knowledge_time
+        ("AMBIG", ids[0], dt.date(2000, 1, 1), dt.date(2010, 1, 1), early),
+        ("AMBIG", ids[1], dt.date(2000, 1, 1), dt.date(2010, 1, 1), early),
+        # REVISED: a later belief supersedes an earlier one
+        ("REVISED", ids[0], dt.date(2000, 1, 1), dt.date(2010, 1, 1), early),
+        ("REVISED", ids[2], dt.date(2000, 1, 1), dt.date(2010, 1, 1), later),
+    ]
+    for value, security_id, valid_from, valid_to, known in rows:
+        db_session.add(
+            SymbolAlias(
+                security_id=security_id,
+                alias_kind="ticker",
+                alias_value=value,
+                valid_from=valid_from,
+                valid_to=valid_to,
+                knowledge_time=known,
+                knowledge_source="test",
+                source="test",
+            )
+        )
+    db_session.flush()
+
+    resolver = AliasResolver(db_session)
+    probes = [
+        dt.date(1994, 6, 1),
+        dt.date(1996, 1, 1),
+        dt.date(1999, 12, 31),
+        dt.date(2000, 1, 1),
+        dt.date(2002, 1, 1),
+        dt.date(2007, 1, 1),
+        dt.date(2010, 1, 1),
+        dt.date(2026, 1, 1),
+    ]
+    compared = 0
+    for ticker in ("REUSE", "OPEN", "AMBIG", "REVISED", "ABSENT"):
+        for on in probes:
+            direct = resolve_security(db_session, ticker=ticker, on=on)
+            cached = resolver.resolve(ticker, on)
+            assert cached == direct, f"{ticker} on {on}: {cached} != {direct}"
+            compared += 1
+    assert compared == 40, "the comparison must actually run, not pass vacuously"
+
+
+def test_resolver_reads_each_ticker_once(db_session: Session) -> None:
+    """The whole point. If it re-queried per call it would be a slower
+    resolve_security wearing a cache's name."""
+    from tradeit.research01.importer import AliasResolver
+
+    resolver = AliasResolver(db_session)
+    resolver.resolve("ANY", dt.date(2004, 1, 1))
+    resolver.resolve("ANY", dt.date(2005, 1, 1))
+    assert list(resolver._cache) == ["ANY"]

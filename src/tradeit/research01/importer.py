@@ -35,6 +35,7 @@ from tradeit.research01.pit import KnowledgeTimeBasis, knowledge_time_for
 from tradeit.storage.tables import SecurityPriceFact, SymbolAlias
 
 __all__ = [
+    "AliasResolver",
     "Delivery",
     "ImportResult",
     "RejectReason",
@@ -205,6 +206,64 @@ def resolve_security(
     return current.pop(), Resolution.RESOLVED
 
 
+class AliasResolver:
+    """:func:`resolve_security` with the alias rows loaded once per ticker.
+
+    **Why this exists.** ``import_price_bars`` resolves every bar
+    independently, which is the property that makes a splice impossible, and it
+    costs one query per bar. A live registrant carries roughly nine thousand
+    sessions, so importing one symbol issued about eighteen thousand queries and
+    the live universe backfill was measured at 128 symbols an hour -- forty
+    hours for the run.
+
+    The alias rows for a ticker do not change during an import, so they can be
+    read once and the *same per-date rules* applied in memory. **Resolution
+    stays per date.** Nothing here widens a window, merges an interval or
+    caches an answer across dates; only the fetch is hoisted.
+
+    :func:`resolve_security` remains the reference implementation and is not
+    touched. ``test_resolver_agrees_with_resolve_security`` asserts the two
+    return identical answers, because two implementations of one rule that can
+    disagree are two rules.
+    """
+
+    __slots__ = ("_alias_kind", "_cache", "_session")
+
+    def __init__(self, session: Session, *, alias_kind: str = "ticker") -> None:
+        self._session = session
+        self._alias_kind = alias_kind
+        self._cache: dict[str, list[SymbolAlias]] = {}
+
+    def _rows(self, ticker: str) -> list[SymbolAlias]:
+        held = self._cache.get(ticker)
+        if held is None:
+            held = list(
+                self._session.scalars(
+                    select(SymbolAlias).where(
+                        SymbolAlias.alias_kind == self._alias_kind,
+                        SymbolAlias.alias_value == ticker,
+                    )
+                ).all()
+            )
+            self._cache[ticker] = held
+        return held
+
+    def resolve(self, ticker: str, on: dt.date) -> tuple[int | None, Resolution]:
+        """The same answer :func:`resolve_security` gives, without the query."""
+        rows = [
+            r
+            for r in self._rows(ticker)
+            if r.valid_from <= on and (r.valid_to is None or r.valid_to > on)
+        ]
+        if not rows:
+            return None, Resolution.UNRESOLVED_NO_ALIAS
+        latest = max(r.knowledge_time for r in rows)
+        current = {r.security_id for r in rows if r.knowledge_time == latest}
+        if len(current) > 1:
+            return None, Resolution.UNRESOLVED_AMBIGUOUS
+        return current.pop(), Resolution.RESOLVED
+
+
 def _incoherent(bar: VendorBar) -> str:
     """Why this row is not a price bar, or empty if it is.
 
@@ -245,10 +304,9 @@ def import_price_bars(
     re-running a delivery changes nothing.
     """
     result = ImportResult()
+    resolver = AliasResolver(session, alias_kind=alias_kind)
     for bar in bars:
-        security_id, resolution = resolve_security(
-            session, ticker=bar.ticker, on=bar.session_date, alias_kind=alias_kind
-        )
+        security_id, resolution = resolver.resolve(bar.ticker, bar.session_date)
         if resolution is Resolution.UNRESOLVED_NO_ALIAS:
             result.rejected.append(
                 RejectedBar(
