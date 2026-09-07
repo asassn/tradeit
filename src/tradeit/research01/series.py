@@ -37,6 +37,7 @@ from enum import StrEnum
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from tradeit.core.calendar import TradingCalendar
 from tradeit.storage.tables import SecurityCorporateActionFact, SecurityPriceFact, SymbolAlias
 
 __all__ = [
@@ -196,6 +197,7 @@ def price_series(
     start: dt.date | None = None,
     end: dt.date | None = None,
     include_disputed: bool = False,
+    calendar: TradingCalendar | None = None,
 ) -> list[AdjustedBar]:
     """The split-adjusted series for one security, as knowable at ``as_of``.
 
@@ -214,6 +216,15 @@ def price_series(
     ``include_disputed=True`` returns everything, for a caller auditing the cut
     rather than trading on it. It is spelled out at every call site so that
     reading a known-contaminated series is never the accident.
+
+    **Bars dated on a day the market was closed are excluded on read, and left
+    in the table.** 3,930 of them arrived before the importer learned to refuse
+    them -- July 4th, Thanksgiving, Good Friday, and 2025-01-09, the national
+    day of mourning. They are excluded rather than deleted for the same reason
+    a spliced bar is: the corpus's habit is to bound what it will read, not to
+    destroy what it was sent, so the vendor's error stays visible to an audit
+    and stops reaching a strategy. ``include_disputed=True`` returns them too,
+    since a caller auditing the cut needs to see what was cut.
     """
     conditions = [
         SecurityPriceFact.security_id == security_id,
@@ -248,7 +259,12 @@ def price_series(
     # Latest revision per session, by iterating in knowledge_time order and
     # letting later rows overwrite earlier ones for the same date.
     latest: dict[dt.date, tuple[Decimal, Decimal, Decimal, Decimal, Decimal]] = {}
+    sessions = calendar or TradingCalendar()
     for session_date, o, h, low, c, v, _kt in rows:
+        if not include_disputed and not sessions.is_session(session_date):
+            # A day with no trading has no price. Filtered here rather than in
+            # SQL because the exchange calendar is not a column.
+            continue
         latest[session_date] = (o, h, low, c, v)
 
     splits = known_splits(session, security_id, as_of=as_of, include_disputed=include_disputed)

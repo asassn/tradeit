@@ -180,9 +180,17 @@ class TestMechanics:
         assert bar.close == Decimal("28.60")
 
     def test_successive_splits_compound(self, db_session: Session) -> None:
+        """The invariant is that two splits multiply, not the date they sit on.
+
+        This bar was dated 2020-01-01 -- New Year's Day, when no US market
+        opens -- and the series read empty once non-session bars began being
+        excluded. Moved to the first actual session of 2020 rather than
+        weakening the filter, because a bar on a closed day is the defect the
+        filter exists for and a fixture is not evidence that one should be read.
+        """
         security = _security(db_session)
         sid = security.security_id
-        _bar(db_session, sid, dt.date(2020, 1, 1), Decimal("100"))
+        _bar(db_session, sid, dt.date(2020, 1, 2), Decimal("100"))
         _split(db_session, sid, dt.date(2020, 6, 1), Decimal(2))
         _split(db_session, sid, dt.date(2021, 6, 1), Decimal(5))
         db_session.flush()
@@ -421,3 +429,55 @@ class TestAdjudicatedBound:
             len(price_series(db_session, security.security_id, as_of=AS_OF, include_disputed=True))
             == 3
         )
+
+
+class TestNonSessionBars:
+    """3,930 bars arrived before the importer learned to refuse them.
+
+    They are excluded on read and left in the table: the corpus bounds what it
+    will read rather than destroying what it was sent, so the vendor's error
+    stays visible to an audit and stops reaching a strategy.
+    """
+
+    def test_a_bar_on_a_market_holiday_is_not_returned(self, db_session: Session) -> None:
+        security = _security(db_session)
+        sid = security.security_id
+        _bar(db_session, sid, dt.date(2021, 7, 5), Decimal("10"))  # observed July 4th
+        _bar(db_session, sid, dt.date(2021, 7, 6), Decimal("11"))
+        db_session.flush()
+        got = price_series(db_session, sid, as_of=dt.datetime(2022, 1, 1, tzinfo=UTC))
+        assert [b.session_date for b in got] == [dt.date(2021, 7, 6)]
+
+    def test_the_bar_is_excluded_not_deleted(self, db_session: Session) -> None:
+        """The row must still be there for an audit to find."""
+        security = _security(db_session)
+        sid = security.security_id
+        _bar(db_session, sid, dt.date(2021, 7, 5), Decimal("10"))
+        db_session.flush()
+        price_series(db_session, sid, as_of=dt.datetime(2022, 1, 1, tzinfo=UTC))
+        stored = db_session.scalars(
+            select(SecurityPriceFact).where(SecurityPriceFact.security_id == sid)
+        ).all()
+        assert len(stored) == 1
+        assert stored[0].session_date == dt.date(2021, 7, 5)
+
+    def test_an_auditor_can_still_see_them(self, db_session: Session) -> None:
+        """include_disputed already means "show me what was cut"; a caller
+        auditing the cut needs the holiday bars in that view too."""
+        security = _security(db_session)
+        sid = security.security_id
+        _bar(db_session, sid, dt.date(2021, 7, 5), Decimal("10"))
+        db_session.flush()
+        got = price_series(
+            db_session, sid, as_of=dt.datetime(2022, 1, 1, tzinfo=UTC), include_disputed=True
+        )
+        assert [b.session_date for b in got] == [dt.date(2021, 7, 5)]
+
+    def test_ordinary_sessions_are_untouched(self, db_session: Session) -> None:
+        security = _security(db_session)
+        sid = security.security_id
+        for day in (dt.date(2021, 7, 6), dt.date(2021, 7, 7), dt.date(2021, 7, 8)):
+            _bar(db_session, sid, day, Decimal("10"))
+        db_session.flush()
+        got = price_series(db_session, sid, as_of=dt.datetime(2022, 1, 1, tzinfo=UTC))
+        assert len(got) == 3
