@@ -1109,3 +1109,49 @@ this state, including some of the largest US companies and most closed-end
 funds with preferred classes. Reaching them needs one security per share class
 with an evidenced label — an identity question, not a fetching one, and the
 next real piece of architecture on the data side.
+
+## The narrative-pattern fix, measured — 2026-09-07
+
+Two sentence constructions were added to the symbol extractor after finding
+that the SEC only required a Trading Symbol column on cover pages from 2019,
+leaving every earlier registrant's symbol in Item 5 prose. Re-running the
+resolver over the **identical population** isolates what the change bought:
+
+| | v2 | v3 |
+|---|---:|---:|
+| attempted | 20,213 | 20,198 |
+| **resolved** | **346** | **1,631** |
+| `not_established_annual` | 10,784 | 9,526 |
+
+**4.7x on the same registrants, from one extractor change.** Corpus-wide:
+dead exits priced 5,705 -> 6,425, `matched_coverage` 26.39% -> 29.72%,
+`bounded_coverage` 5.89% -> 6.64%, CIKs with prices 11,313 -> 12,036.
+
+### What it reached, and what it did not
+
+`YAHOO INC` now binds `YHOO` with 9,794 bars and `RESEARCH IN MOTION LTD` binds
+`BB` with 12,144 -- both companies the corpus already held identity for and had
+never bound a ticker to.
+
+`MERRILL LYNCH & CO., INC.` and `TIME WARNER INC.` remain unresolved, so at
+least one further construction exists that neither pattern reaches. They are
+named here rather than counted, because a named miss is checkable and a
+percentage is not.
+
+`BIOPURE CORP` binds `BPUR` and prices nothing: the vendor serves `BPURQ`, the
+Q suffix an exchange appends during bankruptcy. That is a symbol-rendering gap
+of the same kind as `BRK.A` against `BRK-A`, and it is not addressed here.
+
+### The finding that removed a supposed decision
+
+13,363 delisted exchange-listed symbols had no identity in the corpus, and the
+question raised was whether to admit securities without a CIK. **It was the
+wrong question.** Every name checked -- Time Warner, Merrill Lynch, BlackBerry,
+Yahoo!, Square, Biopure -- was already held with full SEC identity and simply
+had no ticker bound. The first search missed them because the corpus stores the
+**historical** name: `YAHOO INC`, not Altaba; `RESEARCH IN MOTION LTD`, not
+BlackBerry; `SQUARE, INC.`, not Block.
+
+**A name search against a corpus that records names point-in-time will report a
+renamed company as absent.** No identity rule needed loosening; the gap was
+ticker binding all along.
