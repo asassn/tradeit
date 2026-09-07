@@ -1626,3 +1626,55 @@ class TestUserAgentFromEnvFile:
     def test_a_missing_file_is_not_an_error_it_is_an_absence(self, tmp_path: Path) -> None:
         with pytest.raises(ConfigError):
             resolve_user_agent(env_file=tmp_path / "nope.env")
+
+
+ALPHABET_COVER_HTML = """
+<p>Securities registered pursuant to Section 12(b) of the Act:</p>
+<table>
+ <tr><td>Title of each class</td><td>Trading Symbol(s)</td>
+     <td>Name of each exchange on which registered</td></tr>
+ <tr><td>Class A Common Stock, $0.001 par value</td><td>GOOGL</td>
+     <td>Nasdaq Stock Market LLC</td></tr>
+ <tr><td>(Nasdaq Global Select Market)</td></tr>
+ <tr><td>Class C Capital Stock, $0.001 par value</td><td>GOOG</td>
+     <td>Nasdaq Stock Market LLC</td></tr>
+ <tr><td>(Nasdaq Global Select Market)</td></tr>
+</table>
+<p>Securities registered pursuant to Section 12(g) of the Act: None</p>
+"""
+
+
+def test_a_one_cell_continuation_row_does_not_end_a_multi_class_table() -> None:
+    """Alphabet's cover puts "(Nasdaq Global Select Market)" on its own row
+    between Class A and Class C.
+
+    Breaking on it dropped Class C, and with it the second security of every
+    multi-class issuer — which is why Alphabet had no ticker in the corpus at
+    all. Narrowness was never a structural boundary; the statutory heading, the
+    table end and a prose cell are.
+    """
+    extract = extract_identity_evidence(ALPHABET_COVER_HTML)
+    symbols = {cell for row in extract.section_12b_rows for cell in row.cells}
+    assert "GOOGL" in symbols
+    assert "GOOG" in symbols, "the class after the continuation row was dropped"
+    titles = [row.cells[0] for row in extract.section_12b_rows]
+    assert any("Class A" in t for t in titles)
+    assert any("Class C" in t for t in titles)
+
+
+def test_the_continuation_row_itself_is_not_reported_as_a_security() -> None:
+    """Skipped, not collected: a one-cell parenthetical is not a registered
+    class and must not become a row of its own."""
+    extract = extract_identity_evidence(ALPHABET_COVER_HTML)
+    for row in extract.section_12b_rows:
+        assert row.cells != ("(Nasdaq Global Select Market)",)
+        assert len(row.cells) >= 3
+
+
+def test_the_statutory_heading_still_ends_the_table_after_the_fix() -> None:
+    """The boundary that does the real work must survive the one that did not:
+    12(g) begins where 12(b) ends, whatever the row widths in between."""
+    extract = extract_identity_evidence(ALPHABET_COVER_HTML)
+    joined = " ".join(cell for row in extract.section_12b_rows for cell in row.cells)
+    assert "None" not in joined.split()
+    assert "12(g)" not in joined

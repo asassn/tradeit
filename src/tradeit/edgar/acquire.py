@@ -940,10 +940,14 @@ def _collect_rows(region: str, *, width: int) -> tuple[list[Section12bRow], list
 
         if cells:
             if len(cells) < width:
-                # Narrow: residue from the heading row before the body starts,
-                # or the end of the body once it has.
-                if rows:
-                    break
+                # Narrow: heading residue before the body starts, or a
+                # continuation inside it. **Never a boundary.** Alphabet's cover
+                # puts "(Nasdaq Global Select Market)" on its own one-cell row
+                # between Class A and Class C; breaking here dropped Class C and
+                # with it every multi-class issuer's second security. The three
+                # structural boundaries below already bound the region, and
+                # narrowness was never one of them -- as this docstring said
+                # before the code did.
                 continue
             if any(len(cell) > _MAX_CELL_CHARS for cell in cells):
                 if rows:
