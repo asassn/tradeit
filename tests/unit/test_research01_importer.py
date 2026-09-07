@@ -267,6 +267,44 @@ class TestRoundTrip:
         assert second.rejected[0].reason is RejectReason.DUPLICATE
         assert len(db_session.scalars(select(SecurityPriceFact)).all()) == 1
 
+    def test_a_bar_dated_on_a_market_holiday_is_refused(self, db_session: Session) -> None:
+        """3,930 bars in the corpus fall on days the US market was closed --
+        July 4th, Thanksgiving, the 2025-01-09 day of mourning. The vendor emits
+        them; a day with no trading has no price."""
+        security = _security(db_session, _issuer(db_session, "ACME", "1"))
+        _alias(db_session, security, "ACME", dt.date(2000, 1, 1), None)
+        delivery = Delivery("eodhd", DELIVERED, "acme.csv")
+
+        result = import_price_bars(db_session, [_bar("ACME", dt.date(2025, 7, 4))], delivery)
+
+        assert result.landed == 0
+        assert result.rejected[0].reason is RejectReason.NON_SESSION_DATE
+        assert "not a trading session" in result.rejected[0].detail
+
+    def test_a_holiday_bar_is_refused_rather_than_moved_to_a_session(
+        self, db_session: Session
+    ) -> None:
+        """There is no session to move it to, and inventing one would put a
+        fabricated observation into a corpus whose claim is that it does not
+        fabricate."""
+        security = _security(db_session, _issuer(db_session, "ACME", "1"))
+        _alias(db_session, security, "ACME", dt.date(2000, 1, 1), None)
+        delivery = Delivery("eodhd", DELIVERED, "acme.csv")
+
+        import_price_bars(db_session, [_bar("ACME", dt.date(2025, 12, 25))], delivery)
+
+        assert db_session.scalars(select(SecurityPriceFact)).all() == []
+
+    def test_an_ordinary_session_still_lands(self, db_session: Session) -> None:
+        """The guard must not reject the trading days it exists to protect."""
+        security = _security(db_session, _issuer(db_session, "ACME", "1"))
+        _alias(db_session, security, "ACME", dt.date(2000, 1, 1), None)
+        delivery = Delivery("eodhd", DELIVERED, "acme.csv")
+
+        result = import_price_bars(db_session, [_bar("ACME", dt.date(2025, 7, 7))], delivery)
+
+        assert result.landed == 1
+
     def test_the_same_bar_twice_in_one_delivery_lands_once(self, db_session: Session) -> None:
         """The within-delivery duplicate, which the cross-delivery test above
         does not reach. The per-bar query caught it by seeing the flushed row;

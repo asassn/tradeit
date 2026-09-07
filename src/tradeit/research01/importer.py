@@ -31,6 +31,7 @@ from enum import StrEnum
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from tradeit.core.calendar import TradingCalendar
 from tradeit.research01.pit import KnowledgeTimeBasis, knowledge_time_for
 from tradeit.storage.tables import SecurityPriceFact, SymbolAlias
 
@@ -73,6 +74,18 @@ class RejectReason(StrEnum):
     #: without a ratio, a dividend without an amount. Not defaulted, because a
     #: split silently ratioed 1.0 is a split that does nothing and looks fine.
     INCOMPLETE = "incomplete"
+    #: The session date is not a trading session on the exchange calendar.
+    #:
+    #: Measured 2026-09-07: 3,930 bars in the corpus fall on dates the US market
+    #: was closed -- July 4th, Thanksgiving, Good Friday, Juneteenth, and
+    #: 2025-01-09, the national day of mourning. Eight to ten dates a year,
+    #: every year. The vendor emits them and nothing refused them.
+    #:
+    #: A bar on a day with no trading is not a price. It is refused rather than
+    #: moved, because there is no session to move it to and inventing one would
+    #: put a fabricated observation into a corpus whose whole claim is that it
+    #: does not fabricate.
+    NON_SESSION_DATE = "non_session_date"
     #: The bar is not a bar: its high is below its open or close, its low is
     #: above one of them, or its volume is negative. EODHD returns
     #: ``open=high=low=0`` with a non-zero close for thinly traded delisted
@@ -333,6 +346,7 @@ def import_price_bars(
     delivery: Delivery,
     *,
     alias_kind: str = "ticker",
+    calendar: TradingCalendar | None = None,
 ) -> ImportResult:
     """Land what resolves; report what does not. Never guess, never create.
 
@@ -350,7 +364,19 @@ def import_price_bars(
     result = ImportResult()
     resolver = AliasResolver(session, alias_kind=alias_kind)
     known_facts = _KnownFacts(session)
+    sessions = calendar or TradingCalendar()
     for bar in bars:
+        if not sessions.is_session(bar.session_date):
+            result.rejected.append(
+                RejectedBar(
+                    bar,
+                    RejectReason.NON_SESSION_DATE,
+                    bar.ticker,
+                    f"{bar.session_date} is not a trading session on "
+                    f"{sessions.name}; a day with no trading has no price",
+                )
+            )
+            continue
         security_id, resolution = resolver.resolve(bar.ticker, bar.session_date)
         if resolution is Resolution.UNRESOLVED_NO_ALIAS:
             result.rejected.append(
