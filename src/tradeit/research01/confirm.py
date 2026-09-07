@@ -117,6 +117,10 @@ _STOPWORDS = frozenset(
 #: but asking the narrower question the filing already answers.
 _BOUND_SYMBOL = re.compile(
     r"(?:TICKER\s+)?SYMBOLS?\s*[:\-,]?\s*"
+    # "The Ticker Symbol is ABP." -- the copula sits where a colon usually
+    # does. Without this the capture takes "IS", which _STOPWORDS discards,
+    # and the real symbol two words later is never reached.
+    r"(?:IS\s+)?"
     r"[\"\u201c\u2018']?\s*([A-Z]{1,6}(?:\.[A-Z]{1,2})?)\b"
     # The stopword alternation needs \b or `A` matches the start of `ABC` and
     # the refusal quietly stops working for every ticker beginning with a

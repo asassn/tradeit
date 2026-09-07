@@ -255,3 +255,63 @@ class TestTheStoredSymbolIsTheVendorsNotTheComparisonForm:
             )
             is None
         )
+
+
+# -- the construction where the security is named in the previous sentence --
+
+
+class _Extract:
+    """The minimum `candidate_symbols` reads: statements and 12(b) rows."""
+
+    def __init__(self, *texts: str) -> None:
+        self.symbol_statements = [type("S", (), {"text": t})() for t in texts]
+        self.section_12b_rows: list[object] = []
+
+
+def test_the_ticker_symbol_is_construction_yields_the_symbol() -> None:
+    """Verbatim from CIK 4672's 1999 10-K.
+
+    The Trading Symbol column was only added to SEC cover pages in 2019, so a
+    pre-2019 registrant's symbol lives in Item 5 prose. Here the security is
+    named in the *previous* sentence — "Common Stock is listed on the New York
+    Stock Exchange." — which is exactly what the "common stock ... under the
+    symbol" pattern cannot reach.
+    """
+    assert candidate_symbols(_Extract("Ticker Symbol is ABP")) == {"ABP"}
+
+
+def test_the_copula_is_not_captured_as_the_symbol() -> None:
+    """Without allowing for "is", the capture takes IS, `_STOPWORDS` discards
+    it, and the real symbol two words later is never reached — a silent miss
+    rather than a wrong answer, which is worse to find."""
+    assert "IS" not in candidate_symbols(_Extract("The Ticker Symbol is ABP"))
+
+
+def test_trading_symbol_is_admitted_on_the_same_ground() -> None:
+    """Verbatim from CIK 3952's 2013 10-K. It says "stock", not "common
+    stock", so the security-named pattern cannot reach it either; the
+    specificity is carried by the two-word term of art instead."""
+    text = "the Company's stock traded in the over-the-counter market under the trading symbol ADGI"
+    assert "ADGI" in candidate_symbols(_Extract(text))
+
+
+def test_a_bare_symbol_in_prose_is_still_not_a_ticker() -> None:
+    """Bare "symbol" appears in trademark and typographic prose, and matching
+    it was already refused once. Only the two-word terms are admitted."""
+    got = candidate_symbols(_Extract("any logo or symbol authorized by the Sub-Adviser"))
+    assert got == set()
+
+
+def test_the_cover_table_header_is_still_refused() -> None:
+    """ "Trading Symbol" is now a matched phrase, and the 12(b) header contains
+    it. Reading the header as a binding produced the ticker NAME for seven
+    registrants once already."""
+    header = "Title of each class Trading Symbol Name of each exchange on which registered"
+    assert candidate_symbols(_Extract(header)) == set()
+
+
+def test_the_venue_qualified_refusals_survive() -> None:
+    """`TSX: XPL` and `TSX-V: GGC` are venues followed by a foreign listing,
+    not this registrant's symbol. Both were real false positives."""
+    assert candidate_symbols(_Extract("The shares trade on the TSX: XPL")) == set()
+    assert candidate_symbols(_Extract("Listed on the TSX-V: GGC exchange.")) == set()

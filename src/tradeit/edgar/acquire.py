@@ -718,6 +718,34 @@ _SYMBOL_SENTENCE = re.compile(
     re.IGNORECASE,
 )
 
+#: The second construction Item 5 uses, and the one the pattern above cannot
+#: reach: **the security is named in the previous sentence.**
+#:
+#:     "American Business Products, Inc.'s Common Stock is listed on the New
+#:      York Stock Exchange. The Ticker Symbol is ABP."
+#:
+#: Requiring "common stock" in the same sentence is what makes the pattern above
+#: safe, and it is exactly what excludes this. Measured 2026-09-07: 6,494
+#: registrants whose cover page proves they had an exchange-listed class yielded
+#: no symbol, because the Trading Symbol column was only added to cover pages in
+#: 2019 and their symbol lives in this sentence instead.
+#:
+#: **The safety here is the two-word phrase, not a security name.** Bare
+#: "symbol" appears in ordinary prose -- logos, trademarks, the "$" symbol --
+#: and matching it was already refused once. "Ticker symbol" is a term of art
+#: that a filing uses when it is about to give one. The window is short so the
+#: match cannot run past the value into the next clause.
+#: "trading symbol" is admitted on the same ground as "ticker symbol" and no
+#: other: both are terms of art a filing uses when it is about to give one.
+#: "the Company's stock traded in the over-the-counter market under the trading
+#: symbol ADGI" is missed by the pattern above because it says "stock" and not
+#: "common stock", and requiring the security name is what keeps that pattern
+#: safe -- so this one carries the specificity in the phrase instead.
+_TICKER_SYMBOL_SENTENCE = re.compile(
+    r"\b(?:ticker|trading)\s+symbol\b[^.␞␟␝]{0,60}",
+    re.IGNORECASE,
+)
+
 #: Straight and typographic quotation marks, both of which EDGAR HTML uses,
 #: sometimes in the same document.
 #: Escaped rather than written literally: the curly forms are indistinguishable
@@ -1420,10 +1448,14 @@ def extract_identity_evidence(document_text: str) -> EvidenceExtract:
         # The matched core, never a widened display window: a quotation must be
         # what matched, not the neighbourhood it was found in.
         SymbolStatement(text=_clean(m.group(0)))
-        for m in _SYMBOL_SENTENCE.finditer(text)
+        for pattern in (_SYMBOL_SENTENCE, _TICKER_SYMBOL_SENTENCE)
+        for m in pattern.finditer(text)
     )[:5]
     if not statements:
-        notes.append("no narrative '... under the symbol ...' statement was found")
+        notes.append(
+            "no narrative statement was found -- neither '... under the symbol ...' "
+            "nor a 'ticker symbol' construction"
+        )
 
     has_table = bool(heading and len(headers) == 3 and rows)
     corporate_complete = bool(has_table and statements)
