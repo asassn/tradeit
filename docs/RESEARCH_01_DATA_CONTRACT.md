@@ -960,3 +960,82 @@ everywhere else in this system.
 
 **Not built and not applied.** Scoping the denominator by it would change what
 the corpus claims to be true and needs authorisation, as the fund scoping did.
+
+## The 2,819 tickered-but-unpriced, accounted for — 2026-09-06
+
+**A correction.** This was called "the single largest recoverable gap" in a
+status report earlier the same day. It is not recoverable, and the reason is
+the safeguards working rather than failing.
+
+2,819 dead registrants hold an evidenced ticker and no price bar. Every one was
+put through three independent tests.
+
+### 1. Does the vendor carry the symbol at all?
+
+EODHD publishes its own delisted US inventory — 59,925 symbols. Intersecting:
+
+```
+tickered dead registrants with no bars     2,819
+  symbol absent from the vendor entirely   2,141   (76%)
+  symbol present                             678   (24%)
+```
+
+The 2,141 are unrecoverable from this vendor at any price. No amount of
+identity work reaches them.
+
+### 2. For the 678 it does carry, whose series is it?
+
+Each was fetched over its full available range and the series compared against
+the registrant's own lifetime:
+
+| | n | |
+|---|---:|---|
+| **a different company that took the ticker later** | **547** | 81% |
+| overlaps the registrant's life | 130 | 19% |
+| vendor returned nothing | 1 | |
+
+**Four out of five would have imported another company's prices.** Worked
+examples, all previously "failures":
+
+| symbol | registrant's life | vendor's series |
+|---|---|---|
+| `SPK` | 1996-05 → **2001-07** | **2021-08** → 2023-01 |
+| `THS` | 1996-05 → **1999-12** | **2005-06** → 2026-02 |
+| `CUNB` | 1995-03 → **1996-12** | **2005-11** → 2017-10 |
+
+The backfill asked for each registrant's *own* window, got nothing, and
+recorded a failure. That is the window bound doing exactly what §"bounded by
+their own lifetimes" says it is for. **A recorded failure here is a prevented
+splice**, and reading the failure count as lost coverage inverts its meaning.
+
+The 130 "overlaps" are generous: the test allowed ±365 days of slack, so
+adjacency counts as overlap. The true figure is lower.
+
+### 3. Is the security already priced under a sibling registrant?
+
+**99** of the 2,819 share their ticker with a *different registrant that is
+priced*, over an overlapping interval. These are REIT/operating-partnership
+pairs and holding-company structures — **two SEC registrants, one traded
+security**:
+
+| symbol | unpriced registrant | priced sibling |
+|---|---|---|
+| `EOP` | CIK 1038339 | CIK 1043866 — 4,582 bars |
+| `ACFC` | CIK 1284077 | CIK 1404296 — 5,318 bars |
+| `AAII` | CIK 771729 | CIK 1013243 — 4,114 bars |
+| `ACO` | CIK 863881 | CIK 813621 — 8,230 bars |
+
+`resolve_security` assigns each bar to exactly one security, so the sibling
+holds them all. **Giving both a copy would double-count one stock**, which is a
+worse error than the gap it would close.
+
+### What is actually left
+
+After the vendor's absence, ticker reuse and sibling coverage, the residue that
+could plausibly be recovered is **on the order of thirty registrants**, not
+2,819. **Dead-side pricing is finished** as far as this vendor can take it.
+
+**The lesson, which is the reusable part:** a failure count from a
+splice-preventing fetch is not a coverage deficit. It is the number of times
+the system refused to guess, and it should be read alongside *why* each refusal
+happened before anybody plans work against it.
