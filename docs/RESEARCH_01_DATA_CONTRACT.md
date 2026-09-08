@@ -1155,3 +1155,52 @@ BlackBerry; `SQUARE, INC.`, not Block.
 **A name search against a corpus that records names point-in-time will report a
 renamed company as absent.** No identity rule needed loosening; the gap was
 ticker binding all along.
+
+## Two levers measured, one taken — 2026-09-07
+
+### Taken: read more than three annual reports
+
+The resolver read a registrant's three most recent annual reports and stopped.
+**For a company that died, those are its most distressed filings** — already
+delisted, already deregistered, and often silent about a symbol it no longer
+has. The ticker sits in the earlier, healthier reports.
+
+Probed over 100 registrants holding four or more annual reports:
+
+```
+resolved within the first three      4
+resolved ONLY beyond the third      14
+never resolved                      82
+```
+
+**4% against 18%, a 4.5x lift**, and 19,650 annual reports across 4,109
+registrants had never been opened at all. `MAX_ATTEMPTS` is now 10.
+
+**The cost is self-limiting**: the loop stops at the first symbol, so the extra
+requests fall only on registrants the early filings failed to resolve, which is
+exactly where the yield is.
+
+### Not taken: proxies, tender offers and current reports
+
+For the 10,255 registrants with **no** annual report, three other routes were
+sampled over 60 of them:
+
+| form family | registrants holding one | yielded a symbol |
+|---|---:|---:|
+| `DEF 14A` / `DEFM14A` | 11 | **1** |
+| `SC 14D9` / `SC 13E3` | 0 | — |
+| `8-K` | 14 | **0** |
+
+**One symbol from sixty registrants.** A proxy names a symbol only when it
+happens to discuss the market for the stock, and an 8-K almost never does.
+**Do not re-investigate these three for ticker binding**; the answer is
+recorded here so the next reading of the `no_annual_report` count does not
+start the same search.
+
+### On the sampling that produced both answers
+
+A handful first, then a hundred. The handful showed 1 depth hit in 6 — 
+suggestive and not decisive. The hundred gave a clean comparison against
+current behaviour, which is what justified spending the requests. The same
+staging refused the alt-form route, which a lucky handful could easily have
+made look promising.
