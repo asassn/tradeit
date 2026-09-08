@@ -205,9 +205,15 @@ restate any of them from memory or from a document.
    between the numbered phases.
 2. [`docs/PHASE_06_IMPROVEMENT_PLAN.md`](docs/PHASE_06_IMPROVEMENT_PLAN.md) —
    where work currently is, its milestone table and its measured status.
-3. [`docs/EDGAR_DELISTING_DENOMINATOR.md`](docs/EDGAR_DELISTING_DENOMINATOR.md)
+3. [`docs/RESEARCH_01_DATA_DICTIONARY.md`](docs/RESEARCH_01_DATA_DICTIONARY.md)
+   — **read before querying the corpus.** Its §0 lists six ways the file
+   returns a confident wrong answer, each discovered by getting one. Written
+   for a reader with no other context, so it also serves anyone pointing
+   another tool at the database. **Add to it whenever a new reading rule is
+   found.**
+4. [`docs/EDGAR_DELISTING_DENOMINATOR.md`](docs/EDGAR_DELISTING_DENOMINATOR.md)
    §4 — the identity and evidence rules. Normative.
-4. [`docs/adr/`](docs/adr/) — 26 decisions that constrain later phases.
+5. [`docs/adr/`](docs/adr/) — 26 decisions that constrain later phases.
 
 ## Validation baseline for any production change
 
