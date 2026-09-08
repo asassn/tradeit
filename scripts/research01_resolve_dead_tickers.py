@@ -96,6 +96,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from tradeit.edgar.acquire import extract_identity_evidence, resolve_user_agent, strip_html
 from tradeit.edgar.evidence import ReportingRegime, reporting_regime
 from tradeit.research01.confirm import candidate_symbols
+from tradeit.research01.insider import (
+    InsiderSymbol,
+    InsiderVerdict,
+    read_insider_symbol,
+)
 from tradeit.research01.registered_classes import (
     RegisteredClasses,
     read_registered_classes,
@@ -131,6 +136,18 @@ ANNUAL = ("10-K", "10-K405", "10-KSB", "10-K/A", "20-F", "40-F")
 #: naming exactly one that belongs to somebody else, which binds silently and
 #: wrongly. Restricting to the issuer's own offering is what removes it.
 OFFERING = ("424B1", "424B4", "424A")
+
+#: Ownership filings. **The only route that reads a field rather than a
+#: sentence**: the symbol sits in ``<issuerTradingSymbol>``, and electronic
+#: Form 4 has been mandatory since 2003-06-30, so coverage is systematic
+#: rather than dependent on how a filing happens to be phrased. Staged over
+#: 100 registrants it bound 59, the best rate of any route here.
+INSIDER = ("4", "3", "5", "4/A", "3/A", "5/A")
+
+#: Insider filings are small XML and cheap to read, but a registrant may have
+#: hundreds. Three is enough: they all carry the same issuer block, and a
+#: disagreement between them is a reason to stop rather than to keep looking.
+MAX_INSIDER_ATTEMPTS = 3
 
 #: Offering prospectuses are large and the symbol is on the cover, so the
 #: earliest is preferred -- it is the offering that put the stock on the tape.
@@ -299,6 +316,34 @@ def _symbol_from(cik: int, accession: str, document: str, user_agent: str) -> Do
         if symbol in blob.upper():
             return DocumentRead(symbol, blob.strip(), classes)
     return DocumentRead(symbol=None, statement="", classes=classes)
+
+
+def _insider_symbol(cik: int, user_agent: str) -> InsiderSymbol | None:
+    """The symbol an ownership filing states for this registrant.
+
+    ``None`` when the registrant filed none. Otherwise the first filing that
+    either binds a symbol or states the issuer has none -- both are answers,
+    and only an unreadable one is worth trying another filing for.
+    """
+    filings = _annual_reports(cik, user_agent, INSIDER)
+    if not filings:
+        return None
+    last: InsiderSymbol | None = None
+    for accession, _document, _filed in filings[:MAX_INSIDER_ATTEMPTS]:
+        # The complete submission, not the primary document: the ownership XML
+        # is an exhibit, and the index names the HTML rendering as primary.
+        raw = _get(
+            f"{ARCHIVES}/{cik}/{accession.replace('-', '')}/{accession}.txt",
+            user_agent,
+            timeout=90,
+        )
+        time.sleep(PAUSE_S)
+        if raw is None:
+            continue
+        last = read_insider_symbol(raw.decode("latin-1"), cik=cik)
+        if last.binds or last.verdict is InsiderVerdict.NO_TRADING_SYMBOL:
+            return last
+    return last
 
 
 def _self_test(user_agent: str) -> bool:
@@ -521,7 +566,37 @@ def main() -> int:
             route = "offering"
             time.sleep(PAUSE_S)
         if not reports:
-            tally["no_annual_report"] += 1
+            # No prose document at all -- but an ownership filing may still
+            # name the symbol in its issuer block, and 40% of the remaining
+            # population is in exactly this state.
+            insider = _insider_symbol(cik, user_agent)
+            if insider is not None and insider.binds:
+                assert insider.symbol is not None
+                anchor = max(
+                    filter(None, (last_seen.get(cik), exits.get(cik))),
+                    default=dt.datetime.now(dt.UTC).date(),
+                )
+                resolved.append(
+                    Resolution(
+                        cik=cik,
+                        security_id=security_id,
+                        ticker=insider.symbol,
+                        accession="",
+                        filed=anchor,
+                        citation=(
+                            f"symbol bound to CIK {cik} by an ownership filing whose own "
+                            f"issuerCik is {cik} and whose issuerTradingSymbol reads "
+                            f'"{insider.stated}", for issuer "{insider.issuer_name[:120]}". '
+                            "No annual report or offering prospectus was available. "
+                            f"Interval start NOT evidenced; closed at {anchor}."
+                        ),
+                    )
+                )
+                tally["resolved_insider"] += 1
+            elif insider is not None and insider.verdict is InsiderVerdict.NO_TRADING_SYMBOL:
+                tally["insider_says_no_symbol"] += 1
+            else:
+                tally["no_annual_report"] += 1
             done.add(str(cik))
             continue
 
@@ -557,13 +632,47 @@ def main() -> int:
                 tally[f"resolved_{route}"] += 1
                 break
         if found is None or found.symbol is None:
-            verdict = verdicts.get(str(cik), RegisteredClasses.UNDETERMINED.value)
-            if verdict == RegisteredClasses.NONE_AT_ALL.value:
-                # Not a failure. The registrant declared no registered class,
-                # so there is no ticker to find and the question is closed.
-                tally["no_registered_class"] += 1
+            # The prose routes are exhausted. An ownership filing states the
+            # symbol in a field rather than a sentence, so it does not depend
+            # on how this registrant happened to phrase anything -- which is
+            # why it is tried after them and not instead of them.
+            insider = _insider_symbol(cik, user_agent)
+            if insider is not None and insider.binds:
+                assert insider.symbol is not None
+                anchor = max(
+                    filter(None, (last_seen.get(cik), exits.get(cik))),
+                    default=dt.datetime.now(dt.UTC).date(),
+                )
+                resolved.append(
+                    Resolution(
+                        cik=cik,
+                        security_id=security_id,
+                        ticker=insider.symbol,
+                        accession="",
+                        filed=anchor,
+                        citation=(
+                            f"symbol bound to CIK {cik} by an ownership filing whose own "
+                            f"issuerCik is {cik} and whose issuerTradingSymbol reads "
+                            f'"{insider.stated}", for issuer "{insider.issuer_name[:120]}". '
+                            "A filing indexed under a CIK is not a statement by that "
+                            "registrant; the document's own CIK is what binds this. "
+                            f"Interval start NOT evidenced; closed at {anchor}."
+                        ),
+                    )
+                )
+                tally["resolved_insider"] += 1
+            elif insider is not None and insider.verdict is InsiderVerdict.NO_TRADING_SYMBOL:
+                # Positive evidence, not a failure: the filer states the issuer
+                # has no trading symbol.
+                tally["insider_says_no_symbol"] += 1
             else:
-                tally[f"not_established_{route}"] += 1
+                verdict = verdicts.get(str(cik), RegisteredClasses.UNDETERMINED.value)
+                if verdict == RegisteredClasses.NONE_AT_ALL.value:
+                    # Not a failure. The registrant declared no registered
+                    # class, so there is no ticker and the question is closed.
+                    tally["no_registered_class"] += 1
+                else:
+                    tally[f"not_established_{route}"] += 1
         done.add(str(cik))
 
         if attempted % 50 == 0:
@@ -583,7 +692,9 @@ def main() -> int:
     # Summed across routes: the tally is split by route so the two are never
     # averaged, and a summary reading tally["resolved"] would silently print
     # zero now that no key by that name exists.
-    resolved_total = tally["resolved_annual"] + tally["resolved_offering"]
+    resolved_total = (
+        tally["resolved_annual"] + tally["resolved_offering"] + tally["resolved_insider"]
+    )
     rate = 100 * resolved_total / attempted if attempted else 0.0
     print(f"resolved {resolved_total:,} ({rate:.1f}%)")
     closed = tally["no_registered_class"]
