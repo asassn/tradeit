@@ -17,7 +17,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tradeit.core.enums import KnowledgeTimeSource
 from tradeit.research01.pit import KnowledgeTimeBasis
+from tradeit.research01.series import price_series
 from tradeit.research01.views import VIEWS, create_views
 from tradeit.storage.tables import Issuer, Security, SecurityPriceFact, SymbolAlias
 
@@ -190,3 +192,66 @@ def test_rebuilding_is_idempotent(built: Session) -> None:
     create_views(built, start=dt.date(2020, 1, 1), end=dt.date(2021, 12, 31))
     after = built.execute(text("select count(*) from trading_sessions")).scalar()
     assert before == after
+
+
+class TestZeroPricedBars:
+    """A bar priced at zero is a vendor placeholder, not a price.
+
+    The corpus holds 11,580 of them across 248 securities, and the two
+    supported read paths disagreed about them until this was fixed --
+    ``CorpusSessionData`` excluded them and the views served them.
+    """
+
+    def _zero_bar(self, session: Session, sid: int, day: dt.date) -> None:
+        for basis in ("raw", "total"):
+            session.add(
+                SecurityPriceFact(
+                    security_id=sid,
+                    session_date=day,
+                    adjustment_basis=basis,
+                    open=Decimal(0),
+                    high=Decimal(0),
+                    low=Decimal(0),
+                    close=Decimal(0),
+                    volume=Decimal(110),
+                    event_time=KNOWN,
+                    knowledge_time=KNOWN,
+                    knowledge_time_basis=KnowledgeTimeBasis.SESSION_CLOSE,
+                    knowledge_source=KnowledgeTimeSource.SYNTHETIC,
+                    source="test",
+                )
+            )
+
+    def test_neither_price_view_serves_a_zero_priced_bar(self, built: Session) -> None:
+        security = _security(built)
+        _bar(built, security.security_id, dt.date(2021, 7, 6), "10")
+        self._zero_bar(built, security.security_id, dt.date(2021, 7, 7))
+        built.flush()
+        for view in ("v_prices", "v_prices_raw"):
+            rows = built.execute(
+                text(f"select session_date from {view} where security_id = :s"),
+                {"s": security.security_id},
+            ).all()
+            assert [r[0] for r in rows] == ["2021-07-06"], view
+
+    def test_price_series_excludes_it_too(self, built: Session) -> None:
+        """The two read paths must agree, which is the point of the fix."""
+        security = _security(built)
+        _bar(built, security.security_id, dt.date(2021, 7, 6), "10")
+        self._zero_bar(built, security.security_id, dt.date(2021, 7, 7))
+        built.flush()
+        bars = price_series(built, security.security_id, as_of=dt.datetime(2026, 1, 1, tzinfo=UTC))
+        assert [b.session_date for b in bars] == [dt.date(2021, 7, 6)]
+
+    def test_an_auditor_can_still_see_it(self, built: Session) -> None:
+        """Bounded on read, not destroyed -- like every other exclusion here."""
+        security = _security(built)
+        self._zero_bar(built, security.security_id, dt.date(2021, 7, 7))
+        built.flush()
+        bars = price_series(
+            built,
+            security.security_id,
+            as_of=dt.datetime(2026, 1, 1, tzinfo=UTC),
+            include_disputed=True,
+        )
+        assert [b.session_date for b in bars] == [dt.date(2021, 7, 7)]

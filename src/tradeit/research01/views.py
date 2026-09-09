@@ -19,6 +19,14 @@ which takes ``as_of``. These views serve the simple case; they do not replace
 the library, and :func:`create_views` writes that warning into each view's own
 SQL where a reader running ``.schema`` will meet it.
 
+**Bars priced at zero are excluded too**, and that was found late. The corpus
+holds 11,580 of them across 248 securities, clustered at the end of a series
+where a vendor keeps emitting rows after a stock stops trading -- one with
+volume 110 at a price of exactly zero. ``CorpusSessionData`` was excluding them
+and these views were not, which is worse than either choice made consistently:
+two supported read paths disagreeing about what the corpus contains. Treating
+one as a real print books a -100% return on a session nobody traded.
+
 ``trading_sessions`` is a materialised table rather than a view because an
 exchange calendar is not expressible in SQL. It is rebuilt on every call.
 
@@ -97,6 +105,7 @@ from security_price_facts p
 join trading_sessions ts on ts.session_date = p.session_date
 {_WINDOW}
 where p.adjustment_basis = '{basis}'
+  and p.open > 0 and p.high > 0 and p.low > 0 and p.close > 0
   and (w.opens is null or p.session_date >= w.opens)
   and (w.closes is null or p.session_date < w.closes)
   {_LATEST}

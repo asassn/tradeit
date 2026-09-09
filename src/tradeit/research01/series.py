@@ -217,6 +217,10 @@ def price_series(
     rather than trading on it. It is spelled out at every call site so that
     reading a known-contaminated series is never the accident.
 
+    **Bars priced at zero are excluded on read**, for the same reason and by the
+    same rule: the corpus was sent them, keeps them, and does not serve them.
+    ``include_disputed=True`` returns them, like every other exclusion here.
+
     **Bars dated on a day the market was closed are excluded on read, and left
     in the table.** 3,930 of them arrived before the importer learned to refuse
     them -- July 4th, Thanksgiving, Good Friday, and 2025-01-09, the national
@@ -264,6 +268,18 @@ def price_series(
         if not include_disputed and not sessions.is_session(session_date):
             # A day with no trading has no price. Filtered here rather than in
             # SQL because the exchange calendar is not a column.
+            continue
+        if not include_disputed and min(o, h, low, c) <= 0:
+            # A bar priced at zero is not a price. The corpus holds 11,580 of
+            # them across 248 securities, clustered at the end of a series
+            # where the vendor keeps emitting rows after a stock stops trading
+            # -- one of them with volume 110 at a price of exactly zero.
+            #
+            # ``AdjustedBar`` is a plain dataclass and would hand one over
+            # unvalidated, where ``OhlcvBar`` refuses it. Dividing by a zero
+            # factor is not the risk; booking a -100% return on a session
+            # nobody traded is, and these sit at the end of a series, which is
+            # exactly where a survivorship study is most sensitive.
             continue
         latest[session_date] = (o, h, low, c, v)
 
