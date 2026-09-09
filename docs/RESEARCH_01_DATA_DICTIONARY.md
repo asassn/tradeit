@@ -229,6 +229,41 @@ the separate `full-01` machinery.
 
 ---
 
+## 3a. The views — the short answer to everything in §0
+
+Built by `scripts/research01_build_views.py`, defined in
+`tradeit.research01.views`, rebuildable at any time. **They add no rows and
+alter none**; dropping one costs nothing.
+
+| view | what it gives you |
+|---|---|
+| `v_prices` | one row per session, **adjusted**, holiday and spliced bars already excluded, latest revision only |
+| `v_prices_raw` | the same, on the **unadjusted** print |
+| `v_security_tickers` | one row per ticker held, with `last_day` **inclusive** — the off-by-one in §0.2 already done |
+| `v_dead_registrants` | the survivorship population with `has_ticker` / `has_prices` flags |
+
+```sql
+select * from v_prices where security_id = 42 order by session_date;
+```
+
+That query is correct by construction. It reads a full 9,237-bar series in
+**0.09s**, and `tests/unit/test_research01_views.py` asserts the view returns
+**identical** sessions to `price_series` — the views are not a second opinion.
+
+`trading_sessions` is a materialised table, not a view, because an exchange
+calendar cannot be expressed in SQL. Rebuild it whenever the corpus is extended.
+
+### The one thing the views cannot do
+
+**A view takes no `as_of`, so it cannot be point-in-time.** `v_prices` returns
+*the current belief*. 327,924 keys in this corpus carry more than one revision,
+so this is a real difference and not a technicality.
+
+**Anything asking what was knowable on a past date must use
+`price_series(session, security_id, as_of=...)`.** The views serve the simple
+case; they do not replace the library, and this warning is repeated inside each
+view's own SQL where `.schema` will show it.
+
 ## 4. How to read it correctly
 
 **Use the library.** `tradeit.research01.series.price_series` applies the
