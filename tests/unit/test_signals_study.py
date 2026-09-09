@@ -42,10 +42,12 @@ def _study(
     *,
     horizon: int = 5,
     name: str = "s",
+    stride: int = 1,
 ) -> SignalStudy:
     return SignalStudy(
         name=name,
         target=_target(horizon),
+        sampling_stride_sessions=stride,
         observations=tuple(
             Observation(
                 session_date=START + dt.timedelta(days=i),
@@ -273,3 +275,80 @@ class TestRanking:
         assert ranked[0][0].name == "slow_and_useful"
         assert ranked[0][1] is SignalVerdict.ECONOMICALLY_USEFUL
         assert ranked[-1][0].name == "fast_and_useless"
+
+
+class TestTheSamplingStride:
+    """The correction must depend on how the observations were taken."""
+
+    def test_non_overlapping_sampling_needs_no_correction(self) -> None:
+        study = _study([(1.0, 0.1)] * 100, horizon=21, stride=21)
+        assert study.overlap_factor == 1.0
+        assert study.effective_observations == 100
+
+    def test_daily_sampling_divides_by_the_whole_horizon(self) -> None:
+        study = _study([(1.0, 0.1)] * 100, horizon=21, stride=1)
+        assert study.overlap_factor == 21.0
+        assert study.effective_observations == pytest.approx(100 / 21)
+
+    def test_a_stride_wider_than_the_horizon_does_not_inflate(self) -> None:
+        """Sampling sparsely does not make observations more than independent."""
+        study = _study([(1.0, 0.1)] * 100, horizon=5, stride=60)
+        assert study.overlap_factor == 1.0
+        assert study.effective_observations == 100
+
+    def test_assuming_daily_sampling_would_fail_a_sound_signal(self) -> None:
+        """The reason the stride is required rather than defaulted to one."""
+        pairs = [(o.signal, o.outcome) for o in _predictive(600, strength=0.14).observations]
+        honest = _study(pairs, horizon=21, stride=21)
+        assumed = _study(pairs, horizon=21, stride=1)
+        assert abs(honest.t_statistic() or 0) > 2.0
+        assert abs(assumed.t_statistic() or 0) < 2.0
+
+
+class TestOutlierDependence:
+    """One lucky draw must not be allowed to carry a verdict."""
+
+    def _lopsided(self) -> SignalStudy:
+        """Top bucket loses by median and wins by mean, on one huge outcome."""
+        pairs: list[tuple[float, float]] = []
+        for i in range(1000):
+            signal = float(i)
+            # The top fifth reliably loses a little...
+            outcome = -0.03 if i >= 800 else 0.01
+            pairs.append((signal, outcome))
+        # ...except once, enormously.
+        pairs[999] = (999.0, 60.0)
+        return _study(pairs, horizon=21, stride=21)
+
+    def test_the_mean_and_median_spreads_can_disagree_in_sign(self) -> None:
+        study = self._lopsided()
+        mean_spread = study.quantile_spread(0.2)
+        median_spread = study.robust_quantile_spread(0.2)
+        assert mean_spread is not None and median_spread is not None
+        assert mean_spread > 0
+        assert median_spread < 0
+
+    def test_a_signal_resting_on_one_observation_is_refused(self) -> None:
+        verdict, reason = self._lopsided().verdict(
+            PromotionRule(min_observations=100, min_abs_t_statistic=0.5, quantile_fraction=0.2),
+            COSTS,
+            average_price=PRICE,
+        )
+        assert verdict is SignalVerdict.OUTLIER_DEPENDENT
+        assert "opposite signs" in reason
+
+    def test_an_agreeing_signal_is_not_blocked_by_the_check(self) -> None:
+        pairs = [
+            (o.signal, o.outcome) for o in _predictive(4000, strength=0.5, scale=0.05).observations
+        ]
+        study = _study(pairs, horizon=63, stride=63)
+        mean_spread = study.quantile_spread(0.2)
+        median_spread = study.robust_quantile_spread(0.2)
+        assert mean_spread is not None and median_spread is not None
+        assert mean_spread * median_spread > 0
+        verdict, _ = study.verdict(RULE, COSTS, average_price=PRICE)
+        assert verdict is not SignalVerdict.OUTLIER_DEPENDENT
+
+    def test_the_robust_spread_refuses_an_overlapping_fraction(self) -> None:
+        with pytest.raises(ValueError, match=r"\(0, 0.5\]"):
+            _study([(1.0, 1.0)] * 10).robust_quantile_spread(0.75)

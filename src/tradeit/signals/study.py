@@ -41,6 +41,20 @@ approximate and conservative in the direction that matters: it makes marginal
 signals fail. The alternative — quoting the raw count — has produced more false
 discoveries in this field than any other single mistake.
 
+An edge only one observation supports is not an edge
+----------------------------------------------------
+
+A portfolio's return is the arithmetic mean of its holdings, so the quantile
+spread is computed that way -- and on a universe that includes microcaps and
+failures, a mean is hostage to single draws. Measured on this corpus: one
+21-session return of **+7,609%** pulled a high-volatility bucket to a mean of
++15.5% while its median was -2.5%, and the mean and median spreads came out
+with **opposite signs**. The rank-based information coefficient agreed with the
+median.
+
+``verdict`` computes both and returns ``OUTLIER_DEPENDENT`` when they disagree
+in sign. Without it this study reports the low-volatility anomaly backwards.
+
 Beating baselines is required, and sophistication is not a defence
 ------------------------------------------------------------------
 
@@ -87,6 +101,7 @@ class SignalVerdict(StrEnum):
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
     NOT_DETECTABLE = "not_detectable"
     DETECTABLE_NOT_PROFITABLE = "detectable_not_profitable"
+    OUTLIER_DEPENDENT = "outlier_dependent"
     BEATEN_BY_BASELINE = "beaten_by_baseline"
     ECONOMICALLY_USEFUL = "economically_useful"
 
@@ -159,21 +174,39 @@ class SignalStudy:
     name: str
     target: StudyTarget
     observations: tuple[Observation, ...]
+    #: Sessions between consecutive observations of the same security.
+    #:
+    #: Required, because it decides how much of the overlap correction
+    #: applies. Sampling every session over a 21-session horizon means each
+    #: observation shares twenty twentieths of its window with its neighbour;
+    #: sampling every 21 sessions means they share nothing and no correction is
+    #: due. Defaulting it to 1 would silently divide an already-independent
+    #: sample by the horizon and fail signals that were fine.
+    sampling_stride_sessions: int
 
     @property
     def count(self) -> int:
         return len(self.observations)
 
     @property
+    def overlap_factor(self) -> float:
+        """How many observations share each horizon window.
+
+        One when the sampling stride is at least the horizon, which is the
+        non-overlapping case and needs no correction at all.
+        """
+        return max(1.0, self.target.horizon_sessions / self.sampling_stride_sessions)
+
+    @property
     def effective_observations(self) -> float:
         """Sample size after the overlap correction.
 
-        Observations spaced one session apart over an N-session horizon share
-        most of their window. Dividing by the horizon is the standard
-        non-overlapping adjustment; see the module docstring for what skipping
-        it does to the t-statistic.
+        Observations spaced closer together than the horizon share most of
+        their window and are not independent. Dividing by the overlap factor is
+        the standard non-overlapping adjustment; see the module docstring for
+        what skipping it does to the t-statistic.
         """
-        return self.count / self.target.horizon_sessions
+        return self.count / self.overlap_factor
 
     def information_coefficient(self) -> float | None:
         """Rank correlation between the signal and the outcome.
@@ -215,6 +248,29 @@ class SignalStudy:
         ordered = sorted(self.observations, key=lambda o: o.signal)
         bottom = statistics.fmean(o.outcome for o in ordered[:bucket])
         top = statistics.fmean(o.outcome for o in ordered[-bucket:])
+        return top - bottom
+
+    def robust_quantile_spread(self, fraction: float) -> float | None:
+        """The same spread computed from medians instead of means.
+
+        A portfolio's return is the arithmetic mean of its holdings, so
+        :meth:`quantile_spread` is the right *portfolio* number. It is also
+        hostage to single observations: measured on this corpus, one 21-session
+        return of +7,609% pulled a high-volatility bucket to a mean of +15.5%
+        while its median was -2.5%, and the mean and median spreads came out
+        with **opposite signs**.
+
+        Reporting both is the only way to see that from outside, which is why
+        ``verdict`` refuses a signal whose two spreads disagree.
+        """
+        if not 0 < fraction <= 0.5:
+            raise ValueError("fraction must be in (0, 0.5]")
+        bucket = int(self.count * fraction)
+        if bucket < 1:
+            return None
+        ordered = sorted(self.observations, key=lambda o: o.signal)
+        bottom = statistics.median(o.outcome for o in ordered[:bucket])
+        top = statistics.median(o.outcome for o in ordered[-bucket:])
         return top - bottom
 
     def annual_cost_drag(self, costs: CostConfig, *, average_price: float) -> float:
@@ -280,6 +336,15 @@ class SignalStudy:
             return (
                 SignalVerdict.INSUFFICIENT_EVIDENCE,
                 f"too few observations to fill a {rule.quantile_fraction:.0%} bucket",
+            )
+        spread = self.quantile_spread(rule.quantile_fraction)
+        robust = self.robust_quantile_spread(rule.quantile_fraction)
+        if spread is not None and robust is not None and spread * robust < 0:
+            return (
+                SignalVerdict.OUTLIER_DEPENDENT,
+                f"the quantile spread is {spread:+.2%} by mean and {robust:+.2%} by "
+                "median -- opposite signs, so the edge rests on a handful of "
+                "observations rather than on the population",
             )
         if net <= 0:
             drag = self.annual_cost_drag(costs, average_price=average_price)
