@@ -23,6 +23,7 @@ Recording only what was traded makes the strategy look better than it is.
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -146,7 +147,12 @@ class RiskSnapshot:
     """
 
     portfolio_id: int
-    as_of: str
+    #: The instant the snapshot describes, and the session it belongs to. Two
+    #: fields rather than one because ``risk_snapshots`` is unique on
+    #: (portfolio, session_date) while ``as_of`` is a timestamp -- an after-
+    #: hours snapshot and a midday one are the same session and must collide.
+    as_of: dt.datetime
+    session_date: dt.date
     equity: Decimal
     cash: Decimal
     open_risk: Decimal
@@ -158,3 +164,6 @@ class RiskSnapshot:
     max_pairwise_correlation: float | None = None
     drawdown_from_peak: Decimal = Decimal(0)
     limit_breaches: tuple[str, ...] = ()
+    #: Which configuration produced the day. Without it a snapshot cannot be
+    #: attributed to the parameters that were live when it was taken.
+    strategy_config_digest: str | None = None
