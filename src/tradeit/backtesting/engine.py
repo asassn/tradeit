@@ -1,0 +1,475 @@
+"""The event-driven backtester: a clock, a simulated venue, and nothing else new.
+
+``BacktestEngine`` says the commitment plainly and this module keeps it: **the
+backtester does not reimplement the strategy.** It advances a clock through
+history and calls the same sizer, risk engine, allocation ranker and stop ladder
+that would run live, with the simulated broker substituted at the edge. A
+backtester carrying its own copy of the entry logic tests a program that
+resembles the live system, and the two drift apart in silence.
+
+The look-ahead rule is structural, not a convention
+---------------------------------------------------
+
+**A decision taken on session T executes against session T+1.** That is not
+enforced by a comment or a review checklist — the engine physically cannot do
+otherwise, because planning produces ``pending`` orders and pending orders are
+only ever filled at the top of the *next* iteration. There is no code path from
+a plan to a fill within one session, so the most common way to fabricate
+backtest returns is unavailable rather than discouraged.
+
+The consequence is visible and correct: a position is sized on the price the
+strategy could see (T's close) and filled at the price it would have got (T+1's
+open). The gap between those two is real and the backtest pays it.
+
+Exits are pessimistic, deliberately
+-----------------------------------
+
+The stop ladder evaluates on T's close, and a breached stop exits as a market
+order on T+1's open. A live system would have a resting stop that filled
+intraday on T, usually at a better price. **The difference is left in the
+pessimistic direction on purpose**, and the alternative was considered and
+rejected for now: modelling resting stops means treating an order as live
+*during* a bar, which is a real feature and a real source of optimism, and it
+should arrive with its own tests rather than as a side effect of this one.
+
+Every exit is its own trade
+---------------------------
+
+A position scaled out in two pieces produces two ``BacktestTrade`` rows, not
+one averaged one. ``ExitReason`` already states why: a scaled-out position can
+leave for several reasons, and averaging them away loses the lesson.
+
+What it does not do
+-------------------
+
+It does not decide *what* to buy. Candidates arrive from a
+:class:`SessionData` source, which in production is the same screening and
+scoring stack the live job uses and in tests is whatever the test needs. The
+engine's job is the loop, the venue and the measurement.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import datetime as dt
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import Protocol, runtime_checkable
+
+from tradeit.backtesting.base import (
+    BacktestResult,
+    BacktestSpec,
+    BacktestTrade,
+    PerformanceAnalyzer,
+    PerformanceMetrics,
+)
+from tradeit.core.enums import (
+    BacktestStatus,
+    ExitReason,
+    OrderSide,
+    OrderType,
+    PositionStatus,
+    Side,
+)
+from tradeit.core.models import OhlcvBar
+from tradeit.execution.base import CostModel, Fill, FillModel, OrderRequest
+from tradeit.portfolio.base import PortfolioState, PositionState
+from tradeit.portfolio.cycle import EntryCandidate, PortfolioCycle
+from tradeit.portfolio.stops import ExitSignal, StopContext
+from tradeit.reproducibility.versioning import RunManifest
+
+__all__ = ["EventDrivenEngine", "SessionData"]
+
+
+@runtime_checkable
+class SessionData(Protocol):
+    """Everything the engine needs to know about one session.
+
+    ``candidates`` is the strategy's output, not the engine's: whatever
+    produced it must already have respected point-in-time discipline, because
+    the engine cannot tell a legitimately-known feature from a leaked one.
+    """
+
+    def sessions(self, start: dt.date, end: dt.date) -> Sequence[dt.date]: ...
+
+    def bars(self, session_date: dt.date) -> Mapping[int, OhlcvBar]: ...
+
+    def candidates(self, session_date: dt.date) -> Sequence[EntryCandidate]: ...
+
+
+@dataclass(slots=True)
+class _OpenLot:
+    """Bookkeeping a ``PositionState`` does not carry but a trade record needs."""
+
+    instrument_id: int
+    entry_date: dt.date
+    entry_price: Decimal
+    entry_costs: Decimal
+    quantity: Decimal
+    initial_stop: Decimal
+    highest: Decimal
+    lowest: Decimal
+    sessions_held: int = 0
+    partial_profit_taken: bool = False
+    score_at_entry: float | None = None
+    sector: str | None = None
+
+    def observe(self, bar: OhlcvBar) -> None:
+        self.highest = max(self.highest, bar.high)
+        self.lowest = min(self.lowest, bar.low)
+        self.sessions_held += 1
+
+
+@dataclass(slots=True)
+class _Pending:
+    """An order decided on one session, to be filled on the next."""
+
+    order: OrderRequest
+    candidate: EntryCandidate | None
+    exit_reason: ExitReason | None
+    reference_bar: OhlcvBar
+
+
+@dataclass(frozen=True, slots=True)
+class EventDrivenEngine:
+    """Advances a clock and calls the live components at every step."""
+
+    cycle: PortfolioCycle
+    costs: CostModel
+    fills: FillModel
+    data: SessionData
+    analyzer: PerformanceAnalyzer
+    #: The reproducible context this engine runs in.
+    #:
+    #: **Taken, never constructed.** A manifest names the exact strategy-config
+    #: artifact and data snapshot a run used, and the engine knows neither. An
+    #: engine that minted its own would produce a manifest that always
+    #: validates and never reproduces, which is fabricated provenance wearing
+    #: the shape of the real thing.
+    manifest: RunManifest
+    name: str = "event_driven"
+
+    def run(self, spec: BacktestSpec) -> BacktestResult:
+        state = _RunState(spec)
+        sessions = list(self.data.sessions(spec.effective_start, spec.end))
+        if len(sessions) < 2:
+            raise ValueError(
+                f"{len(sessions)} sessions between {spec.effective_start} and {spec.end}; "
+                "a backtest needs at least two, because decisions execute on the next one"
+            )
+
+        for session_date in sessions:
+            bars = self.data.bars(session_date)
+            # 1. Yesterday's decisions meet today's prices. Always first.
+            self._settle(state, bars, session_date)
+            # 2. Mark the book and record the day.
+            self._mark(state, bars, session_date)
+            # 3. Decide, using only what today's close revealed.
+            self._decide(state, bars, session_date)
+
+        self._close_out(state, sessions[-1])
+        return self._result(spec, state)
+
+    # -- the three steps ----------------------------------------------------
+
+    def _settle(
+        self, state: _RunState, bars: Mapping[int, OhlcvBar], session_date: dt.date
+    ) -> None:
+        pending, state.pending = state.pending, []
+        for item in pending:
+            bar = bars.get(item.order.instrument_id)
+            if bar is None:
+                # No print today. The order is not silently cancelled -- it is
+                # carried, because a halted session is not a decision.
+                state.pending.append(item)
+                continue
+            estimate = self.costs.estimate(item.order, item.reference_bar)
+            fill = self.fills.simulate(item.order, bar, estimate)
+            if fill is None:
+                continue
+            if item.order.side is OrderSide.BUY:
+                state.open_lot(fill, item.candidate, session_date)
+            else:
+                state.close_lot(fill, item.exit_reason or ExitReason.DISCRETIONARY)
+
+    def _mark(self, state: _RunState, bars: Mapping[int, OhlcvBar], session_date: dt.date) -> None:
+        for lot in state.lots.values():
+            bar = bars.get(lot.instrument_id)
+            if bar is not None:
+                lot.observe(bar)
+        state.mark(bars, session_date)
+
+    def _decide(
+        self, state: _RunState, bars: Mapping[int, OhlcvBar], session_date: dt.date
+    ) -> None:
+        portfolio = state.portfolio()
+        contexts = {
+            position.instrument_id: self._context(state, position, bars)
+            for position in portfolio.open_positions
+        }
+        if any(context is None for context in contexts.values()):
+            # A held name with no print today cannot have its stop managed, and
+            # the cycle refuses that case rather than guessing. Skip deciding
+            # rather than lying about the context.
+            return
+        candidates = [
+            candidate
+            for candidate in self.data.candidates(session_date)
+            if candidate.instrument_id in bars
+        ]
+        plan = self.cycle.plan(
+            portfolio,
+            candidates,
+            {k: v for k, v in contexts.items() if v is not None},
+        )
+        for signal in plan.exits:
+            state.pending.append(self._exit_order(state, signal, bars))
+        for entry in plan.accepted:
+            state.pending.append(self._entry_order(entry.candidate, entry.quantity, bars))
+
+    # -- order construction -------------------------------------------------
+
+    @staticmethod
+    def _context(
+        state: _RunState, position: PositionState, bars: Mapping[int, OhlcvBar]
+    ) -> StopContext | None:
+        bar = bars.get(position.instrument_id)
+        lot = state.lots.get(position.instrument_id)
+        if bar is None or lot is None:
+            return None
+        return StopContext(
+            last_price=bar.close,
+            high_since_entry=lot.highest,
+            sessions_held=lot.sessions_held,
+            partial_profit_taken=lot.partial_profit_taken,
+            atr=None,
+        )
+
+    def _entry_order(
+        self, candidate: EntryCandidate, quantity: Decimal, bars: Mapping[int, OhlcvBar]
+    ) -> _Pending:
+        return _Pending(
+            order=OrderRequest(
+                client_order_id=f"e-{candidate.instrument_id}",
+                portfolio_id=1,
+                instrument_id=candidate.instrument_id,
+                side=OrderSide.BUY,
+                order_type=OrderType.MARKET,
+                quantity=quantity,
+                intent="entry",
+            ),
+            candidate=candidate,
+            exit_reason=None,
+            reference_bar=bars[candidate.instrument_id],
+        )
+
+    @staticmethod
+    def _exit_order(state: _RunState, signal: ExitSignal, bars: Mapping[int, OhlcvBar]) -> _Pending:
+        lot = state.lots[signal.instrument_id]
+        quantity = (lot.quantity * signal.fraction).quantize(Decimal(1))
+        if signal.fraction >= 1 or quantity > lot.quantity:
+            quantity = lot.quantity
+        if quantity <= 0:
+            quantity = lot.quantity
+        if signal.reason is ExitReason.PARTIAL_PROFIT:
+            lot.partial_profit_taken = True
+        return _Pending(
+            order=OrderRequest(
+                client_order_id=f"x-{signal.instrument_id}",
+                portfolio_id=1,
+                instrument_id=signal.instrument_id,
+                side=OrderSide.SELL,
+                order_type=OrderType.MARKET,
+                quantity=quantity,
+                intent=str(signal.reason),
+            ),
+            candidate=None,
+            exit_reason=signal.reason,
+            reference_bar=bars[signal.instrument_id],
+        )
+
+    def _close_out(self, state: _RunState, last_session: dt.date) -> None:
+        """Everything still open leaves at the final mark.
+
+        Recorded as ``BACKTEST_END`` rather than folded into the metrics as an
+        unrealised gain: a strategy holding a large winner on the last day did
+        not earn that money, and labelling the exit says so.
+        """
+        for instrument_id in list(state.lots):
+            lot = state.lots[instrument_id]
+            price = state.last_prices.get(instrument_id, lot.entry_price)
+            state.record_exit(
+                instrument_id=instrument_id,
+                quantity=lot.quantity,
+                price=price,
+                costs=Decimal(0),
+                exit_date=last_session,
+                reason=ExitReason.BACKTEST_END,
+            )
+
+    def _result(self, spec: BacktestSpec, state: _RunState) -> BacktestResult:
+        caveats = list(state.caveats)
+        metrics: PerformanceMetrics | None = None
+        if len(state.curve) >= 2:
+            metrics = self.analyzer.compute(state.trades, state.curve)
+        else:
+            caveats.append("fewer than two marked sessions; no metrics computed")
+        return BacktestResult(
+            spec=spec,
+            manifest=self.manifest,
+            status=BacktestStatus.COMPLETED,
+            metrics=metrics,
+            trades=tuple(state.trades),
+            equity_curve=tuple(state.curve),
+            warnings=tuple(state.warnings),
+            data_caveats=tuple(caveats),
+        )
+
+
+@dataclass(slots=True)
+class _RunState:
+    """Cash, open lots, the curve and the trade log, advanced session by session."""
+
+    spec: BacktestSpec
+    cash: Decimal = field(init=False)
+    equity: Decimal = field(init=False)
+    lots: dict[int, _OpenLot] = field(default_factory=dict)
+    pending: list[_Pending] = field(default_factory=list)
+    trades: list[BacktestTrade] = field(default_factory=list)
+    curve: list[tuple[dt.date, Decimal]] = field(default_factory=list)
+    last_prices: dict[int, Decimal] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+    as_of: dt.datetime = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
+
+    def __post_init__(self) -> None:
+        self.cash = self.spec.initial_capital
+        self.equity = self.spec.initial_capital
+
+    def portfolio(self) -> PortfolioState:
+        return PortfolioState(
+            portfolio_id=1,
+            as_of=self.as_of,
+            cash=self.cash,
+            equity=self.equity,
+            positions=tuple(
+                PositionState(
+                    position_id=instrument_id,
+                    portfolio_id=1,
+                    instrument_id=instrument_id,
+                    side=Side.LONG,
+                    status=PositionStatus.OPEN,
+                    quantity=lot.quantity,
+                    average_entry_price=lot.entry_price,
+                    stop_price=lot.initial_stop,
+                    opened_on=lot.entry_date,
+                    initial_stop_price=lot.initial_stop,
+                )
+                for instrument_id, lot in self.lots.items()
+            ),
+            last_prices=dict(self.last_prices),
+        )
+
+    def mark(self, bars: Mapping[int, OhlcvBar], session_date: dt.date) -> None:
+        for instrument_id, bar in bars.items():
+            self.last_prices[instrument_id] = bar.close
+        held = sum(
+            (
+                lot.quantity * self.last_prices.get(instrument_id, lot.entry_price)
+                for instrument_id, lot in self.lots.items()
+            ),
+            Decimal(0),
+        )
+        self.equity = self.cash + held
+        self.as_of = dt.datetime.combine(session_date, dt.time(), tzinfo=dt.UTC)
+        self.curve.append((session_date, self.equity))
+
+    def open_lot(self, fill: Fill, candidate: EntryCandidate | None, session_date: dt.date) -> None:
+        self.cash -= fill.gross_value + fill.commission
+        existing = self.lots.get(fill.instrument_id)
+        if existing is None:
+            assert candidate is not None
+            self.lots[fill.instrument_id] = _OpenLot(
+                instrument_id=fill.instrument_id,
+                entry_date=session_date,
+                entry_price=fill.price,
+                entry_costs=fill.commission,
+                quantity=fill.quantity,
+                initial_stop=candidate.stop_price,
+                highest=fill.price,
+                lowest=fill.price,
+                score_at_entry=candidate.score.total,
+                sector=candidate.sector,
+            )
+            return
+        total = existing.quantity + fill.quantity
+        existing.entry_price = (
+            existing.entry_price * existing.quantity + fill.price * fill.quantity
+        ) / total
+        existing.quantity = total
+        existing.entry_costs += fill.commission
+
+    def close_lot(self, fill: Fill, reason: ExitReason) -> None:
+        self.cash += fill.gross_value - fill.commission
+        self.record_exit(
+            instrument_id=fill.instrument_id,
+            quantity=fill.quantity,
+            price=fill.price,
+            costs=fill.commission,
+            exit_date=fill.filled_at.date(),
+            reason=reason,
+        )
+
+    def record_exit(
+        self,
+        *,
+        instrument_id: int,
+        quantity: Decimal,
+        price: Decimal,
+        costs: Decimal,
+        exit_date: dt.date,
+        reason: ExitReason,
+    ) -> None:
+        """One trade row per exit, per ``ExitReason``'s own reasoning."""
+        lot = self.lots.get(instrument_id)
+        if lot is None or quantity <= 0:
+            return
+        quantity = min(quantity, lot.quantity)
+        share = quantity / lot.quantity if lot.quantity else Decimal(0)
+        entry_costs = lot.entry_costs * share
+        gross = (price - lot.entry_price) * quantity
+        total_costs = entry_costs + costs
+        risk_per_share = lot.entry_price - lot.initial_stop
+        self.trades.append(
+            BacktestTrade(
+                instrument_id=instrument_id,
+                entry_date=lot.entry_date,
+                entry_price=lot.entry_price,
+                exit_date=exit_date,
+                exit_price=price,
+                quantity=quantity,
+                side="long",
+                exit_reason=str(reason),
+                gross_pnl=gross,
+                net_pnl=gross - total_costs,
+                costs=total_costs,
+                return_pct=float((price - lot.entry_price) / lot.entry_price),
+                r_multiple=(
+                    float((price - lot.entry_price) / risk_per_share)
+                    if risk_per_share > 0
+                    else None
+                ),
+                holding_sessions=lot.sessions_held,
+                mae=lot.lowest,
+                mfe=lot.highest,
+                score_at_entry=lot.score_at_entry,
+                sector=lot.sector,
+            )
+        )
+        if quantity >= lot.quantity:
+            del self.lots[instrument_id]
+        else:
+            self.lots[instrument_id] = dataclasses.replace(
+                lot, quantity=lot.quantity - quantity, entry_costs=lot.entry_costs - entry_costs
+            )
