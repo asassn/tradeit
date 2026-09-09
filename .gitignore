@@ -91,4 +91,8 @@ htmlcov/
 /.research01_confirmed_backfill.json
 /.research01_fsds.json
 /.research01_dead_tickers.json
+# Resolver shard progress and cover-page verdicts. Named by pattern rather
+# than individually: every new run coins new filenames, and listing them one
+# by one is how sixteen of them arrived untracked in a status check.
+/.research01_*shard*.json
 /.research01_dead_backfill.json

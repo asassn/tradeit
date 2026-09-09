@@ -414,6 +414,26 @@ def _prune(session: Session, *, apply: bool) -> dict[str, int]:
 
     Applied to what is already stored as well as to a fresh run, because the
     rules were learned from the data the first run produced.
+
+    **DECIDED 2026-09-08: the three-claimant rule stands, and it is known to
+    cost correct bindings.** It removed roughly 498 in one v5 run, and ticker
+    reuse across decades is ordinary rather than anomalous, so some of those
+    were right. The owner was offered an exemption for insider bindings --
+    which are verified against the filing's own ``issuerCik`` and so are
+    structurally stronger than a prose match -- and **declined it**, choosing
+    the guarantee that no shared-ticker binding survives over roughly 2% of
+    ticker coverage.
+
+    Recorded here rather than only in a commit message because the temptation
+    to relax it will recur every time a run reports a large ``many_claimants``
+    count, and the answer is that the cost is known and was accepted.
+
+    One argument that looks good and is wrong, so that it is not made again:
+    *"claims with disjoint intervals are plain reuse and safe to keep."* A
+    spuriously extracted symbol also lands one claim per registrant lifetime,
+    which is mostly disjoint, so interval separation does not distinguish
+    error from reuse. The discriminator, if one is ever wanted, is the
+    evidence type -- not the intervals.
     """
     rows = session.execute(
         select(SymbolAlias.id, SymbolAlias.alias_value, SymbolAlias.citation).where(
