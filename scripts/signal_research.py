@@ -87,7 +87,7 @@ from tradeit.signals.study import (
     TargetKind,
 )
 from tradeit.storage.session import install_sqlite_busy_timeout
-from tradeit.strategy.config import CostConfig, StrategyConfig
+from tradeit.strategy.config import CostConfig, LiquidityConfig, StrategyConfig
 
 
 @dataclass(frozen=True)
@@ -203,8 +203,24 @@ def _observations(
     end: dt.date,
     horizon: int,
     stride: int,
-) -> tuple[dict[str, list[Observation]], float, int]:
-    """Signal readings paired with the return that followed them."""
+    liquidity: LiquidityConfig | None,
+) -> tuple[dict[str, list[Observation]], float, int, tuple[int, int]]:
+    """Signal readings paired with the return that followed them.
+
+    ``liquidity`` is applied **per observation, on trailing data**, not per
+    security over its lifetime. That distinction is the whole point: filtering
+    securities by their average liquidity across the window would select the
+    ones that *became* liquid, which is a look-ahead of exactly the kind this
+    study exists to avoid. Here a name contributes observations only for the
+    stretches during which it was actually tradeable, which is also the only
+    period anybody could have acted on it.
+
+    It is a tradability requirement and not a survivorship device -- a company
+    that was liquid in 2003 and failed in 2005 keeps its 2003 observations.
+    But it does drop the tail of failures that decay below the price floor
+    before they end, which biases in the flattering direction and is recorded
+    here rather than discovered later.
+    """
     specs = _build_signals()
     for spec in specs:
         if not spec.scale_invariant:
@@ -217,6 +233,7 @@ def _observations(
     forward: list[float] = []
     prices: list[float] = []
     used = 0
+    offered = kept = 0
 
     for security_id in universe:
         bars = price_series(session, security_id, as_of=as_of, start=start, end=end)
@@ -231,9 +248,20 @@ def _observations(
 
         computed = {spec.name: spec.compute(close, high, low, volume) for spec in specs}
         warmup = max(spec.warmup for spec in specs)
+        adv = (
+            sma(close * volume, liquidity.dollar_volume_lookback) if liquidity is not None else None
+        )
         for i in range(warmup, len(bars) - horizon, stride):
             if close[i] <= 0:
                 continue
+            offered += 1
+            if liquidity is not None:
+                if not (liquidity.min_price <= close[i] <= liquidity.max_price):
+                    continue
+                assert adv is not None
+                if not np.isfinite(adv[i]) or adv[i] < liquidity.min_avg_dollar_volume:
+                    continue
+            kept += 1
             outcome = float(close[i + horizon] / close[i] - 1.0)
             forward.append(outcome)
             for spec in specs:
@@ -252,11 +280,25 @@ def _observations(
     # is dominated by the few names that went up several hundred percent, and
     # reports a "buy and hold" nobody could have earned: on this universe it
     # reads 21.9%/yr for 2000-2010, a decade the market spent flat.
-    kept = [r for r in forward if r > -1.0]
-    mean_forward = float(np.expm1(np.mean(np.log1p(kept)))) if kept else 0.0
+    usable = [r for r in forward if r > -1.0]
+    mean_forward = float(np.expm1(np.mean(np.log1p(usable)))) if usable else 0.0
     median_price = float(np.median(prices)) if prices else 1.0
     print(f"  {used:,} securities had enough history; {len(forward):,} forward returns")
-    return out, mean_forward, int(median_price)
+    if forward:
+        tail = np.array(forward)
+        print(
+            f"  outcome tails: p1 {np.percentile(tail, 1):+.1%}  "
+            f"p99 {np.percentile(tail, 99):+.1%}  max {tail.max():+.0%}"
+        )
+    if liquidity is not None:
+        share = kept / offered if offered else 0.0
+        print(
+            f"  liquidity filter kept {kept:,} of {offered:,} candidate "
+            f"observations ({share:.1%}) -- price >= ${liquidity.min_price:,.0f}, "
+            f"{liquidity.dollar_volume_lookback}-day dollar volume >= "
+            f"${liquidity.min_avg_dollar_volume:,.0f}"
+        )
+    return out, mean_forward, int(median_price), (offered, kept)
 
 
 def main() -> int:
@@ -271,6 +313,13 @@ def main() -> int:
     ap.add_argument("--min-observations", type=int, default=500)
     ap.add_argument("--min-t", type=float, default=2.0)
     ap.add_argument("--quantile", type=float, default=0.2)
+    ap.add_argument(
+        "--liquidity",
+        action="store_true",
+        help="require each observation to be tradeable on trailing data",
+    )
+    ap.add_argument("--min-price", type=float, default=None)
+    ap.add_argument("--min-dollar-volume", type=float, default=None)
     args = ap.parse_args()
 
     start = dt.date.fromisoformat(args.start)
@@ -285,6 +334,20 @@ def main() -> int:
         min_abs_t_statistic=args.min_t,
         quantile_fraction=args.quantile,
     )
+
+    liquidity: LiquidityConfig | None = None
+    if args.liquidity:
+        base = StrategyConfig(name="baseline").liquidity
+        liquidity = base.model_copy(
+            update={
+                k: v
+                for k, v in (
+                    ("min_price", args.min_price),
+                    ("min_avg_dollar_volume", args.min_dollar_volume),
+                )
+                if v is not None
+            }
+        )
 
     universe = _universe(args.spans, args.start, args.end, args.min_bars, args.cap)
     specs = _build_signals()
@@ -305,8 +368,8 @@ def main() -> int:
         stride = horizon  # non-overlapping
         print(f"=== horizon {horizon} sessions (sampled every {stride}) ===")
         t0 = time.time()
-        observations, mean_forward, median_price = _observations(
-            session, universe, start, end, horizon, stride
+        observations, mean_forward, median_price, _counts = _observations(
+            session, universe, start, end, horizon, stride, liquidity
         )
         # Context, not a gate. Buy-and-hold is long-only and a quantile spread
         # is long the top and short the bottom; requiring one to beat the other
