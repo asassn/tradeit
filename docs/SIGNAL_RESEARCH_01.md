@@ -148,3 +148,92 @@ because a forward return needs a forward window. That systematically excludes
 the terminal collapse, which is the largest move a failing company makes. It is
 a small fraction of observations and it biases in the flattering direction, so
 it should be fixed before any positive result is believed.
+
+---
+
+## 7. The liquidity experiment, run — 2026-09-09, code `ccf9405`
+
+§6 predicted that a tradeable universe would thin the tails enough to make the
+spread estimable. **It partly did, and the part that did not is the more
+interesting half.**
+
+The filter is `LiquidityConfig`'s own floors — price ≥ $5, 20-day average
+dollar volume ≥ $10M — applied **per observation on trailing data**, so a name
+contributes only for the stretches it was actually tradeable. Filtering
+securities by their average liquidity over the window would have selected the
+ones that *became* liquid, which is the look-ahead this study exists to avoid.
+About 24% of candidate observations survive.
+
+### What improved
+
+| | unfiltered | filtered |
+|---|---|---|
+| worst-case outcome (50 securities) | +7,609% | **+57%** |
+| 99th percentile outcome (800 securities, 21s) | — | **+39.8%** |
+| spreads with \|t\| > 2 at 21 sessions | **0 of 9** | **4 of 9** |
+| annualised nets | ±1,500% | −42% to +34% |
+
+Four spreads became statistically established for the first time
+(`dist_from_sma_50` −2.61, `relative_volume_20` −2.46, `dist_from_sma_200`
+−2.21, `rsi_14` −2.17). The numbers stopped being arithmetic on unusable
+estimates.
+
+### One signal passed everything
+
+```
+horizon 63, 4,310 observations
+relative_volume_20   dn   IC -0.069   t -4.54   sp t -2.15
+                     mean sp -8.39%   med sp -3.24%   net +32.7%/yr
+                     ECONOMICALLY_USEFUL
+```
+
+**It should not be believed yet, and here is why.** It is the one signal whose
+direction was `DERIVED` rather than declared, so it spent two of the twenty
+trials. It shows nothing at the 21-session horizon in the same run (t = −1.17).
+And its sign is unstable across specifications — in the unfiltered study it was
+*positive* at 21 sessions and negative at 63. A relationship that changes sign
+when the universe or the horizon changes is the signature of fitting noise,
+and one pass out of twenty trials is what chance produces.
+
+**It is a hypothesis to test out of sample, not a finding.** That is precisely
+what the walk-forward harness is for, and it is the next thing to do with it.
+
+### The half that did not improve, and cannot
+
+The volatility signals remain the strongest relationships anywhere in this
+study — `atr_percent_14` at t = −5.15 and `realized_vol_60` at t = −4.33 over
+63 sessions, significant at *every* specification tried, filtered and
+unfiltered, at both horizons, always with the same sign. And both remain
+`OUTLIER_DEPENDENT`: mean spreads of +0.69% and +1.03% against medians of
+−5.54% and −5.28%.
+
+More data will not fix this, because the problem is structural. **Sorting on
+volatility sorts on the variance of the very thing being averaged.** The
+high-volatility bucket contains the extreme outcomes by construction — that is
+what putting it there means — so the mean-spread estimator has its worst
+variance exactly where the signal is strongest. A liquidity filter thins the
+tail; it cannot make a volatility-sorted bucket well-behaved.
+
+The consequence is worth stating plainly: **the clearest relationship in this
+corpus is one whose tradeable value cannot be established by a quantile spread
+at all.** Measuring it needs a different estimator — a volatility-targeted
+position size rather than an equal-weight bucket — which is a portfolio
+construction question, and Phase 8 already has the machinery for it.
+
+### A declared prior the data keeps contradicting
+
+`dist_from_sma_50` was declared POSITIVE from the trend-following literature.
+It has now come out negative twice: t = −3.14 unfiltered, t = −2.77 filtered,
+with an established spread the second time. It is still declared positive here,
+and it is still not flipped.
+
+If a future study wants to test it as a mean-reversion signal, **the
+declaration has to be made before that run, not inherited from this paragraph.**
+Writing down that the data disagreed is honest; treating that note as
+permission to flip the sign next time is how a prior quietly becomes a fitted
+parameter.
+
+### Where this leaves the weights
+
+Unchanged, and for the same reason as §5. Nothing here has survived
+out-of-sample testing, because nothing has been tested out of sample yet.
