@@ -46,6 +46,20 @@ class PositionState:
     opened_on: dt.date
     closed_on: dt.date | None = None
     realised_pnl: Decimal = Decimal(0)
+    #: The stop the position opened with, kept after ``stop_price`` moves.
+    #: Without it an R multiple cannot be computed, because R is measured
+    #: against the risk originally taken -- a trailed stop would otherwise make
+    #: every position look like a smaller and smaller bet the better it did.
+    initial_stop_price: Decimal | None = None
+    #: A price at which the position leaves regardless of its stop. Optional:
+    #: a strategy that exits on a trailing stop alone has no target, and a
+    #: default one would be an exit rule nobody chose.
+    target_price: Decimal | None = None
+    #: Entries made into this position, the initial one included -- which is
+    #: why it starts at 1 rather than 0, matching ``Position.pyramid_entries``
+    #: in the schema. ``max_pyramid_entries`` is a cap on this number, so its
+    #: default of 2 permits one add.
+    pyramid_entries: int = 1
 
     def open_risk(self, last_price: Decimal) -> Decimal:
         """Currency at risk between the current price and the stop.

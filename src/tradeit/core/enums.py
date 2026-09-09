@@ -303,6 +303,7 @@ class RiskLimitType(StrEnum):
     DAILY_LOSS = "daily_loss"
     GROSS_EXPOSURE = "gross_exposure"
     LIQUIDITY_PARTICIPATION = "liquidity_participation"
+    PYRAMID_ENTRIES = "pyramid_entries"
 
 
 class RiskDecision(StrEnum):
