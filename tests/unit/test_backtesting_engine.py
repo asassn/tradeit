@@ -108,6 +108,7 @@ class _Script:
 
     bars_by_session: dict[dt.date, dict[int, OhlcvBar]]
     candidates_by_session: dict[dt.date, list[EntryCandidate]] = field(default_factory=dict)
+    splits_by_session: dict[dt.date, dict[int, Decimal]] = field(default_factory=dict)
 
     def sessions(self, start: dt.date, end: dt.date) -> Sequence[dt.date]:
         return sorted(d for d in self.bars_by_session if start <= d <= end)
@@ -117,6 +118,9 @@ class _Script:
 
     def candidates(self, session_date: dt.date) -> Sequence[EntryCandidate]:
         return self.candidates_by_session.get(session_date, [])
+
+    def splits_on(self, session_date: dt.date) -> Mapping[int, Decimal]:
+        return self.splits_by_session.get(session_date, {})
 
 
 def _engine(data: _Script, *, exits: ExitConfig | None = None) -> EventDrivenEngine:
@@ -330,3 +334,66 @@ class TestResultIntegrity:
         assert result.trades
         assert result.trades[-1].r_multiple is not None
         assert result.trades[-1].r_multiple > 0
+
+
+class TestCorporateActions:
+    """A split changes the share count, not the value of the holding."""
+
+    def _through_a_split(self, ratio: str | None) -> tuple[list, dict]:
+        days = _days(6)
+        # Price halves on day 3: that is a 2-for-1, not a 50% loss.
+        closes = ["100", "100", "100", "50", "50", "50"]
+        bars = {
+            day: {7: _bar(7, day, open_=close, close=close)}
+            for day, close in zip(days, closes, strict=True)
+        }
+        script = _Script(
+            bars,
+            {days[0]: [_candidate(7, "100", "80")]},
+            {days[3]: {7: Decimal(ratio)}} if ratio else {},
+        )
+        result = _engine(script).run(_spec(days=7))
+        return list(result.equity_curve), {t.exit_reason: t for t in result.trades}
+
+    def test_a_two_for_one_leaves_equity_unchanged(self) -> None:
+        curve, _ = self._through_a_split("2")
+        before = dict(curve)[_days(6)[2]]
+        after = dict(curve)[_days(6)[3]]
+        assert after == pytest.approx(before, rel=Decimal("0.001"))
+
+    def test_without_the_split_the_holding_appears_to_halve(self) -> None:
+        """The failure this exists to prevent, shown at the level it bites.
+
+        The account only drops about 1.25%, because the position is 2.5% of
+        equity -- which is exactly why this bug survives casual inspection of
+        an equity curve. The trade record is where it is unmistakable: a
+        holding that cost the owner nothing books a 50% loss and a stop-out.
+        """
+        _, trades = self._through_a_split(None)
+        assert str(ExitReason.STOP_LOSS) in trades
+        stopped = trades[str(ExitReason.STOP_LOSS)]
+        assert stopped.return_pct == pytest.approx(-0.5, abs=0.01)
+
+    def test_with_the_split_the_account_does_not_move(self) -> None:
+        curve, _ = self._through_a_split("2")
+        before = dict(curve)[_days(6)[2]]
+        after = dict(curve)[_days(6)[3]]
+        assert abs(after - before) / before < Decimal("0.0001")
+
+    def test_the_two_readings_differ_by_the_whole_position(self) -> None:
+        """Same prices, same strategy; the only difference is knowing about the split."""
+        with_split, _ = self._through_a_split("2")
+        without, _ = self._through_a_split(None)
+        assert dict(with_split)[_days(6)[5]] > dict(without)[_days(6)[5]]
+
+    def test_the_stop_survives_the_split_intact(self) -> None:
+        """A stop at 80 against a 100 entry is a stop at 40 against a 50 one."""
+        _, trades = self._through_a_split("2")
+        # The halved price is not a stop breach, so nothing exits early.
+        assert set(trades) == {str(ExitReason.BACKTEST_END)}
+
+    def test_a_split_does_not_manufacture_an_r_multiple(self) -> None:
+        _, trades = self._through_a_split("2")
+        trade = trades[str(ExitReason.BACKTEST_END)]
+        assert trade.r_multiple is not None
+        assert abs(trade.r_multiple) < 0.1  # the holding is flat, and says so

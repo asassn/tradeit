@@ -97,6 +97,16 @@ class SessionData(Protocol):
 
     def candidates(self, session_date: dt.date) -> Sequence[EntryCandidate]: ...
 
+    def splits_on(self, session_date: dt.date) -> Mapping[int, Decimal]:
+        """Split ratios with this ex-date. ``{}`` when there are none.
+
+        Required rather than optional, because a source that silently had no
+        way to report splits would produce a backtest that shows a 50% loss
+        every time a holding splits two-for-one -- and it would look like a
+        strategy result rather than a missing feature.
+        """
+        ...
+
 
 @dataclass(slots=True)
 class _OpenLot:
@@ -161,6 +171,8 @@ class EventDrivenEngine:
 
         for session_date in sessions:
             bars = self.data.bars(session_date)
+            # 0. The share count changes before anything is priced against it.
+            self._apply_splits(state, session_date)
             # 1. Yesterday's decisions meet today's prices. Always first.
             self._settle(state, bars, session_date)
             # 2. Mark the book and record the day.
@@ -170,6 +182,41 @@ class EventDrivenEngine:
 
         self._close_out(state, sessions[-1])
         return self._result(spec, state)
+
+    # -- the steps ----------------------------------------------------------
+
+    def _apply_splits(self, state: _RunState, session_date: dt.date) -> None:
+        """Restate holdings and resting orders for splits with this ex-date.
+
+        First thing in the session, because the session's own prints are
+        already post-split: marking a pre-split share count against a
+        post-split price reports a 50% loss on a two-for-one that cost the
+        holder nothing.
+
+        Entry price, initial stop and the running extremes divide by the same
+        ratio, so R multiples and the stop ladder mean after the split exactly
+        what they meant before it. A pending order is restated too rather than
+        cancelled -- a decision taken yesterday was a decision about a
+        percentage of the account, and the split did not change it.
+        """
+        ratios = self.data.splits_on(session_date)
+        for instrument_id, ratio in ratios.items():
+            if ratio <= 0:
+                continue
+            lot = state.lots.get(instrument_id)
+            if lot is not None:
+                lot.quantity *= ratio
+                lot.entry_price /= ratio
+                lot.initial_stop /= ratio
+                lot.highest /= ratio
+                lot.lowest /= ratio
+            for item in state.pending:
+                if item.order.instrument_id == instrument_id:
+                    item.order = dataclasses.replace(
+                        item.order, quantity=item.order.quantity * ratio
+                    )
+            if instrument_id in state.last_prices:
+                state.last_prices[instrument_id] /= ratio
 
     # -- the three steps ----------------------------------------------------
 

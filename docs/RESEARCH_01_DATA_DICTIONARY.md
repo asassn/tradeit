@@ -303,6 +303,34 @@ no guide.
 Rebuild both halves with `scripts/research01_cleanup.py`, or
 `prepare_corpus(session)` in code.
 
+### Reading the corpus for a backtest
+
+`tradeit.backtesting.corpus.CorpusSessionData` is the supported path, and three
+of its choices are reading rules in their own right.
+
+**Use `raw`, not `total`.** Today's split-adjusted history for a stock that
+split last year is not history anybody could have traded: the adjustment factor
+comes from a split that had not happened, so every earlier bar carries future
+information. A backtester trades the print and changes the share count when a
+split arrives — `security_corporate_action_facts` is what tells it to.
+
+**The price index cannot serve a cross-section.** `ix_security_price_pit` leads
+with `security_id`, so "one session, every security" — exactly what a
+backtester wants — reports `SCAN` over 71 million rows. Declare a universe and
+read it per security instead: **62,900 bars for 50 securities over five years
+in 0.52 seconds**, measured. This is the same shape as the fundamentals problem
+migration `0016` fixed, and it has not been fixed here because a declared
+universe is the right way to specify a backtest anyway.
+
+**`knowledge_time` currently equals the session close on every raw bar.**
+Measured across 116,262 raw bars in a fourteen-security sample: all of them,
+with none learned late. A point-in-time bound therefore drops nothing today. It
+still belongs in any backtest read, because the corpus is growing and a
+correction backfilled to a 2015 bar must not become tradeable in 2015 the
+moment it lands. Note that the 327,924 multi-revision keys mentioned above did
+not fall in that sample — do not conclude from it that the corpus has no
+revisions.
+
 ### The one thing the views cannot do
 
 **A view takes no `as_of`, so it cannot be point-in-time.** `v_prices` returns
