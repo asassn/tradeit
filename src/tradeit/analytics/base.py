@@ -56,7 +56,17 @@ class Indicator(Protocol):
     docstring claims.
     """
 
-    name: str
+    @property
+    def name(self) -> str:
+        """A stable identifier for this implementation.
+
+        A read-only property rather than ``name: str``. The attribute form
+        demands a *settable* member, which no frozen dataclass can offer --
+        and every implementation of this protocol is one, because these
+        components are stateless and configured once. A mutable attribute
+        still satisfies this, so the change only ever admits more.
+        """
+        ...
 
     @property
     def warmup_periods(self) -> int:
@@ -102,7 +112,8 @@ class CrossSectionalFeature(Protocol):
     supplied to them, never against a list fetched independently.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def compute(
         self,
@@ -160,7 +171,8 @@ class RegimeClassifier(Protocol):
     something each instrument recomputes.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
 
     @property
     def warmup_periods(self) -> int: ...

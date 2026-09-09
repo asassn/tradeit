@@ -185,7 +185,18 @@ class CorporateActionSource(Protocol):
     does a provider do?" has no answer.
     """
 
-    name: str
+    @property
+    def name(self) -> str:
+        """A stable identifier for this implementation.
+
+        A read-only property rather than ``name: str``. The attribute form
+        demands a *settable* member, which no frozen dataclass can offer --
+        and every implementation of this protocol is one, because these
+        components are stateless and configured once. A mutable attribute
+        still satisfies this, so the change only ever admits more.
+        """
+        ...
+
     credential_env: str
     #: What this source supplies. ``SPLITS`` today; a dividend source would
     #: implement the same shape with a different value here.

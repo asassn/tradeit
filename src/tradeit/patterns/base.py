@@ -712,7 +712,18 @@ class Detector(Protocol):
     tests assert they do not.
     """
 
-    name: str
+    @property
+    def name(self) -> str:
+        """A stable identifier for this implementation.
+
+        A read-only property rather than ``name: str``. The attribute form
+        demands a *settable* member, which no frozen dataclass can offer --
+        and every implementation of this protocol is one, because these
+        components are stateless and configured once. A mutable attribute
+        still satisfies this, so the change only ever admits more.
+        """
+        ...
+
     pattern_type: PatternType
     #: Bumped whenever a scoring rule or structural definition changes, so a
     #: stored pattern says which definition produced it. A backtest pins this;

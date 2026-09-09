@@ -125,7 +125,17 @@ class CostModel(Protocol):
     fictitious backtest returns come from.
     """
 
-    name: str
+    @property
+    def name(self) -> str:
+        """A stable identifier for this implementation.
+
+        A read-only property rather than ``name: str``. The attribute form
+        demands a *settable* member, which no frozen dataclass can offer --
+        and every implementation of this protocol is one, because these
+        components are stateless and configured once. A mutable attribute
+        still satisfies this, so the change only ever admits more.
+        """
+        ...
 
     @property
     def parameters(self) -> dict[str, object]: ...
@@ -154,7 +164,8 @@ class FillModel(Protocol):
       not fill in full at one price.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
 
     @property
     def parameters(self) -> dict[str, object]: ...

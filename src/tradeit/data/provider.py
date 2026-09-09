@@ -56,7 +56,17 @@ class ReferenceDataProvider(Protocol):
     say so in its capabilities.
     """
 
-    name: str
+    @property
+    def name(self) -> str:
+        """A stable identifier for this implementation.
+
+        A read-only property rather than ``name: str``. The attribute form
+        demands a *settable* member, which no frozen dataclass can offer --
+        and every implementation of this protocol is one, because these
+        components are stateless and configured once. A mutable attribute
+        still satisfies this, so the change only ever admits more.
+        """
+        ...
 
     def list_instruments(self, as_of: dt.date) -> Iterable[tuple[Instrument, SymbolMapping]]: ...
 
@@ -70,7 +80,8 @@ class MarketDataProvider(Protocol):
     split, and only the action series distinguishes them.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def fetch_bars(
         self,
@@ -99,7 +110,8 @@ class FundamentalDataProvider(Protocol):
     new metric is a screen whose history cannot be reproduced.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def fetch_fundamentals(
         self, instrument_id: int, metrics: Sequence[str], start: dt.date, end: dt.date
@@ -115,7 +127,8 @@ class EarningsProvider(Protocol):
     even when no fundamental data is licensed at all.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def fetch_earnings(
         self, instrument_id: int, start: dt.date, end: dt.date
@@ -137,7 +150,8 @@ class NewsProvider(Protocol):
     ingestion and storage design accommodates it rather than being retrofitted.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def fetch_news(
         self, instrument_id: int, start: dt.datetime, end: dt.datetime
@@ -156,7 +170,8 @@ class MacroDataProvider(Protocol):
     revised macro data produces a model that could not have existed.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def fetch_series(
         self, series_id: str, start: dt.date, end: dt.date
@@ -225,7 +240,9 @@ class BrokerProvider(Protocol):
     what makes paper trading evidence about live behaviour.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
+
     supports_fractional_shares: bool
     supports_extended_hours: bool
 

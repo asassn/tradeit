@@ -55,7 +55,18 @@ class ScreenFilter(Protocol):
     are computed once per instrument per date, not once per filter.
     """
 
-    name: str
+    @property
+    def name(self) -> str:
+        """A stable identifier for this implementation.
+
+        A read-only property rather than ``name: str``. The attribute form
+        demands a *settable* member, which no frozen dataclass can offer --
+        and every implementation of this protocol is one, because these
+        components are stateless and configured once. A mutable attribute
+        still satisfies this, so the change only ever admits more.
+        """
+        ...
+
     stage: str  # "liquidity" | "quality" | "fundamental" | "technical"
 
     @property
@@ -117,7 +128,9 @@ class PatternDetector(Protocol):
     reach for more.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
+
     pattern_type: PatternType
 
     @property
@@ -200,7 +213,8 @@ class OpportunityScorer(Protocol):
     number.
     """
 
-    name: str
+    @property
+    def name(self) -> str: ...
 
     @property
     def parameters(self) -> dict[str, object]: ...

@@ -7,6 +7,7 @@ produces a *profitable* one, which is the failure that gets acted on.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -123,7 +124,13 @@ class _Script:
         return self.splits_by_session.get(session_date, {})
 
 
-def _engine(data: _Script, *, exits: ExitConfig | None = None) -> EventDrivenEngine:
+def _engine(
+    data: _Script,
+    *,
+    exits: ExitConfig | None = None,
+    delisting_after: int = 20,
+    recovery: str = "1",
+) -> EventDrivenEngine:
     sizing = SizingConfig()
     risk = RiskConfig()
     return EventDrivenEngine(
@@ -147,6 +154,8 @@ def _engine(data: _Script, *, exits: ExitConfig | None = None) -> EventDrivenEng
         data=data,
         analyzer=StandardPerformanceAnalyzer(annualisation_factor=252, risk_free_rate=0.0),
         manifest=_manifest(),
+        delisting_after_sessions=delisting_after,
+        delisting_recovery=Decimal(recovery),
     )
 
 
@@ -306,14 +315,7 @@ class TestResultIntegrity:
         bars = {d: {7: _bar(7, d, open_="100", close="100")} for d in days}
         manifest = _manifest()
         engine = _engine(_Script(bars))
-        engine = type(engine)(
-            cycle=engine.cycle,
-            costs=engine.costs,
-            fills=engine.fills,
-            data=engine.data,
-            analyzer=engine.analyzer,
-            manifest=manifest,
-        )
+        engine = dataclasses.replace(engine, manifest=manifest)
         assert engine.run(_spec()).manifest is manifest
 
     def test_a_thin_result_is_not_trustworthy(self) -> None:
@@ -397,3 +399,113 @@ class TestCorporateActions:
         trade = trades[str(ExitReason.BACKTEST_END)]
         assert trade.r_multiple is not None
         assert abs(trade.r_multiple) < 0.1  # the holding is flat, and says so
+
+
+class TestDelisting:
+    """A universe containing companies that failed holds positions that stop."""
+
+    def _run(self, *, recovery: str, after: int = 3, silence: int = 6) -> object:
+        days = _days(4 + silence)
+        bars: dict[dt.date, dict[int, OhlcvBar]] = {
+            day: {7: _bar(7, day, open_="100", close="100")} for day in days[:4]
+        }
+        # The company stops printing. Something else keeps the calendar moving.
+        for day in days[4:]:
+            bars[day] = {9: _bar(9, day, open_="10", close="10")}
+        data = _Script(bars, {days[0]: [_candidate(7, "100", "95")]})
+        return _engine(data, delisting_after=after, recovery=recovery).run(
+            _spec(days=len(days) + 1)
+        )
+
+    def test_a_holding_that_stops_printing_is_closed(self) -> None:
+        result = self._run(recovery="1")
+        reasons = [t.exit_reason for t in result.trades]  # type: ignore[attr-defined]
+        assert str(ExitReason.DELISTED_EXIT) in reasons
+
+    def test_it_is_not_carried_to_the_end_of_the_run(self) -> None:
+        """Occupying a slot and a share of heat no real holder still had."""
+        result = self._run(recovery="1")
+        reasons = [t.exit_reason for t in result.trades]  # type: ignore[attr-defined]
+        assert str(ExitReason.BACKTEST_END) not in reasons
+
+    def test_silence_shorter_than_the_threshold_does_not_close_it(self) -> None:
+        result = self._run(recovery="1", after=99)
+        reasons = [t.exit_reason for t in result.trades]  # type: ignore[attr-defined]
+        assert str(ExitReason.DELISTED_EXIT) not in reasons
+        assert str(ExitReason.BACKTEST_END) in reasons
+
+    def test_the_recovery_assumption_decides_the_loss(self) -> None:
+        """The most consequential number in a survivorship-honest backtest."""
+        sold = self._run(recovery="1")
+        wiped = self._run(recovery="0")
+        sold_trade = next(
+            t
+            for t in sold.trades
+            if t.exit_reason == str(ExitReason.DELISTED_EXIT)  # type: ignore[attr-defined]
+        )
+        wiped_trade = next(
+            t
+            for t in wiped.trades
+            if t.exit_reason == str(ExitReason.DELISTED_EXIT)  # type: ignore[attr-defined]
+        )
+        assert sold_trade.exit_price == Decimal(100)
+        assert wiped_trade.exit_price == Decimal(0)
+        assert wiped_trade.net_pnl < sold_trade.net_pnl
+
+    def test_a_total_loss_shows_up_in_the_equity_curve(self) -> None:
+        wiped = self._run(recovery="0")
+        curve = dict(wiped.equity_curve)  # type: ignore[attr-defined]
+        days = sorted(curve)
+        assert curve[days[-1]] < Decimal(100000)
+
+    def test_a_quiet_name_does_not_stall_the_whole_session(self) -> None:
+        """A stale mark is the last thing known, not a reason to stop deciding."""
+        result = self._run(recovery="1", after=99)
+        # Trading continued: the position was still managed to the end.
+        assert result.equity_curve  # type: ignore[attr-defined]
+        assert len(result.equity_curve) == 10  # type: ignore[attr-defined]
+
+
+class TestGuardsRealDataForced:
+    """Both of these were found by running on the corpus, not by design."""
+
+    def test_an_entry_that_gaps_through_its_own_stop_is_abandoned(self) -> None:
+        """The premise of the trade no longer holds, so it is not opened.
+
+        Decide at 100 with a stop at 92; the market opens at 85. Opening and
+        instantly stopping out would book a loss on a trade nobody would take,
+        and the position would have a stop above its entry -- undefined risk
+        and no meaningful R.
+        """
+        days = _days(4)
+        bars = {
+            days[0]: {7: _bar(7, days[0], open_="100", close="100")},
+            days[1]: {7: _bar(7, days[1], open_="85", low="84", close="86")},
+            days[2]: {7: _bar(7, days[2], open_="86", close="86")},
+            days[3]: {7: _bar(7, days[3], open_="86", close="86")},
+        }
+        data = _Script(bars, {days[0]: [_candidate(7, "100", "92")]})
+        result = _engine(data).run(_spec())
+        assert result.trades == ()
+        assert any("gapped to or through" in w for w in result.warnings)
+
+    def test_an_exit_is_not_filled_into_a_market_that_is_not_printing(self) -> None:
+        """Selling at a price nobody quoted is the most flattering fill there is."""
+        days = _days(8)
+        bars: dict[dt.date, dict[int, OhlcvBar]] = {
+            days[0]: {7: _bar(7, days[0], open_="100", close="100")},
+            days[1]: {7: _bar(7, days[1], open_="100", close="100")},
+            # A close below the stop, then silence: the stop is breached on a
+            # mark that no longer has a market behind it.
+            days[2]: {7: _bar(7, days[2], open_="100", low="90", close="90")},
+        }
+        for day in days[3:]:
+            bars[day] = {9: _bar(9, day, open_="10", close="10")}
+        data = _Script(bars, {days[0]: [_candidate(7, "100", "95")]})
+        result = _engine(data, delisting_after=3, recovery="0.5").run(_spec(days=9))
+        reasons = [t.exit_reason for t in result.trades]
+        # It left as a delisting at the stated recovery, not as a clean stop
+        # fill at a price that was never quoted.
+        assert str(ExitReason.DELISTED_EXIT) in reasons
+        delisted = next(t for t in result.trades if t.exit_reason == str(ExitReason.DELISTED_EXIT))
+        assert delisted.exit_price == Decimal(45)  # 90 x 0.5

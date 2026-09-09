@@ -301,7 +301,18 @@ class FetchOutcome:
 class AcquisitionProvider(Protocol):
     """A vendor adapter. Owns its endpoints, its batching and its normalization."""
 
-    name: str
+    @property
+    def name(self) -> str:
+        """A stable identifier for this implementation.
+
+        A read-only property rather than ``name: str``. The attribute form
+        demands a *settable* member, which no frozen dataclass can offer --
+        and every implementation of this protocol is one, because these
+        components are stateless and configured once. A mutable attribute
+        still satisfies this, so the change only ever admits more.
+        """
+        ...
+
     #: Environment variable the credential is read from. Named here so the
     #: setup instructions and the error message cannot drift apart.
     credential_env: str

@@ -112,8 +112,22 @@ class RiskRule(Protocol):
     which is what lets a backtest evaluate the exact rules that would run live.
     """
 
-    name: str
-    limit_type: RiskLimitType
+    @property
+    def name(self) -> str:
+        """A stable identifier for this implementation.
+
+        A read-only property rather than ``name: str``. The attribute form
+        demands a *settable* member, which no frozen dataclass can offer --
+        and every implementation of this protocol is one, because these
+        components are stateless and configured once. A mutable attribute
+        still satisfies this, so the change only ever admits more.
+        """
+        ...
+
+    @property
+    def limit_type(self) -> RiskLimitType:
+        """Which limit this rule enforces. Read-only, for the reason above."""
+        ...
 
     @property
     def parameters(self) -> dict[str, object]: ...

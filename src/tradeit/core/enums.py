@@ -287,6 +287,12 @@ class ExitReason(StrEnum):
     REBALANCE = "rebalance"
     PARTIAL_PROFIT = "partial_profit"
     DISCRETIONARY = "discretionary"
+    #: The security stopped printing and never resumed. Distinct from every
+    #: other exit because nobody chose it, and because what the holder actually
+    #: recovered is a separate assumption from the last quoted price. Shares a
+    #: spelling with ``SecurityStatus.DELISTED`` and means something different:
+    #: that is a state of the listing, this is why a position ended.
+    DELISTED_EXIT = "delisted_exit"
     BACKTEST_END = "backtest_end"
 
 

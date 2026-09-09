@@ -121,6 +121,7 @@ class _OpenLot:
     highest: Decimal
     lowest: Decimal
     sessions_held: int = 0
+    sessions_since_bar: int = 0
     partial_profit_taken: bool = False
     score_at_entry: float | None = None
     sector: str | None = None
@@ -129,6 +130,12 @@ class _OpenLot:
         self.highest = max(self.highest, bar.high)
         self.lowest = min(self.lowest, bar.low)
         self.sessions_held += 1
+        self.sessions_since_bar = 0
+
+    def observe_silence(self) -> None:
+        """A session the security did not print. Still held, not marked anew."""
+        self.sessions_held += 1
+        self.sessions_since_bar += 1
 
 
 @dataclass(slots=True)
@@ -150,6 +157,24 @@ class EventDrivenEngine:
     fills: FillModel
     data: SessionData
     analyzer: PerformanceAnalyzer
+    #: Sessions of silence after which a holding is treated as delisted.
+    #:
+    #: Required. A universe containing companies that failed -- the only kind
+    #: worth measuring -- holds positions whose prices simply stop, and a
+    #: backtester with no answer for that carries them to the end of the run,
+    #: occupying a position slot and a share of portfolio heat no real holder
+    #: still had.
+    delisting_after_sessions: int
+    #: Fraction of the last quoted price a delisted holding recovers.
+    #:
+    #: Required, and the most consequential assumption in a survivorship-honest
+    #: backtest. 1.0 says the position was sold at its last print, which is
+    #: optimistic -- a company whose quotes stop because it failed did not
+    #: usually offer an exit there. 0.0 says the holding went to nothing. Both
+    #: an acquisition and a bankruptcy stop the prices, and this system cannot
+    #: yet tell them apart, so the caller states the assumption rather than
+    #: inheriting one that would quietly decide the result.
+    delisting_recovery: Decimal
     #: The reproducible context this engine runs in.
     #:
     #: **Taken, never constructed.** A manifest names the exact strategy-config
@@ -177,6 +202,8 @@ class EventDrivenEngine:
             self._settle(state, bars, session_date)
             # 2. Mark the book and record the day.
             self._mark(state, bars, session_date)
+            # 2a. Retire anything that has stopped printing.
+            self._expire_delisted(state, session_date)
             # 3. Decide, using only what today's close revealed.
             self._decide(state, bars, session_date)
 
@@ -236,6 +263,16 @@ class EventDrivenEngine:
             if fill is None:
                 continue
             if item.order.side is OrderSide.BUY:
+                if item.candidate is not None and fill.price <= item.candidate.stop_price:
+                    # The market gapped through the intended stop overnight, so
+                    # the fill is at or below it. The premise of the trade --
+                    # enter here, risk down to there -- no longer holds, and a
+                    # position whose stop sits above its entry has no defined
+                    # risk and no meaningful R. Refused rather than opened and
+                    # instantly stopped out, which would book a loss on a trade
+                    # nobody would have taken.
+                    state.abandoned_entries += 1
+                    continue
                 state.open_lot(fill, item.candidate, session_date)
             else:
                 state.close_lot(fill, item.exit_reason or ExitReason.DISCRETIONARY)
@@ -245,7 +282,27 @@ class EventDrivenEngine:
             bar = bars.get(lot.instrument_id)
             if bar is not None:
                 lot.observe(bar)
+            else:
+                lot.observe_silence()
         state.mark(bars, session_date)
+
+    def _expire_delisted(self, state: _RunState, session_date: dt.date) -> None:
+        """Close holdings that have gone quiet for longer than the threshold.
+
+        Booked on the session the silence is recognised rather than on the last
+        print, because the holder did not know it was the last one at the time.
+        """
+        for instrument_id in list(state.lots):
+            lot = state.lots[instrument_id]
+            if lot.sessions_since_bar < self.delisting_after_sessions:
+                continue
+            last = state.last_prices.get(instrument_id, lot.entry_price)
+            state.close_at(
+                instrument_id=instrument_id,
+                price=last * self.delisting_recovery,
+                exit_date=session_date,
+                reason=ExitReason.DELISTED_EXIT,
+            )
 
     def _decide(
         self, state: _RunState, bars: Mapping[int, OhlcvBar], session_date: dt.date
@@ -271,6 +328,13 @@ class EventDrivenEngine:
             {k: v for k, v in contexts.items() if v is not None},
         )
         for signal in plan.exits:
+            if signal.instrument_id not in bars:
+                # The stop was evaluated against a stale mark, and there is no
+                # market to sell into. The position stays; if the silence
+                # continues it is retired by the delisting rule instead. A
+                # backtest that filled here would be selling at a price nobody
+                # was quoting, which is the most flattering fill there is.
+                continue
             state.pending.append(self._exit_order(state, signal, bars))
         for entry in plan.accepted:
             state.pending.append(self._entry_order(entry.candidate, entry.quantity, bars))
@@ -281,12 +345,24 @@ class EventDrivenEngine:
     def _context(
         state: _RunState, position: PositionState, bars: Mapping[int, OhlcvBar]
     ) -> StopContext | None:
-        bar = bars.get(position.instrument_id)
+        """The stop ladder's view of one holding.
+
+        A security that did not print today is carried at its last known price
+        rather than skipped. That is not a guess -- it is the last thing anybody
+        knew, and being unchanged from yesterday it cannot trigger a stop that
+        yesterday did not. Skipping would stall the whole session's decisions
+        over one quiet name, which in a universe containing failed companies is
+        most sessions.
+        """
         lot = state.lots.get(position.instrument_id)
-        if bar is None or lot is None:
+        if lot is None:
+            return None
+        bar = bars.get(position.instrument_id)
+        last = bar.close if bar is not None else state.last_prices.get(position.instrument_id)
+        if last is None:
             return None
         return StopContext(
-            last_price=bar.close,
+            last_price=last,
             high_since_entry=lot.highest,
             sessions_held=lot.sessions_held,
             partial_profit_taken=lot.partial_profit_taken,
@@ -345,18 +421,21 @@ class EventDrivenEngine:
         """
         for instrument_id in list(state.lots):
             lot = state.lots[instrument_id]
-            price = state.last_prices.get(instrument_id, lot.entry_price)
-            state.record_exit(
+            state.close_at(
                 instrument_id=instrument_id,
-                quantity=lot.quantity,
-                price=price,
-                costs=Decimal(0),
+                price=state.last_prices.get(instrument_id, lot.entry_price),
                 exit_date=last_session,
                 reason=ExitReason.BACKTEST_END,
             )
 
     def _result(self, spec: BacktestSpec, state: _RunState) -> BacktestResult:
         caveats = list(state.caveats)
+        warnings = list(state.warnings)
+        if state.abandoned_entries:
+            warnings.append(
+                f"{state.abandoned_entries} entries were abandoned because the fill "
+                "gapped to or through the intended stop"
+            )
         metrics: PerformanceMetrics | None = None
         if len(state.curve) >= 2:
             metrics = self.analyzer.compute(state.trades, state.curve)
@@ -369,7 +448,7 @@ class EventDrivenEngine:
             metrics=metrics,
             trades=tuple(state.trades),
             equity_curve=tuple(state.curve),
-            warnings=tuple(state.warnings),
+            warnings=tuple(warnings),
             data_caveats=tuple(caveats),
         )
 
@@ -388,6 +467,11 @@ class _RunState:
     last_prices: dict[int, Decimal] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
+    #: Entries whose fill gapped through their own stop before they opened.
+    #: Counted rather than dropped silently: a large number means the stop is
+    #: too tight for the universe's overnight behaviour, which is a finding
+    #: about the strategy and not a quirk of the simulator.
+    abandoned_entries: int = 0
     as_of: dt.datetime = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
 
     def __post_init__(self) -> None:
@@ -456,6 +540,32 @@ class _RunState:
         ) / total
         existing.quantity = total
         existing.entry_costs += fill.commission
+
+    def close_at(
+        self,
+        *,
+        instrument_id: int,
+        price: Decimal,
+        exit_date: dt.date,
+        reason: ExitReason,
+    ) -> None:
+        """Liquidate a whole lot at a stated price, with no order and no fill.
+
+        Used where no market transaction happened: a delisting, and the run's
+        final mark. No commission is charged, because none was paid.
+        """
+        lot = self.lots.get(instrument_id)
+        if lot is None:
+            return
+        self.cash += price * lot.quantity
+        self.record_exit(
+            instrument_id=instrument_id,
+            quantity=lot.quantity,
+            price=price,
+            costs=Decimal(0),
+            exit_date=exit_date,
+            reason=reason,
+        )
 
     def close_lot(self, fill: Fill, reason: ExitReason) -> None:
         self.cash += fill.gross_value - fill.commission
