@@ -69,10 +69,16 @@ VERSIONS = Path(__file__).resolve().parents[2] / "migrations" / "versions"
 #: single file**: 0013 creates the tables and 0014 adds a column to one, so a
 #: guard reading only the first would report drift that the chain does not have.
 #: Append here when a later migration touches research-01.
-MIGRATIONS = (
-    VERSIONS / "0013_research01_security_schema.py",
-    VERSIONS / "0014_pit_basis_and_alias_overlap.py",
-    VERSIONS / "0015_fundamental_duration.py",
+#: Every migration from 0013 -- where the research-01 schema begins -- onwards,
+#: **derived rather than listed.**
+#:
+#: It was a pinned tuple of three, and 0016 was added without extending it. That
+#: was harmless only by luck: 0016 creates an index and touches no column, so
+#: the guard kept passing while silently replaying an incomplete history. 0017
+#: adds a column and the omission finally showed. A list that must be edited in
+#: lockstep with a directory will fall out of step with it.
+MIGRATIONS = tuple(
+    path for path in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py")) if path.stem >= "0013"
 )
 
 #: The twelve tables milestone 2 adds. Named explicitly rather than derived, so

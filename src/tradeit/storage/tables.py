@@ -2792,6 +2792,13 @@ class Security(Base, TimestampMixin):
     ``class_label`` is the filing's own words -- ``"Common Stock, $.01 par
     value"`` -- kept verbatim. It is what separates BBBY's two issuers, whose
     par values differ, and normalising it would destroy that discrimination.
+
+    **It is a share-class title and nothing else.** Prose explaining *why* an
+    identity was established belongs in ``identity_evidence``; a short routing
+    tag belongs in ``note``. Those three were once one column, and a reader had
+    to consult ``source`` to learn which of the three a given row held --
+    recorded as trap 0.5 in the data dictionary until migration 0017 separated
+    them.
     """
 
     __tablename__ = "securities"
@@ -2802,9 +2809,14 @@ class Security(Base, TimestampMixin):
     )
     #: ``common_stock``, ``preferred``, ``warrant``, ``unit``, ``adr`` ...
     security_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    #: Verbatim from the filing. Never normalised.
+    #: Verbatim from the filing. Never normalised. A share-class title only.
     class_label: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    #: Why this security's identity is believed: the reasoning, the filings
+    #: relied on, and what was ruled out. Free prose, sometimes several
+    #: paragraphs, and read by people rather than by queries.
+    identity_evidence: Mapped[str | None] = mapped_column(Text)
+    #: A short operator tag (``AAPL/primary``). Not a place for paragraphs.
     note: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (Index("ix_security_issuer", "issuer_id", "security_type"),)

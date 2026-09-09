@@ -8,8 +8,9 @@ confident wrong answers rather than to list column names.
 |---|---|
 | file | `/Users/ericsasson/Documents/GitHub/tradeit/research01.sqlite` |
 | format | SQLite 3, single file, no extensions required |
-| size | ~61 GB |
-| tables declared | 69 (16 carry data; the rest are declared for later phases) |
+| size | 67.4 GB |
+| tables | 71 declared, plus 4 views. Only a handful carry data; the rest are declared for later phases, and an empty one is not a broken one |
+| self-describing | `select * from corpus_readme order by ordinal` — §0 lives inside the file |
 | in git | **no** — `.gitignore` excludes it; only code and docs are pushed |
 
 Everything here is measured from the file, not from memory. **When a new fact
@@ -24,6 +25,15 @@ will be rediscovered the hard way.
 Every one of these has produced a confident wrong answer during construction,
 most of them mine. They are listed first because a reader who stops here has
 still got the most important part.
+
+**Four of the six are now handled by the query views in §3a, and 0.5 has been
+fixed outright.** They are still described here, because a view helps only a
+caller who uses it and a raw `SELECT` still meets every trap below.
+
+**This section also lives inside the database.** `select * from corpus_readme
+order by ordinal` returns the same guidance, so a tool pointed at the file with
+nothing beside it is not left guessing. The table is generated from the same
+constants that build the views, so the two cannot drift apart.
 
 ### 0.1 Every trading day is stored **twice**
 
@@ -86,14 +96,30 @@ rendered it. Yahoo! is `YAHOO INC`, not Altaba. BlackBerry is
 Five major companies were reported missing from this corpus on exactly that
 mistake; all five were present. **Search by CIK.**
 
-### 0.5 `class_label` is not always a class label
+### 0.5 `class_label` was not always a class label — **fixed, not documented**
 
-For the 34 curated control securities (`source = 'control_identity_evidence'`)
-this column holds long provenance prose — paragraphs of reasoning about why an
-identity was or was not established. For the 879 rows with
-`source = 'edgar_filing_text'` it is a real share-class title taken verbatim
-from a Section 12(b) cover table (`Class A Common Stock, $0.001 par value`).
-Filter on `source` before treating it as a label.
+This entry is kept as a record of a trap that no longer exists, because notes
+written before 2026-09-08 still describe it.
+
+The column once held two unrelated things: a real share-class title taken
+verbatim from a Section 12(b) cover table (`Class A Common Stock, $0.001 par
+value`) for 879 rows, **and** paragraphs of identity reasoning — up to 4,156
+characters — for the 34 curated control securities. A reader had to check
+`source` before believing the column.
+
+`scripts/research01_cleanup.py` moved the prose to `securities.identity_evidence`
+(migration `0017`) and left `class_label` NULL on those rows, which is the
+honest value: a share-class title was never established for them. Nothing was
+discarded, and the move was verified byte-for-byte against an independent
+extract. **Measured after the move: `class_label` is at most 128 characters
+across all 879 rows that have one.**
+
+```sql
+-- a share-class title, for every row that has one
+select class_label from securities where class_label is not null;
+-- why an identity is believed, for the 34 control securities
+select identity_evidence from securities where identity_evidence is not null;
+```
 
 ### 0.6 A "failure" in a splice-preventing fetch is not a coverage gap
 
@@ -153,7 +179,7 @@ for `GOOGL` (Class A) and one for `GOOG` (Class C).
 issuer-level financials belonging to no single class. **Joining a class's prices
 to its issuer's fundamentals goes through `issuer_id`, not `security_id`.**
 
-### `symbol_aliases` — 16,065 rows
+### `symbol_aliases` — 18,913 rows
 
 | column | meaning |
 |---|---|
@@ -176,7 +202,7 @@ to its issuer's fundamentals goes through `issuer_id`, not `security_id`.**
 
 ## 2. The fact tables
 
-### `security_price_facts` — 65,668,853 rows
+### `security_price_facts` — 71,197,370 rows
 
 Two rows per session per security — see §0.1. `volume_adjusted` says whether the
 volume was scaled by the same factor as the prices.
@@ -185,7 +211,7 @@ Four check constraints hold on every row and are worth relying on:
 `high >= low`, `high >= open`, `high >= close`, `low <= open`, `low <= close`,
 `volume >= 0`. Measured: **0 violations in 65.7 million rows.**
 
-### `security_corporate_action_facts` — 204,473 rows
+### `security_corporate_action_facts` — 218,666 rows
 
 `action_type` ∈ {`split`, `cash_dividend`, `stock_dividend`, …}. For a split,
 `ratio` is the multiplier — `4` for a 4-for-1, `0.1` for a 1-for-10 reverse.
@@ -252,6 +278,30 @@ That query is correct by construction. It reads a full 9,237-bar series in
 
 `trading_sessions` is a materialised table, not a view, because an exchange
 calendar cannot be expressed in SQL. Rebuild it whenever the corpus is extended.
+
+### `corpus_readme` — the guide book, inside the file
+
+A view fixes the traps expressible as SQL. The rest — that names are
+point-in-time, that a fetch "failure" often means the system refused to guess,
+that **no result computed here is evidence of profitability** — can only be
+*stated*, and a statement in a markdown file beside the database helps nobody
+who was handed only the database.
+
+```sql
+select topic, applies_to, guidance from corpus_readme order by ordinal;
+```
+
+Ten entries, **ordered by how badly the mistake hurts** rather than
+alphabetically, so a reader who takes only the first row has taken the one that
+matters. It is generated from the same constants in `tradeit.research01.views`
+that build the views, dropped and rebuilt on every run, and
+`tests/unit/test_research01_readme.py` asserts that every view the module
+creates is mentioned in it and that every `applies_to` names an object that
+actually exists — a guide pointing at a table that is not there is worse than
+no guide.
+
+Rebuild both halves with `scripts/research01_cleanup.py`, or
+`prepare_corpus(session)` in code.
 
 ### The one thing the views cannot do
 

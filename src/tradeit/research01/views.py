@@ -21,6 +21,14 @@ SQL where a reader running ``.schema`` will meet it.
 
 ``trading_sessions`` is a materialised table rather than a view because an
 exchange calendar is not expressible in SQL. It is rebuilt on every call.
+
+``corpus_readme`` is the same argument taken one step further. A view fixes the
+traps that are expressible as SQL; the rest -- that names are point-in-time,
+that a fetch "failure" often means the system refused to guess -- can only be
+*stated*. Stating them in a table means a tool that opens this file finds them
+without being handed a markdown document alongside it, which is the whole
+complaint that produced this module. It is generated from the same constants
+the views are, so the two cannot drift.
 """
 
 from __future__ import annotations
@@ -32,7 +40,15 @@ from sqlalchemy.orm import Session
 
 from tradeit.core.calendar import TradingCalendar
 
-__all__ = ["CALENDAR_FROM", "CALENDAR_TO", "VIEWS", "create_views"]
+__all__ = [
+    "CALENDAR_FROM",
+    "CALENDAR_TO",
+    "README",
+    "VIEWS",
+    "create_readme",
+    "create_views",
+    "prepare_corpus",
+]
 
 CALENDAR_FROM = dt.date(1990, 1, 1)
 CALENDAR_TO = dt.date(2030, 12, 31)
@@ -166,3 +182,150 @@ def create_views(
         session.execute(text(sql))
     session.commit()
     return len(sessions)
+
+
+#: What a reader must know that the schema cannot tell them, written into the
+#: database itself. Each row is (topic, applies_to, guidance).
+#:
+#: **Ordered by how badly the mistake hurts**, not alphabetically: a tool that
+#: reads only the first row should have read the one that matters most. Every
+#: entry corresponds to a confident wrong answer this corpus actually produced.
+README: tuple[tuple[str, str, str], ...] = (
+    (
+        "start here",
+        "corpus_readme",
+        "This table is the reading guide for the file you have opened. The long "
+        "form is docs/RESEARCH_01_DATA_DICTIONARY.md in the tradeit repository, "
+        "but nothing here depends on having it. Prefer the v_ views over the "
+        "base tables: each one has a convention already applied.",
+    ),
+    (
+        "no backtest here is evidence of profitability",
+        "security_price_facts",
+        "The survivorship gate returns SURVIVOR_BIASED against this corpus. "
+        "Companies that failed are substantially absent, so a good strategy "
+        "result means the failures are missing, not that the strategy works. "
+        "Build machinery on this corpus; do not believe its returns. "
+        "v_dead_registrants is the population in question: every registrant "
+        "EDGAR shows exiting, and whether this corpus can name and price it.",
+    ),
+    (
+        "every trading day is stored twice",
+        "security_price_facts",
+        "adjustment_basis holds 'raw' and 'total' for the same session. "
+        "count(*) therefore reports double the sessions. Use 'total' for "
+        "returns and any comparison across time, 'raw' to reconstruct what a "
+        "trader saw on the day, and never mix them in one calculation. "
+        "v_prices and v_prices_raw each pick one.",
+    ),
+    (
+        "a session can have more than one revision",
+        "security_price_facts",
+        "knowledge_time records when a fact became known. The latest row for a "
+        "(security, basis, session) is the current belief; earlier ones are "
+        "what was believed before. The views return the latest only. Anything "
+        "asking what was knowable on a past date must use "
+        "tradeit.research01.series.price_series, which takes as_of -- no view "
+        "can be point-in-time.",
+    ),
+    (
+        "valid_to is exclusive",
+        "symbol_aliases",
+        "The last day a security owns a ticker is valid_to minus one day. NULL "
+        "means open-ended -- the SEC publishes it as current -- not unknown. "
+        "Tickers are reused, so resolve per date, never per ticker: asking "
+        "which security is 'ACME' has no answer. v_security_tickers does the "
+        "arithmetic and exposes an inclusive last_day.",
+    ),
+    (
+        "rows known to be wrong are still here",
+        "security_price_facts",
+        "This corpus bounds what it reads rather than destroying what it was "
+        "sent, so an audit can always see the vendor's error. Roughly 3,900 "
+        "bars fall on days the US market was closed and roughly 91,000 sit "
+        "outside their security's adjudicated interval. A raw SELECT includes "
+        "both; the views and price_series exclude them.",
+    ),
+    (
+        "names are point-in-time",
+        "issuers",
+        "display_name is the registrant's name as its most recent index row "
+        "rendered it. Yahoo! is YAHOO INC, BlackBerry is RESEARCH IN MOTION "
+        "LTD, Block is SQUARE, INC. A name search for a renamed company "
+        "returns nothing and looks like absence -- five major companies were "
+        "reported missing from this corpus on exactly that mistake, and all "
+        "five were present. Search by CIK.",
+    ),
+    (
+        "a fetch failure is not a coverage gap",
+        "ingestion_runs",
+        "Price backfill asks the vendor only for each registrant's own "
+        "lifetime. When a different company later took that ticker the request "
+        "returns nothing and is logged as a failure. Measured: of 678 such "
+        "failures the vendor could serve, 547 were a different company's "
+        "series. The count is how often the system refused to guess.",
+    ),
+    (
+        "most tables are empty by design",
+        "sqlite_master",
+        "The schema is declared in full for later phases; only a handful of "
+        "tables carry data today. An empty table is not a broken one. Ask "
+        "whether a table has rows before concluding a capability is missing.",
+    ),
+    (
+        "class_label is a share-class title only",
+        "securities",
+        "It once also held identity prose for 34 control securities, which is "
+        "why older notes describe filtering on source before trusting it. "
+        "Migration 0017 moved that prose to identity_evidence and left "
+        "class_label NULL on those rows. A short operator tag lives in note.",
+    ),
+)
+
+
+def create_readme(session: Session) -> int:
+    """(Re)build ``corpus_readme``. Returns the number of entries written.
+
+    Dropped and rebuilt rather than updated in place: the table is generated
+    output, and a stale row surviving an edit is exactly the failure the table
+    exists to prevent.
+    """
+    session.execute(text("drop table if exists corpus_readme"))
+    session.execute(
+        text(
+            "create table corpus_readme ("
+            " ordinal integer primary key not null,"
+            " topic text not null,"
+            " applies_to text not null,"
+            " guidance text not null)"
+        )
+    )
+    session.execute(
+        text(
+            "insert into corpus_readme (ordinal, topic, applies_to, guidance)"
+            " values (:o, :t, :a, :g)"
+        ),
+        [
+            {"o": index, "t": topic, "a": applies_to, "g": guidance}
+            for index, (topic, applies_to, guidance) in enumerate(README, start=1)
+        ],
+    )
+    session.commit()
+    return len(README)
+
+
+def prepare_corpus(
+    session: Session,
+    *,
+    calendar: TradingCalendar | None = None,
+    start: dt.date = CALENDAR_FROM,
+    end: dt.date = CALENDAR_TO,
+) -> tuple[int, int]:
+    """Everything that makes the file self-describing. Returns (sessions, entries).
+
+    One entry point because the two halves answer the same question and are
+    read together: a view a reader does not know to prefer is a view that does
+    not help.
+    """
+    sessions = create_views(session, calendar=calendar, start=start, end=end)
+    return sessions, create_readme(session)
