@@ -266,7 +266,7 @@ alter none**; dropping one costs nothing.
 | `v_prices` | one row per session, **adjusted**, holiday and spliced bars already excluded, latest revision only |
 | `v_prices_raw` | the same, on the **unadjusted** print |
 | `v_security_tickers` | one row per ticker held, with `last_day` **inclusive** — the off-by-one in §0.2 already done |
-| `v_dead_registrants` | the survivorship population with `has_ticker` / `has_prices` flags |
+| `v_registrants` | every registrant with a CIK, with `has_ticker` / `has_prices` coverage flags |
 
 ```sql
 select * from v_prices where security_id = 42 order by session_date;
@@ -278,6 +278,34 @@ That query is correct by construction. It reads a full 9,237-bar series in
 
 `trading_sessions` is a materialised table, not a view, because an exchange
 calendar cannot be expressed in SQL. Rebuild it whenever the corpus is extended.
+
+### A view that was named wrong, and what it means
+
+`v_registrants` was called **`v_dead_registrants`**, and its comment said it
+returned *"every registrant EDGAR shows exiting"*. It never filtered to exits.
+Measured: **40,818 rows — every issuer carrying a CIK**, which is the whole
+table. Anyone who trusted the name would have taken a *coverage* denominator
+for a *survivorship* one, and reported a much healthier survivorship picture
+than the corpus supports.
+
+`issuers` has no lifecycle column at all — only `issuer_id`, `display_name`,
+`note`, `ingested_at` and `source`, and `source` records how a registrant was
+*seeded* (`edgar_full_index`, `sec_fsds_sub`), not whether it died. The exit
+population is derived from filing evidence and belongs with the denominator
+work, not with a view over `issuers`.
+
+**If you want the companies that stopped trading, ask the prices, not the
+registrants.** A security whose raw series ends before your window does is a
+measured fact and needs no inference:
+
+```sql
+select security_id, min(session_date) first, max(session_date) last, count(*) bars
+from security_price_facts where adjustment_basis = 'raw' group by security_id;
+```
+
+That scan takes a few minutes and is worth caching. Of 14,257 priced
+securities, **4,306 were tradeable in January 2000 with at least 250 bars, and
+1,737 of those — 40.3% — stopped printing before 2010.**
 
 ### `corpus_readme` — the guide book, inside the file
 

@@ -98,3 +98,16 @@ def test_each_entry_names_a_real_table_or_view(prepared: Session) -> None:
     objects.add("sqlite_master")
     for (applies_to,) in prepared.execute(text("select applies_to from corpus_readme")).all():
         assert applies_to in objects, f"corpus_readme points at {applies_to}, which is not here"
+
+
+def test_a_retired_view_is_dropped_on_rebuild(prepared: Session) -> None:
+    """A renamed view otherwise survives under a name whose meaning changed."""
+    prepared.execute(text("create view v_dead_registrants as select 1 as x"))
+    prepared.commit()
+    prepare_corpus(prepared, start=dt.date(2020, 1, 1), end=dt.date(2020, 12, 31))
+    remaining = {
+        n
+        for (n,) in prepared.execute(text("select name from sqlite_master where type='view'")).all()
+    }
+    assert "v_dead_registrants" not in remaining
+    assert set(VIEWS) <= remaining

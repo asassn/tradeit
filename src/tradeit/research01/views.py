@@ -44,6 +44,7 @@ __all__ = [
     "CALENDAR_FROM",
     "CALENDAR_TO",
     "README",
+    "RETIRED_VIEWS",
     "VIEWS",
     "create_readme",
     "create_views",
@@ -134,11 +135,19 @@ from symbol_aliases a
 join securities s on s.security_id = a.security_id
 where a.alias_kind = 'ticker'
 """,
-    "v_dead_registrants": """
-create view v_dead_registrants as
--- The survivorship population: every registrant EDGAR shows exiting, with
--- whether the corpus can identify, name and price it. `has_prices` is the
--- gate's numerator.
+    "v_registrants": """
+create view v_registrants as
+-- Every registrant carrying a CIK, with whether the corpus can ticker and
+-- price it. Coverage, not survivorship.
+--
+-- It was called v_dead_registrants and its comment claimed "every registrant
+-- EDGAR shows exiting". It never filtered to exits: measured, it returns
+-- 40,818 rows, which is every issuer with a CIK. Anyone reading the old name
+-- would have taken a coverage denominator for a survivorship one.
+--
+-- The exit population is not derivable from `issuers`, which carries no
+-- lifecycle column at all -- it comes from filing evidence, and lives with the
+-- denominator work rather than here.
 select
     ii.value_normalized      as cik,
     i.display_name           as name_as_last_filed,
@@ -154,6 +163,16 @@ join issuer_identifiers ii
   on ii.issuer_id = i.issuer_id and ii.namespace = 'sec_cik'
 """,
 }
+
+
+#: Views this module used to build and no longer does.
+#:
+#: Recorded rather than simply dropped from ``VIEWS``, because rebuilding only
+#: drops what it is about to create -- so a renamed view otherwise survives in
+#: every database that ever had it, under a name whose meaning has changed.
+#: ``v_dead_registrants`` is the case that taught this: it never filtered to
+#: exits and its name said it did.
+RETIRED_VIEWS: tuple[str, ...] = ("v_dead_registrants",)
 
 
 def create_views(
@@ -177,6 +196,8 @@ def create_views(
             text("insert into trading_sessions (session_date) values (:d)"),
             [{"d": day.isoformat()} for day in sessions],
         )
+    for name in RETIRED_VIEWS:
+        session.execute(text(f"drop view if exists {name}"))
     for name, sql in VIEWS.items():
         session.execute(text(f"drop view if exists {name}"))
         session.execute(text(sql))
@@ -206,8 +227,10 @@ README: tuple[tuple[str, str, str], ...] = (
         "Companies that failed are substantially absent, so a good strategy "
         "result means the failures are missing, not that the strategy works. "
         "Build machinery on this corpus; do not believe its returns. "
-        "v_dead_registrants is the population in question: every registrant "
-        "EDGAR shows exiting, and whether this corpus can name and price it.",
+        "v_registrants shows the coverage side of it: every registrant with a "
+        "CIK, and whether this corpus can ticker and price it. It is not "
+        "filtered to companies that exited -- `issuers` has no lifecycle "
+        "column -- so do not read it as a survivorship denominator.",
     ),
     (
         "every trading day is stored twice",
