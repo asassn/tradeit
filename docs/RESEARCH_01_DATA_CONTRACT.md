@@ -1265,3 +1265,21 @@ exit is dated 1999-05-20; `GUCCI GROUP NV`, `KONINKLIJKE KPN N V`,
 name must be unique among *registrants* as well as among vendor symbols.
 Uniqueness on one side only leaves two similarly-named registrants both
 claiming one symbol, which the three-claimant prune would then delete for both.
+
+**DECIDED 2026-09-08: refused.** The owner declined it, keeping the rule
+absolute — **a name is not evidence, whatever corroborates it.** Ticker coverage
+of dated exits stays at 41.6% and that is accepted rather than regretted.
+
+The reasoning worth preserving, because the 87% corroboration rate makes this
+look like a close call and it was not treated as one: every other binding in
+this corpus can be checked by opening one document and reading one sentence or
+one field. A name match plus a date overlap cannot be checked that way — it is
+an inference from two datasets agreeing, and the registrant never states it.
+That is a different *kind* of claim, and admitting it would mean the corpus's
+bindings are no longer uniformly checkable. **Coverage is worth less than that
+property.**
+
+This closes the ticker-resolution work. Every route has now been measured:
+annual reports at depth 10, offering prospectuses, insider filings, proxies,
+tender offers, current reports, CUSIP-to-ISIN, and name matching. What remains
+unresolved is either provably ticketless or unreachable from EDGAR.
