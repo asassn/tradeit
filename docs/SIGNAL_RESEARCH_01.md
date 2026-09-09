@@ -237,3 +237,85 @@ parameter.
 
 Unchanged, and for the same reason as §5. Nothing here has survived
 out-of-sample testing, because nothing has been tested out of sample yet.
+
+---
+
+## 8. The out-of-sample test — 2026-09-09, code `754bde3`
+
+§7 recorded `relative_volume_20` as a hypothesis and named the test. Here it is.
+
+**Pre-registered before the run:** the signal, the direction (`NEGATIVE`, taken
+from the in-sample result), the horizon (63 sessions), the quantile fraction,
+the liquidity floors, and the period. One signal, one horizon, **one trial** —
+so no multiple-testing penalty applies, and the runner computed the hurdle as
+zero rather than being told.
+
+**The period had never been looked at.** The study covered 2000–2009; the
+corpus runs to 2026. The test used 2010-01-04 to 2024-12-31: 800 securities
+drawn the same way, 400 that survived and 400 whose prices stopped, 53% of the
+eligible population failing within the window.
+
+### It failed
+
+| | in-sample 2000–2009 | out-of-sample 2010–2024 |
+|---|---|---|
+| observations | 4,310 | **9,583** |
+| information coefficient | **−0.069** | **+0.009** |
+| IC t-statistic | **−4.54** | **+0.93** |
+| spread t | −2.15 | −0.21 |
+| mean spread | −8.39% | −0.14% |
+| net of costs | **+32.7%/yr** | **−0.2%/yr** |
+| verdict | `ECONOMICALLY_USEFUL` | `NOT_DETECTABLE` |
+
+**The sign flipped and the magnitude went to zero.** Not weakened — reversed
+and vanished. The net after costs is −0.2% a year, which is nothing.
+
+This is not a power problem: the out-of-sample sample is **more than twice the
+size** of the one that produced the finding. It is not a regime excuse either,
+though the periods do differ — equal-weight buy-and-hold ran at −10.07%/yr
+in-sample and +3.64%/yr out.
+
+### What this vindicates
+
+One signal passed every in-sample gate out of twenty trials. **One in twenty is
+exactly what chance produces at the 5% level, and that is what it was.**
+
+Everything built to catch this, caught it:
+
+* the **trial ledger** counted twenty and said the hurdle had risen
+* the **derived-direction rule** charged that signal two trials rather than one
+* §7 refused to call it a finding, listing the sign instability and the single
+  passing horizon as reasons
+* **pre-registration** made the out-of-sample test unambiguous — there was no
+  room to adjust the direction, the horizon or the universe after seeing the
+  answer
+
+Had the weights been changed on the in-sample result, the system would now be
+trading noise with a t-statistic attached to it.
+
+### Where this leaves the weights, finally
+
+**Unchanged, and now for a demonstrated reason rather than an absence of
+evidence.** The single best candidate this research produced does not survive
+contact with data it has not seen. The declared weights in `ScoringConfig`
+remain judgement, they remain labelled as judgement, and nothing measured here
+justifies moving any of them.
+
+That is a real result. A research loop that can only ever confirm is not a
+research loop, and this one just rejected its own best finding.
+
+### What is worth doing next
+
+Not more signals of this kind. The two things this study says are worth
+pursuing:
+
+1. **The volatility relationship**, which was significant at every
+   specification tried and is the only candidate never to change sign. §7
+   explains why a quantile spread cannot value it — sorting on volatility sorts
+   on the variance of the thing being averaged — and points at
+   volatility-targeted sizing, which is a Phase 8 mechanism rather than a
+   signal.
+2. **The factors that could not be tested at all.** `breakout_confirmation` and
+   `fundamental_quality` need engines this study did not use, and
+   `sector_strength` carries a 0.10 weight on a classification the corpus does
+   not contain.
