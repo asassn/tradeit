@@ -1204,3 +1204,64 @@ suggestive and not decisive. The hundred gave a clean comparison against
 current behaviour, which is what justified spending the requests. The same
 staging refused the alt-form route, which a lucky handful could easily have
 made look promising.
+
+## Three more routes measured — 2026-09-08
+
+### Refused: reading deeper into insider filings
+
+The annual-report depth result (4% -> 18%) made the same idea look compelling
+here. It yields **nothing**: over 100 registrants with four or more ownership
+filings, 41 bound within the first three and **zero bound only beyond them**.
+A registrant's Forms 3/4/5 all carry the *same* issuer block, so an older one
+repeats the answer rather than improving on it. `MAX_INSIDER_ATTEMPTS` stays 3.
+
+**Recorded because the analogy was persuasive and wrong.** Depth helps where
+older documents contain *different* text; it cannot help where they contain the
+same field.
+
+### Refused: CUSIP from an SC 13D/G, matched to the vendor's ISIN
+
+A US ISIN embeds a CUSIP and an `SC 13D/G` cover page prints the issuer's CUSIP
+in a labelled box, so this promised an identifier-to-identifier match with no
+prose parsing at all. 3,680 untickered registrants hold one. Over 100:
+
+```
+cusip not in the vendor's set   59
+no CUSIP found in the filing    32
+foreign CINS only (G.., M..)     5
+MATCHED                          4
+```
+
+**4%**, and one of the four matches was `TSIFX`, a mutual-fund ticker. The
+binding constraint is the vendor: only 31% of its delisted symbols carry an
+ISIN at all. **Do not re-investigate this route** unless a different CUSIP
+source appears.
+
+### Measured, not applied: unique name match corroborated by trading period
+
+The one substantial route left, and it rests on `NAME_MATCH`, which this
+codebase ranks weakest and declares insufficient alone. So it is measured and
+**left for an explicit decision**.
+
+Normalising both sides (dropping `INC`, `CORP`, `HOLDINGS`, punctuation) and
+restricting the vendor side to Common and Preferred stock on NYSE, NASDAQ,
+NYSE MKT, AMEX, ARCA or BATS:
+
+```
+untickered dead registrants tested        17,885
+  unique name match                        1,306
+    ...and trading period overlaps         1,135   (87%)
+    ...period contradicts the match           87
+    ...vendor period unknown                  84
+```
+
+**The period check has teeth** -- it rejects 87 name matches outright, which is
+what makes it a second fact rather than a restatement of the first. Worked
+examples: `LITTLE FALLS BANCORP INC` last trades 1999-05-20 and its registrant's
+exit is dated 1999-05-20; `GUCCI GROUP NV`, `KONINKLIJKE KPN N V`,
+`LIHIR GOLD LTD` all agree on both name and era.
+
+**A guard this would need if it is ever taken up:** the registrant's normalised
+name must be unique among *registrants* as well as among vendor symbols.
+Uniqueness on one side only leaves two similarly-named registrants both
+claiming one symbol, which the three-claimant prune would then delete for both.
