@@ -57,7 +57,7 @@ import datetime as dt
 import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -320,6 +320,20 @@ def main() -> int:
     )
     ap.add_argument("--min-price", type=float, default=None)
     ap.add_argument("--min-dollar-volume", type=float, default=None)
+    ap.add_argument(
+        "--only",
+        default=None,
+        help="comma-separated signal names to report and count as trials. The "
+        "others are still computed, so the observation set is identical to a "
+        "full run's -- which is what makes an out-of-sample result comparable "
+        "with the in-sample one that motivated it.",
+    )
+    ap.add_argument(
+        "--orient",
+        default=None,
+        help="pre-register a direction, e.g. relative_volume_20=dn. Legitimate "
+        "only when the declaration precedes the run on this data.",
+    )
     args = ap.parse_args()
 
     start = dt.date.fromisoformat(args.start)
@@ -351,6 +365,26 @@ def main() -> int:
 
     universe = _universe(args.spans, args.start, args.end, args.min_bars, args.cap)
     specs = _build_signals()
+    if args.orient:
+        wanted = {}
+        for pair in args.orient.split(","):
+            name, _, value = pair.partition("=")
+            wanted[name.strip()] = {
+                "up": Orientation.POSITIVE,
+                "dn": Orientation.NEGATIVE,
+                "derived": Orientation.DERIVED,
+            }[value.strip()]
+        specs = tuple(
+            replace(spec, orientation=wanted[spec.name]) if spec.name in wanted else spec
+            for spec in specs
+        )
+        print("pre-registered directions: " + ", ".join(f"{k}={v}" for k, v in wanted.items()))
+    if args.only:
+        chosen = {name.strip() for name in args.only.split(",")}
+        missing = chosen - {spec.name for spec in specs}
+        if missing:
+            raise SystemExit(f"unknown signal(s): {', '.join(sorted(missing))}")
+        specs = tuple(spec for spec in specs if spec.name in chosen)
     # A derived direction tests both signs, so it spends two trials.
     per_horizon = sum(2 if spec.orientation is Orientation.DERIVED else 1 for spec in specs)
     trials = per_horizon * len(horizons)
