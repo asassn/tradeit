@@ -279,6 +279,29 @@ That query is correct by construction. It reads a full 9,237-bar series in
 `trading_sessions` is a materialised table, not a view, because an exchange
 calendar cannot be expressed in SQL. Rebuild it whenever the corpus is extended.
 
+### Some bars are priced at zero, and they are not prices
+
+**11,580 raw bars across 248 securities have an open, high, low and close of
+exactly 0.000000.** They cluster at the *end* of a security's series — the
+vendor emitting placeholder rows after a stock stops trading — and at least one
+carries a non-zero volume (110 shares at a price of zero, which nobody traded).
+
+They are 0.0327% of raw bars and heavily skewed late: **324 before 2010, and
+over 11,000 after**, with the largest counts in 2017–2020 and 2023–2025.
+
+```sql
+select count(*) from security_price_facts
+where adjustment_basis = 'raw' and (open<=0 or high<=0 or low<=0 or close<=0);
+```
+
+**Why it matters more than the count suggests.** Treating one as a real print
+books a **−100% return** on a session nobody traded, and because they sit at
+the end of a series they land exactly where a survivorship study is most
+sensitive. `OhlcvBar` rejects them — prices must be positive — which is how
+they were found, but `price_series` returns a plain dataclass and will hand
+them to you unvalidated. `CorpusSessionData` excludes and counts them
+separately from its other exclusions.
+
 ### A view that was named wrong, and what it means
 
 `v_registrants` was called **`v_dead_registrants`**, and its comment said it

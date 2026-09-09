@@ -50,11 +50,18 @@ That is a constraint worth stating rather than hiding, because it also matches
 how a backtest should be specified: a universe chosen before the run, not
 whatever the data happened to contain.
 
-Two exclusions carried over from ``price_series``
---------------------------------------------------
+Three exclusions
+-----------------
 
-Bars on days the market was closed, and bars outside the security's adjudicated
-ticker interval. The second is the splice guard: a reused ticker has two
+Two carried over from ``price_series``: bars on days the market was closed, and
+bars outside the security's adjudicated ticker interval.
+
+The third is this module's own. **A bar priced at zero is not a price.** The
+corpus holds 11,580 of them across 248 securities, concentrated at the end of a
+series -- a vendor emitting placeholder rows after a stock stops trading, one
+with volume 110 at a price of exactly zero. ``OhlcvBar`` refuses them, which is
+how they were found; treating one as a real print books a -100% return on a
+session nobody traded. The second is the splice guard: a reused ticker has two
 neighbours, and trading through the boundary is trading one company's prices as
 another's.
 
@@ -124,6 +131,7 @@ class CorpusSessionData:
     _splits: dict[dt.date, dict[int, Decimal]] = field(default_factory=dict, init=False)
     _sessions: list[dt.date] = field(default_factory=list, init=False)
     excluded_out_of_window: int = field(default=0, init=False)
+    excluded_non_positive: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         if not self.universe:
@@ -170,6 +178,11 @@ class CorpusSessionData:
         return sum(len(rows) for rows in self._bars.values())
 
     @property
+    def excluded(self) -> int:
+        """Bars dropped for any reason, so the two counts cannot be read apart."""
+        return self.excluded_out_of_window + self.excluded_non_positive
+
+    @property
     def session_count(self) -> int:
         return len(self._sessions)
 
@@ -197,6 +210,15 @@ class CorpusSessionData:
             window_start, window_end = adjudicated_window(self.session, security_id)
             for row in self._rows(security_id):
                 day, open_, high, low, close, volume = row
+                if min(open_, high, low, close) <= 0:
+                    # A bar priced at zero is not a price. Measured: 11,580 of
+                    # them across 248 securities, clustered at the end of a
+                    # series -- the vendor emitting placeholder rows after a
+                    # stock stops trading, one of them with volume 110 at a
+                    # price of exactly zero. Treating one as a real print books
+                    # a -100% return on a session nobody traded.
+                    self.excluded_non_positive += 1
+                    continue
                 if window_start is not None and day < window_start:
                     self.excluded_out_of_window += 1
                     continue

@@ -63,9 +63,10 @@ fundamental_quality 0.15 · sector_strength 0.10 · volume_accumulation 0.10
 Nothing measured justifies moving any of them. The one candidate that passed
 every in-sample gate failed out of sample decisively. See §8.
 
-## Next test: volatility, measured as a portfolio rather than a spread
+## Volatility, measured as a portfolio rather than a spread — RUN
 
-**Status: starting.**
+**Status: complete. Result is MIXED, and under the registered criterion that
+means it did not replicate.**
 
 The volatility relationship is the only one that never changed sign, and it is
 the largest effect found. §7 explains why a quantile spread cannot value it:
@@ -92,3 +93,55 @@ Same universe, same entry rule, same costs, same period. If the volatility
 relationship is real and capturable, B beats A on risk-adjusted return. If it
 does not, the relationship is real and not monetisable, which is also an
 answer worth having in writing.
+
+
+### Result — 2026-09-09
+
+Same universe, same entry rule, same costs, same risk budget, 800 securities
+per period with the failures included. The arms differ only in where the stop
+sits, which is what sets position size.
+
+| | in-sample 2000–2009 | out-of-sample 2010–2024 |
+|---|---|---|
+| **A** equal dollar — return | −14.69% | +22.02% |
+| **B** equal risk — return | **−6.61%** | **+27.14%** |
+| A Sharpe | −0.40 | −0.14 |
+| B Sharpe | **−0.30** | **−0.07** |
+| Sharpe change | **+0.10** | **+0.07** |
+| A max drawdown | 35.82% | 28.37% |
+| B max drawdown | **33.25%** | 29.92% |
+| drawdown change | **−2.58pp** | **+1.55pp** |
+| exposure, both arms | 90.5% / 91.0% | 93.6% / 93.6% |
+| verdict | **CAPTURES** | **MIXED** |
+
+**What replicated.** Equal-risk sizing improved return in both periods (+8.08pp
+and +5.12pp) and improved Sharpe in both (+0.10 and +0.07), at effectively
+identical market exposure. The direction of the effect held on data the
+volatility finding had never seen, which is more than `relative_volume_20`
+managed — that one reversed sign.
+
+**What did not.** Drawdown improved in-sample and worsened out-of-sample. The
+registered criterion required both, so the out-of-sample verdict is MIXED, not
+a capture. That criterion was fixed before the run and is not being relaxed
+now.
+
+**The honest reading.** There is a small, consistent, replicating improvement in
+risk-adjusted return from sizing by risk rather than by dollars — and it is not
+large enough, or clean enough on drawdown, to call the volatility relationship
+captured. Both arms lose money on a risk-adjusted basis in both periods
+(Sharpe negative throughout, against a 3% risk-free rate). **An improvement
+from −0.14 to −0.07 is less bad, not good.**
+
+Nothing here changes a scoring weight. It is evidence about *sizing*, which is
+a Phase 8 mechanism, and the mechanism it supports — `RiskBasedSizer` with an
+ATR stop — is already what the system does.
+
+### A data defect this run exposed
+
+The out-of-sample arm crashed on first attempt: the corpus holds **11,580 bars
+priced at exactly zero** across 248 securities, clustered at the end of a
+series, over 11,000 of them after 2010. `OhlcvBar` refused them, which is how
+they were found. They are now excluded and counted separately by
+`CorpusSessionData`, and recorded in the data dictionary. Treating one as a
+real print books a −100% return on a session nobody traded, and they sit
+exactly where a survivorship study is most sensitive.

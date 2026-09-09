@@ -25,6 +25,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+import numpy as np
+
+from tradeit.analytics.kernels import atr_percent
 from tradeit.backtesting.engine import EventDrivenEngine, SessionData
 from tradeit.backtesting.performance import StandardPerformanceAnalyzer
 from tradeit.core.enums import SignalDirection
@@ -58,22 +61,81 @@ class MovingAverageCross:
     That is what keeps it honest: there is no way for it to look forward,
     because it has never been shown a bar it should not have.
 
-    ``stop_pct`` has no default. Where the stop sits decides position size,
-    which decides everything downstream, and a baseline with an invented stop
-    is not a baseline anybody agreed to.
+    **Where the stop sits is the whole experiment, not a detail.** With
+    risk-based sizing, shares bought are ``risk_amount / (entry - stop)``, so
+    the stop chooses the position size:
+
+    * a **fixed-percentage** stop makes ``entry - stop`` proportional to price,
+      so notional is *constant* -- an equal-dollar portfolio
+    * an **ATR** stop makes ``entry - stop`` proportional to volatility, so
+      notional is proportional to ``1 / ATR%`` -- an equal-*risk* portfolio,
+      holding less of the wild names
+
+    Those are the two arms of the volatility experiment, and they differ in
+    exactly one thing. Exactly one of ``stop_pct`` and ``stop_atr_multiple``
+    must be given; neither has a default, because an invented stop is an
+    invented position size.
+
+    The liquidity floors, when supplied, are applied on the rule's own trailing
+    history, so a name is considered only while it was tradeable.
     """
 
     fast: int
     slow: int
-    stop_pct: Decimal
+    stop_pct: Decimal | None = None
+    stop_atr_multiple: Decimal | None = None
+    atr_period: int = 14
+    min_price: Decimal | None = None
+    min_dollar_volume: Decimal | None = None
+    dollar_volume_lookback: int = 20
     closes: dict[int, deque[Decimal]] = field(default_factory=dict)
+    _highs: dict[int, deque[Decimal]] = field(default_factory=dict)
+    _lows: dict[int, deque[Decimal]] = field(default_factory=dict)
+    _volumes: dict[int, deque[Decimal]] = field(default_factory=dict)
     _was_above: dict[int, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.fast >= self.slow:
             raise ValueError(f"fast ({self.fast}) must be shorter than slow ({self.slow})")
-        if not 0 < self.stop_pct < 1:
+        if (self.stop_pct is None) == (self.stop_atr_multiple is None):
+            raise ValueError(
+                "give exactly one of stop_pct and stop_atr_multiple: the stop decides "
+                "position size, so two rules for it means two different portfolios"
+            )
+        if self.stop_pct is not None and not 0 < self.stop_pct < 1:
             raise ValueError("stop_pct must be a fraction between 0 and 1")
+        if self.stop_atr_multiple is not None and self.stop_atr_multiple <= 0:
+            raise ValueError("stop_atr_multiple must be positive")
+
+    def _tradeable(self, instrument_id: int, bar: OhlcvBar) -> bool:
+        """Whether the floors, if any, were met on trailing data."""
+        if self.min_price is not None and bar.close < self.min_price:
+            return False
+        if self.min_dollar_volume is None:
+            return True
+        closes = list(self.closes[instrument_id])[-self.dollar_volume_lookback :]
+        volumes = list(self._volumes[instrument_id])[-self.dollar_volume_lookback :]
+        if len(volumes) < self.dollar_volume_lookback:
+            return False
+        turnover = sum((c * v for c, v in zip(closes, volumes, strict=True)), Decimal(0)) / len(
+            volumes
+        )
+        return turnover >= self.min_dollar_volume
+
+    def _stop(self, instrument_id: int, bar: OhlcvBar) -> Decimal | None:
+        """Where the stop sits, which is where the position size comes from."""
+        if self.stop_pct is not None:
+            return bar.close * (1 - self.stop_pct)
+        assert self.stop_atr_multiple is not None
+        highs = np.array([float(v) for v in self._highs[instrument_id]])
+        lows = np.array([float(v) for v in self._lows[instrument_id]])
+        closes = np.array([float(v) for v in self.closes[instrument_id]])
+        if len(closes) < self.atr_period + 2:
+            return None
+        atr_pct = atr_percent(highs, lows, closes, self.atr_period)[-1]
+        if not np.isfinite(atr_pct) or atr_pct <= 0:
+            return None
+        return bar.close * (Decimal(1) - self.stop_atr_multiple * Decimal(str(atr_pct)))
 
     def __call__(
         self, session_date: dt.date, bars: Mapping[int, OhlcvBar]
@@ -82,7 +144,12 @@ class MovingAverageCross:
         for instrument_id, bar in bars.items():
             history = self.closes.setdefault(instrument_id, deque(maxlen=self.slow))
             history.append(bar.close)
+            self._highs.setdefault(instrument_id, deque(maxlen=self.slow)).append(bar.high)
+            self._lows.setdefault(instrument_id, deque(maxlen=self.slow)).append(bar.low)
+            self._volumes.setdefault(instrument_id, deque(maxlen=self.slow)).append(bar.volume)
             if len(history) < self.slow:
+                continue
+            if not self._tradeable(instrument_id, bar):
                 continue
             values = list(history)
             # Seeded with Decimal(0): an unseeded sum starts at int 0, which
@@ -95,6 +162,13 @@ class MovingAverageCross:
             crossed_up = above and not self._was_above.get(instrument_id, above)
             self._was_above[instrument_id] = above
             if not crossed_up:
+                continue
+            stop = self._stop(instrument_id, bar)
+            if stop is None or stop >= bar.close:
+                # No usable stop -- too little history for an ATR, or a
+                # volatility so large the stop would sit at or above entry.
+                # Refused rather than widened: a stop chosen to make a trade
+                # possible is not a risk limit.
                 continue
             strength = float((fast_mean - slow_mean) / slow_mean)
             out.append(
@@ -116,7 +190,7 @@ class MovingAverageCross:
                         strategy_config_digest="baseline",
                     ),
                     entry_price=bar.close,
-                    stop_price=bar.close * (1 - self.stop_pct),
+                    stop_price=stop,
                     sector=None,
                     average_dollar_volume=bar.close * bar.volume,
                 )

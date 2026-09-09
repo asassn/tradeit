@@ -226,3 +226,46 @@ def test_load_statistics_are_reported(db_session: Session) -> None:
     data = _data(db_session, sid)
     assert data.bar_count == 5
     assert data.session_count == 5
+
+
+class TestNonPositiveBars:
+    """A bar priced at zero is a vendor placeholder, not a price."""
+
+    def test_a_zero_priced_bar_is_excluded_and_counted(self, db_session: Session) -> None:
+        sid = _security(db_session)
+        _bar(db_session, sid, DAY, close="100")
+        db_session.execute(
+            SecurityPriceFact.__table__.insert(),
+            {
+                "security_id": sid,
+                "session_date": DAY + dt.timedelta(days=1),
+                "adjustment_basis": "raw",
+                "open": Decimal(0),
+                "high": Decimal(0),
+                "low": Decimal(0),
+                "close": Decimal(0),
+                "volume": Decimal(110),
+                "event_time": _close(DAY + dt.timedelta(days=1)),
+                "knowledge_time": _close(DAY + dt.timedelta(days=1)),
+                "knowledge_time_basis": KnowledgeTimeBasis.SESSION_CLOSE,
+                "knowledge_source": KnowledgeTimeSource.VENDOR_INGEST,
+                "source": "test",
+            },
+        )
+        db_session.flush()
+        data = _data(db_session, sid)
+        assert data.excluded_non_positive == 1
+        assert data.bar_count == 1
+        assert data.sessions(dt.date(2020, 1, 1), dt.date(2020, 12, 31)) == [DAY]
+
+    def test_the_two_exclusion_counts_are_reported_separately(self, db_session: Session) -> None:
+        """A single total would hide which problem the corpus actually has."""
+        sid = _security(db_session)
+        _ticker(db_session, sid, valid_from=DAY)
+        _bar(db_session, sid, dt.date(2020, 3, 2), close="50")  # before the ticker
+        _bar(db_session, sid, DAY, close="100")
+        db_session.flush()
+        data = _data(db_session, sid)
+        assert data.excluded_out_of_window == 1
+        assert data.excluded_non_positive == 0
+        assert data.excluded == 1
