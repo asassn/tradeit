@@ -62,14 +62,14 @@ from tradeit.backtesting.base import (
     MonteCarloSpec,
 )
 
-__all__ = ["PERCENTILES", "ResamplingMonteCarlo"]
+__all__ = ["PERCENTILES", "ResamplingMonteCarlo", "percentile_of"]
 
 #: Reported percentiles. The tails lead, because the middle of the distribution
 #: is the part a single backtest already showed you.
 PERCENTILES = (5, 10, 25, 50, 75, 90, 95)
 
 
-def _percentile(values: Sequence[float], percentile: int) -> float:
+def percentile_of(values: Sequence[float], percentile: int) -> float:
     """Linear-interpolated percentile of an already-sorted sequence."""
     if not values:
         return 0.0
@@ -145,8 +145,8 @@ class ResamplingMonteCarlo:
         drawdowns.sort()
         return MonteCarloResult(
             spec=spec,
-            return_percentiles={p: _percentile(returns, p) for p in PERCENTILES},
-            drawdown_percentiles={p: _percentile(drawdowns, p) for p in PERCENTILES},
+            return_percentiles={p: percentile_of(returns, p) for p in PERCENTILES},
+            drawdown_percentiles={p: percentile_of(drawdowns, p) for p in PERCENTILES},
             ruin_probability=ruined / spec.iterations,
             iterations_completed=spec.iterations,
         )
