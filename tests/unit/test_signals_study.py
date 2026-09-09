@@ -18,6 +18,7 @@ import pytest
 
 from tradeit.signals.study import (
     Observation,
+    Orientation,
     PromotionRule,
     SignalStudy,
     SignalVerdict,
@@ -43,10 +44,12 @@ def _study(
     horizon: int = 5,
     name: str = "s",
     stride: int = 1,
+    orientation: Orientation = Orientation.POSITIVE,
 ) -> SignalStudy:
     return SignalStudy(
         name=name,
         target=_target(horizon),
+        orientation=orientation,
         sampling_stride_sessions=stride,
         observations=tuple(
             Observation(
@@ -352,3 +355,82 @@ class TestOutlierDependence:
     def test_the_robust_spread_refuses_an_overlapping_fraction(self) -> None:
         with pytest.raises(ValueError, match=r"\(0, 0.5\]"):
             _study([(1.0, 1.0)] * 10).robust_quantile_spread(0.75)
+
+
+class TestOrientation:
+    """A signal that predicts downward is traded inverted, not discarded."""
+
+    def _inverse(self, orientation: Orientation) -> SignalStudy:
+        """Higher signal reliably means lower outcome."""
+        pairs = [
+            (o.signal, -o.outcome) for o in _predictive(4000, strength=0.5, scale=0.05).observations
+        ]
+        return _study(pairs, horizon=63, stride=63, orientation=orientation)
+
+    def test_a_negative_signal_declared_negative_is_tradeable(self) -> None:
+        study = self._inverse(Orientation.NEGATIVE)
+        assert (study.information_coefficient() or 0) < 0
+        assert study.sign == -1
+        net = study.net_annual_spread(0.2, COSTS, average_price=PRICE)
+        assert net is not None and net > 0
+
+    def test_the_same_signal_declared_positive_is_not(self) -> None:
+        """The logic error this fixes: penalising a signal for pointing down."""
+        study = self._inverse(Orientation.POSITIVE)
+        net = study.net_annual_spread(0.2, COSTS, average_price=PRICE)
+        assert net is not None and net < 0
+
+    def test_a_derived_direction_follows_the_data(self) -> None:
+        study = self._inverse(Orientation.DERIVED)
+        assert study.sign == -1
+        net = study.net_annual_spread(0.2, COSTS, average_price=PRICE)
+        assert net is not None and net > 0
+
+    def test_a_derived_direction_costs_two_trials(self) -> None:
+        """Both signs were tested, so the hurdle must charge for both."""
+        assert self._inverse(Orientation.DERIVED).trials_consumed == 2
+        assert self._inverse(Orientation.NEGATIVE).trials_consumed == 1
+
+    def test_a_derived_direction_with_no_signal_has_none(self) -> None:
+        study = _study([(1.0, 0.5)] * 50, orientation=Orientation.DERIVED)
+        assert study.sign is None
+        verdict, _ = study.verdict(
+            PromotionRule(min_observations=10, min_abs_t_statistic=0.1, quantile_fraction=0.2),
+            COSTS,
+            average_price=PRICE,
+        )
+        assert verdict is SignalVerdict.INSUFFICIENT_EVIDENCE
+
+
+class TestSpreadSignificance:
+    def test_a_large_spread_one_observation_could_move_is_refused(self) -> None:
+        """A portfolio earns the mean, but an estimate is not a finding."""
+        # A clean rank relationship -- the information coefficient is ~1 and
+        # hugely significant -- whose *mean* spread is nevertheless carried by
+        # a single observation. Rank correlation does not care how big that
+        # observation is; the mean does, and so does its variance.
+        rng = random.Random(4)
+        pairs = [(float(i), 0.001 * i / 1000 + rng.gauss(0, 0.0002)) for i in range(1000)]
+        pairs[999] = (999.0, 400.0)
+        study = _study(pairs, horizon=21, stride=21)
+        assert abs(study.t_statistic() or 0) > 2.0  # the relationship is real
+        spread = study.quantile_spread(0.2)
+        assert spread is not None and spread > 1.0  # and the mean spread is enormous
+        verdict, reason = study.verdict(
+            PromotionRule(min_observations=100, min_abs_t_statistic=2.0, quantile_fraction=0.2),
+            COSTS,
+            average_price=PRICE,
+        )
+        assert verdict is SignalVerdict.SPREAD_NOT_ESTABLISHED
+        assert "not a finding" in reason
+
+    def test_a_consistent_spread_is_established(self) -> None:
+        pairs = [
+            (o.signal, o.outcome) for o in _predictive(4000, strength=0.5, scale=0.05).observations
+        ]
+        study = _study(pairs, horizon=63, stride=63)
+        t_stat = study.spread_t_statistic(0.2)
+        assert t_stat is not None and abs(t_stat) > 2.0
+
+    def test_too_few_observations_to_fill_two_buckets(self) -> None:
+        assert _study([(1.0, 0.1), (2.0, 0.2)]).spread_t_statistic(0.2) is None

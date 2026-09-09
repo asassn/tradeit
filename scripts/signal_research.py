@@ -79,6 +79,7 @@ from tradeit.backtesting.overfitting import expected_max_of_normals
 from tradeit.research01.series import price_series
 from tradeit.signals.study import (
     Observation,
+    Orientation,
     PromotionRule,
     SignalStudy,
     SignalVerdict,
@@ -103,6 +104,15 @@ class SignalSpec:
     warmup: int
     scale_invariant: bool
     maps_to: str
+    #: Declared in advance from the published literature, not from this data.
+    #:
+    #: Momentum trends at 6-12 months and reverses at one; RSI mean-reverts;
+    #: low volatility outperforms. **``dist_from_sma_50`` is declared POSITIVE
+    #: and the corpus disagrees with it.** It is left that way on purpose: a
+    #: prior that gets flipped whenever the data disagrees is not a prior, and
+    #: the whole reason to declare a direction is to avoid paying for the free
+    #: parameter that deriving one costs.
+    orientation: Orientation
 
 
 def _build_signals() -> tuple[SignalSpec, ...]:
@@ -114,18 +124,21 @@ def _build_signals() -> tuple[SignalSpec, ...]:
     def dist_sma(period: int) -> Callable[..., np.ndarray]:
         return lambda close, high, low, volume: distance_from(close, sma(close, period))
 
+    pos, neg, der = Orientation.POSITIVE, Orientation.NEGATIVE, Orientation.DERIVED
     return (
-        SignalSpec("momentum_21", mom(21), 22, True, "relative_strength"),
-        SignalSpec("momentum_126", mom(126), 127, True, "relative_strength"),
-        SignalSpec("momentum_252", mom(252), 253, True, "relative_strength"),
-        SignalSpec("dist_from_sma_50", dist_sma(50), 51, True, "pattern_quality"),
-        SignalSpec("dist_from_sma_200", dist_sma(200), 201, True, "pattern_quality"),
+        # One-month reversal, not momentum: the classic short-horizon finding.
+        SignalSpec("momentum_21", mom(21), 22, True, "relative_strength", neg),
+        SignalSpec("momentum_126", mom(126), 127, True, "relative_strength", pos),
+        SignalSpec("momentum_252", mom(252), 253, True, "relative_strength", pos),
+        SignalSpec("dist_from_sma_50", dist_sma(50), 51, True, "pattern_quality", pos),
+        SignalSpec("dist_from_sma_200", dist_sma(200), 201, True, "pattern_quality", pos),
         SignalSpec(
             "rsi_14",
             lambda close, high, low, volume: rsi(close, 14),
             15,
             True,
             "pattern_quality",
+            neg,
         ),
         SignalSpec(
             "relative_volume_20",
@@ -133,6 +146,7 @@ def _build_signals() -> tuple[SignalSpec, ...]:
             22,
             True,
             "volume_accumulation",
+            der,
         ),
         SignalSpec(
             "atr_percent_14",
@@ -140,6 +154,7 @@ def _build_signals() -> tuple[SignalSpec, ...]:
             16,
             True,
             "volatility",
+            neg,
         ),
         SignalSpec(
             "realized_vol_60",
@@ -147,6 +162,7 @@ def _build_signals() -> tuple[SignalSpec, ...]:
             62,
             True,
             "volatility",
+            neg,
         ),
     )
 
@@ -272,8 +288,14 @@ def main() -> int:
 
     universe = _universe(args.spans, args.start, args.end, args.min_bars, args.cap)
     specs = _build_signals()
-    trials = len(specs) * len(horizons)
-    print(f"\n{len(specs)} signals x {len(horizons)} horizons = {trials} trials")
+    # A derived direction tests both signs, so it spends two trials.
+    per_horizon = sum(2 if spec.orientation is Orientation.DERIVED else 1 for spec in specs)
+    trials = per_horizon * len(horizons)
+    derived = sum(1 for spec in specs if spec.orientation is Orientation.DERIVED)
+    print(
+        f"\n{len(specs)} signals x {len(horizons)} horizons = {trials} trials "
+        f"({derived} signal(s) with a derived direction count double)"
+    )
     print(
         f"multiple-testing hurdle at {trials} trials: "
         f"|t| > {expected_max_of_normals(trials):.2f} on top of the {args.min_t:.1f} floor\n"
@@ -307,6 +329,7 @@ def main() -> int:
             spec.name: SignalStudy(
                 name=spec.name,
                 target=target,
+                orientation=spec.orientation,
                 observations=tuple(observations[spec.name]),
                 sampling_stride_sessions=stride,
             )
@@ -337,20 +360,31 @@ def main() -> int:
             )
             rows.append((spec, study, verdict, nets[spec.name], reason))
 
-        rows.sort(key=lambda r: (r[3] is None, -(r[3] or 0)))
+        # Ranked by what survives, with unusable rows last rather than first:
+        # a mean spread of +1519% sorted to the top of the previous run and was
+        # an artefact of one observation.
+        rows.sort(
+            key=lambda r: (
+                r[2] is not SignalVerdict.ECONOMICALLY_USEFUL,
+                -abs(r[1].t_statistic() or 0.0),
+            )
+        )
         print(
-            f"  {'signal':<20}{'maps to':<20}{'n':>7}{'IC':>7}{'t':>7}"
+            f"  {'signal':<20}{'dir':>4}{'n':>8}{'IC':>7}{'t':>7}{'sp t':>7}"
             f"{'mean sp':>9}{'med sp':>8}{'net/yr':>9}  verdict"
         )
         for spec, study, verdict, net, _ in rows:
             mean_spread = study.quantile_spread(args.quantile)
             median_spread = study.robust_quantile_spread(args.quantile)
+            spread_t = study.spread_t_statistic(args.quantile)
+            arrow = {1: "up", -1: "dn"}.get(study.sign or 0, "?")
             ic = study.information_coefficient()
             t_stat = study.t_statistic()
             print(
-                f"  {spec.name:<20}{spec.maps_to:<20}{study.count:>7,}"
+                f"  {spec.name:<20}{arrow:>4}{study.count:>8,}"
                 f"{'' if ic is None else f'{ic:>7.3f}'}"
                 f"{'' if t_stat is None else f'{t_stat:>7.2f}'}"
+                f"{'' if spread_t is None else f'{spread_t:>7.2f}'}"
                 f"{'' if mean_spread is None else f'{mean_spread:>9.2%}'}"
                 f"{'' if median_spread is None else f'{median_spread:>8.2%}'}"
                 f"{'' if net is None else f'{net:>9.1%}'}  {verdict}"

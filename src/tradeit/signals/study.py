@@ -41,6 +41,31 @@ approximate and conservative in the direction that matters: it makes marginal
 signals fail. The alternative — quoting the raw count — has produced more false
 discoveries in this field than any other single mistake.
 
+A signal that points down is traded inverted
+-------------------------------------------
+
+An information coefficient of -0.06 is exactly as useful as +0.06. Scoring the
+first as unprofitable is a logic error, and it disqualified the strongest
+relationship in this module's first run against the corpus. The spread is
+oriented by :attr:`SignalStudy.sign` before costs come off it.
+
+Reading that direction off the same data that measures the edge is a free
+parameter, so it is *declared* wherever a prior exists -- momentum trends, RSI
+mean-reverts, low volatility outperforms, all textbook rather than fitted here
+-- and ``DERIVED`` where none does. A derived direction means both signs were
+tested, so :attr:`SignalStudy.trials_consumed` reports two and the
+multiple-testing hurdle charges for it.
+
+A large spread is not an established one
+----------------------------------------
+
+A portfolio earns the arithmetic mean of its holdings, so the mean spread is
+the realisable number. It is also an estimate, and on this corpus one
+21-session return of +7,609% moved a bucket mean by more than a hundred
+percentage points. :meth:`SignalStudy.spread_t_statistic` tests it -- Welch, on
+the same overlap-corrected sample -- and the verdict returns
+``SPREAD_NOT_ESTABLISHED`` when a spread is merely large.
+
 An edge only one observation supports is not an edge
 ----------------------------------------------------
 
@@ -76,6 +101,7 @@ from tradeit.strategy.config import CostConfig
 
 __all__ = [
     "Observation",
+    "Orientation",
     "PromotionRule",
     "SignalStudy",
     "SignalVerdict",
@@ -95,6 +121,27 @@ class TargetKind(StrEnum):
     BREAKOUT_SUCCESS = "breakout_success"
 
 
+class Orientation(StrEnum):
+    """Which way a signal is expected to point, and whether that was declared.
+
+    An information coefficient of -0.06 is exactly as useful as +0.06: the
+    signal is traded inverted. Scoring it as unprofitable for pointing down was
+    a straight logic error, and fixing it opens a subtler one -- reading the
+    direction off the same data that measures the edge is a free parameter.
+
+    So the direction is declared where a prior exists (momentum trends up,
+    RSI mean-reverts, low volatility outperforms -- textbook, not fitted here),
+    and ``DERIVED`` where it does not. A derived direction means both signs
+    were tested, which is two trials rather than one, and
+    :attr:`SignalStudy.trials_consumed` says so, so the multiple-testing hurdle
+    can charge for it.
+    """
+
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    DERIVED = "derived"
+
+
 class SignalVerdict(StrEnum):
     """The outcome of assessing one signal. Only one of these is a pass."""
 
@@ -102,6 +149,7 @@ class SignalVerdict(StrEnum):
     NOT_DETECTABLE = "not_detectable"
     DETECTABLE_NOT_PROFITABLE = "detectable_not_profitable"
     OUTLIER_DEPENDENT = "outlier_dependent"
+    SPREAD_NOT_ESTABLISHED = "spread_not_established"
     BEATEN_BY_BASELINE = "beaten_by_baseline"
     ECONOMICALLY_USEFUL = "economically_useful"
 
@@ -174,6 +222,8 @@ class SignalStudy:
     name: str
     target: StudyTarget
     observations: tuple[Observation, ...]
+    #: Which way the signal is expected to point. See :class:`Orientation`.
+    orientation: Orientation
     #: Sessions between consecutive observations of the same security.
     #:
     #: Required, because it decides how much of the overlap correction
@@ -187,6 +237,31 @@ class SignalStudy:
     @property
     def count(self) -> int:
         return len(self.observations)
+
+    @property
+    def sign(self) -> int | None:
+        """+1 to trade the signal as-is, -1 to trade it inverted.
+
+        ``None`` only when the direction was to be derived and there is no
+        information coefficient to derive it from.
+        """
+        if self.orientation is Orientation.POSITIVE:
+            return 1
+        if self.orientation is Orientation.NEGATIVE:
+            return -1
+        ic = self.information_coefficient()
+        if ic is None or ic == 0:
+            return None
+        return 1 if ic > 0 else -1
+
+    @property
+    def trials_consumed(self) -> int:
+        """How many trials this study spends against a multiple-testing hurdle.
+
+        Two when the direction was read from the data, because both signs were
+        effectively tested.
+        """
+        return 2 if self.orientation is Orientation.DERIVED else 1
 
     @property
     def overlap_factor(self) -> float:
@@ -273,6 +348,43 @@ class SignalStudy:
         top = statistics.median(o.outcome for o in ordered[-bucket:])
         return top - bottom
 
+    def _buckets(self, fraction: float) -> tuple[list[float], list[float]] | None:
+        if not 0 < fraction <= 0.5:
+            raise ValueError("fraction must be in (0, 0.5]")
+        bucket = int(self.count * fraction)
+        if bucket < 2:
+            return None
+        ordered = sorted(self.observations, key=lambda o: o.signal)
+        return (
+            [o.outcome for o in ordered[:bucket]],
+            [o.outcome for o in ordered[-bucket:]],
+        )
+
+    def spread_t_statistic(self, fraction: float) -> float | None:
+        """Welch's t on the difference between the two buckets' mean outcomes.
+
+        **A large spread is not the same as an established one.** A portfolio
+        earns the arithmetic mean, so the mean spread is the realisable number
+        -- but on this corpus a single 21-session return of +7,609% moved a
+        bucket mean by more than a hundred points, and a figure that one
+        observation can move is an estimate with enormous variance rather than
+        a finding.
+
+        Testing it is the standard answer, and the sample size is divided by
+        the overlap factor for the same reason the information coefficient's is.
+        """
+        buckets = self._buckets(fraction)
+        if buckets is None:
+            return None
+        bottom, top = buckets
+        effective = len(top) / self.overlap_factor
+        if effective < 2:
+            return None
+        variance = statistics.variance(top) / effective + statistics.variance(bottom) / effective
+        if variance <= 0:
+            return None
+        return (statistics.fmean(top) - statistics.fmean(bottom)) / math.sqrt(variance)
+
     def annual_cost_drag(self, costs: CostConfig, *, average_price: float) -> float:
         """What the horizon's turnover costs per year, as a fraction of capital.
 
@@ -290,14 +402,36 @@ class SignalStudy:
     def net_annual_spread(
         self, fraction: float, costs: CostConfig, *, average_price: float
     ) -> float | None:
-        """The quantile spread annualised, less what trading it costs.
+        """The quantile spread annualised and oriented, less trading costs.
 
-        This is the number that decides whether a signal is worth anything.
+        Oriented: a signal that predicts downward is traded inverted, so its
+        spread counts positively. Scoring it negative was a logic error that
+        penalised the strongest relationship in the first study run.
+
+        This is the number that decides whether a signal is worth anything --
+        but only once :meth:`spread_t_statistic` says the spread is real.
         """
         spread = self.quantile_spread(fraction)
-        if spread is None:
+        sign = self.sign
+        if spread is None or sign is None:
             return None
-        annualised = spread * self.target.round_trips_per_year
+        annualised = spread * sign * self.target.round_trips_per_year
+        return annualised - self.annual_cost_drag(costs, average_price=average_price)
+
+    def robust_net_annual_spread(
+        self, fraction: float, costs: CostConfig, *, average_price: float
+    ) -> float | None:
+        """The same, computed from medians. Reported beside the mean, never instead.
+
+        A portfolio earns the mean, so this is a diagnostic rather than the
+        answer: it says what the edge looks like with the tails removed. When
+        the two disagree, neither is trustworthy and the verdict says so.
+        """
+        spread = self.robust_quantile_spread(fraction)
+        sign = self.sign
+        if spread is None or sign is None:
+            return None
+        annualised = spread * sign * self.target.round_trips_per_year
         return annualised - self.annual_cost_drag(costs, average_price=average_price)
 
     def verdict(
@@ -331,6 +465,12 @@ class SignalStudy:
                 f"t={t_statistic:.2f} on {self.effective_observations:.0f} effective "
                 f"observations, below the {rule.min_abs_t_statistic:.2f} threshold",
             )
+        if self.sign is None:
+            return (
+                SignalVerdict.INSUFFICIENT_EVIDENCE,
+                "the direction was to be derived and there is no information "
+                "coefficient to derive it from",
+            )
         net = self.net_annual_spread(rule.quantile_fraction, costs, average_price=average_price)
         if net is None:
             return (
@@ -345,6 +485,14 @@ class SignalStudy:
                 f"the quantile spread is {spread:+.2%} by mean and {robust:+.2%} by "
                 "median -- opposite signs, so the edge rests on a handful of "
                 "observations rather than on the population",
+            )
+        spread_t = self.spread_t_statistic(rule.quantile_fraction)
+        if spread_t is None or abs(spread_t) < rule.min_abs_t_statistic:
+            return (
+                SignalVerdict.SPREAD_NOT_ESTABLISHED,
+                f"the quantile spread is {spread:+.2%} but its own t is "
+                f"{0.0 if spread_t is None else spread_t:.2f}: a large spread that "
+                "one observation could move is an estimate, not a finding",
             )
         if net <= 0:
             drag = self.annual_cost_drag(costs, average_price=average_price)
