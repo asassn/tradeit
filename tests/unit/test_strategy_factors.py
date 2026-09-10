@@ -106,7 +106,9 @@ class TestReporting:
         securities were scored on different evidence, which no arithmetic
         rescues. The message has to tell them apart, so it needs two factors.
         """
-        patchy = "breakout_confirmation"
+        # Any weighted factor other than the exemplar; what matters is that
+        # the message can name two different kinds of gap at once.
+        patchy = "volume_accumulation"
         coverage = _coverage(
             s1=WITHOUT_SECTOR,
             s2=tuple(n for n in WITHOUT_SECTOR if n != patchy),
@@ -116,7 +118,7 @@ class TestReporting:
         assert f"available for some securities only: {patchy}" in message
 
     def test_full_coverage_says_so_plainly(self) -> None:
-        assert "all 5 weighted factors available" in _coverage(s1=ALL).explain()
+        assert "all 4 weighted factors available" in _coverage(s1=ALL).explain()
 
     def test_unknown_names_are_not_counted_as_coverage(self) -> None:
         """A pipeline producing a feature nobody weighted has not covered anything."""

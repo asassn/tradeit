@@ -48,7 +48,7 @@ same way in all four in-sample specifications.
 
 | scoring factor | weight | why not |
 |---|---|---|
-| `breakout_confirmation` | 0.20 → 0.2222 | **still untested, and structurally hard to weight** — see §10 |
+| `breakout_confirmation` | ~~0.20~~ → **gate** | **retired as a weight 2026-09-10**; now a conditional gate — see §11 |
 | `fundamental_quality` | 0.15 → 0.1667 | **tested 2026-09-10: no detectable relationship** — see §10 |
 | `sector_strength` | 0.10 | ~~no sector classification in the corpus~~ — **resolved 2026-09-09.** `issuer_sic_observations` now classifies 12,871 issuers, covering 93.5% of priced securities, point-in-time from SEC filing headers. The factor is computable; it has still never been *tested* |
 
@@ -368,3 +368,66 @@ factors every security *can* score treats two different kinds of thing as one.
 a null, and the issue with `breakout_confirmation` is structural — the right
 response is a decision about how a conditional factor should enter a score, not
 a number moved.
+
+
+---
+
+## §11 — `breakout_confirmation` becomes a gate — 2026-09-10
+
+Authorised by the owner. **Retired as a weight for a different reason from
+`sector_strength`**: not measured and failed, but declared as the wrong
+instrument.
+
+A weight says every candidate has some amount of a quality and the score blends
+them. A gate says most candidates are unaffected and a few are refused.
+Confirmation is the second — `ConfirmationInputs` requires post-breakout
+evidence, so a security with no breakout has **no** confirmation score rather
+than a low one, and a slate containing any such security could never satisfy
+the uniform-coverage rule in `tradeit.strategy.factors` while it carried weight.
+
+### The policy already existed; the gate reads it
+
+Nothing new was invented. `ProfileConfig` already declares what evidence a
+breakout needs before it may be called confirmed — required closes,
+follow-through, relative volume, retest quality, and a `min_evidence_coverage`
+below which it "declines to confirm at all". The engine applies that policy and
+records a `BreakoutState`. `breakout_confirmation_gate` reads the verdict.
+
+### Four outcomes, and two of them are refusals
+
+| candidate state | outcome | blocks? |
+|---|---|---|
+| no open event, or not yet broken out (incl. `REJECTED`) | `NOT_APPLICABLE` | no |
+| `CONFIRMED`, `RETEST_CONFIRMED` | `PASSED` | no |
+| `CLOSED_ABOVE`, `CONFIRMATION_PENDING`, `RETEST_*` | `BLOCKED_AWAITING` | **yes** |
+| `FAILED_BREAKOUT` | `BLOCKED_FAILED` | **yes** |
+
+The gate turns on `BreakoutState.has_broken_out`, which the lifecycle calls
+*"the dividing line the whole machine turns on"*. **Approaching a level is not
+a reason to refuse a stock.**
+
+Awaiting and failed are reported separately because they are different facts: a
+developing setup and a dead one. And `applied` distinguishes "did not apply"
+from "applied and passed", so a slate that confirmation never filtered is
+visible rather than inferred from an absence of vetoes.
+
+**The gate cannot promote.** Passing removes a refusal and adds nothing to any
+score — which is what keeps it a gate rather than a weight under a new name. A
+test asserts the result carries no score field at all.
+
+### Weights after
+
+| factor | declared | effective | validated? |
+|---|---|---|---|
+| `relative_strength` | 0.25 | **0.3571** | no |
+| `pattern_quality` | 0.20 | **0.2857** | no |
+| `fundamental_quality` | 0.15 | **0.2143** | **measured, showed nothing** |
+| `volume_accumulation` | 0.10 | **0.1429** | no |
+
+Two things worth noticing rather than acting on. `relative_strength` now
+carries **36%** of the score, having absorbed both retirements. And
+`fundamental_quality` keeps 21% despite §10 finding no detectable relationship
+— the null was reported and no weight change was proposed for it, so it
+inherited weight from a factor that was removed. Neither is wrong; both are
+consequences of removing factors rather than re-deriving the remainder, and
+both are decisions still open.

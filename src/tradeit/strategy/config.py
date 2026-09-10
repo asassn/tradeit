@@ -505,11 +505,21 @@ class ScoringConfig(Section):
     """Factor weights for the opportunity score.
 
     Weights are normalised on load rather than trusted to sum correctly, so a
-    config that lists five factors adding to 0.90 is not silently a different
+    config that lists four factors adding to 0.70 is not silently a different
     strategy from one adding to 1.0. **That is also why dropping a factor needs
     no arithmetic here**: removing its entry renormalises the rest in the same
     proportions, and leaving the survivors at their original numbers keeps the
     declared intent legible.
+
+    ``breakout_confirmation`` was weighted 0.20 and was **removed on 2026-09-10
+    because it was the wrong instrument**, not because it was measured and
+    failed. ``ConfirmationInputs`` requires post-breakout evidence, so a
+    security with no breakout has *no* confirmation score rather than a low
+    one -- and a slate holding any such security could never satisfy the
+    uniform-coverage rule in :mod:`tradeit.strategy.factors` while it carried
+    weight. It is now a gate:
+    :func:`tradeit.opportunity.gates.breakout_confirmation_gate`, reading the
+    verdict ``ProfileConfig`` and the breakout engine already produce.
 
     ``sector_strength`` was weighted 0.10 and was **removed on 2026-09-10, on
     measured evidence** -- the only factor here retired for a reason rather than
@@ -538,7 +548,6 @@ class ScoringConfig(Section):
         default_factory=lambda: {
             "relative_strength": 0.25,
             "pattern_quality": 0.20,
-            "breakout_confirmation": 0.20,
             "fundamental_quality": 0.15,
             "volume_accumulation": 0.10,
         }

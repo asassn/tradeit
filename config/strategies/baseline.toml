@@ -241,9 +241,17 @@ max_candidates_per_session = 20
 # [sector_strength] below is untouched: the engine, its table and the breakout
 # eligibility gate all still use it. What changed is that it carries no weight
 # in the opportunity score.
+#
+# breakout_confirmation carried 0.2 here and was removed on 2026-09-10 for a
+# different reason: not measured and failed, but the wrong instrument. A
+# security with no breakout has NO confirmation score rather than a low one, so
+# it could never satisfy the uniform-coverage rule while it carried weight. It
+# is now a gate -- tradeit.opportunity.gates.breakout_confirmation_gate --
+# reading the verdict ProfileConfig and the breakout engine already produce.
+#
+# Effective weights are now 0.3571 / 0.2857 / 0.2143 / 0.1429.
 relative_strength = 0.25
 pattern_quality = 0.2
-breakout_confirmation = 0.2
 fundamental_quality = 0.15
 volume_accumulation = 0.1
 
