@@ -538,18 +538,57 @@ class ScoringConfig(Section):
     breakout eligibility still uses it as a gate. What changed is that it no
     longer carries weight in the opportunity score.
 
-    The four surviving factors are all still **unvalidated**. Dropping the one
-    with evidence against it does not promote the others; it removes a factor
-    that was measured and failed, leaving four that have not been measured at
-    all.
+    **The four survivors are weighted equally, and that is derived rather than
+    lazy.** On 2026-09-10 the weights were re-examined against the evidence
+    instead of being left at whatever the two retirements happened to leave
+    behind -- which had put ``relative_strength`` at 36% by inheritance.
+
+    What the evidence supports is *no differentiation*:
+
+    * **No surviving factor produced an established tradeable spread** at any
+      specification tried. Every quantile spread was ``OUTLIER_DEPENDENT``,
+      ``NOT_DETECTABLE`` or ``SPREAD_NOT_ESTABLISHED``.
+    * The largest information-coefficient t-statistics among them
+      (``momentum_252`` at +3.88, ``momentum_126`` at +3.00) sit against a
+      multiple-testing hurdle of 1.90 for the twenty trials actually run, and
+      the largest of those **flipped sign across specifications**.
+    * So the *ordering* among the four is not distinguishable from noise, and
+      **ordering by noise manufactures confidence**. Equal weight is the unique
+      weighting consistent with "no factor has been shown superior to another".
+
+    Three alternatives were considered and rejected, recorded here because each
+    looks reasonable:
+
+    * **Weight by t-statistic.** The ordering it would produce is the ordering
+      of numbers that do not clear their own hurdle.
+    * **Weight by sign stability.** Only ``relative_strength`` has a proxy whose
+      sign held across all four specifications, so this concentrates the score
+      in one factor on evidence far too weak to carry it -- reproducing exactly
+      the 36% artefact this change removes.
+    * **Zero the factors whose proxies failed.** Three of the four were measured
+      only by *proxy* -- price kernels standing in for engines that have never
+      been run. ``pattern_quality``'s real detector is not distance-from-SMA, and
+      punishing a factor for its substitute's failure is not evidence about the
+      factor.
+
+    One asymmetry is worth naming because it argues against ever weighting on
+    evidence quality: ``fundamental_quality`` is the only survivor measured
+    **directly**, and it returned a null. Down-weighting it for that, while
+    leaving unmeasured factors higher, would mean **measuring a factor is
+    punished relative to leaving it alone** -- a poor property for a research
+    loop. The answer to its null is to measure the other three directly, not to
+    reshuffle weights.
+
+    Equal weight is therefore a *statement of ignorance*, held deliberately and
+    labelled as such. It is not evidence that these four are equally good.
     """
 
     weights: dict[str, float] = Field(
         default_factory=lambda: {
             "relative_strength": 0.25,
-            "pattern_quality": 0.20,
-            "fundamental_quality": 0.15,
-            "volume_accumulation": 0.10,
+            "pattern_quality": 0.25,
+            "fundamental_quality": 0.25,
+            "volume_accumulation": 0.25,
         }
     )
     min_score_to_consider: float = Field(default=0.60, ge=0, le=1)

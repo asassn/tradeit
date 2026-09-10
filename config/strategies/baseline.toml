@@ -250,10 +250,26 @@ max_candidates_per_session = 20
 # reading the verdict ProfileConfig and the breakout engine already produce.
 #
 # Effective weights are now 0.3571 / 0.2857 / 0.2143 / 0.1429.
+#
+# Equal, and derived rather than lazy. Re-examined 2026-09-10 instead of being
+# left at whatever the sector_strength and breakout_confirmation retirements
+# happened to leave behind, which had put relative_strength at 36% purely by
+# inheritance.
+#
+# No surviving factor produced an established tradeable spread at any
+# specification. The largest IC t-statistics among them (+3.88, +3.00) sit
+# against a multiple-testing hurdle of 1.90 for the trials actually run, and
+# the largest of those flipped sign. The ordering among the four is therefore
+# not distinguishable from noise, and equal weight is the only weighting
+# consistent with that. See ScoringConfig's docstring for the three
+# alternatives rejected, and docs/SIGNAL_SCOREBOARD.md for the runs.
+#
+# This is a statement of ignorance, held deliberately. It is not a claim that
+# these four are equally good.
 relative_strength = 0.25
-pattern_quality = 0.2
-fundamental_quality = 0.15
-volume_accumulation = 0.1
+pattern_quality = 0.25
+fundamental_quality = 0.25
+volume_accumulation = 0.25
 
 [sizing]
 risk_per_trade_pct = 0.005

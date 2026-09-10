@@ -430,4 +430,93 @@ carries **36%** of the score, having absorbed both retirements. And
 — the null was reported and no weight change was proposed for it, so it
 inherited weight from a factor that was removed. Neither is wrong; both are
 consequences of removing factors rather than re-deriving the remainder, and
-both are decisions still open.
+both are decisions still open. **§12 closes them.**
+
+---
+
+## §12 — the four remaining weights, re-derived — 2026-09-10
+
+§11 left `relative_strength` holding **36%** of the score, not because anything
+was measured about it but because it happened to be the largest weight when two
+other factors were removed and the remainder renormalised. That is an artefact
+of arithmetic, and an artefact carrying 36% of a scoring decision is exactly the
+kind of number this project treats as worse than no number: it will be acted on,
+and it cannot be traced to evidence.
+
+So the question was put properly. **What do the runs actually license?**
+
+### What the evidence says about each survivor
+
+| factor | measured how | best result | verdict |
+|---|---|---|---|
+| `relative_strength` | **proxy** — `momentum_21/126/252` | `momentum_252` IC t **+3.88** | largest t of the four, and it **flipped sign** across specifications; `momentum_21` stable but **negative** |
+| `pattern_quality` | **proxy** — `dist_sma_50/200`, `rsi_14` | `dist_sma_200` t **+2.58** | **no stable sign at all**; both SMA-distance kernels flipped, `rsi_14` never detectable |
+| `fundamental_quality` | **direct** | IC **−0.009**, t **−1.16** (21s); **−0.015**, t **−1.11** (63s) | not detectable, both horizons |
+| `volume_accumulation` | **proxy** — `relative_volume_20` | passed in-sample | **failed out-of-sample**, +32.7%/yr → −0.2%/yr, sign flipped |
+
+Against the multiple-testing hurdle for the **20 trials actually run**,
+|t| > **1.90** — and with the 2.0 floor the practical bar is |t| ≈ 2.0–3.9 to
+claim anything at all. **No surviving factor produced an `ESTABLISHED` tradeable
+spread at any specification tried.** Every quantile spread came back
+`OUTLIER_DEPENDENT`, `NOT_DETECTABLE` or `SPREAD_NOT_ESTABLISHED`.
+
+### The derivation
+
+The four factors are **not distinguishable from one another** on this evidence.
+Two of the three largest t-statistics flipped sign; the one that did not is
+negative; the only directly measured factor is null. There is no ordering here
+that survives its own hurdle.
+
+**Ordering by numbers that do not clear their thresholds manufactures
+confidence.** It takes noise and prints it as a ranking, and the ranking then
+looks like a finding to whoever reads the config next.
+
+So the weighting the evidence supports is **equal — 0.25 each**:
+
+| factor | before (effective) | after |
+|---|---|---|
+| `relative_strength` | 0.3571 | **0.25** |
+| `pattern_quality` | 0.2857 | **0.25** |
+| `fundamental_quality` | 0.2143 | **0.25** |
+| `volume_accumulation` | 0.1429 | **0.25** |
+
+This is a **statement of ignorance held deliberately**, not a claim that the
+four are equally good. It is a derivation because the evidence *rules out*
+differentiation, and equal weight is the only weighting consistent with that.
+
+### Three alternatives, rejected
+
+**Weight by t-statistic.** The ordering it produces is the ordering of numbers
+that do not clear their own hurdle, and its top-ranked factor is the one whose
+sign flipped. Rejected.
+
+**Weight by sign stability.** Only `relative_strength` has a proxy whose sign
+held across all four specifications — so this concentrates the score in one
+factor on evidence far too weak to carry it, which is a reconstruction of the
+36% artefact being removed. Rejected.
+
+**Zero the factors whose proxies failed.** Three of the four were measured only
+by **proxy** — price kernels standing in for engines that have never been run.
+`pattern_quality`'s real detector is not distance-from-a-moving-average, and
+`volume_accumulation`'s is not `relative_volume_20`. Punishing a factor for its
+substitute's failure is not evidence about the factor. Rejected.
+
+### The asymmetry worth naming
+
+`fundamental_quality` is the **only survivor measured directly**, and it
+returned a null. Down-weighting it for that while leaving the unmeasured factors
+higher would mean **measuring a factor is punished relative to leaving it
+alone** — which is a poor property for a research loop to have, because it makes
+ignorance the safest place for a weight to sit.
+
+The answer to its null is to **measure the other three directly**, not to
+reshuffle weights among them.
+
+### What would change this
+
+Equal weight is the correct answer *to the evidence that exists*, and it should
+not survive better evidence. It moves when a factor produces an `ESTABLISHED`
+spread from its **real** engine — pattern detection, not SMA distance;
+accumulation, not raw relative volume — out-of-sample, on a corpus whose
+survivorship gate says something other than `SURVIVOR_BIASED`. Until then, no
+factor has earned more than a quarter.
