@@ -22,9 +22,19 @@ accession is skipped, so an interrupted run continues where it stopped.
 **A few workers, because the bottleneck is latency, not bandwidth.** Measured
 sequentially: 100 issuers in 1.3 minutes, 0.78 s each, of which about 0.66 s is
 waiting on sec.gov. Sequentially the full run takes close to three hours while
-asking sec.gov for barely one request a second. Four workers finish in about
-half an hour at roughly five a second -- inside the published limit of ten, and
-a shorter window of traffic rather than a longer one.
+asking sec.gov for barely one request a second.
+
+**The rate is capped, not estimated, and that is a correction.** The first full
+run set four workers from a measured 6.25/s and had no cap. Latency improved as
+it went, throughput climbed to 11.8/s, and sec.gov answered with 889 HTTP 429s
+and then throttled the address outright -- 1,918 of 12,940 issuers were lost to
+it. A worker count is not a rate limit: it is a guess about latency, and it
+stops being true the moment latency changes.
+
+:class:`RateGate` enforces an aggregate ceiling across all workers regardless
+of how fast any single request returns. The default sits at half the published
+limit, because the cost of being slow is minutes and the cost of being rude is
+an address that stops being served.
 
 Only fetching is concurrent. Every database write happens on the main thread,
 because the session is not thread-safe and a corpus is not the place to find
@@ -39,6 +49,7 @@ import csv
 import datetime as dt
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -55,6 +66,41 @@ from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import IssuerSicObservation
 
 SOURCE = "edgar_header_sgml"
+
+#: Bodies that are not an SGML header at all.
+#:
+#: A throttle page arrives with HTTP 200 often enough to matter, and it
+#: contains no ``<ASSIGNED-SIC>`` -- which is indistinguishable from a real
+#: header that states no classification unless the body is checked. The first
+#: run could not tell them apart and its "no SIC in header" tally climbed from
+#: 1% to 18% as the throttling began, which is how the overrun was noticed.
+#: **A missing tag in an error page is not evidence that a filing lacks a SIC.**
+_HEADER_MARKERS = ("<SEC-HEADER>", "<ASSIGNED-SIC>", "STANDARD INDUSTRIAL CLASSIFICATION")
+
+
+class RateGate:
+    """An aggregate request ceiling, shared across worker threads.
+
+    Enforced rather than estimated. Workers pace themselves against a shared
+    next-slot time, so the rate holds whatever the latency does.
+    """
+
+    def __init__(self, per_second: float) -> None:
+        if per_second <= 0:
+            raise ValueError("rate must be positive")
+        self._interval = 1.0 / per_second
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next)
+            self._next = slot + self._interval
+        delay = slot - now
+        if delay > 0:
+            time.sleep(delay)
+
 
 #: (issuer_id, cik, filed_at, accession)
 PlanRow = tuple[int, str, str, str]
@@ -73,6 +119,19 @@ def main() -> int:
     ap.add_argument("--plan", required=True, help="CSV of issuer_id,cik,filed_at,accession")
     ap.add_argument("--limit", type=int, default=None, help="stop after this many fetches")
     ap.add_argument("--workers", type=int, default=4, help="concurrent fetches")
+    ap.add_argument(
+        "--rate",
+        type=float,
+        default=5.0,
+        help="hard ceiling on requests per second across all workers. SEC "
+        "publishes 10; this defaults to half of it.",
+    )
+    ap.add_argument(
+        "--backoff",
+        type=float,
+        default=2.0,
+        help="seconds to wait after a 429 or 503 before the one retry",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -108,18 +167,34 @@ def main() -> int:
             print(f"  would GET {_header_url(row[1], row[3])}")
         return 0
 
+    gate = RateGate(args.rate)
+
     def fetch(row: PlanRow) -> tuple[PlanRow, str | None, str]:
-        """One header. Runs on a worker thread and touches no database."""
-        try:
-            request = urllib.request.Request(
-                _header_url(row[1], row[3]), headers={"User-Agent": user_agent}
-            )
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return row, response.read().decode("utf-8", "replace"), "ok"
-        except urllib.error.HTTPError as error:
-            return row, None, f"http_{error.code}"
-        except Exception as error:
-            return row, None, type(error).__name__
+        """One header. Runs on a worker thread and touches no database.
+
+        A 429 or 503 is retried once after a pause. Being throttled is a
+        request to slow down, and answering it with an immediate identical
+        request is how a slowdown becomes a block.
+        """
+        for attempt in (1, 2):
+            gate.wait()
+            try:
+                request = urllib.request.Request(
+                    _header_url(row[1], row[3]), headers={"User-Agent": user_agent}
+                )
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    body = response.read().decode("utf-8", "replace")
+                if not any(marker in body for marker in _HEADER_MARKERS):
+                    return row, None, "unrecognised_body"
+                return row, body, "ok"
+            except urllib.error.HTTPError as error:
+                if error.code in (429, 503) and attempt == 1:
+                    time.sleep(args.backoff)
+                    continue
+                return row, None, f"http_{error.code}"
+            except Exception as error:
+                return row, None, type(error).__name__
+        return row, None, "retry_exhausted"
 
     tally: Counter[str] = Counter()
     started = time.time()
