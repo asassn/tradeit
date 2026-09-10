@@ -279,6 +279,36 @@ That query is correct by construction. It reads a full 9,237-bar series in
 `trading_sessions` is a materialised table, not a view, because an exchange
 calendar cannot be expressed in SQL. Rebuild it whenever the corpus is extended.
 
+### `filings` holds company-filed forms only, and that is deliberate
+
+**8,260,531 filings**, up from 3,528,865 on 2026-09-10. The addition came
+entirely from the EDGAR full-index already on disk — 129 quarters, 1994 to
+2026, 27,084,670 rows — of which the corpus had ingested 11.4%.
+
+Two rules decide what is in this table, and both change what a query means.
+
+**Ownership forms are excluded.** EDGAR lists a filing once *per filer*, and an
+ownership form has two: the reporting owner and the subject company. A Form 4
+filed by Bank of Nova Scotia about Foamex International appears in the index
+under **both** CIKs, and `filings` has `UNIQUE (accession)` — one row, one
+issuer. The corpus resolves such filings to the **subject**, because "filings
+about company X" is what a research query means. The index cannot say which of
+the two CIKs is the subject, so Forms 3/4/5, SC 13*, SC 14*, 13F and 144 are
+**not ingested from the index at all**. Those already present came from other
+sources and are attributed to the subject.
+
+**So do not count Form 4s here and conclude anything about insider activity.**
+The 396,721 Form 4 rows are whatever earlier work loaded, not a census.
+
+**Ambiguous attributions are skipped, not guessed.** Even among company-filed
+forms, 471,673 accessions appeared under more than one tracked CIK and were
+left out. A wrong issuer is read as evidence; a missing filing is read as
+absence, and absence is the safer error.
+
+**Filings exist for 40,818 tracked CIKs only.** 12,518,837 index rows belong to
+filers this corpus does not track and were skipped. This is not an EDGAR
+mirror.
+
 ### Sectors: `issuer_sic_observations`, and why the earliest filing is the wrong one
 
 **12,871 issuers carry a SIC classification**, covering **13,327 of 14,257
