@@ -42,6 +42,7 @@ same way in all four in-sample specifications.
 | `dist_from_sma_200` | pattern_quality 0.20 | trend following | IC +0.015, t +2.58 | no — flipped | not run | inconsistent |
 | `dist_from_sma_50` | pattern_quality 0.20 | trend following | IC −0.024, t −2.77 | no — flipped | not run | **contradicts its declared prior twice.** Not flipped — see §7 |
 | `rsi_14` | pattern_quality 0.20 | mean reversion | IC −0.015, t −1.70 | no — flipped | not run | never detectable |
+| `sector_strength` | sector_strength 0.10 | **strong sectors outperform** | IC −0.018, t −2.48 | yes, 2/2 — **but negative** | n/a | **hypothesis rejected.** Significant and pointing the *opposite* way |
 
 ### Factors carrying weight that have not been tested at all
 
@@ -145,3 +146,71 @@ they were found. They are now excluded and counted separately by
 `CorpusSessionData`, and recorded in the data dictionary. Treating one as a
 real print books a −100% return on a session nobody traded, and they sit
 exactly where a survivorship study is most sensitive.
+
+
+---
+
+## sector_strength, tested — 2026-09-10, code `92493ea`
+
+The factor became computable on 2026-09-09 and this is its first test. It puts
+`SectorStrengthEngine` itself on trial — the declared composite of relative and
+absolute return, relative momentum, breadth above two moving averages and
+participation — not a trailing-return proxy for it.
+
+**Universe:** 800 securities tradeable on 2015-01-02, 400 that survived and 400
+whose prices stopped, liquidity floors applied on trailing data,
+non-overlapping sampling, costs charged against the horizon's turnover.
+
+**Declared before the run:** direction POSITIVE — *securities in strong sectors
+outperform*. That is the premise behind giving the factor any weight, so it is
+the hypothesis on trial.
+
+| | 21 sessions | 63 sessions |
+|---|---|---|
+| observations | 19,524 | 6,167 |
+| dropped, no classification yet | 2.5% | 2.5% |
+| information coefficient | **−0.018** | **−0.023** |
+| IC t-statistic | **−2.48** | −1.83 |
+| spread t | +0.68 | −1.37 |
+| mean spread | +0.20% | −1.17% |
+| median spread | −0.50% | −2.50% |
+| net of costs | +0.1%/yr | −5.4%/yr |
+| verdict | `OUTLIER_DEPENDENT` | `NOT_DETECTABLE` |
+
+### The declared hypothesis is rejected
+
+**The relationship is negative at both horizons, and at 21 sessions it is
+significant** — t = −2.48, clearing both the 2.0 floor and the 0.52
+multiple-testing hurdle for two trials. The sign is consistent across horizons,
+which more of the original nine signals failed than managed.
+
+So on this window, securities in *strong* sectors slightly **underperform**.
+That is sector mean-reversion, and it is the opposite of what the weight
+assumes.
+
+**The direction is not being flipped.** `dist_from_sma_50` set that precedent
+and it holds here: a prior that reverses whenever the data disagrees is not a
+prior, and the whole value of declaring one is refusing that move. If sector
+*weakness* is to be tested as a signal, **the declaration has to precede a run
+on data not used here** — this window has now been spent.
+
+Note also that neither horizon produced an established tradeable spread, so
+even the inverted reading is not yet a trade.
+
+### What it says about the 0.10 weight
+
+The weight assumes strong sectors are worth buying. **Measured, they are not,
+and the evidence mildly favours the reverse.** That is the first factor in this
+scoreboard for which there is direct evidence *against* its declared
+specification rather than merely an absence of evidence for it.
+
+No weight has been changed. This is a decision, and it is the owner's.
+
+### A corpus limitation this surfaced
+
+A 2000–2009 window dropped **87.9%** of security-sessions for want of any
+classification in force. The cause is not the SIC fetch: **the corpus's own
+`filings` index is skewed recent**, with no filing on record before 2010 for
+nearly 10,000 of the 12,940 issuers. Fetching more headers cannot fix it, and
+any point-in-time study needing pre-2010 fundamentals or classification is
+bounded by the same gap. The 2015–2024 window drops 2.5%.
