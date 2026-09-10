@@ -42,7 +42,7 @@ same way in all four in-sample specifications.
 | `dist_from_sma_200` | pattern_quality 0.20 | trend following | IC +0.015, t +2.58 | no — flipped | not run | inconsistent |
 | `dist_from_sma_50` | pattern_quality 0.20 | trend following | IC −0.024, t −2.77 | no — flipped | not run | **contradicts its declared prior twice.** Not flipped — see §7 |
 | `rsi_14` | pattern_quality 0.20 | mean reversion | IC −0.015, t −1.70 | no — flipped | not run | never detectable |
-| `sector_strength` | sector_strength 0.10 | **strong sectors outperform** | IC −0.018, t −2.48 | yes, 2/2 — **but negative** | n/a | **hypothesis rejected.** Significant and pointing the *opposite* way |
+| `sector_strength` | sector_strength 0.10 | **strong sectors outperform** | 2000s IC +0.026 t +2.93; 2010s IC −0.018 t −2.48 | **no — reverses by decade** | n/a | **significant in both directions.** Worse than a null: the relationship inverts |
 
 ### Factors carrying weight that have not been tested at all
 
@@ -214,3 +214,63 @@ classification in force. The cause is not the SIC fetch: **the corpus's own
 nearly 10,000 of the 12,940 issuers. Fetching more headers cannot fix it, and
 any point-in-time study needing pre-2010 fundamentals or classification is
 bounded by the same gap. The 2015–2024 window drops 2.5%.
+
+
+---
+
+## sector_strength on the 2000s — 2026-09-10, code `8c31d02`
+
+The 2015–2024 test dropped 87.9% of security-sessions on a 2000–2009 window for
+want of any classification in force. Closing the filings-ingest gap took that to
+**2.7%**, so the same declared hypothesis could be put to genuinely different
+data. Same signal, same engine, same direction declared **POSITIVE**, same
+horizons, universe drawn the same way.
+
+| | 2000–2009 | 2015–2024 |
+|---|---|---|
+| observations, 21 sessions | 12,590 | 19,524 |
+| **IC, 21 sessions** | **+0.026** | **−0.018** |
+| **IC t, 21 sessions** | **+2.93** | **−2.48** |
+| IC, 63 sessions | +0.042 | −0.023 |
+| IC t, 63 sessions | +2.72 | −1.83 |
+| verdict, both horizons | `OUTLIER_DEPENDENT` | `OUTLIER_DEPENDENT` / `NOT_DETECTABLE` |
+
+### The sign reverses between decades, and both directions are significant
+
+In the 2000s strong sectors **outperformed** — which is what the weight assumes,
+at t = +2.93. In 2015–2024 they **underperformed**, at t = −2.48. Both clear the
+2.0 floor and the 0.52 two-trial hurdle. Both horizons agree within each decade
+and disagree across them.
+
+**This is worse for the factor than a null result would be.** A signal that
+measures nothing is merely useless. A signal that is significant in both
+directions depending on the decade is one whose sign you would have to know in
+advance — and knowing it in advance is the whole problem.
+
+### It corrects the previous entry
+
+The 2015–2024 run alone read as *"hypothesis rejected, and the relationship
+points the other way."* With the 2000s in hand that was **the wrong
+conclusion** — or rather, a conclusion drawn from one period and stated as
+though it were about the signal. The right statement is that
+`sector_strength` **has no stable direction**.
+
+This is also the case for the standing rule against changing a weight on one
+window. Had the weight been inverted on the 2015–2024 evidence, the 2000s would
+now be showing it inverted the wrong way.
+
+### Neither decade produced a tradeable spread
+
+Every verdict is `OUTLIER_DEPENDENT` or `NOT_DETECTABLE`: mean and median
+quantile spreads disagree in sign in three of the four runs. So even setting the
+instability aside, nothing here is a trade.
+
+### Where that leaves the 0.10 weight
+
+`sector_strength` is the only factor on this scoreboard measured on two
+independent decades. It is significant in both and consistent in neither. The
+weight assumes a direction the evidence supplies in one decade and reverses in
+the next.
+
+No weight has been changed. The decision is the owner's, and it is now the
+best-evidenced one on the board.
