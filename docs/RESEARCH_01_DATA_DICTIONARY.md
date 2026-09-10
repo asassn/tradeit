@@ -279,6 +279,41 @@ That query is correct by construction. It reads a full 9,237-bar series in
 `trading_sessions` is a materialised table, not a view, because an exchange
 calendar cannot be expressed in SQL. Rebuild it whenever the corpus is extended.
 
+### Fundamentals: a backfill with holes, and two ways to misread it
+
+`security_fundamental_facts` holds 92,022,159 rows and both of these will bite.
+
+**It is not point-in-time before roughly 2013.** `knowledge_time` begins in
+**2009** and the median gap from `period_end` to `knowledge_time` is **1,574
+days**, with 97.6% exceeding 400. SEC's XBRL datasets start around 2009 and
+restate history, so the recorded instant is when this corpus learned a fact,
+not when the market could have. Securities with an annual figure both knowable
+at the session and fresh (period end within two years):
+
+| session | securities |
+|---|---|
+| 2005-06-30 | **0** |
+| 2010-06-30 | 409 |
+| 2013-06-30 | 7,584 |
+
+**A study that ignores `knowledge_time` reads a 2016 restatement into a 2013
+decision**, and one that respects it finds nothing at all before 2013.
+
+**2,664,473 rows (2.895%) have a NULL `value`.** They cluster in concepts a
+filing tags whether or not there is an amount:
+
+```
+446,687  CommitmentsAndContingencies
+156,082  PreferredStockValue
+ 79,879  IncomeTaxExpenseBenefit
+ 42,707  Revenues
+```
+
+**NULL is not zero.** Reading one as zero puts a company with unknown equity at
+the bottom of every quality ranking, and `float(None)` will simply kill a long
+job — it ended a 32-minute run that a 30-security staging pass had not
+contained a single NULL to reveal.
+
 ### `filings` holds company-filed forms only, and that is deliberate
 
 **8,260,531 filings**, up from 3,528,865 on 2026-09-10. The addition came
