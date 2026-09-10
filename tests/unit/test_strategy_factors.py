@@ -20,7 +20,12 @@ from tradeit.strategy.factors import (
 
 WEIGHTS = StrategyConfig(name="baseline").scoring.normalised_weights()
 ALL = tuple(WEIGHTS)
-WITHOUT_SECTOR = tuple(n for n in ALL if n != "sector_strength")
+#: The exemplar is whichever weighted factor cannot be computed today.
+#: It was ``sector_strength`` until that weight was dropped on measured
+#: evidence; the invariants here are about coverage, not about which
+#: factor happens to be missing.
+UNCOMPUTABLE = "fundamental_quality"
+WITHOUT_SECTOR = tuple(n for n in ALL if n != UNCOMPUTABLE)
 
 
 def _coverage(**per_security: tuple[str, ...]) -> FactorCoverage:
@@ -56,8 +61,8 @@ class TestUniformlyMissing:
         """Scoring it zero would tighten min_score_to_consider silently."""
         coverage = _coverage(s1=WITHOUT_SECTOR, s2=WITHOUT_SECTOR)
         assert coverage.is_uniform
-        assert coverage.missing_everywhere == frozenset({"sector_strength"})
-        with pytest.raises(UncomputableFactor, match="sector_strength"):
+        assert coverage.missing_everywhere == frozenset({UNCOMPUTABLE})
+        with pytest.raises(UncomputableFactor, match=UNCOMPUTABLE):
             require_uniform_coverage(coverage)
 
     def test_the_message_names_the_threshold_it_would_distort(self) -> None:
@@ -69,8 +74,8 @@ class TestUniformlyMissing:
     def test_dropping_is_explicit_and_renormalises(self) -> None:
         coverage = _coverage(s1=WITHOUT_SECTOR, s2=WITHOUT_SECTOR)
         weights, digest, dropped = drop_uniformly_unavailable(coverage)
-        assert dropped == ("sector_strength",)
-        assert "sector_strength" not in weights
+        assert dropped == (UNCOMPUTABLE,)
+        assert UNCOMPUTABLE not in weights
         assert sum(weights.values()) == pytest.approx(1.0)
         assert digest
 
@@ -95,16 +100,23 @@ class TestUniformlyMissing:
 
 class TestReporting:
     def test_explain_separates_the_two_kinds_of_gap(self) -> None:
+        """Missing everywhere and missing patchily are different problems.
+
+        Only the first can be dropped by renormalising; the second means two
+        securities were scored on different evidence, which no arithmetic
+        rescues. The message has to tell them apart, so it needs two factors.
+        """
+        patchy = "breakout_confirmation"
         coverage = _coverage(
             s1=WITHOUT_SECTOR,
-            s2=tuple(n for n in WITHOUT_SECTOR if n != "fundamental_quality"),
+            s2=tuple(n for n in WITHOUT_SECTOR if n != patchy),
         )
         message = coverage.explain()
-        assert "unavailable for every security: sector_strength" in message
-        assert "available for some securities only: fundamental_quality" in message
+        assert f"unavailable for every security: {UNCOMPUTABLE}" in message
+        assert f"available for some securities only: {patchy}" in message
 
     def test_full_coverage_says_so_plainly(self) -> None:
-        assert "all 6 weighted factors available" in _coverage(s1=ALL).explain()
+        assert "all 5 weighted factors available" in _coverage(s1=ALL).explain()
 
     def test_unknown_names_are_not_counted_as_coverage(self) -> None:
         """A pipeline producing a feature nobody weighted has not covered anything."""
@@ -112,17 +124,17 @@ class TestReporting:
         assert coverage.missing_for(1) == frozenset(WEIGHTS)
 
 
-def test_the_corpus_today_cannot_score_sector_strength() -> None:
+def test_the_corpus_today_cannot_score_every_weighted_factor() -> None:
     """The situation this module was written for, stated as a test.
 
-    ``research-01`` holds no sector classification, so a scorer run against it
-    today would meet exactly this coverage and must refuse rather than quietly
-    score the factor zero.
+    ``fundamental_quality`` needs an engine no study has run against
+    ``research-01``, so a scorer run today would meet exactly this coverage and
+    must refuse rather than quietly score the factor zero.
     """
     coverage = _coverage(s1=WITHOUT_SECTOR, s2=WITHOUT_SECTOR, s3=WITHOUT_SECTOR)
     with pytest.raises(UncomputableFactor):
         require_uniform_coverage(coverage)
     weights, _, dropped = drop_uniformly_unavailable(coverage)
-    assert dropped == ("sector_strength",)
+    assert dropped == (UNCOMPUTABLE,)
     # The remaining five carry the whole weight, renormalised -- not 0.90.
     assert sum(weights.values()) == pytest.approx(1.0)

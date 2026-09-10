@@ -505,8 +505,33 @@ class ScoringConfig(Section):
     """Factor weights for the opportunity score.
 
     Weights are normalised on load rather than trusted to sum correctly, so a
-    config that lists six factors adding to 0.95 is not silently a different
-    strategy from one adding to 1.0.
+    config that lists five factors adding to 0.90 is not silently a different
+    strategy from one adding to 1.0. **That is also why dropping a factor needs
+    no arithmetic here**: removing its entry renormalises the rest in the same
+    proportions, and leaving the survivors at their original numbers keeps the
+    declared intent legible.
+
+    ``sector_strength`` was weighted 0.10 and was **removed on 2026-09-10, on
+    measured evidence** -- the only factor here retired for a reason rather than
+    a revision. Tested on two independent decades with the direction declared in
+    advance, it came out significant in *both* directions: strong sectors
+    outperformed in 2000-2009 at t = +2.93 and underperformed in 2015-2024 at
+    t = -2.48, with both horizons agreeing inside each decade and disagreeing
+    across them. A factor that measures nothing is useless; one that is
+    significant in both directions depending on the decade requires knowing its
+    sign in advance, which is the thing the weight was supposed to supply.
+    ``docs/SIGNAL_SCOREBOARD.md`` holds the runs.
+
+    **This does not retire sector strength as a measurement.**
+    :class:`SectorStrengthConfig`, the ``sector_strength`` table and
+    :class:`~tradeit.analytics.sectors.SectorStrengthEngine` are untouched, and
+    breakout eligibility still uses it as a gate. What changed is that it no
+    longer carries weight in the opportunity score.
+
+    The four surviving factors are all still **unvalidated**. Dropping the one
+    with evidence against it does not promote the others; it removes a factor
+    that was measured and failed, leaving four that have not been measured at
+    all.
     """
 
     weights: dict[str, float] = Field(
@@ -515,7 +540,6 @@ class ScoringConfig(Section):
             "pattern_quality": 0.20,
             "breakout_confirmation": 0.20,
             "fundamental_quality": 0.15,
-            "sector_strength": 0.10,
             "volume_accumulation": 0.10,
         }
     )

@@ -1,11 +1,17 @@
 """Which scoring factors can actually be computed, and what to do when one cannot.
 
-``ScoringConfig`` declares six weighted factors. **One of them,
-``sector_strength``, cannot be computed at all on ``research-01``: the corpus
-holds no sector classification, and its ``sectors`` table is empty.** Two more,
-``breakout_confirmation`` and ``fundamental_quality``, need engines no study
-has yet run. Together that is 45% of the declared weight resting on numbers
-nobody can produce today.
+``ScoringConfig`` declares five weighted factors, and **two of them --
+``breakout_confirmation`` and ``fundamental_quality`` -- cannot be produced on
+``research-01`` today**, because the engines they need have never been run
+against it. That is 39% of the declared weight resting on numbers nobody can
+compute.
+
+The module was written when ``sector_strength`` was the example: it carried
+0.10 and the corpus held no sector classification at all. Both halves of that
+have since changed -- the classification was built, the factor was measured on
+two decades, it came out significant in *both* directions, and the weight was
+removed. The situation it was written for outlived the example, which is the
+usual way of these things.
 
 Nothing is currently wrong, because no concrete scorer exists — the weights are
 declared, hashed into the configuration digest, and consumed by nothing. This

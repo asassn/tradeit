@@ -227,11 +227,24 @@ min_score_to_consider = 0.6
 max_candidates_per_session = 20
 
 [scoring.weights]
+# sector_strength carried 0.1 here and was removed on 2026-09-10 on measured
+# evidence: tested on two independent decades with its direction declared in
+# advance, it came out significant in BOTH directions -- strong sectors
+# outperformed in 2000-2009 at t = +2.93 and underperformed in 2015-2024 at
+# t = -2.48. See docs/SIGNAL_SCOREBOARD.md.
+#
+# The survivors keep their original numbers. Weights are normalised on load, so
+# removing an entry renormalises the rest in the same proportions and leaves
+# the declared intent legible. Effective weights are now 0.2778 / 0.2222 /
+# 0.2222 / 0.1667 / 0.1111.
+#
+# [sector_strength] below is untouched: the engine, its table and the breakout
+# eligibility gate all still use it. What changed is that it carries no weight
+# in the opportunity score.
 relative_strength = 0.25
 pattern_quality = 0.2
 breakout_confirmation = 0.2
 fundamental_quality = 0.15
-sector_strength = 0.1
 volume_accumulation = 0.1
 
 [sizing]

@@ -54,15 +54,30 @@ same way in all four in-sample specifications.
 
 **0.45 of the weight — 45% — has never been measured.** One of the three (`sector_strength`) became *computable* on 2026-09-09 but remains untested.
 
-## Scoring weights: still unchanged
+## Scoring weights: one factor retired on evidence
 
-```
-relative_strength 0.25 · pattern_quality 0.20 · breakout_confirmation 0.20
-fundamental_quality 0.15 · sector_strength 0.10 · volume_accumulation 0.10
-```
+**`sector_strength` was removed on 2026-09-10**, by the owner, on the measured
+finding below. Effective weights are now:
 
-Nothing measured justifies moving any of them. The one candidate that passed
-every in-sample gate failed out of sample decisively. See §8.
+| factor | declared | effective | validated? |
+|---|---|---|---|
+| `relative_strength` | 0.25 | **0.2778** | no |
+| `pattern_quality` | 0.20 | **0.2222** | no |
+| `breakout_confirmation` | 0.20 | **0.2222** | **never tested** |
+| `fundamental_quality` | 0.15 | **0.1667** | **never tested** |
+| `volume_accumulation` | 0.10 | **0.1111** | no |
+
+Weights normalise on load, so the survivors keep their declared numbers and the
+proportions between them are unchanged. **The strategy digest changed**, which
+is correct: this is a different strategy, and results tied to the old digest
+belong to the old one.
+
+**Dropping the failed factor does not promote the other four.** They remain
+unvalidated; what changed is that a factor which *was* measured, and failed, no
+longer carries weight. Two of the survivors have still never been tested at all.
+
+Nothing else measured justifies moving any remaining weight. The one candidate
+that passed every in-sample gate failed out of sample decisively — see §8.
 
 ## Volatility, measured as a portfolio rather than a spread — RUN
 
