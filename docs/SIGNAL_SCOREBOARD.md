@@ -48,11 +48,11 @@ same way in all four in-sample specifications.
 
 | scoring factor | weight | why not |
 |---|---|---|
-| `breakout_confirmation` | 0.20 | needs the breakout engine; this study used only price and volume kernels |
-| `fundamental_quality` | 0.15 | needs the fundamentals engine over `security_fundamental_facts` |
+| `breakout_confirmation` | 0.20 → 0.2222 | **still untested, and structurally hard to weight** — see §10 |
+| `fundamental_quality` | 0.15 → 0.1667 | **tested 2026-09-10: no detectable relationship** — see §10 |
 | `sector_strength` | 0.10 | ~~no sector classification in the corpus~~ — **resolved 2026-09-09.** `issuer_sic_observations` now classifies 12,871 issuers, covering 93.5% of priced securities, point-in-time from SEC filing headers. The factor is computable; it has still never been *tested* |
 
-**0.45 of the weight — 45% — has never been measured.** One of the three (`sector_strength`) became *computable* on 2026-09-09 but remains untested.
+**Updated 2026-09-10:** `sector_strength` was measured and retired; `fundamental_quality` has now been measured and shows nothing; `breakout_confirmation` remains untested and cannot be weighted the way the others are. See §10.
 
 ## Scoring weights: one factor retired on evidence
 
@@ -289,3 +289,82 @@ the next.
 
 No weight has been changed. The decision is the owner's, and it is now the
 best-evidenced one on the board.
+
+
+---
+
+## §10 — the last two weighted factors — 2026-09-10, code `9cf9773`
+
+### `fundamental_quality`: measured, and it shows nothing
+
+The criteria are the ones `FundamentalConfig` **already declares**, not
+criteria invented for the test: ROE ≥ 0.10, debt-to-equity ≤ 2.0, revenue
+growth ≥ 0.10, earnings growth ≥ 0.15. The signal is the fraction met, so what
+was on trial is the system's own definition of quality.
+
+| | 21 sessions | 63 sessions |
+|---|---|---|
+| liquid security-sessions | 24,026 | 7,837 |
+| with fundamentals knowable and fresh | 17,931 (74.6%) | 5,820 (74.3%) |
+| information coefficient | **−0.009** | **−0.015** |
+| IC t | **−1.16** | **−1.11** |
+| mean spread | −0.45% | −1.61% |
+| median spread | −0.28% | −0.82% |
+| verdict | `NOT_DETECTABLE` | `NOT_DETECTABLE` |
+
+**No detectable relationship at either horizon.** The sign is weakly negative
+both times — higher declared quality very slightly underperforming — but
+nowhere near the 2.0 threshold, so the honest reading is *nothing here*, not
+*quality is bad*.
+
+This is a cleaner null than `sector_strength` produced: consistent, unremarkable
+and not significant in either direction.
+
+### The fundamentals are a backfill, and that bounds every study using them
+
+`knowledge_time` on `security_fundamental_facts` begins in **2009**, and the
+median gap from `period_end` to `knowledge_time` is **1,574 days** — 97.6%
+exceed 400. SEC's XBRL datasets start around 2009 and restate history, so the
+recorded instant is when the corpus learned a fact, not when the market could
+have.
+
+Securities with an annual figure both knowable at the session and fresh:
+
+| session | securities |
+|---|---|
+| 2005-06-30 | **0** |
+| 2010-06-30 | 409 |
+| 2013-06-30 | 7,584 |
+
+**A point-in-time fundamental study before roughly 2013 is not possible on this
+corpus**, and one that ignored `knowledge_time` would be reading a 2016
+restatement into a 2013 decision. This is a constraint on `fundamental_quality`
+and on any future study that touches fundamentals.
+
+### `breakout_confirmation`: not merely untested — hard to weight at all
+
+Two findings, and the second matters more than the first.
+
+**Nothing has been computed.** `breakout_events`, `breakout_observations`,
+`breakout_labels` and `pattern_observations` are all **empty**. Testing it needs
+the Phase 4→5 pipeline run across the universe: pattern detection produces a
+boundary, `BreakoutEngine.open_event` mints an event, `advance` walks it
+session by session, and only then is there a confirmation score. That is a
+project, not a study.
+
+**It is conditional by construction.** `ConfirmationInputs` requires
+`acceptance_score` as a mandatory field — post-breakout evidence only. A
+security with no open breakout does not have a low confirmation score; **it has
+none**. So under the coverage contract in `tradeit.strategy.factors`, a slate
+containing any security without an open breakout can never have uniform
+coverage while `breakout_confirmation` carries weight.
+
+That is a design question about the weight rather than a measurement:
+`breakout_confirmation` behaves like a **gate on a subset of candidates**, not
+like a factor every security scores on. Weighting it at 0.2222 alongside four
+factors every security *can* score treats two different kinds of thing as one.
+
+**No weight change is proposed.** The measurement for `fundamental_quality` is
+a null, and the issue with `breakout_confirmation` is structural — the right
+response is a decision about how a conditional factor should enter a score, not
+a number moved.
