@@ -61,7 +61,7 @@ Live trading is disabled and stays disabled until separately authorised
   rejected rows quarantined verbatim rather than dropped.
 - **A safety interlock** that makes live trading require a deliberate,
   machine-local act rather than an environment variable.
-- **A 69-table schema** applied to PostgreSQL 16, with monthly partitioning on
+- **A 70-table schema** applied to PostgreSQL 16, with monthly partitioning on
   the high-volume tables and a drift test that fails if the ORM and the
   migrations disagree. 41 of them were validated at Phase 2 and later phases
   added the rest; the count is measured from the ORM metadata.

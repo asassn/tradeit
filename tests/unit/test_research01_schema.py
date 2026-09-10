@@ -81,12 +81,20 @@ MIGRATIONS = tuple(
     path for path in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py")) if path.stem >= "0013"
 )
 
-#: The twelve tables milestone 2 adds. Named explicitly rather than derived, so
+#: Every table the research-01 migration chain creates, listed explicitly.
+#:
+#: It said "the twelve tables milestone 2 adds" until 0018 added a thirteenth,
+#: and the count in the name was the part that decayed rather than the check.
+#: The invariant was never the number: it is that this set is written down, so
+#: that dropping a table from the ORM fails here instead of quietly shrinking
+#: the comparison. Adding one is therefore meant to require editing this list.
+#: Named explicitly rather than derived, so
 #: that deleting one from the ORM fails here instead of shrinking the check.
 RESEARCH01_TABLES = frozenset(
     {
         "issuers",
         "issuer_identifiers",
+        "issuer_sic_observations",
         "issuer_related_identities",
         "securities",
         "security_identifiers",
@@ -187,7 +195,7 @@ def _type_key(type_: Any) -> tuple[Any, ...]:
 
 
 class TestMigrationOrmDrift:
-    def test_the_migration_creates_exactly_the_twelve_new_tables(self) -> None:
+    def test_the_migrations_create_exactly_the_listed_tables(self) -> None:
         assert set(_migration_columns()) == RESEARCH01_TABLES
 
     def test_every_new_table_is_in_the_orm(self) -> None:

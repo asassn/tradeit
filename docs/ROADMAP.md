@@ -47,7 +47,7 @@ Complete technical architecture, the 41-table schema **as it stood at Phase 2**
 validated against PostgreSQL 16 with partitioning, six provider interfaces, the
 domain interface set, content-addressed reproducibility, versioned
 configuration, 22-job schedule. Later phases added to it: the current count is
-**69**, measured from `tables.py`. See [`PHASE_02.md`](PHASE_02.md) and
+**70**, measured from `tables.py`. See [`PHASE_02.md`](PHASE_02.md) and
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Phase 3 — Market analytics foundation ✅

@@ -1622,6 +1622,48 @@ class Position(Base):
     )
 
 
+class IssuerSicObservation(Base):
+    """One filing's statement of a filer's SIC code.
+
+    **Observations, not labels.** A company's SIC changes, and a single row per
+    issuer would answer "what sector is this?" while quietly getting "what
+    sector was this in 2008?" wrong -- the only version of the question a
+    backtest asks. ``sic_as_of`` reads the latest observation at or before a
+    date, which is point-in-time and gets better as more are recorded rather
+    than being overwritten.
+
+    ``sic_description`` is the SEC's own wording, kept verbatim, and empty when
+    the source stated only a code -- which the ``.hdr.sgml`` header always does.
+    Filling it from a lookup table of our own would be a different claim
+    wearing the same field.
+
+    Keyed on the issuer because SIC is assigned to a filer. A security inherits
+    its issuer's classification; it does not have one of its own.
+    """
+
+    __tablename__ = "issuer_sic_observations"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    issuer_id: Mapped[int] = mapped_column(
+        ForeignKey("issuers.issuer_id", ondelete="CASCADE"), nullable=False
+    )
+    sic_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    sic_description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    division: Mapped[str] = mapped_column(String(96), nullable=False)
+    #: The filing date. The SEC asserted this code on that day.
+    observed_on: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    #: The citation. Every row here can be traced to the document that said it.
+    accession: Mapped[str] = mapped_column(String(32), nullable=False)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("issuer_id", "accession", name="uq_issuer_sic_observation"),
+        CheckConstraint("sic_code between 100 and 9999", name="ck_issuer_sic_range"),
+        Index("ix_issuer_sic_pit", "issuer_id", "observed_on", "knowledge_time"),
+    )
+
+
 class Order(Base):
     """An order the system created. Immutable except for its status lifecycle.
 

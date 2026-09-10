@@ -1,6 +1,6 @@
 # Data Model
 
-**69 tables are defined** in `src/tradeit/storage/tables.py` and created by
+**70 tables are defined** in `src/tradeit/storage/tables.py` and created by
 `migrations/versions/` — measured from the ORM metadata, not counted by hand.
 The schema has been applied to PostgreSQL 16 and is verified by
 `tests/integration/test_phase2_schema.py`, which includes a drift check
@@ -1051,6 +1051,7 @@ Domain 1 was renamed, re-keyed or extended — all of it is load-bearing for
 |---|---|
 | `issuers` | A legal issuing entity. Carries **no** `cik`: its key lives in `issuer_identifiers` under a namespace |
 | `issuer_identifiers` | The namespaced keys that *are* this issuer — exactly one `primary`, any number of `corroborating` |
+| `issuer_sic_observations` | One filing's statement of this issuer's SIC code, with the accession that said it. **Observations, not a label** — SIC changes, and "as of 2008" is the only version of the question a backtest asks |
 | `issuer_related_identities` | Identifiers that appear to describe this issuer and have not been shown to. A separate table so an unproven key can never resolve identity |
 | `securities` | One class of securities issued by one issuer. Holds no ticker and no venue |
 | `security_identifiers` | CUSIP / ISIN / FIGI — identifiers of a *security*, kept out of the issuer namespace |

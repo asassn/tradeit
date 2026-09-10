@@ -75,6 +75,13 @@ DIVISIONS: tuple[tuple[int, int, str], ...] = (
 #:   the line is not a reason to discard the code
 #: * ``[]`` -- empty, no classification stated
 #:
+#: A sixth shape lives in a different file. EDGAR publishes a header-only
+#: ``.hdr.sgml`` beside each filing -- **893 bytes against the filing's 2.4 MB**
+#: -- and it states the code as an SGML tag, ``<ASSIGNED-SIC>3571``, with no
+#: description at all. That is the endpoint worth fetching: pulling headers out
+#: of full submissions would have moved an estimated 26 GB from sec.gov to read
+#: about 12 KB of it.
+#:
 #: A parser written against the first shape alone silently loses the other
 #: three, which are exactly the oldest filings and therefore exactly the ones a
 #: survivorship study most needs.
@@ -93,6 +100,10 @@ _BRACKETED = re.compile(r"\[\s*(?P<code>\d{3,4})\s*\]")
 #: fallen onto the following line.
 _BRACKET_OPEN = re.compile(r"\[\s*(?P<code>\d{3,4})\s*$")
 _BARE = re.compile(r"^\s*(?P<code>\d{3,4})\s*$")
+
+#: The ``.hdr.sgml`` form. Tried first because it is unambiguous and because
+#: that file is the cheap way to ask.
+_ASSIGNED = re.compile(r"<ASSIGNED-SIC>\s*(?P<code>\d{3,4})", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +147,10 @@ def parse_sic_header(text: str) -> SicClassification | None:
     the phrase can appear in the body of a filing that *discusses* SIC codes,
     and the header is the only place it is an assertion about this filer.
     """
+    assigned = _ASSIGNED.search(text)
+    if assigned is not None:
+        return _build(int(assigned.group("code")), "")
+
     line = _HEADER_LINE.search(text)
     if line is None:
         return None
@@ -154,17 +169,20 @@ def parse_sic_header(text: str) -> SicClassification | None:
         code_text = bare.group("code")
         description = ""
 
-    code = int(code_text)
+    return _build(int(code_text), description)
+
+
+def _build(code: int, description: str) -> SicClassification | None:
+    """A classification, or ``None`` when the code is not one.
+
+    The description is kept verbatim and left empty when the source gave none.
+    An absent description is not an occasion to invent one from the code: the
+    SEC's own wording is the evidence, and a lookup table of our own would be a
+    different claim wearing the same field.
+    """
     if not 100 <= code <= 9999:
         return None
     division = division_of(code)
     if division is None:
         return None
-    return SicClassification(
-        code=code,
-        # Verbatim, and empty when the filing gave none. See the module
-        # docstring: an absent description is not an occasion to invent one
-        # from the code, because the SEC's own wording is the evidence.
-        description=description,
-        division=division,
-    )
+    return SicClassification(code=code, description=description, division=division)
