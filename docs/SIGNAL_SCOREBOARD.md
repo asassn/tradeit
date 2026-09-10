@@ -49,9 +49,9 @@ same way in all four in-sample specifications.
 |---|---|---|
 | `breakout_confirmation` | 0.20 | needs the breakout engine; this study used only price and volume kernels |
 | `fundamental_quality` | 0.15 | needs the fundamentals engine over `security_fundamental_facts` |
-| `sector_strength` | 0.10 | **the corpus contains no sector classification.** This weight rides on data that does not exist |
+| `sector_strength` | 0.10 | ~~no sector classification in the corpus~~ — **resolved 2026-09-09.** `issuer_sic_observations` now classifies 12,871 issuers, covering 93.5% of priced securities, point-in-time from SEC filing headers. The factor is computable; it has still never been *tested* |
 
-**0.45 of the weight — 45% — has never been measured.**
+**0.45 of the weight — 45% — has never been measured.** One of the three (`sector_strength`) became *computable* on 2026-09-09 but remains untested.
 
 ## Scoring weights: still unchanged
 

@@ -279,6 +279,46 @@ That query is correct by construction. It reads a full 9,237-bar series in
 `trading_sessions` is a materialised table, not a view, because an exchange
 calendar cannot be expressed in SQL. Rebuild it whenever the corpus is extended.
 
+### Sectors: `issuer_sic_observations`, and why the earliest filing is the wrong one
+
+**12,871 issuers carry a SIC classification**, covering **13,327 of 14,257
+priced securities (93.5%)**. It is the only sector classification in this
+corpus, it came from SEC filing headers rather than a vendor, and it is
+point-in-time.
+
+```sql
+-- the classification in force for an issuer on a given date
+select sic_code, division, observed_on, accession
+from issuer_sic_observations
+where issuer_id = ? and observed_on <= ?
+order by observed_on desc, knowledge_time desc limit 1;
+```
+
+**Observations, not labels.** Each row is one filing's statement of the code,
+carrying the filing date and the accession that said it. A company's SIC
+changes, so "what sector is this?" and "what sector was this in 2008?" are
+different questions and only the second matters to a backtest.
+
+**Descriptions are usually empty, and that is correct.** The `.hdr.sgml` header
+states `<ASSIGNED-SIC>3571` and nothing more. The older tab-delimited headers
+carry the SEC's wording; the modern SGML ones do not. Filling the gap from a
+lookup table of our own would be a different claim wearing the same field.
+
+**A registration statement predates classification.** The first fetch took each
+issuer's *earliest* filing, on the reasoning that it gives the longest span
+over which the observation is the best available answer. For 1,283 issuers it
+returned nothing at all — and the cause was not throttling or bad parsing but
+the SEC: the earliest filing is an **S-1, SB-2, 10SB12G or REGDEX**, filed
+before a SIC code had been assigned. Re-fetching those issuers' *latest*
+filings recovered 1,214 of the 1,283.
+
+So: **the earliest filing is the wrong place to ask, for any issuer whose
+earliest filing is a registration statement.** If you extend this table, fetch a
+periodic report.
+
+**69 issuers have no SIC in any filing checked.** That is a real absence, not a
+gap in the fetch, and it should be read as `UNRESOLVED` rather than filled.
+
 ### Some bars are priced at zero, and they are not prices
 
 **11,580 raw bars across 248 securities have an open, high, low and close of
