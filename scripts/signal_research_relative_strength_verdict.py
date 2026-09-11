@@ -23,6 +23,7 @@ reported and is not one of the three criteria.
 
 from __future__ import annotations
 
+import argparse
 import csv
 import datetime as dt
 import sqlite3
@@ -47,11 +48,9 @@ from tradeit.signals.study import (
 from tradeit.strategy.config import StrategyConfig
 
 OUT = Path("/Users/ericsasson/Documents/TradeItData/out")
-TRIALS = 26
 HORIZONS = (21, 63)
 STRIDE = 21
 QUANTILE = 0.2
-SPLIT = dt.date(2005, 1, 1)
 SEED = 20260912
 #: Past the spread gate: the spread is established, whatever its economics.
 ESTABLISHED = {
@@ -63,15 +62,15 @@ ESTABLISHED = {
 IMPLAUSIBLE = 10.0
 
 
-def _load() -> list[dict[str, str]]:
+def _load(tag: str) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for k in range(4):
-        with (OUT / f"rs_observations_{k}.csv").open() as handle:
+        with (OUT / f"{tag}_observations_{k}.csv").open() as handle:
             rows.extend(csv.DictReader(handle))
     return rows
 
 
-def _median_price(ids: set[int]) -> float:
+def _median_price(ids: set[int], start: str, end: str) -> float:
     con = sqlite3.connect("file:research01.sqlite?mode=ro", uri=True)
     con.execute("PRAGMA busy_timeout=300000")
     medians = []
@@ -81,8 +80,8 @@ def _median_price(ids: set[int]) -> float:
             for (c,) in con.execute(
                 "select close from security_price_facts where security_id = ? and "
                 "adjustment_basis = 'raw' and volume > 0 and close > 0 and "
-                "session_date between '2000-01-03' and '2009-12-31'",
-                (sid,),
+                "session_date between ? and ?",
+                (sid, start, end),
             )
         ]
         if closes:
@@ -103,10 +102,15 @@ def _geometric(values: np.ndarray) -> float:
 
 
 def _study(
-    signal: list[float], outcome: list[float], dates: list[dt.date], ids: list[int], horizon: int
+    signal: list[float],
+    outcome: list[float],
+    dates: list[dt.date],
+    ids: list[int],
+    horizon: int,
+    name: str = "rs_score",
 ) -> SignalStudy:
     return SignalStudy(
-        name="rs_score",
+        name=name,
         target=StudyTarget(kind=TargetKind.FORWARD_RETURN, horizon_sessions=horizon),
         orientation=Orientation.POSITIVE,
         observations=tuple(
@@ -118,22 +122,39 @@ def _study(
 
 
 def main() -> int:
-    rows = _load()
-    hurdle = max(2.0, expected_max_of_normals(TRIALS))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tag", default="rs")
+    ap.add_argument("--qqq-column", default="rs_score")
+    ap.add_argument("--flat-column", default="rs_flat")
+    ap.add_argument("--trials", type=int, default=26)
+    ap.add_argument("--start", default="2000-01-03")
+    ap.add_argument("--end", default="2009-12-31")
+    ap.add_argument("--split", default="2005-01-01")
+    args = ap.parse_args()
+    split = dt.date.fromisoformat(args.split)
+    half_labels = (
+        f"{args.start[:4]}-{split.year - 1}",
+        f"{split.year}-{args.end[:4]}",
+    )
+    # A row carries a composite score whenever any lookback is ranked; a single
+    # lookback's percentile can be empty on the same row, and such a row is not
+    # an observation of that signal.
+    rows = [r for r in _load(args.tag) if r[args.qqq_column] and r[args.flat_column]]
+    hurdle = max(2.0, expected_max_of_normals(args.trials))
     rule = PromotionRule(
         min_observations=500, min_abs_t_statistic=hurdle, quantile_fraction=QUANTILE
     )
     costs = StrategyConfig(name="baseline").costs
-    price = _median_price({int(r["security_id"]) for r in rows})
+    price = _median_price({int(r["security_id"]) for r in rows}, args.start, args.end)
     rng = np.random.default_rng(SEED)
     print(
         f"{len(rows):,} observations across 4 samples; hurdle |t| > {hurdle:.2f} "
-        f"at {TRIALS} trials; median price ${price:,.2f}"
+        f"at {args.trials} trials; median price ${price:,.2f}"
     )
 
     # -- agreement between the two benchmarks --------------------------------
-    q = np.array([float(r["rs_score"]) for r in rows])
-    f = np.array([float(r["rs_flat"]) for r in rows])
+    q = np.array([float(r[args.qqq_column]) for r in rows])
+    f = np.array([float(r[args.flat_column]) for r in rows])
 
     moved = int(np.sum(np.abs(q - f) > 1e-9))
     print(
@@ -143,8 +164,8 @@ def main() -> int:
     )
 
     survives: dict[tuple[str, int], bool] = {}
-    for variant in ("rs_score", "rs_flat"):
-        label = "QQQ" if variant == "rs_score" else "FLAT"
+    for variant in (args.qqq_column, args.flat_column):
+        label = "QQQ" if variant == args.qqq_column else "FLAT"
         print(f"\n{'#' * 78}\nbenchmark {label}")
         for horizon in HORIZONS:
             usable = [r for r in rows if r[str(horizon)] and float(r[str(horizon)]) < IMPLAUSIBLE]
@@ -152,7 +173,7 @@ def main() -> int:
             out = [float(r[str(horizon)]) for r in usable]
             dates = [dt.date.fromisoformat(r["session_date"]) for r in usable]
             ids = [int(r["security_id"]) for r in usable]
-            study = _study(sig, out, dates, ids, horizon)
+            study = _study(sig, out, dates, ids, horizon, args.qqq_column)
             verdict, reason = study.verdict(rule, costs, average_price=price)
             ic, t = study.information_coefficient(), study.t_statistic()
             spread_t = study.spread_t_statistic(QUANTILE)
@@ -175,7 +196,10 @@ def main() -> int:
             d_arr = np.array(dates)
             overlap = max(1, horizon // STRIDE)
             halves = []
-            for name, mask in (("2000-2004", d_arr < SPLIT), ("2005-2009", d_arr >= SPLIT)):
+            for name, mask in (
+                (half_labels[0], d_arr < split),
+                (half_labels[1], d_arr >= split),
+            ):
                 ss, oo = s_arr[mask], o_arr[mask]
                 top = oo[ss >= np.quantile(ss, 1 - QUANTILE)]
                 edge = _geometric(top) - _geometric(oo)

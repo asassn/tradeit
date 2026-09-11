@@ -106,6 +106,10 @@ def run_sample(
 ) -> tuple[int, int]:
     start = dt.date.fromisoformat(args.start)
     end = dt.date.fromisoformat(args.end)
+    # Trailing history may begin before the scan window, for the warm-up
+    # only: a 250-session lookback on the window's first day needs the year
+    # before it. No outcome before ``start`` is ever computed.
+    history_from = dt.date.fromisoformat(args.history_from) if args.history_from else start
     survived, died = _arms(_spans(str(args.spans)), args.start, args.end, 250, args.cap, offset)
     universe = sorted(survived + died)
     # The default config -- lookbacks, weights, minimum universe -- with FLAT
@@ -118,8 +122,8 @@ def run_sample(
     horizons = (21, 63)
 
     t0 = time.time()
-    bench = _load(session, BENCHMARK_ID, start, end)
-    series = {sid: _load(session, sid, start, end) for sid in universe}
+    bench = _load(session, BENCHMARK_ID, history_from, end)
+    series = {sid: _load(session, sid, history_from, end) for sid in universe}
     print(
         f"sample {offset}: {len(universe)} securities loaded in {time.time() - t0:.0f}s; "
         f"benchmark {BENCHMARK} {len(bench.dates):,} sessions",
@@ -128,7 +132,7 @@ def run_sample(
 
     # Scan on the benchmark's calendar: every stride-th session after the
     # longest lookback's warm-up, stopping where the longest horizon still fits.
-    scan_days = bench.dates[keep :: args.stride]
+    scan_days = [day for day in bench.dates[keep :: args.stride] if day >= start]
     rows: list[list[object]] = []
     for day in scan_days:
         present = [sid for sid in universe if series[sid].index_of(day) is not None]
@@ -195,6 +199,12 @@ def run_sample(
                     "" if percentiles[sid].get(lb) is None else f"{percentiles[sid][lb]:.6f}"
                     for lb in lookbacks
                 ]
+                + [
+                    ""
+                    if flat_percentiles[sid].get(lb) is None
+                    else f"{flat_percentiles[sid][lb]:.6f}"
+                    for lb in lookbacks
+                ]
                 + forward
             )
     with out_path.open("w", newline="") as handle:
@@ -202,6 +212,7 @@ def run_sample(
         writer.writerow(
             ["sample", "security_id", "session_date", "rs_score", "rs_flat"]
             + [f"pct_{lb}" for lb in lookbacks]
+            + [f"pct_flat_{lb}" for lb in lookbacks]
             + [str(h) for h in horizons]
         )
         writer.writerows(rows)
@@ -222,11 +233,17 @@ def main() -> int:
     ap.add_argument("--stride", type=int, default=21)
     ap.add_argument("--offset", type=int, required=True)
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument(
+        "--history-from",
+        default=None,
+        help="load trailing bars from this date for warm-up; scan dates still begin at --start",
+    )
+    ap.add_argument("--tag", default="rs", help="output file prefix")
     args = ap.parse_args()
     session: Session = sessionmaker(
         bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
     )()
-    out = args.out or OUT / f"rs_observations_{args.offset}.csv"
+    out = args.out or OUT / f"{args.tag}_observations_{args.offset}.csv"
     run_sample(session, args.offset, args, out)
     return 0
 
