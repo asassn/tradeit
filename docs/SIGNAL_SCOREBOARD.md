@@ -520,3 +520,149 @@ spread from its **real** engine — pattern detection, not SMA distance;
 accumulation, not raw relative volume — out-of-sample, on a corpus whose
 survivorship gate says something other than `SURVIVOR_BIASED`. Until then, no
 factor has earned more than a quarter.
+
+---
+
+## §13 — `pattern_quality`, measured by its real detector — 2026-09-10
+
+§12 refused to zero this factor on the strength of its proxies failing, on the
+grounds that **punishing a factor for its substitute's failure is not evidence
+about the factor**. That left an obligation: run the real thing. This is it.
+
+Twelve enabled D1 detectors — VCP, cup-and-handle, bull flag, flat base,
+ascending triangle, pennant, high tight flag, double bottom, inverse head and
+shoulders, base-on-base, tight consolidation, breakout-retest — over a trailing
+236-bar window at every sampled session. **3,876 securities, 285,177 scan points,
+270,081 carrying a live pattern.** Direction, horizon, quantile and universe were
+[pre-registered](prereg/PATTERN_QUALITY_2026-09-10.md) and committed to git
+before the run finished.
+
+### The finding that does not depend on any statistic
+
+**Some structure was present on 99.6% of scan points**, a median of 8 concurrent
+and up to 28; a median of 5 of them live. Quality reads p25 69, median 78, p75 86
+— half the mass inside a 17-point band near the top of a 0–100 scale, because
+"best of eight" is a maximum order statistic.
+
+A factor that is defined for almost every security on almost every day, and that
+reads about 78 when it does, **cannot narrow a slate**. That is true regardless
+of what follows.
+
+### Where the corpus lied, and how it was caught
+
+The first pooled run reported a mean forward return of **+8,511,217%** and a
+quantile spread of **−1,163,218%**. Not a finding — a defect, now recorded as
+§0.7 of the data dictionary. Security 4565:
+
+```
+2005-11-09   o/h/l/c  0.0001   volume 0
+2005-11-10   o/h/l/c  92000    volume 0
+2005-11-11   o/h/l/c  0.0001   volume 0
+```
+
+Placeholder rows the vendor emits after a security stops trading — **2,245,866
+raw bars, 6.339%, across 7,582 securities**. `price_series` refuses `close <= 0`
+and serves `0.0001` happily. Requiring `volume > 0` at both endpoints removed
+10.7% of observations. **The medians were normal throughout**, which is exactly
+why the means went unchallenged as long as they did.
+
+### Three cuts, three different answers
+
+| horizon | study verdict | IC t | spread t |
+|---|---|---|---|
+| 21 | `SPREAD_NOT_ESTABLISHED` | **+2.86** | +0.16 |
+| 63 | `OUTLIER_DEPENDENT` | **+4.51** | −0.04 |
+
+The IC clears the 24-trial hurdle of 1.98 at both horizons. The spread is
+indistinguishable from zero at both. When those two disagree, the tie is broken
+by asking whether the sign survives the choice of statistic:
+
+| statistic | 21 sessions | 63 sessions |
+|---|---|---|
+| Spearman (ranks) | **+0.0056** (t +2.93) | **+0.0154** (t +4.63) |
+| Pearson (levels) | −0.0246 (t −12.81) | −0.0177 (t −5.32) |
+| Pearson winsorized 1/99 | −0.0135 (t −7.03) | −0.0065 (t −1.94) |
+| Pearson less top 0.1% | −0.0144 (t −7.47) | −0.0101 (t −3.04) |
+
+**The sign flips.** Ranks say positive and significant; levels say negative and
+more significant. Both cannot be a description of the same edge.
+
+### The aggregator matters more than expected — and this cuts *for* the factor
+
+`SignalStudy` judges quantile spreads **arithmetically**, and on this corpus the
+arithmetic cross-sectional mean is dominated by a few enormous winners —
+`signal_research` already caught it reporting a 21.9%/yr buy-and-hold for a
+decade the market spent flat. What a portfolio compounds is the **geometric**
+mean, and here the two disagree in sign:
+
+| horizon | top quintile | all candidates | bottom quintile |
+|---|---|---|---|
+| 21 | −0.19%/yr | −2.37%/yr | **−9.35%/yr** |
+| 63 | −0.23%/yr | −3.12%/yr | **−11.60%/yr** |
+
+On a compounded basis high quality looks genuinely useful — **+2.17 and +2.90
+percentage points a year over ranking at random**, bootstrap CI excluding zero at
+both horizons. The mechanism is coherent: a high-quality structure is by
+construction a *tight* one, low-quality "patterns" are volatile junk, and
+volatility drag destroys the junk even though its arithmetic mean is higher.
+
+This is recorded prominently because **it is the strongest case the factor has**,
+and it was found by testing an objection to a null rather than an objection to a
+result.
+
+### And then it dies on its own sample
+
+| horizon | 2000–2004 | 2005–2009 |
+|---|---|---|
+| 21 | **+6.45 pp/yr**, CI excludes 0 | **−1.33 pp/yr**, CI includes 0 |
+| 63 | **+8.10 pp/yr**, CI excludes 0 | **−1.13 pp/yr**, CI includes 0 |
+
+The entire geometric edge is the first half of the decade. It **reverses sign**
+in the second. `sector_strength` was retired for precisely this shape — t +2.93
+in the 2000s and −2.48 in the 2010s — and the standard does not move because a
+different factor is the one failing it.
+
+### Verdict
+
+**`pattern_quality` is not validated by its real detector.** Three independent
+reasons, any one sufficient:
+
+1. **It cannot discriminate** — present on 99.6% of scan points, reading ~78 for
+   almost everything.
+2. **Its sign depends on the statistic chosen** — Spearman positive, Pearson
+   negative, both significant.
+3. **Its only robust-looking edge is a period, not a signal** — strong in
+   2000–2004, reversed in 2005–2009.
+
+The pre-registration named exactly this outcome in advance: *"a significant t on
+the IC alone with no established spread"* was declared insufficient before the
+run, because that is what the SMA proxies produced and it did not license a
+weight then either.
+
+### What this does and does not change
+
+**The weight does not move.** §12's argument survives intact and now has a second
+worked example: down-weighting a factor *because it was measured* would mean two
+of the four are penalised for having been examined while two keep their weight by
+remaining unexamined. `pattern_quality` joins `fundamental_quality` as
+**measured and null**; `relative_strength` and `volume_accumulation` remain
+**unmeasured by their real engines**. Equal weight at 0.25 remains the only
+weighting consistent with that, and remains a statement of ignorance rather than
+a claim of equality.
+
+**A caution that now applies to every row above it.** The `SignalStudy` verdicts
+throughout this document rest on arithmetic quantile spreads. This run is the
+first demonstration that on this corpus the arithmetic and geometric readings can
+**disagree in sign**, which means a `NOT_DETECTABLE` verdict here is weaker
+evidence of absence than it looks. It does not overturn any recorded result — the
+sub-period test killed this factor on the geometric reading too — but a factor
+that failed only on an arithmetic spread deserves the geometric check before
+anyone calls it dead.
+
+### Registered and spent
+
+4 trials — quality × 2 horizons, presence × 2 horizons. Ledger **20 → 24**;
+hurdle now |t| > 1.98. `pattern_present` was tested separately and separately
+counted, so a failure of the grading question could not be quietly replaced by
+the filtering one; it returned `NOT_DETECTABLE` at 21 sessions and
+`SPREAD_NOT_ESTABLISHED` at 63.

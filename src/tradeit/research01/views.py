@@ -261,6 +261,20 @@ README: tuple[tuple[str, str, str], ...] = (
         "can be point-in-time.",
     ),
     (
+        "a bar can have a price and no trade behind it",
+        "security_price_facts",
+        "The vendor keeps emitting rows after a security stops trading, and not "
+        "only at price zero. Security 4565 alternates between a 0.0001 sentinel "
+        "and five-figure nonsense, every bar open=high=low=close and volume 0. "
+        "2,245,866 raw bars (6.339%) across 7,582 securities carry volume 0. "
+        "price_series does NOT filter these -- it refuses close <= 0, and 0.0001 "
+        "is above zero -- so the trap is live on the supported read path. Any "
+        "calculation dividing one price by another must require volume > 0 at "
+        "BOTH ends. Ignoring it produced a mean forward return of +8,511,217% in "
+        "a real study; the medians looked normal throughout, which is why the "
+        "means were believed.",
+    ),
+    (
         "valid_to is exclusive",
         "symbol_aliases",
         "The last day a security owns a ticker is valid_to minus one day. NULL "

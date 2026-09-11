@@ -72,4 +72,42 @@ WHAT WAS NOT LOOKED AT
 
 TRIALS  4 added in total: quality x 2 horizons, presence x 2 horizons.
         The pilot is not counted; it sized the run and fixed the defect.
+
+--------------------------------------------------------------------
+AMENDMENT 2 -- 2026-09-10, after the full-universe run produced
+arithmetically impossible returns.
+
+WHAT WENT WRONG
+  Pooled means read +8,511,217% and the quantile spread read
+  -1,163,218%. Not a finding -- a defect. Traced to security 4565, whose
+  bars run:
+      2005-11-09  o/h/l/c  0.0001   volume 0
+      2005-11-10  o/h/l/c  92000    volume 0
+      2005-11-11  o/h/l/c  0.0001   volume 0
+  Every bar volume 0, every bar o=h=l=c, price alternating between a
+  0.0001 sentinel and five-figure nonsense. The vendor keeps emitting
+  placeholder rows after a security stops trading. price_series refuses
+  close <= 0 and serves these.
+
+  Corpus-wide: 2,245,866 raw bars (6.339%) across 7,582 securities carry
+  volume 0; 2,059,986 of those are also o=h=l=c.
+
+THE RULE ADDED
+  A scan point is used only if BOTH endpoint bars -- session T and
+  session T+h -- have volume > 0.
+
+WHY THIS IS NOT OUTCOME-DRIVEN
+  It is a statement about whether a return exists at all, not about
+  whether patterns work. You cannot buy at a price nobody traded and sell
+  at another price nobody traded. The rule is applied identically to both
+  arms and to both horizons, it was chosen before the filtered numbers
+  were computed, and it would have been the right rule had the unfiltered
+  result been spectacular.
+
+WHAT IS NOT CLAIMED
+  This does not repair the corpus. It bounds what this study will read,
+  which is the same thing price_series does for zero-price bars. The
+  corpus-level fix is a separate decision and is not taken here.
+
+TRIALS  Unchanged at 4. The specification of the signal did not move.
 ```
