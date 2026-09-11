@@ -30,6 +30,8 @@ adjusted number twice, with the vendor's epoch still inside it.
 from __future__ import annotations
 
 import datetime as dt
+from bisect import bisect_right
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -46,6 +48,7 @@ __all__ = [
     "SplitAdjustment",
     "adjudicated_bound",
     "adjudicated_window",
+    "admit_prints",
     "known_splits",
     "price_series",
     "series_coherence",
@@ -64,6 +67,75 @@ class SplitAdjustment:
     ex_date: dt.date
     ratio: Decimal
     knowledge_time: dt.datetime
+
+
+#: One raw bar as the read paths carry it: session, open, high, low, close, volume.
+PrintRow = tuple[dt.date, Decimal, Decimal, Decimal, Decimal, Decimal]
+
+
+def admit_prints(
+    rows: Sequence[PrintRow], split_dates: Iterable[dt.date]
+) -> tuple[list[PrintRow], int]:
+    """Keep the bars that are prices; refuse the ones asserting a price nobody traded.
+
+    ``rows`` must be one security's bars in session order. Returns the admitted
+    bars and how many were refused.
+
+    **The rule.** A bar with volume is a print. A bar with **no** volume is
+    admitted only when it is an exact flat copy -- ``open = high = low = close``
+    -- of the last close that actually traded. Everything else with no volume is
+    refused: a sentinel, a spike, a new price, an intraday range nobody dealt in.
+
+    **Why not simply refuse every zero-volume bar**, which is the obvious rule and
+    was measured before being rejected. Of 2,237,807 positive-priced raw bars
+    with no volume, **1,935,200 (86.5%) are flat copies of the previous close** --
+    a quiet day on a thin stock, the vendor carrying the last price forward. And
+    of 640,333 runs of consecutive zero-volume bars, **637,214 are followed by
+    trading again**; 23,136 of those last longer than ten sessions. The
+    backtester retires a holding after a stretch of *silence*, so refusing them
+    would turn every one of those live, quiet stocks into a false delisting. A
+    carried close adds nothing and moves no mark, so it is kept.
+
+    **What is refused, and why that is the harm.** The remainder assert a price
+    with no trade behind it: 109,063 flat bars at a *new* price, 185,879 with an
+    intraday range, 11,674 jumping more than threefold, 3,792 in the
+    spike-and-back shape of security 4565 (``0.0001``, ``92000``, ``0.0001``, all on
+    zero volume). Those are what put a +8,511,217% mean return into a real study,
+    and in a backtest they are marks and stop triggers at prices nobody quoted.
+
+    **There is no threshold in this rule**, deliberately. Equality with the last
+    traded close is a fact about the bar; "within 3x of it" would be a parameter,
+    and a parameter here would decide which vendor errors count as prices.
+
+    **The anchor resets at a split.** A carried *raw* close on or after an
+    ex-date is the pre-split price repeated into a post-split session -- a
+    two-for-one would mark the holding at double its value. So after a split the
+    first admitted bar must have traded.
+    """
+    splits = sorted(set(split_dates))
+    kept: list[PrintRow] = []
+    refused = 0
+    anchor: Decimal | None = None
+    anchor_day: dt.date | None = None
+    previous: dt.date | None = None
+    for row in rows:
+        day, open_, high, low, close, volume = row
+        if previous is not None and day <= previous:
+            raise ValueError(f"bars must be in session order: {day} follows {previous}")
+        previous = day
+        if volume > 0:
+            kept.append(row)
+            anchor, anchor_day = close, day
+            continue
+        if anchor_day is not None:
+            first_split_after = bisect_right(splits, anchor_day)
+            if first_split_after < len(splits) and splits[first_split_after] <= day:
+                anchor = anchor_day = None
+        if anchor is not None and open_ == high == low == close == anchor:
+            kept.append(row)
+        else:
+            refused += 1
+    return kept, refused
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,6 +293,14 @@ def price_series(
     same rule: the corpus was sent them, keeps them, and does not serve them.
     ``include_disputed=True`` returns them, like every other exclusion here.
 
+    **So are bars asserting a price nobody traded** -- a zero-volume bar that is
+    not an exact flat copy of the last traded close. See :func:`admit_prints`
+    for the rule and the measurement that chose it over refusing every
+    zero-volume bar. A carried close *is* served, with its zero volume intact,
+    so a caller that needs to transact at a bar must still check
+    ``bar.volume > 0``: a price someone traded yesterday is not one you could
+    trade at today.
+
     **Bars dated on a day the market was closed are excluded on read, and left
     in the table.** 3,930 of them arrived before the importer learned to refuse
     them -- July 4th, Thanksgiving, Good Friday, and 2025-01-09, the national
@@ -285,9 +365,15 @@ def price_series(
 
     splits = known_splits(session, security_id, as_of=as_of, include_disputed=include_disputed)
 
+    ordered: list[PrintRow] = [(day, *latest[day]) for day in sorted(latest)]
+    if not include_disputed:
+        # On raw values, before adjustment: the anchor is a raw close, and the
+        # split reset inside the rule is what stops a pre-split close carrying
+        # into a post-split session.
+        ordered, _ = admit_prints(ordered, (split.ex_date for split in splits))
+
     out: list[AdjustedBar] = []
-    for session_date in sorted(latest):
-        o, h, low, c, v = latest[session_date]
+    for session_date, o, h, low, c, v in ordered:
         # Every split strictly AFTER this bar. A split on the bar's own date has
         # already taken effect in that day's print, so applying it again would
         # halve a price that was never doubled.

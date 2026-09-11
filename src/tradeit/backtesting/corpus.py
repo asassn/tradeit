@@ -84,7 +84,7 @@ from sqlalchemy.orm import Session
 from tradeit.core.enums import Bartimeframe, KnowledgeTimeSource
 from tradeit.core.models import OhlcvBar
 from tradeit.portfolio.cycle import EntryCandidate
-from tradeit.research01.series import adjudicated_window, known_splits
+from tradeit.research01.series import PrintRow, adjudicated_window, admit_prints, known_splits
 from tradeit.storage.tables import SecurityPriceFact
 
 __all__ = ["CandidateSource", "CorpusSessionData", "SessionBars"]
@@ -132,6 +132,9 @@ class CorpusSessionData:
     _sessions: list[dt.date] = field(default_factory=list, init=False)
     excluded_out_of_window: int = field(default=0, init=False)
     excluded_non_positive: int = field(default=0, init=False)
+    #: Zero-volume bars asserting a price nobody traded. Counted apart from the
+    #: other two because it is a different vendor failure with a different fix.
+    excluded_untraded: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         if not self.universe:
@@ -174,13 +177,13 @@ class CorpusSessionData:
 
     @property
     def bar_count(self) -> int:
-        """Raw prints held, after both exclusions."""
+        """Raw prints held, after every exclusion."""
         return sum(len(rows) for rows in self._bars.values())
 
     @property
     def excluded(self) -> int:
-        """Bars dropped for any reason, so the two counts cannot be read apart."""
-        return self.excluded_out_of_window + self.excluded_non_positive
+        """Bars dropped for any reason, so the separate counts cannot be read apart."""
+        return self.excluded_out_of_window + self.excluded_non_positive + self.excluded_untraded
 
     @property
     def session_count(self) -> int:
@@ -208,6 +211,8 @@ class CorpusSessionData:
         found: set[dt.date] = set()
         for security_id in self.universe:
             window_start, window_end = adjudicated_window(self.session, security_id)
+            splits = known_splits(self.session, security_id, as_of=as_of)
+            admitted: list[PrintRow] = []
             for row in self._rows(security_id):
                 day, open_, high, low, close, volume = row
                 if min(open_, high, low, close) <= 0:
@@ -226,11 +231,18 @@ class CorpusSessionData:
                     # valid_to is exclusive: the last owned day is the one before.
                     self.excluded_out_of_window += 1
                     continue
+                admitted.append(row)
+            # The same rule price_series applies, from the same function, so the
+            # two read paths cannot disagree about which bars are prices. They
+            # did once, over zero-priced bars, and that was the worse outcome.
+            admitted, untraded = admit_prints(admitted, (split.ex_date for split in splits))
+            self.excluded_untraded += untraded
+            for day, open_, high, low, close, volume in admitted:
                 self._bars.setdefault(day, []).append(
                     (security_id, open_, high, low, close, volume)
                 )
                 found.add(day)
-            for split in known_splits(self.session, security_id, as_of=as_of):
+            for split in splits:
                 if self.start <= split.ex_date <= self.end and split.knowledge_time <= (
                     _session_close(split.ex_date)
                 ):

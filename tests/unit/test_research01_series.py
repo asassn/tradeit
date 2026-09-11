@@ -25,6 +25,7 @@ from tradeit.research01 import (
     price_series,
     series_coherence,
 )
+from tradeit.research01.series import PrintRow, admit_prints
 from tradeit.storage.tables import (
     Issuer,
     IssuerIdentifier,
@@ -481,3 +482,177 @@ class TestNonSessionBars:
         db_session.flush()
         got = price_series(db_session, sid, as_of=dt.datetime(2022, 1, 1, tzinfo=UTC))
         assert len(got) == 3
+
+
+# -- prints nobody traded -----------------------------------------------------
+
+D = Decimal
+#: Consecutive NYSE sessions; 2021-07-05 was the Independence Day holiday.
+JULY = [
+    dt.date(2021, 7, 6),
+    dt.date(2021, 7, 7),
+    dt.date(2021, 7, 8),
+    dt.date(2021, 7, 9),
+    dt.date(2021, 7, 12),
+    dt.date(2021, 7, 13),
+    dt.date(2021, 7, 14),
+]
+
+
+def _row(day: dt.date, close: str, volume: str, *, low: str | None = None) -> PrintRow:
+    c = D(close)
+    return (day, c, c, D(low) if low is not None else c, c, D(volume))
+
+
+def _print(
+    session: Session, sid: int, day: dt.date, close: str, volume: str, *, low: str | None = None
+) -> None:
+    moment = dt.datetime.combine(day, dt.time(20), tzinfo=UTC)
+    c = D(close)
+    session.add(
+        SecurityPriceFact(
+            security_id=sid,
+            session_date=day,
+            adjustment_basis="raw",
+            event_time=moment,
+            knowledge_time=moment,
+            knowledge_time_basis="session_close",
+            knowledge_source="test",
+            open=c,
+            high=c,
+            low=D(low) if low is not None else c,
+            close=c,
+            volume=D(volume),
+            volume_adjusted=False,
+            source="test",
+        )
+    )
+
+
+class TestAdmitPrints:
+    """A zero-volume bar is served only as an exact copy of the last traded close.
+
+    The rule was chosen against measurement, and each test below is one of the
+    shapes that measurement found. Refusing every zero-volume bar was rejected
+    because 637,214 of 640,333 zero-volume runs are followed by trading again,
+    and the backtester would have read each one as a delisting.
+    """
+
+    def test_bars_that_traded_are_all_kept(self) -> None:
+        rows = [_row(JULY[0], "10", "500"), _row(JULY[1], "11", "300")]
+        assert admit_prints(rows, []) == (rows, 0)
+
+    def test_a_carried_close_is_kept(self) -> None:
+        """The 86.5% case: a quiet day on a thin stock, last price carried."""
+        rows = [_row(JULY[0], "10", "500"), _row(JULY[1], "10", "0")]
+        kept, refused = admit_prints(rows, [])
+        assert kept == rows and refused == 0
+
+    def test_a_long_quiet_run_is_kept_so_it_cannot_look_delisted(self) -> None:
+        """The backtester retires a holding after ten sessions of silence."""
+        start = dt.date(2021, 1, 4)
+        rows = [_row(start, "10", "500")] + [
+            _row(start + dt.timedelta(days=i), "10", "0") for i in range(1, 40)
+        ]
+        kept, refused = admit_prints(rows, [])
+        assert len(kept) == 40 and refused == 0
+
+    def test_a_new_price_on_no_volume_is_refused(self) -> None:
+        rows = [_row(JULY[0], "10", "500"), _row(JULY[1], "12", "0")]
+        kept, refused = admit_prints(rows, [])
+        assert [r[0] for r in kept] == [JULY[0]] and refused == 1
+
+    def test_an_untraded_intraday_range_is_refused(self) -> None:
+        """Close equal to the anchor is not enough: a low nobody dealt at would
+        trigger a stop that nothing justified."""
+        rows = [_row(JULY[0], "10", "500"), _row(JULY[1], "10", "0", low="0.0001")]
+        kept, refused = admit_prints(rows, [])
+        assert [r[0] for r in kept] == [JULY[0]] and refused == 1
+
+    def test_zero_volume_before_any_trade_is_refused(self) -> None:
+        """No traded close exists to be carried."""
+        rows = [_row(JULY[0], "10", "0"), _row(JULY[1], "10", "500")]
+        kept, refused = admit_prints(rows, [])
+        assert [r[0] for r in kept] == [JULY[1]] and refused == 1
+
+    def test_security_4565_is_refused_in_its_entirety(self) -> None:
+        """Every bar zero volume, alternating a sentinel and nonsense. Never traded."""
+        rows = [
+            _row(JULY[0], "0.0001", "0"),
+            _row(JULY[1], "92000", "0"),
+            _row(JULY[2], "0.0001", "0"),
+            _row(JULY[3], "96000", "0"),
+        ]
+        assert admit_prints(rows, []) == ([], 4)
+
+    def test_a_spike_is_refused_and_the_carry_after_it_is_judged_on_the_trade(self) -> None:
+        """The anchor is the last TRADED close, never the last served bar."""
+        rows = [
+            _row(JULY[0], "10", "500"),
+            _row(JULY[1], "0.0001", "0"),  # sentinel
+            _row(JULY[2], "10", "0"),  # carries the trade, not the sentinel
+            _row(JULY[3], "0.0001", "0"),  # carries the sentinel: refused
+        ]
+        kept, refused = admit_prints(rows, [])
+        assert [r[0] for r in kept] == [JULY[0], JULY[2]] and refused == 2
+
+    def test_a_carried_close_does_not_cross_a_split(self) -> None:
+        """A raw pre-split close repeated after a 2-for-1 would double the mark."""
+        rows = [
+            _row(JULY[0], "100", "500"),
+            _row(JULY[1], "100", "0"),  # before the split: a real carry
+            _row(JULY[2], "100", "0"),  # the ex-date: the pre-split price, stale
+            _row(JULY[3], "50", "800"),  # trading resumes post-split
+            _row(JULY[4], "50", "0"),  # a real carry again
+        ]
+        kept, refused = admit_prints(rows, [JULY[2]])
+        assert [r[0] for r in kept] == [JULY[0], JULY[1], JULY[3], JULY[4]]
+        assert refused == 1
+
+    def test_bars_out_of_order_are_an_error_not_a_guess(self) -> None:
+        rows = [_row(JULY[1], "10", "500"), _row(JULY[0], "10", "0")]
+        with pytest.raises(ValueError, match="session order"):
+            admit_prints(rows, [])
+
+
+class TestPriceSeriesRefusesWhatNobodyTraded:
+    def test_a_zero_priced_bar_is_not_served(self, db_session: Session) -> None:
+        """Existing behaviour that had no test of its own until now."""
+        sid = _security(db_session).security_id
+        _print(db_session, sid, JULY[0], "10", "500")
+        _print(db_session, sid, JULY[1], "0", "110")
+        db_session.flush()
+        bars = price_series(db_session, sid, as_of=AS_OF)
+        assert [b.session_date for b in bars] == [JULY[0]]
+
+    def test_an_untraded_price_is_not_served_and_a_carried_one_is(
+        self, db_session: Session
+    ) -> None:
+        sid = _security(db_session).security_id
+        _print(db_session, sid, JULY[0], "10", "500")
+        _print(db_session, sid, JULY[1], "92000", "0")
+        _print(db_session, sid, JULY[2], "10", "0")
+        db_session.flush()
+        bars = price_series(db_session, sid, as_of=AS_OF)
+        assert [b.session_date for b in bars] == [JULY[0], JULY[2]]
+        # Served, but still visibly untraded: a caller transacting must check.
+        assert bars[1].volume == 0
+
+    def test_an_auditor_sees_every_bar(self, db_session: Session) -> None:
+        sid = _security(db_session).security_id
+        _print(db_session, sid, JULY[0], "10", "500")
+        _print(db_session, sid, JULY[1], "92000", "0")
+        _print(db_session, sid, JULY[2], "0", "110")
+        db_session.flush()
+        bars = price_series(db_session, sid, as_of=AS_OF, include_disputed=True)
+        assert [b.session_date for b in bars] == JULY[:3]
+
+    def test_the_split_reset_uses_the_splits_the_series_knows(self, db_session: Session) -> None:
+        sid = _security(db_session).security_id
+        _print(db_session, sid, JULY[0], "100", "500")
+        _print(db_session, sid, JULY[1], "100", "0")
+        _split(db_session, sid, JULY[1], Decimal("2"))
+        _print(db_session, sid, JULY[2], "50", "800")
+        db_session.flush()
+        bars = price_series(db_session, sid, as_of=AS_OF)
+        assert [b.session_date for b in bars] == [JULY[0], JULY[2]]

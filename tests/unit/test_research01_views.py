@@ -21,7 +21,13 @@ from tradeit.core.enums import KnowledgeTimeSource
 from tradeit.research01.pit import KnowledgeTimeBasis
 from tradeit.research01.series import price_series
 from tradeit.research01.views import VIEWS, create_views
-from tradeit.storage.tables import Issuer, Security, SecurityPriceFact, SymbolAlias
+from tradeit.storage.tables import (
+    Issuer,
+    Security,
+    SecurityCorporateActionFact,
+    SecurityPriceFact,
+    SymbolAlias,
+)
 
 UTC = dt.UTC
 KNOWN = dt.datetime(2024, 1, 1, tzinfo=UTC)
@@ -255,3 +261,82 @@ class TestZeroPricedBars:
             include_disputed=True,
         )
         assert [b.session_date for b in bars] == [dt.date(2021, 7, 7)]
+
+
+class TestUntradedBars:
+    """The views apply ``admit_prints`` in SQL, and must agree with it row for row."""
+
+    DAYS = (
+        dt.date(2021, 7, 6),
+        dt.date(2021, 7, 7),
+        dt.date(2021, 7, 8),
+        dt.date(2021, 7, 9),
+        dt.date(2021, 7, 12),
+    )
+
+    def _print(
+        self, session: Session, sid: int, day: dt.date, close: str, volume: str, low: str = ""
+    ) -> None:
+        for basis in ("raw", "total"):
+            session.add(
+                SecurityPriceFact(
+                    security_id=sid,
+                    session_date=day,
+                    adjustment_basis=basis,
+                    open=Decimal(close),
+                    high=Decimal(close),
+                    low=Decimal(low or close),
+                    close=Decimal(close),
+                    volume=Decimal(volume),
+                    event_time=KNOWN,
+                    knowledge_time=KNOWN,
+                    knowledge_time_basis=KnowledgeTimeBasis.SESSION_CLOSE,
+                    knowledge_source=KnowledgeTimeSource.SYNTHETIC,
+                    source="test",
+                )
+            )
+
+    def _corpus(self, session: Session) -> int:
+        """One of every shape: trade, sentinel, carry, ranged carry, new price."""
+        sid = _security(session).security_id
+        d = self.DAYS
+        self._print(session, sid, d[0], "10", "500")
+        self._print(session, sid, d[1], "0.0001", "0")  # sentinel: refused
+        self._print(session, sid, d[2], "10", "0")  # carries the trade: served
+        self._print(session, sid, d[3], "10", "0", low="9")  # untraded range: refused
+        self._print(session, sid, d[4], "11", "0")  # new price: refused
+        session.flush()
+        return sid
+
+    def test_both_price_views_serve_only_the_trade_and_the_carry(self, built: Session) -> None:
+        sid = self._corpus(built)
+        for view in ("v_prices", "v_prices_raw"):
+            assert _days(built, view, sid) == [self.DAYS[0], self.DAYS[2]], view
+
+    def test_the_views_agree_with_price_series(self, built: Session) -> None:
+        """The point of writing the rule in SQL at all."""
+        sid = self._corpus(built)
+        bars = price_series(built, sid, as_of=dt.datetime(2026, 1, 1, tzinfo=UTC))
+        assert [b.session_date for b in bars] == _days(built, "v_prices_raw", sid)
+
+    def test_a_carry_does_not_cross_a_split_in_the_views_either(self, built: Session) -> None:
+        sid = _security(built).security_id
+        d = self.DAYS
+        self._print(built, sid, d[0], "100", "500")
+        self._print(built, sid, d[1], "100", "0")
+        built.add(
+            SecurityCorporateActionFact(
+                security_id=sid,
+                action_type="split",
+                ex_date=d[1],
+                event_time=KNOWN,
+                knowledge_time=KNOWN,
+                knowledge_source="test",
+                ratio=Decimal("2"),
+                source="test",
+            )
+        )
+        built.flush()
+        assert _days(built, "v_prices_raw", sid) == [d[0]]
+        bars = price_series(built, sid, as_of=dt.datetime(2026, 1, 1, tzinfo=UTC))
+        assert [b.session_date for b in bars] == [d[0]]

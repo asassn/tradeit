@@ -27,6 +27,11 @@ and these views were not, which is worse than either choice made consistently:
 two supported read paths disagreeing about what the corpus contains. Treating
 one as a real print books a -100% return on a session nobody traded.
 
+**And so are bars asserting a price nobody traded** -- a zero-volume bar that
+is not an exact flat copy of the last traded close. Same rule as
+:func:`tradeit.research01.series.admit_prints`, written out in SQL rather than
+approximated, and tested against the library on the same synthetic rows.
+
 ``trading_sessions`` is a materialised table rather than a view because an
 exchange calendar is not expressible in SQL. It is rebuilt on every call.
 
@@ -92,6 +97,48 @@ _LATEST = """
 """
 
 
+def _last_traded(column: str) -> str:
+    """The most recent bar before ``p`` that traded, as the view would serve it."""
+    return f"""(
+            select a.{column} from security_price_facts a
+            join trading_sessions ta on ta.session_date = a.session_date
+            where a.security_id = p.security_id
+              and a.adjustment_basis = p.adjustment_basis
+              and a.session_date < p.session_date
+              and a.volume > 0
+              and a.open > 0 and a.high > 0 and a.low > 0 and a.close > 0
+              and (w.opens is null or a.session_date >= w.opens)
+            order by a.session_date desc, a.knowledge_time desc
+            limit 1
+        )"""
+
+
+#: The rule in :func:`tradeit.research01.series.admit_prints`, in SQL. A bar
+#: with volume is a print; one without is served only as an exact flat copy of
+#: the last traded close, and never across a split. Written out rather than
+#: approximated because an approximation here would be the fourth time two read
+#: paths disagreed about what this corpus contains.
+#:
+#: The subqueries run only for zero-volume rows -- SQLite short-circuits ``or``
+#: -- so the 94% of bars that traded pay nothing for it.
+_PRINTS = f"""
+    and (
+        p.volume > 0
+        or (
+            p.open = p.close and p.high = p.close and p.low = p.close
+            and p.close = {_last_traded("close")}
+            and not exists (
+                select 1 from security_corporate_action_facts s
+                where s.security_id = p.security_id
+                  and s.action_type in ('split', 'reverse_split')
+                  and s.ex_date <= p.session_date
+                  and s.ex_date > {_last_traded("session_date")}
+            )
+        )
+    )
+"""
+
+
 def _price_view(name: str, basis: str, note: str) -> str:
     return f"""
 create view {name} as
@@ -108,6 +155,7 @@ where p.adjustment_basis = '{basis}'
   and p.open > 0 and p.high > 0 and p.low > 0 and p.close > 0
   and (w.opens is null or p.session_date >= w.opens)
   and (w.closes is null or p.session_date < w.closes)
+  {_PRINTS}
   {_LATEST}
 """
 
@@ -263,16 +311,15 @@ README: tuple[tuple[str, str, str], ...] = (
     (
         "a bar can have a price and no trade behind it",
         "security_price_facts",
-        "The vendor keeps emitting rows after a security stops trading, and not "
-        "only at price zero. Security 4565 alternates between a 0.0001 sentinel "
-        "and five-figure nonsense, every bar open=high=low=close and volume 0. "
-        "2,245,866 raw bars (6.339%) across 7,582 securities carry volume 0. "
-        "price_series does NOT filter these -- it refuses close <= 0, and 0.0001 "
-        "is above zero -- so the trap is live on the supported read path. Any "
-        "calculation dividing one price by another must require volume > 0 at "
-        "BOTH ends. Ignoring it produced a mean forward return of +8,511,217% in "
-        "a real study; the medians looked normal throughout, which is why the "
-        "means were believed.",
+        "2,245,866 raw bars (6.339%) carry volume 0. 86.5% of them are flat "
+        "copies of the previous close -- a quiet day on a thin stock -- and those "
+        "are served, because refusing them would make 23,136 live stocks look "
+        "delisted. The rest assert a price nobody traded: security 4565 "
+        "alternates 0.0001 and 92000 on zero volume. Those are refused by "
+        "price_series, the backtester and both price views alike. A served "
+        "zero-volume bar is still one nobody traded on that day: any "
+        "calculation that transacts at a bar must require volume > 0. A raw "
+        "SELECT sees every one of them.",
     ),
     (
         "valid_to is exclusive",

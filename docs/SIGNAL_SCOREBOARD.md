@@ -666,3 +666,42 @@ hurdle now |t| > 1.98. `pattern_present` was tested separately and separately
 counted, so a failure of the grading question could not be quietly replaced by
 the filtering one; it returned `NOT_DETECTABLE` at 21 sessions and
 `SPREAD_NOT_ESTABLISHED` at 63.
+
+---
+
+## §14 — the read rule changed underneath every result above — 2026-09-10
+
+§13 found security 4565 serving `0.0001` and `92000` on zero volume and left
+the fix open, because fixing it in `price_series` changes what every recorded
+result means. It is now fixed. **Every section above was computed under the old
+rule**, and this note exists so nobody compares a pre-§14 number with a post-§14
+one without knowing that.
+
+**The rule** (`tradeit.research01.series.admit_prints`, applied identically by
+`price_series`, `CorpusSessionData` and both price views): a zero-volume bar is
+served only as an exact flat copy of the last traded close, never across a split.
+**560,100 raw bars refused (1.581%) across 3,353 securities.** Full measurement
+and the rejected alternative in data dictionary §0.7.
+
+**Refusing every zero-volume bar was the obvious fix and was rejected on
+measurement.** 637,214 of 640,333 zero-volume runs are followed by trading
+again, and the backtester retires a holding after ten sessions of silence —
+blanket refusal would have delisted 23,136 live, quiet stocks. That would have
+moved the survivorship results in the pessimistic direction for a reason that
+has nothing to do with survivorship.
+
+**Which results are most exposed**, in order:
+
+1. **The survivorship backtests (§7–§8).** Refused bars cluster in failing
+   companies — exactly the population those runs exist to include — and in a
+   backtest a refused bar was a mark and a stop trigger. Most exposed, and the
+   headline 8–46 pp finding rests on them.
+2. **`relative_volume_20` (§9).** A volume ratio; the refused bars are zero-volume
+   by construction, though the carried ones that remain are too.
+3. **The price-signal studies.** Returns across a refused bar are gone; returns
+   ending on a carried close are unchanged.
+4. **`pattern_quality` (§13) least of all.** Its return endpoints already required
+   `volume > 0`; only its detector windows contained refused bars.
+
+None has been re-run yet. Until one is, its recorded number is a statement about
+the code at its recorded commit, which is what it always was.

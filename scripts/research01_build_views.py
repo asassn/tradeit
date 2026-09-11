@@ -35,7 +35,7 @@ sys.path.insert(0, "src")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from tradeit.research01.views import VIEWS, create_views
+from tradeit.research01.views import README, VIEWS, prepare_corpus
 from tradeit.storage.session import install_sqlite_busy_timeout
 
 
@@ -51,11 +51,17 @@ def main() -> int:
     if args.dry_run:
         for name in VIEWS:
             print(f"  would create {name}")
+        print(f"  would write corpus_readme ({len(README)} entries)")
         return 0
-    count = create_views(session)
-    print(f"trading_sessions written: {count:,}")
+    # prepare_corpus rather than create_views alone: this script used to rebuild
+    # the views and leave corpus_readme at whatever the last cleanup run wrote,
+    # so a new reading rule could reach the views and never reach the guide a
+    # tool reads first. The two are one question and are built together.
+    sessions, entries = prepare_corpus(session)
+    print(f"trading_sessions written: {sessions:,}")
     for name in VIEWS:
         print(f"  created {name}")
+    print(f"corpus_readme written: {entries} entries")
     return 0
 
 

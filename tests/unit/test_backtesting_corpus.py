@@ -269,3 +269,44 @@ class TestNonPositiveBars:
         assert data.excluded_out_of_window == 1
         assert data.excluded_non_positive == 0
         assert data.excluded == 1
+
+
+class TestUntradedBars:
+    """The backtester reads the same rule as ``price_series``, from the same function.
+
+    It matters more here than in a study: a served bar is a mark and a stop
+    trigger, and a bar that is *missing* is silence, which the engine retires as
+    a delisting after ten sessions.
+    """
+
+    def _untraded(self, session: Session, sid: int, day: dt.date, close: str) -> None:
+        _bar(session, sid, day, close=close)
+        session.flush()
+        fact = (
+            session.query(SecurityPriceFact)
+            .filter_by(security_id=sid, session_date=day, adjustment_basis="raw")
+            .one()
+        )
+        fact.volume = Decimal(0)
+        session.flush()
+
+    def test_an_untraded_price_is_excluded_and_counted_apart(self, db_session: Session) -> None:
+        sid = _security(db_session)
+        _bar(db_session, sid, DAY, close="100")
+        self._untraded(db_session, sid, DAY + dt.timedelta(days=1), "0.0001")
+        data = _data(db_session, sid)
+        assert data.excluded_untraded == 1
+        assert data.excluded_non_positive == 0
+        assert data.excluded == 1
+        assert data.sessions(dt.date(2020, 1, 1), dt.date(2020, 12, 31)) == [DAY]
+
+    def test_a_carried_close_stays_so_a_quiet_holding_is_not_silent(
+        self, db_session: Session
+    ) -> None:
+        sid = _security(db_session)
+        _bar(db_session, sid, DAY, close="100")
+        self._untraded(db_session, sid, DAY + dt.timedelta(days=1), "100")
+        data = _data(db_session, sid)
+        assert data.excluded_untraded == 0
+        bar = data.bars(DAY + dt.timedelta(days=1))[sid]
+        assert bar.close == Decimal("100") and bar.volume == 0

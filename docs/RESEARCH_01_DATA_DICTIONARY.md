@@ -26,9 +26,8 @@ Every one of these has produced a confident wrong answer during construction,
 most of them mine. They are listed first because a reader who stops here has
 still got the most important part.
 
-**Four of the seven are now handled by the query views in §3a, and 0.5 has been
-fixed outright. 0.7 is handled by neither a view nor `price_series`** -- it is
-the newest and currently the sharpest edge in the file. They are still described here, because a view helps only a
+**Five of the seven are now handled by the query views in §3a, and 0.5 has been
+fixed outright.** They are still described here, because a view helps only a
 caller who uses it and a raw `SELECT` still meets every trap below.
 
 **This section also lives inside the database.** `select * from corpus_readme
@@ -145,37 +144,49 @@ that is pure placeholder. Security 4565 is the worked example:
 2005-11-11   o/h/l/c  0.0001   volume 0
 ```
 
-Alternating between a `0.0001` sentinel and five-figure nonsense, every bar with
-`open = high = low = close` and **volume 0**.
+**What it cost before it was handled:** a pattern study computing forward
+returns across these bars reported a mean of **+8,511,217%**. The medians looked
+entirely normal, which is precisely why the means were believed for as long as
+they were.
 
-**`price_series` does not filter these.** It refuses `close <= 0`, and `0.0001`
-is greater than zero. So this trap is live on the supported read path as well as
-on a raw `SELECT`, which is what makes it the most dangerous entry in this
-section.
+**Now handled by `price_series`, `CorpusSessionData` and both price views
+alike**, through one rule, `tradeit.research01.series.admit_prints`:
 
-| | raw bars | share |
+> A bar with volume is a print. A bar with **no** volume is served only as an
+> exact flat copy (`open = high = low = close`) of the last close that actually
+> traded, and never across a split ex-date.
+
+**Why not simply refuse every zero-volume bar.** That was the obvious rule, and
+it was measured and rejected:
+
+| zero-volume raw bars, positive price | count | share |
 |---|---|---|
-| `volume = 0` | 2,245,866 | 6.339% |
-| `volume = 0` and `open=high=low=close` | 2,059,986 | 5.814% |
-| `close <= 0.0001` | 128,243 | 0.362% |
-| `close >= 100000` | 43,597 | 0.123% |
+| flat copy of the previous close — a quiet day on a thin stock | 1,935,200 | 86.5% |
+| has an intraday range nobody traded | 185,879 | 8.3% |
+| flat, at a *new* price | 109,063 | 4.9% |
+| jumps more than threefold from the previous bar | 11,674 | 0.5% |
+| spike-and-back, the 4565 shape | 3,792 | 0.2% |
 
-7,582 securities hold at least one. **What it costs you if you miss it:** a
-pattern study computing forward returns across these bars reported a mean of
-**+8,511,217%** and a quantile spread of **-1,163,218%**. Medians were unaffected
-and looked entirely normal, which is precisely why the means were believed for
-as long as they were.
+And of **640,333 runs** of consecutive zero-volume bars, **637,214 are followed
+by trading again** — 23,136 of them after more than ten sessions. Only 2,101 runs
+(71,185 bars) end a series. The backtester retires a holding after ten sessions
+of *silence*, so refusing every zero-volume bar would have delisted 23,136 live,
+quiet stocks — pessimism of exactly the kind this corpus's survivorship work
+exists to measure rather than invent.
 
-**The rule.** Any calculation that divides one price by another must require
-`volume > 0` at both ends. A price nobody traded at is not a price you could
-have transacted, and a return between two of them is arithmetic, not a result.
-`scripts/pattern_tradability_filter.py` is a worked implementation; on a
-full-decade study it removed 10.7% of observations.
+**Measured effect of the rule** over every raw bar: **560,100 refused (1.581%)
+across 3,353 securities**; 1,677,687 carried closes served. By decade: 1990s
+41,704 · 2000s 234,029 · 2010s 235,462 · 2020s 48,905.
 
-**Why this is not fixed in `price_series`.** Doing so would change what every
-existing result means, including results already recorded in
-`docs/SIGNAL_SCOREBOARD.md`. That is a decision to take deliberately rather than
-a side effect of documenting the trap.
+**Two things it does not do.**
+
+* **A served carry is still a day nobody traded.** It keeps a quiet stock
+  present with an unchanged mark; it is not a price you could have transacted
+  at. Anything that transacts at a bar — a fill, the endpoint of a forward return
+  — must still require `volume > 0`. The fill model already does;
+  `scripts/pattern_tradability_filter.py` shows it for a study.
+* **A raw `SELECT` sees every one of them.** Bounded on read, not deleted, like
+  every other entry in this section.
 
 ## 1. The identity spine
 
