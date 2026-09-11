@@ -710,6 +710,12 @@ the code at its recorded commit, which is what it always was.
 
 ## §15 — the survivorship gap, re-measured — 2026-09-11
 
+> **Superseded by §17.** The "robust ~50 points at recovery 0.0" below came from
+> booking bought-out companies as total losses. With each delisted holding's
+> recovery taken from its filings, the gap is −10.7 points on average and not
+> established. The rest of this section stands as the record of how that was
+> found.
+
 The headline result of the corpus effort — *excluding the companies that failed
 was worth 8 to 46 percentage points to a moving-average rule over 2000–2009* —
 was recorded only in the message of commit `823f2f3`. It is recorded here now,
@@ -930,3 +936,75 @@ made.
 
 **No result here is evidence of profitability** — the corpus gate still reads
 `SURVIVOR_BIASED`.
+
+---
+
+## §17 — the survivorship gap with each dead company's actual fate — 2026-09-12
+
+§16 classified why each dead company stopped trading. This puts that into the
+backtest: a delisted holding recovers **its last price if the company was
+bought out, zero if it went bankrupt**, and only the 17% residual keeps the old
+assumption, run at both 0.0 and 1.0. The specification — classes, recoveries,
+samples — was committed in `78caef7` before any run.
+
+### The result
+
+| sample | survivors | everybody | gap, residual 0.0 | gap, residual 1.0 |
+|---|---|---|---|---|
+| 0 | −0.10% | +0.64% | +0.74 | +0.74 |
+| 1 | +16.47% | −16.46% | −32.93 | −32.93 |
+| 2 | +29.41% | +22.51% | −6.90 | −6.90 |
+| 3 | +33.89% | +30.01% / +30.75% | −3.88 | −3.14 |
+| **mean** | | | **−10.74, sd 15.1** | **−10.56, sd 15.2** |
+
+**The bracket collapsed.** §15 put survivorship bias anywhere between about zero
+and 57 points depending on the recovery assumption. With the assumption replaced
+by evidence, the unexplained residual moves the answer by **at most 0.74 points**,
+in one sample of four.
+
+**The gap is about −11 points on average and not established.** Three samples of
+four put everybody below the survivors; one puts it above. With a standard
+deviation of 15 across four samples, t ≈ −1.4. The honest statement is that
+including the companies that died *probably* costs this rule something over the
+decade, and **this measurement cannot say how much**.
+
+**§15's robust ~50 points is retracted.** It came from booking bought-out
+companies as total losses. It was robust in the sense of repeatable, and wrong in
+the sense that mattered.
+
+### Why, measured rather than explained
+
+**Of 49 delisted exits across the four samples, 44 were buyouts** (acquired 31,
+acquisition indicated 8, extinguished 5), 2 were residual, 3 were survivors that
+went briefly silent — and **none was a bankruptcy**. The strategy was still
+holding the companies that got bought, which is unsurprising for a trend rule: a
+takeover lifts the price and keeps it there.
+
+**The strategy never held a bankrupt company at the end.** Across the four
+samples it traded bankrupt-class stocks 32 times, and every trade ended through
+its own exits — 15 time stops, 12 stop-losses, 5 partial profits. The closest any
+exit came to the stock's last price was **408 days** before it; the median was
+1,392. An 8% stop leaves a failing company long before the company leaves the
+exchange.
+
+**So for this rule the recovery assumption was never about bankruptcies.** Every
+dollar of §15's width came from what a buyout paid, which the filings state.
+What the survivorship gap still measures is the cost of *trading* the companies
+that later died, on the way down — stop-losses in stocks the survivors-only
+universe never offered — and that is small, noisy, and real.
+
+### What this does not change
+
+**The gate still reads `SURVIVOR_BIASED`**, and nothing here lifts it. That
+verdict is about coverage — the corpus holds 2.7% of the dated exits EDGAR knows
+about — and a better recovery for the exits it does hold says nothing about the
+ones it is missing.
+
+**The conclusion is specific to a rule with a stop.** A buy-and-hold rule, or one
+without a stop, would still be holding the bankrupt companies at the end, and for
+it the 4% that went bankrupt would matter a great deal. Per-stock recovery
+serves any rule; the small gap belongs to this one.
+
+**No result here is evidence of profitability.** Every arm's Sharpe ratio, in
+every sample, lies between −0.42 and +0.05; the question answered is how much
+excluding the dead flatters the rule, not whether the rule works.
