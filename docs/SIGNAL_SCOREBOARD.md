@@ -1008,3 +1008,84 @@ serves any rule; the small gap belongs to this one.
 **No result here is evidence of profitability.** Every arm's Sharpe ratio, in
 every sample, lies between −0.42 and +0.05; the question answered is how much
 excluding the dead flatters the rule, not whether the rule works.
+
+---
+
+## §18 — `relative_strength`, measured by its real engine — 2026-09-12
+
+Every earlier test of this factor used stand-ins (`momentum_21/126/252`). This
+ran `RelativeStrengthEngine` itself — `compare`, `rank_cross_section` per
+lookback, `score` — on four disjoint samples of 800 securities (400 survived,
+400 died), 207,121 observations, 2000–2009. Specification and survival criteria
+[pre-registered](prereg/RELATIVE_STRENGTH_2026-09-12.md) and committed in
+`644dcad` before any forward return existed.
+
+### Verdict: does not survive, at either horizon, under either benchmark
+
+| horizon | IC (t) | spread | geometric edge 2000–04 | 2005–09 | declared sign | verdict |
+|---|---|---|---|---|---|---|
+| 21 | −0.0021 (−0.93) | mean −2.62%, median +0.20% | +0.47%/yr | −0.96%/yr | 1 of 4 | `NOT_DETECTABLE` |
+| 63 | **+0.0129 (+3.32)** | mean −2.32%, median +0.82% | **+6.85%/yr** | −0.88%/yr | **4 of 4** | `OUTLIER_DEPENDENT` |
+
+At 63 sessions two of the three criteria come close: the IC clears the 26-trial
+hurdle of 2.01, and all four samples agree on its sign. It fails the other: the
+quantile spread is negative by mean and positive by median, and the geometric
+edge belongs entirely to 2000–2004 and reverses after. **That is §13's shape
+exactly** — `pattern_quality` failed the same way, and the standard does not move.
+
+### Why it fails: the engine blends opposite signals
+
+Diagnostics — each lookback's percentile alone, **not trials**, and so not
+promotable from this run:
+
+| lookback | engine weight | IC, 21 sessions | IC, 63 sessions |
+|---|---|---|---|
+| 20 | 0.15 | **−0.0330 (t −14.89)** | −0.0211 (t −5.43) |
+| 60 | 0.25 | −0.0144 (t −6.48) | +0.0003 (t +0.08) |
+| 120 | 0.30 | +0.0046 (t +2.09) | +0.0193 (t +4.96) |
+| 250 | 0.30 | **+0.0189 (t +8.49)** | **+0.0252 (t +6.46)** |
+
+The 20-session rank **reverses**: last month's leaders underperform next month.
+That is the best-known short-horizon result in the literature, and the
+pre-registration flagged it in advance from `momentum_21`'s stable negative sign.
+The 250-session rank carries classic twelve-month momentum. The engine gives
+40% of its weight to the two short horizons and 60% to the two long ones, and
+the composite washes out what the long ones carry.
+
+**The engine's lookback weights are a strategy parameter**, declared and never
+validated, and the evidence now says one of them points the wrong way. Changing
+them is a scoped proposition, not a consequence of this run.
+
+### The benchmark substitution, measured
+
+SPY is not in the corpus; the run used QQQ and, per amendment 1, a flat
+benchmark on the same calendar. The scores differ on 97.7% of observations —
+the engine matches each security's own sessions, so gaps make the benchmark
+matter — but the rank correlation between them is **0.9956**, and **every
+criterion lands the same way under both**. The substitution does not change the
+verdict, so SPY is not needed for it.
+
+The check that established this fired twice on the way. First it caught the
+script, which gave the benchmark too short a window and let the engine cut the
+start off gappy securities' histories. Then, with that fixed, it caught the
+pre-registration's own argument that a common benchmark cannot move a rank. Both
+are recorded in the registration.
+
+### Where this leaves the weights
+
+`relative_strength` joins `pattern_quality` and `fundamental_quality` as
+**measured by its real engine and null**. `volume_accumulation` is now the only
+weighted factor never measured directly. §12's reasoning holds, and holds
+harder: three measured nulls and one unmeasured factor is still no evidence
+that any factor beats another, so **the weights stay equal at 0.25**.
+
+### The lead, and why it is not a finding
+
+The 250-session component alone (t +6.46 at 63 sessions) is the strongest single
+number any factor has produced here. **It is a diagnostic from a run registered
+for the composite**, it was looked at after the fact, and on this decade it can
+no longer be tested cleanly. The honest next test pre-registers it alone and runs
+it on **2010–2019**, data this study never read — which is how
+`relative_volume_20`'s in-sample pass was exposed as nothing.
+
+**Ledger: 24 → 26 trials.** No result here is evidence of profitability.
