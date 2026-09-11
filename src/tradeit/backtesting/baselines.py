@@ -207,6 +207,7 @@ def build_engine(
     risk_free_rate: float,
     delisting_after_sessions: int,
     delisting_recovery: Decimal,
+    delisting_recovery_by_instrument: Mapping[int, Decimal] | None = None,
 ) -> EventDrivenEngine:
     """Assemble the live components behind a simulated venue.
 
@@ -242,4 +243,5 @@ def build_engine(
         manifest=manifest,
         delisting_after_sessions=delisting_after_sessions,
         delisting_recovery=delisting_recovery,
+        delisting_recovery_by_instrument=dict(delisting_recovery_by_instrument or {}),
     )

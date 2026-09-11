@@ -130,6 +130,7 @@ def _engine(
     exits: ExitConfig | None = None,
     delisting_after: int = 20,
     recovery: str = "1",
+    recovery_by: dict[int, Decimal] | None = None,
 ) -> EventDrivenEngine:
     sizing = SizingConfig()
     risk = RiskConfig()
@@ -156,6 +157,7 @@ def _engine(
         manifest=_manifest(),
         delisting_after_sessions=delisting_after,
         delisting_recovery=Decimal(recovery),
+        delisting_recovery_by_instrument=recovery_by or {},
     )
 
 
@@ -404,7 +406,14 @@ class TestCorporateActions:
 class TestDelisting:
     """A universe containing companies that failed holds positions that stop."""
 
-    def _run(self, *, recovery: str, after: int = 3, silence: int = 6) -> object:
+    def _run(
+        self,
+        *,
+        recovery: str,
+        after: int = 3,
+        silence: int = 6,
+        recovery_by: dict[int, Decimal] | None = None,
+    ) -> object:
         days = _days(4 + silence)
         bars: dict[dt.date, dict[int, OhlcvBar]] = {
             day: {7: _bar(7, day, open_="100", close="100")} for day in days[:4]
@@ -413,7 +422,7 @@ class TestDelisting:
         for day in days[4:]:
             bars[day] = {9: _bar(9, day, open_="10", close="10")}
         data = _Script(bars, {days[0]: [_candidate(7, "100", "95")]})
-        return _engine(data, delisting_after=after, recovery=recovery).run(
+        return _engine(data, delisting_after=after, recovery=recovery, recovery_by=recovery_by).run(
             _spec(days=len(days) + 1)
         )
 
@@ -451,6 +460,36 @@ class TestDelisting:
         assert sold_trade.exit_price == Decimal(100)
         assert wiped_trade.exit_price == Decimal(0)
         assert wiped_trade.net_pnl < sold_trade.net_pnl
+
+    def test_a_named_holding_takes_its_own_recovery(self) -> None:
+        """An acquisition pays the last price whatever the fallback assumes."""
+        acquired = self._run(recovery="0", recovery_by={7: Decimal(1)})
+        trade = next(
+            t
+            for t in acquired.trades
+            if t.exit_reason == str(ExitReason.DELISTED_EXIT)  # type: ignore[attr-defined]
+        )
+        assert trade.exit_price == Decimal(100)
+
+    def test_an_unnamed_holding_falls_back_to_the_stated_assumption(self) -> None:
+        """Instrument 9 is named; the holding is 7, so the scalar applies."""
+        result = self._run(recovery="0", recovery_by={9: Decimal(1)})
+        trade = next(
+            t
+            for t in result.trades
+            if t.exit_reason == str(ExitReason.DELISTED_EXIT)  # type: ignore[attr-defined]
+        )
+        assert trade.exit_price == Decimal(0)
+
+    def test_an_empty_mapping_is_the_previous_behaviour(self) -> None:
+        plain = self._run(recovery="0.5")
+        mapped = self._run(recovery="0.5", recovery_by={})
+        assert plain.trades == mapped.trades  # type: ignore[attr-defined]
+
+    @pytest.mark.parametrize("bad", ["-0.1", "1.5"])
+    def test_a_recovery_outside_zero_to_one_is_refused(self, bad: str) -> None:
+        with pytest.raises(ValueError, match="must lie in"):
+            self._run(recovery="1", recovery_by={7: Decimal(bad)})
 
     def test_a_total_loss_shows_up_in_the_equity_curve(self) -> None:
         wiped = self._run(recovery="0")

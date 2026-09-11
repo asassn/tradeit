@@ -90,6 +90,43 @@ def _arms(
     return thin(survived, cap), thin(died, cap)
 
 
+#: What a delisted holding recovered, by what the filings say ended it
+#: (``SIGNAL_SCOREBOARD.md`` §16). Specified before the first run that used it.
+#:
+#: * **Bought out -- 1.0.** Acquired, acquisition indicated, or a Form 15
+#:   certifying no public holders: the holders were paid, and a stock trades at
+#:   the deal price into the close, so its last print is the consideration.
+#: * **Bankrupt -- 0.0**, confirmed by the filing's own text. The last print of a
+#:   bankrupt stock is usually pennies already, so zero moves little money; it
+#:   is the honest number regardless.
+#: * **Everything else -- the stated ``--delisting-recovery``**: kept reporting,
+#:   distress, unexplained deregistration, unresolved, and anything the
+#:   classification does not cover. Running at 0.0 and 1.0 brackets only this
+#:   17% residual instead of the whole died arm.
+#:
+#: A **survivor** that goes silent long enough to trip the delisting rule is set
+#: to 1.0 as well: its series demonstrably continues past the window, so the
+#: silence was not a death, and booking it at the residual's zero would charge
+#: the honest arm for a company that lived.
+PAID = frozenset({"acquired", "acquisition_indicated", "extinguished"})
+WIPED_OUT = frozenset({"bankrupt"})
+
+
+def _recovery_map(path: str, survived: list[int]) -> tuple[dict[int, Decimal], dict[int, str]]:
+    """(security -> recovery, security -> the class that decided it)."""
+    recovery: dict[int, Decimal] = {sid: Decimal(1) for sid in survived}
+    label: dict[int, str] = dict.fromkeys(survived, "survived")
+    with open(path) as handle:
+        for row in csv.DictReader(handle):
+            sid, cause = int(row["security_id"]), row["cause"]
+            label[sid] = cause
+            if cause in PAID:
+                recovery[sid] = Decimal(1)
+            elif cause in WIPED_OUT:
+                recovery[sid] = Decimal(0)
+    return recovery, label
+
+
 def _manifest(config: StrategyConfig, label: str, bars: int) -> RunManifest:
     now = dt.datetime.now(dt.UTC)
     return RunManifest(
@@ -145,6 +182,7 @@ def _run(
         risk_free_rate=args.risk_free,
         delisting_after_sessions=args.delisting_after,
         delisting_recovery=args.delisting_recovery,
+        delisting_recovery_by_instrument=args.recovery_by,
     )
     t0 = time.time()
     result = engine.run(spec)
@@ -152,7 +190,7 @@ def _run(
     return result, data
 
 
-def _report(label: str, result: BacktestResult) -> None:
+def _report(label: str, result: BacktestResult, classes: dict[int, str] | None = None) -> None:
     metrics = result.metrics
     delisted = [t for t in result.trades if t.exit_reason == str(ExitReason.DELISTED_EXIT)]
     print(f"\n{label}")
@@ -167,6 +205,14 @@ def _report(label: str, result: BacktestResult) -> None:
     print(f"  win rate       {metrics.win_rate:>9.2%}")
     print(f"  trades         {metrics.trade_count:>9,}")
     print(f"  delisted exits {len(delisted):>9,}")
+    if classes and delisted:
+        by: dict[str, list[Decimal]] = {}
+        for trade in delisted:
+            by.setdefault(classes.get(trade.instrument_id, "unclassified"), []).append(
+                trade.net_pnl
+            )
+        for cause, pnls in sorted(by.items()):
+            print(f"    {cause:<26}{len(pnls):>4}  net P&L {sum(pnls):>12,.0f}")
 
 
 def main() -> int:
@@ -186,6 +232,13 @@ def main() -> int:
     ap.add_argument("--delisting-after", type=int, default=10)
     ap.add_argument("--delisting-recovery", type=Decimal, required=True)
     ap.add_argument(
+        "--recovery-map",
+        default=None,
+        help="exit_causes.csv from research01_exit_causes.py. Bought-out holdings "
+        "recover 1.0 and confirmed bankruptcies 0.0; --delisting-recovery then "
+        "applies only to the residual the filings do not explain.",
+    )
+    ap.add_argument(
         "--offset",
         type=int,
         default=0,
@@ -203,14 +256,26 @@ def main() -> int:
     )
     print(f"universe {args.start} .. {args.end}  (sample offset {args.offset})")
     print(f"  survivors {len(survived):,}   died {len(died):,}")
-    print(f"  delisting recovery assumption: {args.delisting_recovery}")
+    classes: dict[int, str] | None = None
+    args.recovery_by = {}
+    if args.recovery_map:
+        args.recovery_by, classes = _recovery_map(args.recovery_map, survived)
+        mix: dict[str, int] = {}
+        for sid in died:
+            cause = classes.get(sid, "unclassified")
+            key = "paid" if cause in PAID else "bankrupt" if cause in WIPED_OUT else "residual"
+            mix[key] = mix.get(key, 0) + 1
+        print(f"  died arm by cause: {mix}")
+        print(f"  delisting recovery: paid 1.0, bankrupt 0.0, residual {args.delisting_recovery}")
+    else:
+        print(f"  delisting recovery assumption: {args.delisting_recovery}")
     print()
 
     survivors_only, _ = _run(session, config, survived, "survivors", args)
     everybody, _ = _run(session, config, sorted(survived + died), "everybody", args)
 
-    _report("SURVIVORS ONLY  (the biased view)", survivors_only)
-    _report("EVERYBODY       (survivorship-honest)", everybody)
+    _report("SURVIVORS ONLY  (the biased view)", survivors_only, classes)
+    _report("EVERYBODY       (survivorship-honest)", everybody, classes)
 
     a, b = survivors_only.metrics, everybody.metrics
     if a is not None and b is not None:

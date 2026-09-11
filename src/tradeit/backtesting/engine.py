@@ -183,7 +183,31 @@ class EventDrivenEngine:
     #: validates and never reproduces, which is fabricated provenance wearing
     #: the shape of the real thing.
     manifest: RunManifest
+    #: Per-instrument recovery, overriding :attr:`delisting_recovery` for the
+    #: holdings it names.
+    #:
+    #: Exists because the single number above had to cover two opposite fates.
+    #: Classified from EDGAR (``SIGNAL_SCOREBOARD.md`` §16), 78.8% of the
+    #: securities whose prices stopped in 2000-2009 were bought out and 4.0%
+    #: went bankrupt -- so a bracket of 0.0 to 1.0 applied to all of them spent
+    #: most of its width on companies whose fate the filings state. A caller
+    #: with evidence names each holding; the scalar remains the stated
+    #: assumption for everything the evidence does not reach. Empty by default,
+    #: which is exactly the previous behaviour.
+    delisting_recovery_by_instrument: Mapping[int, Decimal] = field(default_factory=dict)
     name: str = "event_driven"
+
+    def __post_init__(self) -> None:
+        for instrument_id, recovery in self.delisting_recovery_by_instrument.items():
+            if not Decimal(0) <= recovery <= Decimal(1):
+                raise ValueError(
+                    f"delisting recovery for instrument {instrument_id} is {recovery}; it is "
+                    "a fraction of the last quoted price and must lie in [0, 1]"
+                )
+
+    def recovery_for(self, instrument_id: int) -> Decimal:
+        """The fraction of its last price a delisted holding recovers."""
+        return self.delisting_recovery_by_instrument.get(instrument_id, self.delisting_recovery)
 
     def run(self, spec: BacktestSpec) -> BacktestResult:
         state = _RunState(spec)
@@ -299,7 +323,7 @@ class EventDrivenEngine:
             last = state.last_prices.get(instrument_id, lot.entry_price)
             state.close_at(
                 instrument_id=instrument_id,
-                price=last * self.delisting_recovery,
+                price=last * self.recovery_for(instrument_id),
                 exit_date=session_date,
                 reason=ExitReason.DELISTED_EXIT,
             )
