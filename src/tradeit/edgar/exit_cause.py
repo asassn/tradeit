@@ -114,6 +114,20 @@ DEREGISTRATION_WINDOW = (180, 365)
 EXTINGUISHED_HOLDERS = 1
 
 _POINTERS = frozenset({"DEFM14A", "DEFM14C", "SC TO-T", "SC 14D9", "SC 13E3", "425"})
+#: The pointers addressed to the *shareholders* -- a vote on a merger, a tender
+#: for their shares, a going-private schedule. A 425 is excluded: it is deal
+#: communication, often the acquirer's, and says nothing about who is paid.
+#:
+#: They matter because a bankruptcy item says what kind of proceeding a filing
+#: reports, never **whose**: the legacy item 3 covers "the registrant or its
+#: parent". Conning's 1999 8-Ks disclosed its parent GenAmerica's insurance
+#: receivership; MetLife then tendered for Conning's shares in March 2000 and
+#: the holders were paid. Nobody tenders for equity a bankruptcy has wiped out,
+#: so an offer to shareholders *after* the bankruptcy item overrides it -- and
+#: across 1,737 securities that happens exactly once, which is recorded rather
+#: than assumed. An offer *before* the item is a deal that failed first: seven
+#: of those, Edge Petroleum's collapsed Chaparral merger among them.
+_SHAREHOLDER_OFFERS = frozenset({"DEFM14A", "DEFM14C", "SC TO-T", "SC 14D9", "SC 13E3"})
 _LATE = frozenset({"NT 10-K", "NT 10-Q", "NT 10-K405", "NT 20-F"})
 _DEREGISTRATION = frozenset(
     {"15-12B", "15-12G", "15-15D", "15F-12B", "15F-12G", "15F-15D", "25", "25-NSE"}
@@ -178,6 +192,7 @@ def classify_exit(
     texts = bankruptcy_text or {}
     listed = 0
     pointers: list[str] = []
+    offers: list[dt.date] = []
     late: list[str] = []
     dereg: list[str] = []
     later_periodic: list[dt.date] = []
@@ -188,6 +203,8 @@ def classify_exit(
             listed += 1
         if form in _POINTERS and _within(day, stop, POINTER_WINDOW):
             pointers.append(f"{form} {day}")
+            if form in _SHAREHOLDER_OFFERS:
+                offers.append(day)
         if form in _LATE and _within(day, stop, DISTRESS_WINDOW):
             late.append(f"{form} {day}")
         if form in _DEREGISTRATION and _within(day, stop, DEREGISTRATION_WINDOW):
@@ -198,6 +215,7 @@ def classify_exit(
             recent_periodic = True
 
     bankrupt: list[str] = []
+    bankrupt_dates: list[dt.date] = []
     doubted: list[str] = []
     completion: list[str] = []
     delisting_notice: list[str] = []
@@ -210,6 +228,7 @@ def classify_exit(
             agrees = texts.get(header.accession)
             if agrees is True:
                 bankrupt.append(label)
+                bankrupt_dates.append(header.filing_date)
             elif agrees is False:
                 doubted.append(f"header declares bankruptcy, document does not: {label}")
             else:
@@ -255,6 +274,16 @@ def classify_exit(
             eightks_read=read,
         )
 
+    if bankrupt and offers and max(offers) > min(bankrupt_dates):
+        # An offer to the shareholders after the proceeding: whoever's
+        # proceeding it was, the equity was bought. Judged on the acquisition
+        # evidence below, with the bankruptcy item kept as a conflict.
+        doubted.extend(
+            f"bankruptcy item precedes an offer to shareholders "
+            f"(may concern a parent or subsidiary): {label}"
+            for label in bankrupt
+        )
+        bankrupt = []
     if bankrupt:
         # The filing states it; that is as direct as a header gets.
         return finding(

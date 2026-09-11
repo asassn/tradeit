@@ -33,27 +33,42 @@ __all__ = ["bankruptcy_heading_present", "form15_holders_of_record", "plain_text
 _TAGS = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")
 
-#: "Item 1.03 Bankruptcy or Receivership" (2004 scheme) and "Item 3. Bankruptcy
-#: or Receivership" (legacy) -- as filers actually write them, which the first
-#: version of this pattern did not allow for. Measured on the first three
-#: headers it "contradicted", two were real bankruptcies it misread:
+#: What a filing must say for its bankruptcy header to be believed. **Not an
+#: exact heading** -- that was tried twice and was wrong both times. Of the
+#: fifteen bankruptcy headers the second version "contradicted" across the
+#: full died population, ten were real bankruptcies written in ways it did not
+#: anticipate:
 #:
-#: * Kentucky Electric Steel, 2003: "Item 3. Bankruptcy **and** Receivership";
-#: * Federal-Mogul, 2007: "Item 1.03 **and Item 8.01**. Bankruptcy or
-#:   Receivership and Other Events".
+#: * Webvan, Bio-Plexus: "Item 3. Bankruptcy." -- no "or Receivership";
+#: * Winstar: "BANKRUPTCY OR RECEIVORSHIP" -- a typo;
+#: * Kmart: "**Item 2.** Bankruptcy or Receivership" -- the wrong number;
+#: * Luminant: "Item 3." with no title at all, then the petition;
+#: * Kentucky Electric Steel, Federal-Mogul: "and", and a list of items.
 #:
-#: So the connective may be *or*, *and* or *&*, and the item number may head a
-#: **list** -- "Item 1.03 and Item 8.01" -- joined by *and*, a comma or *&*.
-#: Any *other* ``item N`` between number and title is a different item, and
-#: blocks the match: "Item 3. Not applicable. Item 5. Other Events ... no
-#: bankruptcy or receivership" is not a heading.
-_BANKRUPTCY = re.compile(
+#: So a document confirms a bankruptcy in either of two ways. An item-3 or
+#: item-1.03 heading whose title begins with *bankrupt* -- the number may head a
+#: list ("Item 1.03 and Item 8.01"), and the gap may not cross a different
+#: item. **Or** the company stating that a petition was filed under Chapter 7
+#: or 11, which is what a bankruptcy *is*, whatever the heading says. Legal
+#: boilerplate -- CFI ProServices' merger agreement, "subject to laws of
+#: general application relating to bankruptcy, insolvency" -- is neither, and
+#: stays refused.
+_BANKRUPTCY_HEADING = re.compile(
     r"item\s*(?:1\s*\.\s*03|3)\b"
     r"(?:\s*(?:,|and|&)\s*item\s*\d+(?:\s*\.\s*\d+)?)*"
     r"(?:(?!item\s*\d).){0,40}?"
-    r"bankruptcy\s*(?:or|and|&)\s*receivership",
+    r"\bbankrupt",
     re.IGNORECASE,
 )
+_PETITION = re.compile(
+    r"(?:voluntary|involuntary)\s+petitions?|petitions?\s+for\s+(?:relief|reorganization)"
+    r"|filed\s+(?:a\s+)?petitions?",
+    re.IGNORECASE,
+)
+_CHAPTER = re.compile(r"chapter\s+(?:7|11)\b", re.IGNORECASE)
+#: How far apart "voluntary petition" and "Chapter 11" may sit and still be
+#: one statement. A sentence, roughly; two sentences apart is two claims.
+_PETITION_SPAN = 200
 
 _HOLDERS = re.compile(
     r"approximate\s+number\s+of\s+holders\s+of\s+record.{0,80}?date\s*:?\s*(.{0,40})",
@@ -95,8 +110,20 @@ def _without_header(submission: str) -> str:
 
 
 def bankruptcy_heading_present(document: str) -> bool:
-    """Does the filing's own text carry a bankruptcy-or-receivership item heading?"""
-    return bool(_BANKRUPTCY.search(plain_text(_without_header(document))))
+    """Does the filing's own text say a bankruptcy happened?
+
+    True for a bankruptcy-titled item-3 or item-1.03 heading, or for a stated
+    petition under Chapter 7 or 11 within one statement. See the constants
+    above for why an exact heading is not the test.
+    """
+    text = plain_text(_without_header(document))
+    if _BANKRUPTCY_HEADING.search(text):
+        return True
+    for petition in _PETITION.finditer(text):
+        lo = max(0, petition.start() - _PETITION_SPAN)
+        if _CHAPTER.search(text, lo, petition.end() + _PETITION_SPAN):
+            return True
+    return False
 
 
 def form15_holders_of_record(document: str) -> int | None:

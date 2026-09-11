@@ -191,13 +191,45 @@ class TestClassification:
         assert any("document unread" in c for c in found.conflicts)
 
     def test_bankruptcy_outranks_a_sale_and_keeps_the_conflict(self) -> None:
-        """A section 363 sale looks like an acquisition and pays the equity nothing."""
-        filings = [("DEFM14A", _days(-90)), ("8-K", _days(-200)), ("8-K", _days(5))]
+        """A section 363 sale looks like an acquisition and pays the equity nothing.
+
+        Modelled as a 363 sale actually appears: the acquirer's deal
+        communications (425) and a completion 8-K. It first used a merger proxy,
+        which a 363 sale never has -- there is no shareholder vote -- and which
+        now correctly means the shareholders *were* bought out.
+        """
+        filings = [("425", _days(-90)), ("8-K", _days(-200)), ("8-K", _days(5))]
         eightks = [_k(_days(-200), "1.03", accession="B"), _k(_days(5), "2.01", "5.01")]
         found = classify_exit(STOP, filings, eightks, bankruptcy_text={"B": True})
         assert found.cause is ExitCause.BANKRUPT
-        assert any("DEFM14A" in c for c in found.conflicts)
+        assert any("425" in c for c in found.conflicts)
         assert any("2.01" in c for c in found.conflicts)
+
+    def test_an_offer_to_shareholders_after_the_item_means_the_equity_was_bought(
+        self,
+    ) -> None:
+        """Conning, 1999-2000: the parent's receivership, then MetLife's tender."""
+        filings = [("8-K", _days(-240)), ("SC 14D9", _days(-40)), ("15-12G", _days(5))]
+        found = classify_exit(
+            STOP,
+            filings,
+            [_k(_days(-240), "1.03", accession="P")],
+            bankruptcy_text={"P": True},
+            form15_holders=[(_days(5), 1)],
+        )
+        assert found.cause is ExitCause.ACQUIRED
+        assert any("may concern a parent" in c for c in found.conflicts)
+
+    def test_a_deal_that_failed_before_the_bankruptcy_is_still_a_bankruptcy(self) -> None:
+        """Edge Petroleum: the Chaparral merger collapsed in 2008, Chapter 11 in 2009."""
+        filings = [("DEFM14A", _days(-300)), ("8-K", _days(-80))]
+        found = classify_exit(
+            STOP,
+            filings,
+            [_k(_days(-80), "1.03", accession="E")],
+            bankruptcy_text={"E": True},
+        )
+        assert found.cause is ExitCause.BANKRUPT
 
     def test_a_proposal_and_a_completion_make_an_acquisition(self) -> None:
         filings = [("DEFM14A", _days(-120)), ("8-K", _days(3))]
@@ -322,10 +354,34 @@ class TestReadingTheDocuments:
             "Item 3. Bankruptcy and Receivership On February 5, 2003, Kentucky",
             # Federal-Mogul, 2007.
             "Item 1.03 and Item 8.01. Bankruptcy or Receivership and Other Events.",
+            # Webvan and Bio-Plexus, 2001.
+            "Item 3. Bankruptcy. ---------- On July 13, 2001, Webvan Group",
+            # Winstar, 2001: the filer's own typo.
+            "ITEM 3. BANKRUPTCY OR RECEIVORSHIP A. On April 18, 2001",
+            # Kmart, 2002: right title, wrong item number, and a petition.
+            "Item 2. Bankruptcy or Receivership. On January 22, 2002, Kmart "
+            "Corporation filed voluntary petitions for reorganization under "
+            "Chapter 11 of the United States Bankruptcy Code",
+            # Luminant, 2001: no title, then the petition.
+            "Item 3. On December 7, 2001, Luminant Worldwide Corporation filed a "
+            "voluntary petition for reorganization relief under Chapter 11",
         ],
     )
     def test_a_bankruptcy_heading_in_either_scheme(self, text: str) -> None:
         assert bankruptcy_heading_present(text)
+
+    def test_merger_boilerplate_is_not_a_bankruptcy(self) -> None:
+        """CFI ProServices' merger agreement, verbatim."""
+        text = (
+            "Item 2. Acquisition or Disposition of Assets ... enforceability may be "
+            "subject to laws of general application relating to bankruptcy, insolvency "
+            "and the relief of debtors"
+        )
+        assert not bankruptcy_heading_present(text)
+
+    def test_a_petition_and_a_chapter_far_apart_are_two_claims(self) -> None:
+        text = "A voluntary petition was discussed. " + ("x " * 300) + "See Chapter 11."
+        assert not bankruptcy_heading_present(text)
 
     def test_general_instruments_text_is_not_a_bankruptcy(self) -> None:
         text = "Item 2. ACQUISITION OR DISPOSITION OF ASSETS  Item 7. FINANCIAL STATEMENTS"
@@ -342,6 +398,10 @@ class TestReadingTheDocuments:
     def test_the_gap_may_not_cross_another_item(self) -> None:
         text = "Item 3. Not applicable. Item 5. Other Events. No bankruptcy or receivership."
         assert not bankruptcy_heading_present(text)
+
+    def test_the_legacy_legal_proceedings_heading_is_not_a_bankruptcy(self) -> None:
+        """Item 3 means legal proceedings in a 10-K; a title must say bankrupt."""
+        assert not bankruptcy_heading_present("Item 3. Legal Proceedings. None.")
 
     def test_a_passing_mention_is_not_a_heading(self) -> None:
         assert not bankruptcy_heading_present("the risk of bankruptcy or receivership remains")

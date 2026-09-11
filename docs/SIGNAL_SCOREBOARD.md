@@ -813,3 +813,120 @@ is at best a direction.
 
 **No result here is evidence of profitability** — the gate still reads
 `SURVIVOR_BIASED`, and nothing in this section changes that.
+
+---
+
+## §16 — why the dead companies died — 2026-09-11/12
+
+§15 left survivorship bias bracketed between about zero and 57 points, decided
+almost entirely by what a delisted holding was worth: an acquisition pays about
+the last price, a bankruptcy about nothing. This reads the answer from EDGAR for
+**all 1,737 died-population securities** — every one `backtest_survivorship.py`
+can sample, across every `--offset`.
+
+### The answer
+
+| cause | securities | share | what a holder got |
+|---|---|---|---|
+| acquired — proposal *and* completion | 931 | 53.6% | paid |
+| acquisition indicated — one of the two | 247 | 14.2% | paid |
+| extinguished — Form 15 certifies 0–1 holders | 191 | 11.0% | paid |
+| **bankrupt — confirmed by the document** | **70** | **4.0%** | **wiped out** |
+| kept reporting after the prices stopped | 50 | 2.9% | unknown |
+| distress indicated | 119 | 6.9% | unknown |
+| deregistered, unexplained | 88 | 5.1% | unknown |
+| unresolved | 41 | 2.4% | unknown |
+
+**78.8% were bought out. 4.0% are confirmed bankruptcies. 17.2% are unexplained.**
+The mix barely moves between the four backtest samples: 298–320 paid, 12–20
+wiped out and 65–82 residual in each died arm of 400.
+
+**This undercuts §15's robust number.** The ~50-point gap assumed every dead
+holding went to zero, and for four in five of them the filings say it did not.
+The evidence sits near the other end of the bracket, where §15 found the gap
+small and not established. What survivorship bias is for this rule is now a
+question the next backtest can answer, not one it has to assume.
+
+### How it was read
+
+* **8-K item numbers are in the filing's header, in both schemes** — measured on
+  sec.gov before building on it: `1.01 8.01 9.01` on a 2005 filing, `5 7` on a
+  2002 one. The full-index has none, which is why `tradeit.edgar.evidence` marks
+  every 8-K signal `requires_document_text`. All **14,445** headers in the
+  windows were read; none left unread.
+* **Transaction pointers** from the index: merger proxies, tender offers,
+  going-private schedules, deal communications. A proposal alone is only
+  *indicated*; a proposal plus a completion makes *acquired*.
+* **Form 15 holders of record**, from 1,660 documents. After a merger the only
+  holder is the acquirer, so zero or one means the public class is gone.
+
+### What the first versions got wrong, all found before the numbers were used
+
+**A header can lie.** General Instrument's 1999 8-K header declares *bankruptcy*;
+its text says "Item 2. ACQUISITION OR DISPOSITION OF ASSETS", and Motorola
+bought it nine months later. So a bankruptcy header counts only when the
+document agrees. Across 119 bankruptcy 8-Ks, **five headers are genuinely
+wrong**: General Instrument, Vivid Technologies, CFI ProServices, AMSTAR, and
+one of Comdisco's.
+
+**The check that caught it was wrong twice before it was right.** Exact headings
+missed "Bankruptcy **and** Receivership" (Kentucky Electric Steel), "Item 1.03
+**and Item 8.01**" (Federal-Mogul), "Item 3. Bankruptcy." (Webvan, Bio-Plexus),
+"RECEIV**O**RSHIP" (Winstar), "**Item 2.** Bankruptcy or Receivership" (Kmart)
+and an untitled "Item 3." (Luminant). A document now confirms a bankruptcy by a
+bankrupt-titled item-3/1.03 heading **or** a stated Chapter 7 or 11 petition,
+and merger-agreement boilerplate ("laws … relating to bankruptcy, insolvency")
+still fails. Each of those phrasings is a test.
+
+**An item says what kind of proceeding, never whose.** Conning's 8-Ks disclosed
+its *parent's* insurance receivership; MetLife then tendered for Conning's
+shares and paid them. Nobody tenders for equity a bankruptcy wiped out, so an
+offer to shareholders *after* the bankruptcy item overrides it — which happens
+exactly once in 1,737. Seven other bankruptcies had a deal *before* the filing,
+deals that collapsed first (Edge Petroleum's with Chaparral), and stay bankrupt.
+
+**"Deregistered, unexplained" was mostly mergers** until Form 15s were read:
+Dal-Tile certified ZERO holders, Lamar Capital 0, Eagle Bancshares 1 — their
+merger papers were filed under the acquirers' CIKs. DSI Toys, in Chapter 11,
+certified 25.
+
+**Joint filings list several filers.** Equity Office's 8-Ks were filed with its
+operating partnership, and reading only the first `<FILER>` refused 23 of the
+first 702 headers.
+
+### Precision, checked by name
+
+A seeded random sample of eight from each acquisition class — PETCO's buyout,
+Eskimo Pie, Flashnet, BHA Group, Primus Knowledge, and the rest — is **16 for 16**
+against known history. All 70 bankruptcies were read by name and are the decade's
+familiar failures: LTV, Lernout & Hauspie, Webvan, Winstar, Kmart, Finova,
+Adelphia, Teligent, and bank receiverships in 2009.
+
+**The residual is where the misses are**, and it is left as a residual rather than
+forced: MMC Networks, iXL and SkyMall were acquisitions the filings did not reveal;
+Vanguard Airlines and National Equipment Services went bankrupt more than six
+months after their last price; most of the rest went dark or moved to the pink
+sheets. 172 findings carry a *silent final year* flag — no periodic report in the
+year before the last price — which marks doubt without changing the class.
+
+### Two observations left open
+
+**The corpus binds the listed EOP security to Equity Office's operating
+partnership's CIK**, not the trust's. The joint filings make the classification
+right either way — which is the "right answer by accident" pattern, and an
+identity question for another day.
+
+**The windows are research windows, not tuned thresholds** — twelve months
+before the stop to six after for 8-Ks, eighteen months for transaction pointers
+— and nothing here has measured how many findings move if they are widened.
+
+### What it enables
+
+A survivorship backtest with **per-security recovery**: paid holdings at their
+last price, confirmed bankruptcies at zero, and only the 17% residual bracketed.
+That is a change to a backtesting assumption, the delisting recovery, which the
+engine now takes as one number for everybody, so it is proposed rather than
+made.
+
+**No result here is evidence of profitability** — the corpus gate still reads
+`SURVIVOR_BIASED`.
