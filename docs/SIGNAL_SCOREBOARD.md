@@ -1089,3 +1089,85 @@ it on **2010–2019**, data this study never read — which is how
 `relative_volume_20`'s in-sample pass was exposed as nothing.
 
 **Ledger: 24 → 26 trials.** No result here is evidence of profitability.
+
+---
+
+## §19 — the 250-session rank, out of sample on 2010–2019 — 2026-09-12
+
+§18's diagnostic — the engine's 250-session percentile alone — was the best
+number this project had produced, and it had no standing: it was seen after the
+fact in a run registered for the composite. This is its registered test, on a
+decade no momentum result had been read on. Criteria committed in `3ad2c16`
+before any 2010s return was computed. **229,680 observations**, four disjoint
+samples of the 2010 population, both benchmarks.
+
+### Verdict: does not survive
+
+| horizon | IC (t) | spread | 2010–14 edge | 2015–19 edge | sign | verdict |
+|---|---|---|---|---|---|---|
+| 21 | **+0.0466 (+22.22)** | mean −1.30%, median **+1.65%** | −2.24%/yr | +1.01%/yr | **4 of 4** | `OUTLIER_DEPENDENT` |
+| 63 | **+0.0594 (+16.16)** | mean −0.61%, median **+4.29%** | −0.65%/yr | +0.73%/yr | **4 of 4** | `OUTLIER_DEPENDENT` |
+
+Criterion 3 passes emphatically. Criteria 1 and 2 fail, under QQQ and FLAT
+alike. By the rules as written: **it does not survive.**
+
+### What did replicate, and it is the first thing that has
+
+**The direction held and the relationship got stronger.** In sample it read
+IC +0.0189 (t +8.49) at 21 sessions and +0.0252 (t +6.46) at 63; out of sample,
+on data it had never seen, **+0.0466 (t +22.22)** and **+0.0594 (t +16.16)** —
+the same sign in every sample, under both benchmarks. Set against
+`relative_volume_20`, whose in-sample pass reversed to nothing out of sample,
+this is the opposite outcome, and **no other signal in this document has
+replicated at all.**
+
+The typical outcomes separate cleanly at 63 sessions:
+
+| | top quintile | bottom quintile |
+|---|---|---|
+| median return | **+0.67%** | **−3.62%** |
+| win rate | **51.6%** | **43.3%** |
+| mean return | +2.70% | **+3.31%** |
+| 99.9th percentile | +308.8% | **+713.8%** |
+
+### Why it fails anyway
+
+**The losers' lottery tickets own the mean.** The bottom quintile loses more
+often and by more — and its best 0.1% of observations contribute +0.81 points of
+its +3.31% mean. Drop the best 1% of each quintile and the mean spread flips from
+−0.61% to **+1.78%**. That is precisely what `OUTLIER_DEPENDENT` is for, and the
+verdict machinery reached it without being told.
+
+**A long-only top quintile is not where the separation lives.** Compounded —
+diagnostic, not a registered criterion — the top quintile runs at **−7.16%/yr**
+and the bottom at **−31.58%/yr** over the decade, a 24-point difference holding
+in both halves (+24.8 and +23.7). But the top quintile is roughly the universe
+average, which is why criterion 2, which compares top against *all*, fails. **The
+information is in avoidance, not selection.** On this survivorship-honest
+universe both ends lose money compounding; the signal says which end loses far
+more.
+
+### The benchmark, again
+
+QQQ and FLAT differ on 81.2% of observations, rank-correlate at **0.9950**, and
+return identical verdicts on every criterion at both horizons. SPY is still not
+needed.
+
+### What this licenses, and what it does not
+
+**It does not move a weight.** `relative_strength`'s composite was measured and
+was null (§18); this component failed its registered test. The weights stay
+equal at 0.25, and `volume_accumulation` remains the only factor never measured
+directly.
+
+**The obvious next question is a gate, not a weight** — exclude the bottom
+quintile rather than tilt toward the top, the same move `breakout_confirmation`
+made in §11. The diagnostic above is where that idea comes from, so **it cannot
+also be its evidence**: it would need its own pre-registration and a period
+neither decade has touched. 2020–2024 is unread, and the corpus runs to 2026.
+
+**Nothing here is evidence of profitability.** Both quintiles compound
+negatively, the gate is untested, and the corpus gate still reads
+`SURVIVOR_BIASED`.
+
+**Ledger: 26 → 28 trials.**
