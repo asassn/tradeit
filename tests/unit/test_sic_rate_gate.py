@@ -9,21 +9,15 @@ latency, and it stops being true the moment latency changes.
 
 from __future__ import annotations
 
-import importlib.util
-import pathlib
 import threading
 import time
 
 import pytest
 
-_SPEC = importlib.util.spec_from_file_location(
-    "research01_fetch_sic",
-    pathlib.Path(__file__).resolve().parents[2] / "scripts" / "research01_fetch_sic.py",
-)
-assert _SPEC is not None and _SPEC.loader is not None
-_MODULE = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_MODULE)
-RateGate = _MODULE.RateGate
+# Imported from the library since the gate moved there for a second fetcher.
+# The invariant is unchanged: an aggregate ceiling across threads, whatever
+# the latency does.
+from tradeit.edgar.fetching import HEADER_MARKERS, RateGate
 
 
 class TestTheCeilingHolds:
@@ -77,16 +71,16 @@ class TestThrottlePagesAreNotEvidence:
         tally climbed from 1% to 18% as throttling began -- which is how the
         overrun was noticed at all.
         """
-        markers = _MODULE._HEADER_MARKERS
+        markers = HEADER_MARKERS
         throttle = "<html><h1>Your Request Originates from an Undeclared Automated Tool</h1>"
         assert not any(marker in throttle for marker in markers)
 
     def test_a_real_header_is_recognised(self) -> None:
-        markers = _MODULE._HEADER_MARKERS
+        markers = HEADER_MARKERS
         header = "<SEC-HEADER>0001193125-09-153165.hdr.sgml\n<ASSIGNED-SIC>3571\n"
         assert any(marker in header for marker in markers)
 
     def test_the_older_text_header_is_recognised_too(self) -> None:
-        markers = _MODULE._HEADER_MARKERS
+        markers = HEADER_MARKERS
         older = "\t\tSTANDARD INDUSTRIAL CLASSIFICATION:\t6211\n"
         assert any(marker in older for marker in markers)

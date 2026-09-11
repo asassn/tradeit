@@ -49,7 +49,6 @@ import csv
 import datetime as dt
 import os
 import sys
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -61,6 +60,7 @@ sys.path.insert(0, "src")
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from tradeit.edgar.fetching import HEADER_MARKERS, RateGate, header_url
 from tradeit.edgar.sic import parse_sic_header
 from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import IssuerSicObservation
@@ -75,42 +75,10 @@ SOURCE = "edgar_header_sgml"
 #: run could not tell them apart and its "no SIC in header" tally climbed from
 #: 1% to 18% as the throttling began, which is how the overrun was noticed.
 #: **A missing tag in an error page is not evidence that a filing lacks a SIC.**
-_HEADER_MARKERS = ("<SEC-HEADER>", "<ASSIGNED-SIC>", "STANDARD INDUSTRIAL CLASSIFICATION")
-
-
-class RateGate:
-    """An aggregate request ceiling, shared across worker threads.
-
-    Enforced rather than estimated. Workers pace themselves against a shared
-    next-slot time, so the rate holds whatever the latency does.
-    """
-
-    def __init__(self, per_second: float) -> None:
-        if per_second <= 0:
-            raise ValueError("rate must be positive")
-        self._interval = 1.0 / per_second
-        self._lock = threading.Lock()
-        self._next = 0.0
-
-    def wait(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            slot = max(now, self._next)
-            self._next = slot + self._interval
-        delay = slot - now
-        if delay > 0:
-            time.sleep(delay)
 
 
 #: (issuer_id, cik, filed_at, accession)
 PlanRow = tuple[int, str, str, str]
-
-
-def _header_url(cik: str, accession: str) -> str:
-    return (
-        f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
-        f"{accession.replace('-', '')}/{accession}.hdr.sgml"
-    )
 
 
 def main() -> int:
@@ -164,7 +132,7 @@ def main() -> int:
         print(f"limited to {len(todo):,} this run")
     if args.dry_run:
         for row in todo[:5]:
-            print(f"  would GET {_header_url(row[1], row[3])}")
+            print(f"  would GET {header_url(row[1], row[3])}")
         return 0
 
     gate = RateGate(args.rate)
@@ -180,11 +148,11 @@ def main() -> int:
             gate.wait()
             try:
                 request = urllib.request.Request(
-                    _header_url(row[1], row[3]), headers={"User-Agent": user_agent}
+                    header_url(row[1], row[3]), headers={"User-Agent": user_agent}
                 )
                 with urllib.request.urlopen(request, timeout=30) as response:
                     body = response.read().decode("utf-8", "replace")
-                if not any(marker in body for marker in _HEADER_MARKERS):
+                if not any(marker in body for marker in HEADER_MARKERS):
                     return row, None, "unrecognised_body"
                 return row, body, "ok"
             except urllib.error.HTTPError as error:
