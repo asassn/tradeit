@@ -1200,14 +1200,16 @@ had no rank and were not gated.
 
 | recovery | effect on total return, by sample | mean | sd |
 |---|---|---|---|
-| 1.0 | −8.9, +12.3, +20.6, **−34.9** | −2.7 pp | 23.4 pp |
-| 0.0 | −9.1, +3.2, +3.6, −16.6 | −4.7 pp | 9.3 pp |
+| 1.0 | −8.9, +12.3, +20.6, **−34.9** | −2.7 pp | **24.8 pp** |
+| 0.0 | −9.1, +3.1, +3.6, −16.6 | −4.7 pp | **9.8 pp** |
 
-**The spread between samples is several times the effect being looked for.**
+**The spread between samples is several times the effect being looked for**, and
+the paired difference's own t-statistic is −0.22 at recovery 1.0 and −0.96 at
+0.0: not distinguishable from no effect in either direction.
 §17 measured why: a capacity-limited portfolio is path-dependent, so one
 different admission reshuffles every later decision — and a gate that refuses
 165 of 1,227 candidates changes the path everywhere. With four samples and a
-standard deviation of 23 points, this design could not have detected a
+standard deviation of 25 points, this design could not have detected a
 one-point-a-year improvement had there been one.
 
 So the honest reading is two-sided: **the gate did not help, and this test was
@@ -1231,7 +1233,7 @@ threshold would be tried on this data. None was.
 **A design lesson for the next portfolio test.** Four samples is too few for an
 effect of this size. The 2020 population supports eight disjoint samples at cap
 150, and a design that needs to resolve one point a year should be sized against
-the 9–23-point spread measured here rather than against hope.
+the 9.8–24.8-point spread measured here rather than against hope.
 
 **Ledger: 28 → 29 trials.** Weights unchanged; `volume_accumulation` remains the
 only weighted factor never measured directly. Nothing here is evidence of
