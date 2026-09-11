@@ -57,12 +57,25 @@ def _spans(path: str) -> list[tuple[int, str, str, int]]:
 
 
 def _arms(
-    spans: list[tuple[int, str, str, int]], start: str, end: str, min_bars: int, cap: int
+    spans: list[tuple[int, str, str, int]],
+    start: str,
+    end: str,
+    min_bars: int,
+    cap: int,
+    offset: int = 0,
 ) -> tuple[list[int], list[int]]:
     """Securities tradeable at the start, split by whether they lasted.
 
     Sampled deterministically by taking every Nth of the sorted list, so a
     rerun picks the same names and the two arms stay comparable.
+
+    ``offset`` takes the (i*N + offset)th instead: the same construction over
+    different names. **One sample is not enough to quote a number from**, and
+    this is how that was found: across four disjoint samples of 2000-2009 the
+    survivors arm alone ranged from -13.1% to +44.8%, and a change to 1.8% of
+    one sample's bars moved it thirteen points by altering a single admission
+    in January 2001 that cascaded through 190 later trades. At cap 400 the died
+    arm's step is 4.34, so offsets 0-3 are disjoint there.
     """
     alive = [row for row in spans if row[1] <= start <= row[2] and row[3] >= min_bars]
     died = sorted(row[0] for row in alive if row[2] < end)
@@ -72,7 +85,7 @@ def _arms(
         if len(ids) <= limit:
             return ids
         step = len(ids) / limit
-        return [ids[int(i * step)] for i in range(limit)]
+        return [ids[min(len(ids) - 1, int(i * step) + offset)] for i in range(limit)]
 
     return thin(survived, cap), thin(died, cap)
 
@@ -172,6 +185,12 @@ def main() -> int:
     ap.add_argument("--risk-free", type=float, default=0.03)
     ap.add_argument("--delisting-after", type=int, default=10)
     ap.add_argument("--delisting-recovery", type=Decimal, required=True)
+    ap.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="which of several disjoint equally-valid samples to draw; 0 is the original",
+    )
     args = ap.parse_args()
 
     session: Session = sessionmaker(
@@ -179,8 +198,10 @@ def main() -> int:
     )()
     config = StrategyConfig(name="ma_cross_baseline")
 
-    survived, died = _arms(_spans(args.spans), args.start, args.end, args.min_bars, args.cap)
-    print(f"universe {args.start} .. {args.end}")
+    survived, died = _arms(
+        _spans(args.spans), args.start, args.end, args.min_bars, args.cap, args.offset
+    )
+    print(f"universe {args.start} .. {args.end}  (sample offset {args.offset})")
     print(f"  survivors {len(survived):,}   died {len(died):,}")
     print(f"  delisting recovery assumption: {args.delisting_recovery}")
     print()

@@ -692,10 +692,10 @@ has nothing to do with survivorship.
 
 **Which results are most exposed**, in order:
 
-1. **The survivorship backtests (§7–§8).** Refused bars cluster in failing
-   companies — exactly the population those runs exist to include — and in a
-   backtest a refused bar was a mark and a stop trigger. Most exposed, and the
-   headline 8–46 pp finding rests on them.
+1. **The survivorship backtest** (commit `823f2f3`, recorded only in that
+   commit's message until §15 below). In a backtest a refused bar was a mark
+   and a stop trigger. Most exposed, and the headline 8–46 pp finding rests on
+   it. **Re-run in §15.**
 2. **`relative_volume_20` (§9).** A volume ratio; the refused bars are zero-volume
    by construction, though the carried ones that remain are too.
 3. **The price-signal studies.** Returns across a refused bar are gone; returns
@@ -705,3 +705,111 @@ has nothing to do with survivorship.
 
 None has been re-run yet. Until one is, its recorded number is a statement about
 the code at its recorded commit, which is what it always was.
+
+---
+
+## §15 — the survivorship gap, re-measured — 2026-09-11
+
+The headline result of the corpus effort — *excluding the companies that failed
+was worth 8 to 46 percentage points to a moving-average rule over 2000–2009* —
+was recorded only in the message of commit `823f2f3`. It is recorded here now,
+re-run under §14's read rule, and tested for the first time against the
+question a single run cannot answer: **how much does it move if you draw a
+different, equally valid sample?**
+
+### It reproduces exactly
+
+Same spans (one SQL over raw bars, regenerated: 14,257 rows, identical), same
+arguments (`--cap 400`, recovery 1.0 and 0.0, defaults otherwise), run from a
+worktree at each code state:
+
+| code state | survivors | everybody @1.0 | everybody @0.0 |
+|---|---|---|---|
+| `823f2f3`, original | −13.10% | −21.16% | −58.65% |
+| `8b9563d`, zero-price fix | −13.10% | −21.16% | −58.65% |
+| `5566423`, §14 read rule | **−0.10%** | **+0.64%** | **−51.21%** |
+
+The zero-price fix changes nothing here because this universe holds **no**
+zero-priced bars in 2000–2009 — measured, not assumed. The §14 rule refuses
+17,347 bars in the survivors arm (68 securities) and 3,740 in the died arm (50).
+
+### A 1.8% change moved one arm thirteen points — and that is the finding
+
+The survivors arm went from −13.10% to −0.10% on 1.8% of its bars. Attributing
+that trade by trade: **273 of 318 traded securities changed P&L**, and the
+securities the rule actually touched account for only +4,425 of the +13,003
+difference. The two runs are identical for 271 sessions; on **2001-01-30** one
+admits security 2464 and the other 2164, and 190 of ~1,050 trades differ from
+there on.
+
+A capacity-limited portfolio is path-dependent: one different admission
+reallocates slots, heat and cash for everything after it. So a single sample's
+number carries noise of that size — and the *gap* between two such runs carries
+it twice.
+
+### Four disjoint samples
+
+`--offset 0..3` draws four samples with the same construction and no died-arm
+security in common. The "old rule" arm runs at `8b9563d`, because the original
+code **crashes** on offsets 2 and 3: they contain zero-priced bars, which that
+version handed to `OhlcvBar`. On offset 0 the two states are identical.
+
+| rule | sample | survivors | gap @1.0 | gap @0.0 | delisted |
+|---|---|---|---|---|---|
+| old | 0 | −13.10% | −8.06 | −45.55 | 13 |
+| old | 1 | +6.54% | −22.59 | −40.28 | 7 |
+| old | 2 | +20.78% | −0.85 | −56.02 | 8 |
+| old | 3 | +44.80% | −16.61 | −51.55 | 11 |
+| **new** | 0 | −0.10% | **+0.74** | −51.11 | 15 |
+| **new** | 1 | +16.47% | −32.93 | −51.59 | 9 |
+| **new** | 2 | +29.41% | −6.90 | −57.34 | 9 |
+| **new** | 3 | +33.89% | −3.14 | −55.24 | 16 |
+
+| | gap @0.0 | gap @1.0 | survivors alone |
+|---|---|---|---|
+| old rule | mean **−48.4**, sd 6.9 | mean −12.0, sd 9.5 | sd 24.4 |
+| new rule | mean **−53.8**, sd 3.0 | mean −10.6, sd 15.2 | sd 15.3 |
+
+### What holds and what does not
+
+**If delisted holdings recover nothing, survivorship bias is about 50 points,
+and that is robust.** 51 to 57 under the new rule in every sample, standard
+deviation three points. The new rule widens it in all four pairs, by 1.3 to 11.3
+points, with more delisted exits in every sample — refused untraded prices no
+longer keep a dying holding alive long enough to dodge the silence rule. That is
+the direction the fix should push.
+
+**If they recover their last price, the bias is small and its size is not
+established.** Seven of eight samples put everybody below the survivors, so the
+*sign* is fairly consistent — but the magnitude runs from +0.7 to −32.9, and on
+the original sample under the new rule it is **+0.74**: no bias at all. With
+four samples and a standard deviation of 15, a mean of −10.6 is not
+distinguishable from zero.
+
+**So the finding is restated, not retracted:** *survivorship bias for this rule
+over 2000–2009 lies between roughly zero and 57 points, and which end is true
+depends almost entirely on what a delisted holding was worth.* The original
+"8–46" was one draw from each end; its upper end strengthens, its lower end was
+never a number.
+
+### Two consequences
+
+**The delisting recovery assumption is now the whole question.** An
+acquisition pays at or above the last price; a bankruptcy pays close to
+nothing; the system cannot yet tell them apart, which is why recovery is a
+required argument. Classifying *why* each died-arm security's prices stopped
+would replace a 0-to-57 bracket with a measurement, and the evidence is already
+in the corpus — measured in `filings`: 16,124 Form 25-NSE exchange delistings,
+28,387 Form 15 deregistrations (15-12G 14,919 · 15-15D 7,737 · 15-12B 5,731),
+6,520 DEFM14A merger proxies, and 4,497 tender-offer filings (SC TO-T 2,131 ·
+SC 14D9 2,366). A merger proxy or tender offer before the prices stop points to
+an acquisition; a Form 25 or 15 with neither points elsewhere. It is free.
+
+**No single-sample backtest here should be quoted as a number again.** The
+survivors arm alone spans −13.1% to +44.8% across four equally valid samples of
+the same decade. Every portfolio result in this document that came from one
+sample — the volatility experiment included — carries noise of that order and
+is at best a direction.
+
+**No result here is evidence of profitability** — the gate still reads
+`SURVIVOR_BIASED`, and nothing in this section changes that.
