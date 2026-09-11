@@ -1171,3 +1171,68 @@ negatively, the gate is untested, and the corpus gate still reads
 `SURVIVOR_BIASED`.
 
 **Ledger: 26 → 28 trials.**
+
+---
+
+## §20 — the 250-session rank as an exclusion gate, 2020–2024 — 2026-09-12
+
+§19 found the information is in avoidance: compounded over 2010–2019 the bottom
+quintile of `pct_250` ran at −31.6%/yr against −7.2%/yr for the top. That was a
+diagnostic, so it could not be its own evidence. This is its test — the baseline
+rule run twice on each of four disjoint samples, refusing candidates in the
+bottom quintile on the session they are decided, or not. Criteria committed in
+`94910d8` before any 2020s run.
+
+### Verdict: the gate fails
+
+| recovery | gated beat ungated | mean CAGR change | mean drawdown change | verdict |
+|---|---|---|---|---|
+| 1.0 | 2 of 4 | **−0.99%** | +0.05 pp | **fails** |
+| 0.0 | 2 of 4 | **−1.68%** | +2.02 pp | **fails** |
+
+Criterion 1 fails under both, criterion 2 fails under both, criterion 3 passes
+at 1.0 and fails at 0.0. The gate refused 13.1–14.8% of candidates — not 20%,
+because a moving-average crossover already selects names that have been rising,
+so fewer of them sit in the weakest fifth. Two or three candidates per sample
+had no rank and were not gated.
+
+### And the test could not have established the opposite either
+
+| recovery | effect on total return, by sample | mean | sd |
+|---|---|---|---|
+| 1.0 | −8.9, +12.3, +20.6, **−34.9** | −2.7 pp | 23.4 pp |
+| 0.0 | −9.1, +3.2, +3.6, −16.6 | −4.7 pp | 9.3 pp |
+
+**The spread between samples is several times the effect being looked for.**
+§17 measured why: a capacity-limited portfolio is path-dependent, so one
+different admission reshuffles every later decision — and a gate that refuses
+165 of 1,227 candidates changes the path everywhere. With four samples and a
+standard deviation of 23 points, this design could not have detected a
+one-point-a-year improvement had there been one.
+
+So the honest reading is two-sided: **the gate did not help, and this test was
+not capable of proving it did.** The registered criteria decide the verdict —
+that is what registering them is for — but the width belongs in the record next
+to it.
+
+### What this closes and what it leaves
+
+**The avoidance idea is not supported at portfolio level.** A 24-point-a-year
+gap between quintiles of a ranked cross-section did not become a portfolio
+improvement for this rule in this period. The most likely reasons are visible in
+the run and are not tested here: the rule's own trend filter already excludes
+most of what the gate would refuse, and the 8% stop removes a failing holding
+long before the rank does (§17 measured that exits came a median of 1,392 days
+before a bankrupt company's last price).
+
+**No threshold hunting.** The registration fixed 0.20 and said no other
+threshold would be tried on this data. None was.
+
+**A design lesson for the next portfolio test.** Four samples is too few for an
+effect of this size. The 2020 population supports eight disjoint samples at cap
+150, and a design that needs to resolve one point a year should be sized against
+the 9–23-point spread measured here rather than against hope.
+
+**Ledger: 28 → 29 trials.** Weights unchanged; `volume_accumulation` remains the
+only weighted factor never measured directly. Nothing here is evidence of
+profitability, and the corpus gate still reads `SURVIVOR_BIASED`.
