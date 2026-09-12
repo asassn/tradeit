@@ -139,11 +139,23 @@ and it means **the bounded-window discipline is not optional here**: without it
 these 48 requests would have imported a living company's bars under a dead
 registrant's identity.
 
-**The consequence for survivorship coverage.** Dead registrants whose ticker was
-later reused are unreachable through this vendor by symbol. Measured yield on
-the gate's targets: **~11%** — the cases where the dead registrant was its
-symbol's last holder. Reaching 45% coverage was projected on a 40% yield and is
-**not reachable by this path**; see `EDGAR_DELISTING_DENOMINATOR.md` §7e.
+**The consequence for survivorship coverage, measured over the full run.** All
+4,028 ticker-resolved targets were requested: **2,137 responded, 1,831 returned
+404, and 292 became newly priced exits — a 7.2% yield.** 854,718 bars landed and
+12,962 (1.5%) were refused by per-bar resolution.
+
+**The 404s are real, not transient.** A first probe suggested otherwise and was
+biased: it sampled only the 22 failures that appear in EODHD's own delisted
+list, and all ten tried returned data. A random sample of twenty failures
+returned **zero**. The vendor holds the recent delistings its list enumerates
+and not the older ones.
+
+**What remains is mostly old.** Of 13,247 dated exits still unpriced, **8,766
+(66%) exited before 2010**, while this run's gains fell in the 2000s, 2010s and
+2020s. Reaching 45% needs 1,357 more, and the free remainder — resolving tickers
+for the 9,225 exits with no identity — projects to about 337 at the observed
+rates. **45% is not reachable through this vendor**, whatever the effort; see
+`EDGAR_DELISTING_DENOMINATOR.md` §7e.
 
 #### Second reply, 2026-08-30 — depth answered, and EODHD is not disqualified
 

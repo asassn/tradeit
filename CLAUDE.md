@@ -359,9 +359,10 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
   itself authorise it.
 - **No strategy result computed on `research-01` today is evidence of
   profitability.** Measured 2026-09-12, under the §5 denominator adopted that
-  day: the gate reads **`PARTIALLY_SURVIVORSHIP_CORRECTED`** — 8,079 of 21,618
-  dated Exchange Act exits priced (**37.4%**), 65.6% of those whose identity
-  resolves, 91% of the held series recording the death, 30/30 controls. That is
+  day, re-measured the same evening after a backfill: the gate reads
+  **`PARTIALLY_SURVIVORSHIP_CORRECTED`** — 8,371 of 21,618 dated Exchange Act
+  exits priced (**38.7%**), 68.0% of those whose identity resolves, 30/30
+  controls. That is
   a real improvement on the 2.7% this file used to quote, and it is **not**
   safety: nearly two thirds of the companies EDGAR shows exiting are still
   unpriced, so a backtest here is still missing failures. Build the machinery on
