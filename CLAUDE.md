@@ -237,8 +237,9 @@ format-checked, because CI does not format-check it either — mirror CI rather
 than improving on it here, or this list drifts in the opposite direction.
 
 CI runs `mypy src/tradeit`; `mypy src` is equivalent because `[tool.mypy]` sets
-`packages = ["tradeit"]`, and both report the same 164 files. CI adds coverage
-flags to `pytest`, which change no result.
+`packages = ["tradeit"]`, and both report the same file count — which is *not*
+written here, because it rotted once already: this file said 164 long after the
+answer became 218. CI adds coverage flags to `pytest`, which change no result.
 
 Plus, where relevant: the CLI diagnostic, the schema loader, and citation
 integrity. Inspect the final diff before committing.

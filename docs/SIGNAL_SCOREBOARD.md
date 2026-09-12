@@ -1,6 +1,6 @@
 # Signal scoreboard
 
-**As of 2026-09-09, code `4164053`.** A status record, not a findings document —
+**As of 2026-09-12, code `f3881e0`.** A status record, not a findings document —
 [`SIGNAL_RESEARCH_01.md`](SIGNAL_RESEARCH_01.md) holds the methodology and the
 reasoning. **Every number here is measured and every one will rot**; re-run the
 studies rather than quoting this later.
@@ -35,51 +35,50 @@ same way in all four in-sample specifications.
 |---|---|---|---|---|---|---|
 | `realized_vol_60` | *(none — unweighted)* | low volatility outperforms | **IC −0.060, t −10.01** | **yes, 4/4** | not yet run | **strongest candidate.** Spread unmeasurable by quantile — see below |
 | `atr_percent_14` | *(none — unweighted)* | low volatility outperforms | **IC −0.078, t −7.46** | **yes, 4/4** | not yet run | as above; same effect, second measure |
-| `relative_volume_20` | volume_accumulation 0.10 | *derived* | IC −0.069, t −4.54 | no — flipped | **IC +0.009, t +0.93** | **REJECTED.** Sign flipped, net +32.7%/yr → −0.2%/yr |
+| `relative_volume_20` | volume_accumulation 0.25 | *derived* | IC −0.069, t −4.54 | no — flipped | **IC +0.009, t +0.93** | **REJECTED.** Sign flipped, net +32.7%/yr → −0.2%/yr |
 | `momentum_21` | relative_strength 0.25 | one-month reversal | IC −0.016, t −2.15 | yes, 4/4 | not run | weak but consistent; never economically useful |
 | `momentum_126` | relative_strength 0.25 | 6-month momentum | IC +0.021, t +3.00 | yes, 4/4 | not run | weak but consistent; never economically useful |
 | `momentum_252` | relative_strength 0.25 | 12-month momentum | IC +0.023, t +3.88 | no — flipped | not run | inconsistent across specifications |
-| `dist_from_sma_200` | pattern_quality 0.20 | trend following | IC +0.015, t +2.58 | no — flipped | not run | inconsistent |
-| `dist_from_sma_50` | pattern_quality 0.20 | trend following | IC −0.024, t −2.77 | no — flipped | not run | **contradicts its declared prior twice.** Not flipped — see §7 |
-| `rsi_14` | pattern_quality 0.20 | mean reversion | IC −0.015, t −1.70 | no — flipped | not run | never detectable |
-| `sector_strength` | sector_strength 0.10 | **strong sectors outperform** | 2000s IC +0.026 t +2.93; 2010s IC −0.018 t −2.48 | **no — reverses by decade** | n/a | **significant in both directions.** Worse than a null: the relationship inverts |
+| `dist_from_sma_200` | pattern_quality 0.25 | trend following | IC +0.015, t +2.58 | no — flipped | not run | inconsistent |
+| `dist_from_sma_50` | pattern_quality 0.25 | trend following | IC −0.024, t −2.77 | no — flipped | not run | **contradicts its declared prior twice.** Not flipped — see §7 |
+| `rsi_14` | pattern_quality 0.25 | mean reversion | IC −0.015, t −1.70 | no — flipped | not run | never detectable |
+| `sector_strength` | ~~sector_strength 0.10~~ → retired | **strong sectors outperform** | 2000s IC +0.026 t +2.93; 2010s IC −0.018 t −2.48 | **no — reverses by decade** | n/a | **significant in both directions.** Worse than a null: the relationship inverts |
 | `volume_momentum` | volume_accumulation 0.25 | rising volume is accumulation | **IC +0.043, t +20.67** | **yes, 4/4 samples** | **IC +0.004, t +1.95** | **REJECTED.** Passed every criterion in sample, net +32.7%/yr → +3.4%/yr, geometric edge +20.1%/yr → **−11.4%/yr** — see §21, §22 |
 | `obv_trend` | volume_accumulation 0.25 | accumulation, **signed** | IC −0.012, t −5.60 | **consistently NEGATIVE, 4/4** | **IC −0.034, t −16.27, 4/4** | **replicated and strengthened, inverted to the factor's own prior.** Fails half-period consistency; see §21, §24 |
 
-### Factors carrying weight that have not been tested at all
+### Factors that used to carry weight and no longer do
 
 | scoring factor | weight | why not |
 |---|---|---|
 | `breakout_confirmation` | ~~0.20~~ → **gate** | **retired as a weight 2026-09-10**; now a conditional gate — see §11 |
-| `fundamental_quality` | 0.15 → 0.1667 | **tested 2026-09-10: no detectable relationship** — see §10 |
-| `sector_strength` | 0.10 | ~~no sector classification in the corpus~~ — **resolved 2026-09-09.** `issuer_sic_observations` now classifies 12,871 issuers, covering 93.5% of priced securities, point-in-time from SEC filing headers. The factor is computable; it has still never been *tested* |
+| `sector_strength` | ~~0.10~~ → **removed** | measured 2026-09-10 and retired: the relationship reverses by decade. `issuer_sic_observations` does classify 12,871 issuers, so the factor was computable — it was dropped on its result, not for want of data |
 
-**Updated 2026-09-10:** `sector_strength` was measured and retired; `fundamental_quality` has now been measured and shows nothing; `breakout_confirmation` remains untested and cannot be weighted the way the others are. See §10.
+**None are left.** Every factor still carrying weight has now been measured:
+`fundamental_quality` in §10, `pattern_quality` in §13, `relative_strength` in
+§18, `volume_accumulation` in §21, §22 and §24. **All four returned nulls**,
+which is why §12 could not use evidence to separate them.
 
-## Scoring weights: one factor retired on evidence
+## Scoring weights: two factors retired, and the rest set equal
 
-**`sector_strength` was removed on 2026-09-10**, by the owner, on the measured
-finding below. Effective weights are now:
+Two removals on 2026-09-10 — `sector_strength` on the measured reversal below,
+`breakout_confirmation` to a gate in §11 — left four weighted factors. §12 then
+re-derived all four **equal at 0.25**, because no evidence separates them:
 
-| factor | declared | effective | validated? |
-|---|---|---|---|
-| `relative_strength` | 0.25 | **0.2778** | no |
-| `pattern_quality` | 0.20 | **0.2222** | no |
-| `breakout_confirmation` | 0.20 | **0.2222** | **never tested** |
-| `fundamental_quality` | 0.15 | **0.1667** | **never tested** |
-| `volume_accumulation` | 0.10 | **0.1111** | no |
+| factor | weight | validated? |
+|---|---|---|
+| `relative_strength` | 0.25 | **measured, null — §18** |
+| `pattern_quality` | 0.25 | **measured, null — §13** |
+| `fundamental_quality` | 0.25 | **measured, null — §10** |
+| `volume_accumulation` | 0.25 | **measured, null — §21, §22, §24** |
 
-Weights normalise on load, so the survivors keep their declared numbers and the
-proportions between them are unchanged. **The strategy digest changed**, which
-is correct: this is a different strategy, and results tied to the old digest
-belong to the old one.
+**Read `src/tradeit/strategy/config.py`, not this table.** It is the live answer
+and carries the three alternatives §12 rejected.
 
-**Dropping the failed factor does not promote the other four.** They remain
-unvalidated; what changed is that a factor which *was* measured, and failed, no
-longer carries weight. Two of the survivors have still never been tested at all.
-
-Nothing else measured justifies moving any remaining weight. The one candidate
-that passed every in-sample gate failed out of sample decisively — see §8.
+**Equal is not a finding, it is the absence of one.** Every one of the four has
+now been run through its real engine and none predicts returns on this corpus,
+so nothing licenses weighting any of them above another. **The strategy digest
+changed** with the weights, which is correct: this is a different strategy, and
+results tied to the old digest belong to the old one.
 
 ## Volatility, measured as a portfolio rather than a spread — RUN
 
