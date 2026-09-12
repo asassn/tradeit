@@ -1,6 +1,6 @@
 # Signal scoreboard
 
-**As of 2026-09-12, code `f3881e0`.** A status record, not a findings document —
+**As of 2026-09-12, code `613050d`.** A status record, not a findings document —
 [`SIGNAL_RESEARCH_01.md`](SIGNAL_RESEARCH_01.md) holds the methodology and the
 reasoning. **Every number here is measured and every one will rot**; re-run the
 studies rather than quoting this later.
@@ -44,7 +44,7 @@ same way in all four in-sample specifications.
 | `rsi_14` | pattern_quality 0.25 | mean reversion | IC −0.015, t −1.70 | no — flipped | not run | never detectable |
 | `sector_strength` | ~~sector_strength 0.10~~ → retired | **strong sectors outperform** | 2000s IC +0.026 t +2.93; 2010s IC −0.018 t −2.48 | **no — reverses by decade** | n/a | **significant in both directions.** Worse than a null: the relationship inverts |
 | `volume_momentum` | volume_accumulation 0.25 | rising volume is accumulation | **IC +0.043, t +20.67** | **yes, 4/4 samples** | **IC +0.004, t +1.95** | **REJECTED.** Passed every criterion in sample, net +32.7%/yr → +3.4%/yr, geometric edge +20.1%/yr → **−11.4%/yr** — see §21, §22 |
-| `obv_trend` | volume_accumulation 0.25 | accumulation, **signed** | IC −0.012, t −5.60 | **consistently NEGATIVE, 4/4** | **IC −0.034, t −16.27, 4/4** | **replicated and strengthened, inverted to the factor's own prior.** Fails half-period consistency; see §21, §24 |
+| `obv_trend` | volume_accumulation 0.25 | accumulation, **signed** | IC −0.012, t −5.60 | **consistently NEGATIVE, 4/4** | **IC −0.034, t −16.27, 4/4** | **replicated and strengthened, inverted to the factor's own prior.** Fails half-period consistency as a signal (§24) and as an exclusion gate (§25); see §21 |
 
 ### Factors that used to carry weight and no longer do
 
@@ -1523,3 +1523,119 @@ proposition rather than a run.
 **Ledger: 35 → 39 trials**, hurdle 2.179. No result here is evidence of
 profitability; the corpus gate reads `PARTIALLY_SURVIVORSHIP_CORRECTED` and the
 standing rule against believing its numbers has not lifted.
+
+---
+
+## §25 — signed accumulation as a gate: both tests fail, and the primary one was blind — 2026-09-12
+
+**Registered in [`docs/prereg/OBV_TREND_GATE_2026-09-12.md`](prereg/OBV_TREND_GATE_2026-09-12.md)
+at `abf7644`, hurdle corrected to the measured 2.209 at `f3881e0`, before any
+2020s run of this signal.** §24 found `obv_trend`'s inverse 21-session
+relationship in eight samples across two decades and refused it as a selection
+signal because its compounded edge reversed between halves of the decade. A
+gate is a different claim, and this tested it: refuse any candidate whose
+`obv_trend` percentile is at or above 0.80, entry only, threshold fixed in
+advance and never retuned.
+
+### Verdict: both tests fail
+
+| test | criterion | result |
+|---|---|---|
+| PRIMARY, 21 sessions | refused below admitted, \|t\| > 2.209 | **fail** — difference **+0.02%**, t +0.01 |
+| PRIMARY, 63 sessions | as above | **fail** — difference **+0.15%**, t +0.01 |
+| SECONDARY, recovery 1.0 | beats ungated in ≥ 6 of 8 | **fail** — 3 of 8, mean CAGR **−0.84%** |
+| SECONDARY, recovery 0.0 | as above | **fail** — 5 of 8, mean CAGR **+1.57%** |
+
+4,899 candidate observations across eight disjoint samples — every candidate
+the baseline rule emitted that resolved a forward return at either horizon —
+of which **1,549 were refused**. The point estimate at 21 sessions is not merely insignificant,
+it is the wrong sign: refused candidates returned **+1.59%** and admitted ones
+**+1.57%**.
+
+### The registration named the wrong test as primary, and that is measurable
+
+It said so in writing, which is what makes it checkable:
+
+> PRIMARY — the candidate stream. … Thousands of observations rather than eight
+> paired differences, and it tests exactly what a gate does.
+
+**Those thousands are not thousands.** Candidates are emitted every session, so
+a 21-session forward return overlaps the next twenty days of them. §18's
+correction divides the count by the horizon, and 4,778 usable observations
+become **228 effective ones**. The resolution that follows is printed beside
+every result in the verdict script, pass or fail:
+
+| | smallest difference it could resolve | §24's measured effect |
+|---|---|---|
+| 21 sessions, registered correction | **9.39%** | −1.49% |
+| 21 sessions, sessions as clusters | **2.23%** | −1.49% |
+| 63 sessions, registered correction | 32.85% | — |
+| 63 sessions, sessions as clusters | 4.48% | — |
+
+**Under either treatment of dependence the primary test could not have detected
+the effect it was registered to look for** — by a factor of six under its own
+correction, and still short under the most generous one available. That was
+knowable in advance from §24's own number and nobody computed it.
+
+**The secondary test was the sharper one.** Its paired CAGR difference has
+se 0.52pp at recovery 1.0, so it resolves about **1.2 points a year**. The
+registration predicted the opposite ordering and predicted it from §20's
+24.8pp — a figure that is the spread of *five-year total* returns, converted
+there into "about 17.5pp a year" as though it were annual. Measured
+like-for-like on these eight samples, the total-return spread is **7.63%** at
+recovery 1.0 and **11.25%** at 0.0. The design was roughly fifteen times
+sharper than its own registration claimed.
+
+So the honest reading of the primary test is **not** that the gate's
+candidate-level claim was refuted. It is that the test was built to answer a
+question it could not resolve, while the test called secondary could.
+
+### What the secondary test did resolve: the sign depends on how the dead are priced
+
+| recovery | gated beat ungated | mean CAGR change | t | mean drawdown change |
+|---|---|---|---|---|
+| 1.0 | 3 of 8 | **−0.84%** | −1.64 | −3.25 pp |
+| 0.0 | 5 of 8 | **+1.57%** | +1.66 | −8.36 pp |
+
+Neither reaches the hurdle, so neither is a finding on its own. **What the pair
+shows is that the gate's sign flips with the delisting assumption**, and that is
+a finding: what it is really trading is exposure to companies that stop trading.
+Refusing them helps when they die worthless and hurts when they are bought. §16
+classified the died arm as **78.8% acquired and 4.0% bankrupt**, so recovery 1.0
+is the nearer of the two assumptions to this corpus — and under it the gate
+loses money.
+
+The drawdown column improves under both, by 3.25 and 8.36 points. That is what a
+rule holding fewer positions does, not evidence the refused ones were bad.
+
+### The rule it should have helped most
+
+Candidates arrive with a mean `obv_trend` percentile of **0.599** and a median
+of **0.65**, against 0.50 for a draw from the universe. **A moving-average
+crossover systematically buys names that are being accumulated**, which is why
+the 0.80 threshold refuses 32.3% of candidates rather than the 20% it would
+refuse from the whole cross-section. §20 found the mirror image: there the
+rule's trend filter left only 13–15% in the refused fifth, and the gate had
+little to act on.
+
+So this was the favourable case. If §24's inverse relationship were tradeable,
+this is the rule and this is the threshold where it should have shown up.
+
+### What this closes
+
+**The obvious portfolio question after §24 is answered at portfolio level and
+unanswered at candidate level**, and the registration is the reason the
+difference is visible rather than a matter of opinion. No threshold other than
+0.80 was tried, and none will be tried on this data.
+
+**A design lesson, and it is the opposite of §20's.** §20 concluded that four
+samples could not resolve a point a year and recommended eight. Eight delivered:
+se 0.52pp. The mistake this time was assuming a large *count* of observations
+means a large *effective* count — 4,899 candidate returns carry the information
+of 228, because they overlap. **Count the effective observations before
+declaring which test is primary**, not after it fails.
+
+**Ledger: 39 → 42 trials**, hurdle 2.209 (`expected_max_of_normals(42)` =
+2.2087, measured). Weights unchanged. No result here is evidence of
+profitability; the corpus gate reads `PARTIALLY_SURVIVORSHIP_CORRECTED` at
+38.7% and the standing rule against believing its numbers has not lifted.

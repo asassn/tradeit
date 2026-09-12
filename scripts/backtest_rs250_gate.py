@@ -60,9 +60,15 @@ class GatedCandidates:
     inner: MovingAverageCross
     ranks: Mapping[tuple[int, dt.date], float]
     threshold: float = THRESHOLD
+    #: "below" refuses ranks under the threshold; "above" refuses ranks at or
+    #: over it, which is what §24 measured for signed accumulation -- there the
+    #: top of the signal is the bad end.
+    refuse: str = "below"
     offered: int = field(default=0, init=False)
     refused: int = field(default=0, init=False)
     unranked: int = field(default=0, init=False)
+    #: Every decision, for the candidate-level test that is the primary one.
+    decisions: list[tuple[dt.date, int, float, bool]] = field(default_factory=list, init=False)
 
     def __call__(
         self, session_date: dt.date, bars: Mapping[int, OhlcvBar]
@@ -76,18 +82,23 @@ class GatedCandidates:
                 # Unknown is not bad: the gate does not apply.
                 self.unranked += 1
                 kept.append(candidate)
-            elif rank < self.threshold:
-                self.refused += 1
             else:
-                kept.append(candidate)
+                blocked = (
+                    rank < self.threshold if self.refuse == "below" else rank >= self.threshold
+                )
+                self.decisions.append((session_date, candidate.instrument_id, rank, not blocked))
+                if blocked:
+                    self.refused += 1
+                else:
+                    kept.append(candidate)
         return kept
 
 
-def _ranks(path: Path) -> dict[tuple[int, dt.date], float]:
+def _ranks(path: Path, column: str) -> dict[tuple[int, dt.date], float]:
     with path.open() as handle:
         return {
             (int(row["security_id"]), dt.date.fromisoformat(row["session_date"])): float(
-                row["pct_250"]
+                row[column]
             )
             for row in csv.DictReader(handle)
         }
@@ -107,7 +118,9 @@ def _run(
     source: MovingAverageCross | GatedCandidates = inner
     gate: GatedCandidates | None = None
     if ranks is not None:
-        gate = GatedCandidates(inner=inner, ranks=ranks)
+        gate = GatedCandidates(
+            inner=inner, ranks=ranks, threshold=args.threshold, refuse=args.refuse
+        )
         source = gate
     t0 = time.time()
     data = CorpusSessionData(
@@ -154,6 +167,15 @@ def main() -> int:
     ap.add_argument("--cap", type=int, default=300)
     ap.add_argument("--offset", type=int, required=True)
     ap.add_argument("--map", type=Path, default=None)
+    ap.add_argument("--rank-column", default="pct_250")
+    ap.add_argument("--threshold", type=float, default=THRESHOLD)
+    ap.add_argument("--refuse", choices=("below", "above"), default="below")
+    ap.add_argument(
+        "--decisions",
+        type=Path,
+        default=None,
+        help="write every candidate decision here, for the candidate-level test",
+    )
     ap.add_argument("--capital", type=Decimal, default=Decimal(100000))
     ap.add_argument("--fast", type=int, default=50)
     ap.add_argument("--slow", type=int, default=200)
@@ -172,7 +194,7 @@ def main() -> int:
         _spans(str(args.spans)), args.start, args.end, 250, args.cap, args.offset
     )
     universe = sorted(survived + died)
-    ranks = _ranks(args.map or OUT / f"rs250gate_map_{args.offset}.csv")
+    ranks = _ranks(args.map or OUT / f"rs250gate_map_{args.offset}.csv", args.rank_column)
     print(
         f"sample {args.offset}: {len(universe)} securities "
         f"({len(survived)} survived, {len(died)} died); {len(ranks):,} ranks; "
@@ -206,6 +228,15 @@ def main() -> int:
         f"({gate.refused / max(1, gate.offered):.1%}), {gate.unranked:,} unranked and "
         f"therefore not gated"
     )
+    if args.decisions:
+        with args.decisions.open("w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["sample", "session_date", "instrument_id", "rank", "admitted"])
+            writer.writerows(
+                [args.offset, d.isoformat(), i, f"{r:.6f}", int(adm)]
+                for d, i, r, adm in gate.decisions
+            )
+        print(f"  {len(gate.decisions):,} candidate decisions -> {args.decisions}")
     print(
         f"RESULT,{args.offset},{args.delisting_recovery},{a.total_return_pct:.6f},"
         f"{b.total_return_pct:.6f},{a.cagr:.6f},{b.cagr:.6f},"
