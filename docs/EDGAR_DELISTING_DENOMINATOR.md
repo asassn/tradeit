@@ -1525,6 +1525,37 @@ Two further reasons the gap does not close on its own:
   no numerator by this route, and §7be that the pre-2006 window holds no
   exchange-listing evidence at all.
 
+### MEASURED 2026-09-12, after the decision — the free routes to the numerator
+are exhausted
+
+The owner chose to stop chasing the grade at 38.7% and to take whatever corpus
+value the remaining work offered. There is none left to take by these routes,
+which is worth recording so nobody runs them again hoping.
+
+**The ticker-resolution route is complete.** `research01_resolve_dead_tickers.py`
+targets dead registrants with no ticker and reads their own annual reports for
+the symbol. Measured: **17,874 of 17,874 already attempted, 0 never attempted.**
+It has bound 13,705 tickers to date; the 9,311 dated exits with no identity are
+precisely the ones it already tried and could not resolve.
+
+**Form 25 does not carry a symbol.** The exchange's own delisting notice was the
+obvious next source. Four from registrants with no ticker were fetched: each is
+about 1.5 KB and **none contains the words "symbol" or "ticker"** at all.
+
+**The residue is old operating companies, not obscurities.** A 400-strong sample
+of the 9,311: **85% filed an annual report**, and the names are ordinary —
+Browning-Ferris Industries, Federal Paper Board, DynCorp, Baldwin & Lyons —
+alongside subsidiaries such as Illinois Bell that only ever had listed debt.
+They are unresolved because their filings predate machine-readable cover pages,
+not because they were small. And they are where the coverage gap lives: of
+13,247 dated exits still unpriced, **8,766 (66%) exited before 2010**, which is
+exactly where `PHASE_06_VENDOR_MATRIX.md` measured EODHD's delisted coverage to
+be thin.
+
+**So the remaining 6.3 points to the next grade are not an effort problem.**
+They need a source keyed by security rather than by symbol, with deep
+pre-2010 delisted history. That is a purchase decision, and it is not pending.
+
 ### DECIDED 2026-09-12: adopt §5's denominator, and publish both readings forever
 
 **The owner reversed the 2026-09-05 decision**, on the premise that decision
