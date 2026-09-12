@@ -162,7 +162,10 @@ def main() -> int:
         outcome = f"SURVIVES at {state} sessions" if state else "does not survive at either horizon"
         print(f"  {signal:<18}: {outcome}")
     # Reported because the two signals are different claims about one factor:
-    # volume_momentum is direction-blind, obv_trend carries the sign.
+    # volume_momentum is direction-blind, obv_trend carries the sign. Only
+    # meaningful when both were run; a single-signal run says nothing about it.
+    if len(signals) < 2:
+        return 0
     both = [r for r in rows if r[signals[0]] and r[signals[1]]]
     a = np.array([float(r[signals[0]]) for r in both])
     b = np.array([float(r[signals[1]]) for r in both])

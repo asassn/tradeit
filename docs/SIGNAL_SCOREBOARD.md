@@ -43,6 +43,8 @@ same way in all four in-sample specifications.
 | `dist_from_sma_50` | pattern_quality 0.20 | trend following | IC −0.024, t −2.77 | no — flipped | not run | **contradicts its declared prior twice.** Not flipped — see §7 |
 | `rsi_14` | pattern_quality 0.20 | mean reversion | IC −0.015, t −1.70 | no — flipped | not run | never detectable |
 | `sector_strength` | sector_strength 0.10 | **strong sectors outperform** | 2000s IC +0.026 t +2.93; 2010s IC −0.018 t −2.48 | **no — reverses by decade** | n/a | **significant in both directions.** Worse than a null: the relationship inverts |
+| `volume_momentum` | volume_accumulation 0.25 | rising volume is accumulation | **IC +0.043, t +20.67** | **yes, 4/4 samples** | **IC +0.004, t +1.95** | **REJECTED.** Passed every criterion in sample, net +32.7%/yr → +3.4%/yr, geometric edge +20.1%/yr → **−11.4%/yr** — see §21, §22 |
+| `obv_trend` | volume_accumulation 0.25 | accumulation, **signed** | IC −0.012, t −5.60 | **no — wrong sign, 0/4** | not run | the signed measure fails where the direction-blind one passed; see §21 |
 
 ### Factors carrying weight that have not been tested at all
 
@@ -1327,3 +1329,76 @@ something other than what the factor is called.
 
 **Ledger: 29 → 33 trials**, hurdle 2.112. No result here is evidence of
 profitability; the corpus gate still reads `SURVIVOR_BIASED`.
+
+---
+
+## §22 — `volume_momentum` out of sample: it did not replicate — 2026-09-12
+
+§21's pass was the first in this document, and §8's precedent said what to do
+with it: test it on data it has never seen. Criteria committed in `72006b0`
+before any 2010s run of this signal. **235,640 observations**, four disjoint
+samples of the 2010 population.
+
+### It failed, and not narrowly
+
+| | in sample 2000–2009 | out of sample 2010–2019 |
+|---|---|---|
+| IC, 21 sessions | **+0.0428 (t +20.67)** | **+0.0040 (t +1.95)** |
+| IC, 63 sessions | **+0.0231 (t +6.34)** | −0.0005 (t −0.13) |
+| samples with the declared sign | **4 of 4** | **2 of 4** |
+| geometric edge, first half | **+20.05%/yr** | **−11.38%/yr** |
+| geometric edge, second half | **+5.22%/yr** | **−8.76%/yr** |
+| net of costs, 21 sessions | **+32.7%/yr** | +3.4%/yr |
+| verdict | `ECONOMICALLY_USEFUL` | `NOT_DETECTABLE` |
+
+All three criteria fail at both horizons. **The geometric edge did not merely
+weaken — it reversed**, from +20.05%/yr to −11.38%/yr in the first half and from
++5.22%/yr to −8.76%/yr in the second, with confidence intervals excluding zero on
+the wrong side. Buying the top quintile by volume growth *lost* to the universe
+in both halves of the out-of-sample decade.
+
+### This is `relative_volume_20` again, and that was foreseen in writing
+
+| | `relative_volume_20` (§8) | `volume_momentum` (§21–22) |
+|---|---|---|
+| in-sample verdict | `ECONOMICALLY_USEFUL` | `ECONOMICALLY_USEFUL` |
+| in-sample net | +32.7%/yr | +32.7%/yr |
+| out-of-sample | IC +0.009, t +0.93 | IC +0.004, t +1.95 |
+| outcome | **rejected** | **rejected** |
+
+The identical net figure remains a coincidence of the cost arithmetic; the
+outcome is not. **Two volume signals have now passed every in-sample gate and
+died on unseen data.** §21 said in advance that this was the shape to distrust,
+and the registration for this test said in advance what a failure would mean.
+
+### The state of the four weighted factors
+
+| factor | measured by its real engine | result |
+|---|---|---|
+| `relative_strength` | §18 | null — the engine blends a reversal horizon with a momentum one |
+| `pattern_quality` | §13 | null — present on 99.6% of scan points; edge lived in one half |
+| `fundamental_quality` | §10 | null — no detectable relationship |
+| `volume_accumulation` | §21–22 | one signal wrong-signed, one passed in sample and **failed out of it** |
+
+**Every weighted factor has now been measured directly, and none survives.** The
+weights stay equal at 0.25 — for the fourth time on evidence rather than for want
+of it.
+
+### What was gained, since it was not a signal
+
+**A defect that had been shipping.** `obv_slope` could not distinguish
+accumulation from distribution (§21), and it was found only because the hunt for
+this factor's engine went looking.
+
+**A name that does not describe its contents.** The direction-blind measure
+passed in sample and the signed one failed, so what `volume_accumulation` was
+weighting was never accumulation. That remains true whether or not the signal
+replicated.
+
+**A second demonstration that the process works.** The trial ledger, the
+pre-registration and the out-of-sample discipline caught a `+32.7%/yr`
+in-sample result — one that would have been extremely tempting to act on — for
+the second time. Had the weights moved on §21, the system would now be carrying
+a factor whose out-of-sample edge is *negative* in both halves of a decade.
+
+**Ledger: 33 → 35 trials.** No result here is evidence of profitability.
