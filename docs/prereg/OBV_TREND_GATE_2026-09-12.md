@@ -51,7 +51,7 @@ THE GATE   Refuse a candidate whose obv_trend percentile on the decision
 
 PRIMARY PASSES ONLY IF, AT EITHER HORIZON
   1. Refused candidates' mean forward return is below admitted candidates',
-     with a t-statistic beyond the 42-trial hurdle (|t| > 2.19, measured),
+     with a t-statistic beyond the 42-trial hurdle (|t| > 2.209, measured),
      overlap-corrected.
   2. It holds in BOTH 2020-2022 and 2023-2024.
   3. The geometric mean of admitted beats that of all candidates, in both
