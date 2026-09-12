@@ -126,7 +126,7 @@ FEATURE_SCALE_RULES: tuple[ScaleRule, ...] = (
         "band width divided by the middle band",
     ),
     ScaleRule(
-        r"sma_\d+_slope|obv_slope",
+        r"sma_\d+_slope|obv_trend",
         ScaleSensitivity.INVARIANT,
         "slope normalised by its own starting level and by the lookback",
     ),

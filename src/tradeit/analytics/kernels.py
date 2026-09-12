@@ -441,6 +441,39 @@ def on_balance_volume(close: Floats, volume: Floats) -> Floats:
     return out
 
 
+def obv_trend(close: Floats, volume: Floats, lookback: int) -> Floats:
+    """Net signed volume over ``lookback`` bars, as a share of the volume traded.
+
+    The usable form of OBV, and **signed**: +1 means every session in the window
+    closed up on its full volume, -1 means every one closed down, 0 means they
+    cancelled. Dimensionless, so it compares across instruments, and unaffected
+    by a split adjustment, which scales price and volume in opposite directions
+    and leaves the ratio alone.
+
+    **This replaces a feature that could not tell accumulation from
+    distribution.** The registry previously published
+    ``slope(abs(obv) + 1, lookback)``: the absolute value made a security that
+    closed down every session for forty sessions and one that closed up every
+    session return the identical ``+0.052632``. The level of OBV is arbitrary,
+    which is why the old form reached for ``abs`` -- but the *change* in OBV is
+    not arbitrary, and normalising it by the volume behind it keeps the sign and
+    the comparability at once.
+    """
+    close, volume = _as_float(close), _as_float(volume)
+    out = _empty_like(close)
+    n = close.shape[0]
+    if n <= lookback:
+        return out
+    obv = on_balance_volume(close, volume)
+    traded = np.cumsum(volume)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        window_volume = traded[lookback:] - traded[:-lookback]
+        out[lookback:] = np.where(
+            window_volume > 0, (obv[lookback:] - obv[:-lookback]) / window_volume, np.nan
+        )
+    return out
+
+
 def relative_volume(volume: Floats, period: int = 20) -> Floats:
     """Today's volume against the average of the ``period`` bars *before* it.
 

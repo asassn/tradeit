@@ -297,3 +297,65 @@ class TestNoLibraryDependence:
             *k.adx(series["high"], series["low"], series["close"]),
         ]
         assert all(out.shape[0] == n for out in outputs)
+
+
+class TestObvTrend:
+    """The signed, comparable form of OBV.
+
+    Written against a real defect: the registry used to publish
+    ``slope(abs(obv) + 1, lookback)``, and a security closing down every session
+    for forty sessions returned the identical ``+0.052632`` as one closing up
+    every session. These tests fail on that implementation.
+    """
+
+    def _run(self, closes: list[float], volumes: list[float], lookback: int = 20):
+        return k.obv_trend(np.array(closes), np.array(volumes), lookback)
+
+    def test_accumulation_and_distribution_have_opposite_signs(self) -> None:
+        up = [10.0 + 0.1 * i for i in range(40)]
+        down = [10.0 - 0.1 * i for i in range(40)]
+        volume = [1_000_000.0] * 40
+        assert self._run(up, volume)[-1] > 0
+        assert self._run(down, volume)[-1] < 0
+        assert self._run(up, volume)[-1] == pytest.approx(-self._run(down, volume)[-1])
+
+    def test_every_session_up_on_full_volume_is_one(self) -> None:
+        up = [10.0 + 0.1 * i for i in range(40)]
+        assert self._run(up, [1_000_000.0] * 40)[-1] == pytest.approx(1.0)
+
+    def test_every_session_down_on_full_volume_is_minus_one(self) -> None:
+        down = [10.0 - 0.1 * i for i in range(40)]
+        assert self._run(down, [1_000_000.0] * 40)[-1] == pytest.approx(-1.0)
+
+    def test_alternating_sessions_cancel(self) -> None:
+        closes = [10.0 + (0.1 if i % 2 else -0.1) for i in range(41)]
+        value = self._run(closes, [1_000_000.0] * 41, lookback=20)[-1]
+        assert abs(value) < 0.1
+
+    def test_it_is_unchanged_by_a_split_adjustment(self) -> None:
+        """A split divides price and multiplies volume; the ratio does not care."""
+        closes = [10.0 + 0.1 * i for i in range(40)]
+        volume = [1_000_000.0 + 1_000.0 * i for i in range(40)]
+        plain = self._run(closes, volume)[-1]
+        adjusted = self._run([c / 2 for c in closes], [v * 2 for v in volume])[-1]
+        assert adjusted == pytest.approx(plain)
+
+    def test_it_is_bounded(self) -> None:
+        rng = np.random.default_rng(7)
+        closes = list(100 + np.cumsum(rng.normal(0, 1, 200)))
+        volume = list(rng.uniform(1e5, 5e6, 200))
+        values = self._run(closes, volume, lookback=20)
+        finite = values[np.isfinite(values)]
+        assert finite.size > 0
+        assert np.all(finite <= 1.0) and np.all(finite >= -1.0)
+
+    def test_the_warm_up_is_not_a_number(self) -> None:
+        closes = [10.0 + 0.1 * i for i in range(40)]
+        values = self._run(closes, [1_000_000.0] * 40, lookback=20)
+        assert np.all(np.isnan(values[:20]))
+        assert np.isfinite(values[20:]).all()
+
+    def test_a_window_with_no_volume_is_not_a_number(self) -> None:
+        closes = [10.0 + 0.1 * i for i in range(40)]
+        values = self._run(closes, [0.0] * 40, lookback=20)
+        assert np.all(np.isnan(values[20:]))

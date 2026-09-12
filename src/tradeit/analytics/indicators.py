@@ -259,8 +259,11 @@ class IndicatorEngine:
             {},
         )
         spec(
-            "obv_slope",
-            "Slope of on-balance volume -- the usable form of OBV.",
+            "obv_trend",
+            "Net signed volume over the lookback as a share of volume traded: "
+            "+1 every session up, -1 every session down. The usable form of OBV, "
+            "and signed -- it replaced obv_slope, which took abs(OBV) and so "
+            "returned the same number for accumulation and distribution alike.",
             1 + config.ma_slope_lookback,
             OutputType.RATIO,
             {"lookback": config.ma_slope_lookback},
@@ -473,7 +476,7 @@ class IndicatorEngine:
         values[f"vwap_{c.vwap_period}"] = k.rolling_vwap(high, low, close, volume, c.vwap_period)
         obv = k.on_balance_volume(close, volume)
         values["obv"] = obv
-        values["obv_slope"] = k.slope(np.abs(obv) + 1.0, c.ma_slope_lookback)
+        values["obv_trend"] = k.obv_trend(close, volume, c.ma_slope_lookback)
         values["relative_volume"] = k.relative_volume(volume, c.relative_volume_period)
         values[f"avg_dollar_volume_{c.dollar_volume_period}"] = k.average_dollar_volume(
             high, low, close, volume, c.dollar_volume_period

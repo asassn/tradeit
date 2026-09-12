@@ -79,7 +79,7 @@ from too little data, and the crossings it produces are fictional.
 |---|---|---|---|
 | `relative_volume` | `volumeₜ / mean(volume over prior 20)` | 21 | **Excludes the current bar from its own baseline** |
 | `obv` | cumulative `sign(Δclose) · volume` | 1 | Level is arbitrary; only slope carries information |
-| `obv_slope` | per-bar slope of OBV | 11 | The usable form of OBV |
+| `obv_trend` | net signed volume over the lookback, as a share of volume traded | 11 | The usable form of OBV, **signed**. Replaced `obv_slope`, which took `abs(OBV)` and returned the same value for accumulation and distribution |
 | `avg_dollar_volume_20` | `SMA₂₀(typical price · volume)` | 20 | Typical price, not close: close×volume misstates turnover on trend days |
 | `vwap_20` | `Σ(typical·vol)/Σ(vol)` over 20 bars | 20 | Rolling, **not** intraday session VWAP — see below |
 | `volume_momentum` | ROC of average volume | 40 | Accumulation building or fading |
