@@ -108,11 +108,12 @@ def _study(
     ids: list[int],
     horizon: int,
     name: str = "rs_score",
+    orientation: Orientation = Orientation.POSITIVE,
 ) -> SignalStudy:
     return SignalStudy(
         name=name,
         target=StudyTarget(kind=TargetKind.FORWARD_RETURN, horizon_sessions=horizon),
-        orientation=Orientation.POSITIVE,
+        orientation=orientation,
         observations=tuple(
             Observation(session_date=d, instrument_id=i, signal=s, outcome=o)
             for s, o, d, i in zip(signal, outcome, dates, ids, strict=True)

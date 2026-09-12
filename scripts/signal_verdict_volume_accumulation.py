@@ -39,7 +39,7 @@ from signal_research_relative_strength_verdict import (
 )
 
 from tradeit.backtesting.overfitting import expected_max_of_normals
-from tradeit.signals.study import PromotionRule
+from tradeit.signals.study import Orientation, PromotionRule
 from tradeit.strategy.config import StrategyConfig
 
 OUT = Path("/Users/ericsasson/Documents/TradeItData/out")
@@ -55,7 +55,19 @@ def main() -> int:
     ap.add_argument("--end", default="2009-12-31")
     ap.add_argument("--split", default="2005-01-01")
     ap.add_argument("--samples", type=int, default=4)
+    ap.add_argument(
+        "--direction",
+        choices=("positive", "negative"),
+        default="positive",
+        help="the declared direction. It decides three things at once: which sign of "
+        "quantile spread counts as declared, which quintile criterion 2 measures (a "
+        "negative signal is expected to win at its BOTTOM), and which sign of IC "
+        "counts for criterion 3.",
+    )
     args = ap.parse_args()
+    positive = args.direction == "positive"
+    orientation = Orientation.POSITIVE if positive else Orientation.NEGATIVE
+    side = "top" if positive else "bottom"
 
     signals = args.signals.split(",")
     split = dt.date.fromisoformat(args.split)
@@ -89,7 +101,7 @@ def main() -> int:
             out = [float(r[str(horizon)]) for r in usable]
             dates = [dt.date.fromisoformat(r["session_date"]) for r in usable]
             ids = [int(r["security_id"]) for r in usable]
-            study = _study(sig, out, dates, ids, horizon, signal)
+            study = _study(sig, out, dates, ids, horizon, signal, orientation)
             verdict, reason = study.verdict(rule, costs, average_price=price)
             mean_sp = study.quantile_spread(QUANTILE)
             ic, t = study.information_coefficient(), study.t_statistic()
@@ -102,7 +114,8 @@ def main() -> int:
                 f"median sp {median_sp:+.2%}  net/yr {net:+.1%}"
             )
             print(f"    verdict {verdict}: {reason}")
-            c1 = verdict in ESTABLISHED and (mean_sp or 0) > 0
+            spread = mean_sp or 0.0
+            c1 = verdict in ESTABLISHED and (spread > 0 if positive else spread < 0)
             print(f"    criterion 1 (established, declared direction): {'PASS' if c1 else 'fail'}")
 
             s_arr, o_arr, d_arr = np.array(sig), np.array(out), np.array(dates)
@@ -110,11 +123,16 @@ def main() -> int:
             halves = []
             for name, mask in ((labels[0], d_arr < split), (labels[1], d_arr >= split)):
                 ss, oo = s_arr[mask], o_arr[mask]
-                top = oo[ss >= np.quantile(ss, 1 - QUANTILE)]
-                edge = _geometric(top) - _geometric(oo)
+                chosen = (
+                    oo[ss >= np.quantile(ss, 1 - QUANTILE)]
+                    if positive
+                    else oo[ss <= np.quantile(ss, QUANTILE)]
+                )
+                edge = _geometric(chosen) - _geometric(oo)
                 draws = np.array(
                     [
-                        _geometric(rng.choice(top, len(top))) - _geometric(rng.choice(oo, len(oo)))
+                        _geometric(rng.choice(chosen, len(chosen)))
+                        - _geometric(rng.choice(oo, len(oo)))
                         for _ in range(300)
                     ]
                 )
@@ -122,14 +140,17 @@ def main() -> int:
                 w = np.sqrt(overlap)
                 lo, hi = edge - (edge - lo) * w, edge + (hi - edge) * w
                 turns = 252 / horizon
-                annual = (1 + _geometric(top)) ** turns - (1 + _geometric(oo)) ** turns
+                annual = (1 + _geometric(chosen)) ** turns - (1 + _geometric(oo)) ** turns
                 halves.append(edge > 0)
                 print(
-                    f"    {name}: geometric top-quintile edge {edge:+.3%}/hold "
+                    f"    {name}: geometric {side}-quintile edge {edge:+.3%}/hold "
                     f"({annual:+.2%}/yr)  CI [{lo:+.3%}, {hi:+.3%}]"
                 )
             c2 = all(halves)
-            print(f"    criterion 2 (positive in both halves): {'PASS' if c2 else 'fail'}")
+            print(
+                f"    criterion 2 ({side} quintile ahead in both halves): "
+                f"{'PASS' if c2 else 'fail'}"
+            )
 
             signs = []
             for k in range(args.samples):
@@ -141,9 +162,10 @@ def main() -> int:
                     [ids[i] for i in idx],
                     horizon,
                     signal,
+                    orientation,
                 )
                 sic = sub.information_coefficient()
-                signs.append((sic or 0) > 0)
+                signs.append((sic or 0) > 0 if positive else (sic or 0) < 0)
                 print(f"    sample {k}: n {sub.count:,}  IC {sic:+.4f}  t {sub.t_statistic():+.2f}")
             c3 = sum(signs) >= 3
             print(

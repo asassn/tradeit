@@ -44,7 +44,7 @@ same way in all four in-sample specifications.
 | `rsi_14` | pattern_quality 0.20 | mean reversion | IC −0.015, t −1.70 | no — flipped | not run | never detectable |
 | `sector_strength` | sector_strength 0.10 | **strong sectors outperform** | 2000s IC +0.026 t +2.93; 2010s IC −0.018 t −2.48 | **no — reverses by decade** | n/a | **significant in both directions.** Worse than a null: the relationship inverts |
 | `volume_momentum` | volume_accumulation 0.25 | rising volume is accumulation | **IC +0.043, t +20.67** | **yes, 4/4 samples** | **IC +0.004, t +1.95** | **REJECTED.** Passed every criterion in sample, net +32.7%/yr → +3.4%/yr, geometric edge +20.1%/yr → **−11.4%/yr** — see §21, §22 |
-| `obv_trend` | volume_accumulation 0.25 | accumulation, **signed** | IC −0.012, t −5.60 | **no — wrong sign, 0/4** | not run | the signed measure fails where the direction-blind one passed; see §21 |
+| `obv_trend` | volume_accumulation 0.25 | accumulation, **signed** | IC −0.012, t −5.60 | **consistently NEGATIVE, 4/4** | **IC −0.034, t −16.27, 4/4** | **replicated and strengthened, inverted to the factor's own prior.** Fails half-period consistency; see §21, §24 |
 
 ### Factors carrying weight that have not been tested at all
 
@@ -1463,3 +1463,64 @@ arithmetic rather than by data.
 9,311 have no identity yet. **Coverage above 45% — the next grade, where the
 rule does lift — needs roughly 1,650 more priced exits**, which is the first
 target in this project that is both concrete and reachable.
+
+---
+
+## §24 — `obv_trend` out of sample: the sign replicated, the edge did not — 2026-09-12
+
+§22's registration said this signal would not be carried forward, because it
+failed in sample. That was right about a *neutral* failure and wrong about this
+one: `obv_trend` failed by being **consistently negative** against a declared
+positive direction — the shape `relative_volume_20` had, which §8 tested rather
+than assumed. Registered in `9dedd93` with the direction taken from the
+in-sample result and **charged as a derivation, 2 trials per horizon**, before
+its out-of-sample numbers had been computed by anyone. They existed in the §22
+observations and had never been passed to a verdict.
+
+### The strongest replication in this document, and it still fails
+
+| | in sample 2000–2009 | out of sample 2010–2019 |
+|---|---|---|
+| IC, 21 sessions | −0.0116 (t −5.60) | **−0.0337 (t −16.27)** |
+| samples with the negative sign | **4 of 4** | **4 of 4** |
+| quantile spread | — | mean −1.49%, median −0.77%, spread t −8.07 |
+| verdict | `DETECTABLE_NOT_PROFITABLE` | **`ECONOMICALLY_USEFUL`**, +15.1%/yr net |
+| criterion 2, both halves | — | **fail**: +8.00%/yr, then −2.51%/yr |
+| 63 sessions | +0.0049 (t +1.35) | +0.0048 (t +1.33), 0 of 4 — nothing |
+
+**Eight samples across two decades, the same sign in every one, three times
+stronger out of sample than in.** Nothing else here has done that:
+`relative_volume_20` reversed, `volume_momentum` collapsed, `pattern_quality`
+flipped with the statistic chosen, and the 250-session rank replicated but with
+a spread that rested on outliers.
+
+**And it does not survive.** Criterion 2 fails exactly where §13 and §19 failed:
+the compounded edge of the favoured quintile is +8.00%/yr in 2010–2014 and
+−2.51%/yr in 2015–2019. A relationship that reverses between halves of its own
+out-of-sample decade is not a tradeable edge, whatever its t-statistic. The
+standard does not move because this is the best candidate yet.
+
+### What it says about the factor
+
+**`volume_accumulation` is weighted positively, and the only measure of actual
+accumulation says the opposite.** Names bought on balance — more volume on up
+days than down — underperform over the following month, consistently, in both
+decades. §21 found the *direction-blind* measure passed in sample; §22 found it
+died out of sample; §24 finds the *signed* one replicates inversely.
+
+Three signals, one factor, and not one of them supports the thing the factor is
+named after. The weight stays at 0.25 — by §12's argument, which is that no
+factor has been shown superior to another, and which four measured nulls have
+now reinforced rather than weakened.
+
+**What would make this actionable** is not another study of the same shape. The
+21-session inverse relationship is strong enough and stable enough in *sign*
+that the honest next question is a portfolio one: does refusing the top quintile
+of signed accumulation improve a rule that trades? §20 tested that shape for the
+250-session rank and found the paired difference swamped by path noise at four
+samples — so it would need the eight-sample design §20 recommended, and it is a
+proposition rather than a run.
+
+**Ledger: 35 → 39 trials**, hurdle 2.179. No result here is evidence of
+profitability; the corpus gate reads `PARTIALLY_SURVIVORSHIP_CORRECTED` and the
+standing rule against believing its numbers has not lifted.
