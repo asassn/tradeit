@@ -1525,6 +1525,52 @@ Two further reasons the gap does not close on its own:
   no numerator by this route, and §7be that the pre-2006 window holds no
   exchange-listing evidence at all.
 
+### DECIDED 2026-09-12: adopt §5's denominator, and publish both readings forever
+
+**The owner reversed the 2026-09-05 decision**, on the premise that decision
+rested on. It said *"nothing depends on the number while the corpus is short
+under either reading"*. Two things ended that:
+
+* the corpus is no longer short under §5's reading — **8,079 of 21,618 dated
+  Exchange Act exits are priced, 37.4%**, past the 0.25 threshold;
+* the kept reading was measured **unreachable** in the section above: perfect
+  identity resolution at the observed price-hit rate tops out near 23.8%, and
+  its denominator grows every quarter with EDGAR while only exits can feed the
+  numerator.
+
+A gate that cannot change state is a label, not a control, and it was hiding
+real work: priced dated exits went from 5,423 to 8,079 — **+49% in a week** —
+while the published figure crawled from 4.72% to 8.34%.
+
+**What the gate computes from 2026-09-12** (`scripts/research01_gate.py`):
+
+```
+bounded_coverage = priced / every dated exit entry in scope   8,079 / 21,618 = 37.4%
+matched_coverage = priced / entries whose identity resolves   8,079 / 12,307 = 65.6%
+```
+
+Identity resolution is proxied by holding a ticker, as the measurement above
+did. It is a proxy and is labelled one: §4's evidence rules are stricter, so the
+true resolved count is at most 12,307 and the true `matched_coverage` at least
+65.6%.
+
+**Both readings are published side by side, permanently.** The gate prints the
+previous one — 8,079 / 96,822 = 8.34%, `survivor_biased` — beside the new one,
+with what its denominator contains: 50,354 registrants that never reported under
+the Exchange Act and 12,143 the pipeline determined **did not exit at all**. The
+point is that the change of grade is a change of denominator, never a change in
+the corpus, and no reader should have to take that on trust.
+
+**What did NOT change, and this is the part that matters.** The standing rule —
+*no strategy result computed on `research-01` is evidence of profitability* —
+**stays in force.** It was written when `SURVIVOR_BIASED` was the only grade the
+gate could return, and its own trigger ("lifts when the gate says something
+other than `SURVIVOR_BIASED`") would have fired on this change. The owner kept
+the rule and moved its trigger to `MATERIALLY_SURVIVORSHIP_CORRECTED` plus an
+explicit decision. 37.4% coverage means nearly two thirds of the companies EDGAR
+shows exiting are still unpriced. `PARTIALLY_SURVIVORSHIP_CORRECTED` is a
+measurement, not a permission.
+
 **This is recorded, not acted on.** The decision to keep the pessimistic reading
 stands until the owner revisits it. What has changed is only the premise: the
 choice between the two readings is not a cosmetic difference in a number that is

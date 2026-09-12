@@ -150,7 +150,7 @@ The recent years are the strongest the corpus has ever been.
 
 **The standing rule does not lift.** No strategy result computed on this corpus
 is evidence of profitability, and it stays that way until the gate returns
-something other than `SURVIVOR_BIASED` — which needs `bounded_coverage` above
+`MATERIALLY_SURVIVORSHIP_CORRECTED` with a recorded decision. The grade moved to `PARTIALLY_SURVIVORSHIP_CORRECTED` on 2026-09-12 when the §5 denominator was adopted (§7e) and the rule did not lift with it — which needs `bounded_coverage` above
 0.25, roughly five times again what is held now.
 
 **16,348,733 bars landed from 3,534 of 3,728 symbols**, with 5,126 bars refused

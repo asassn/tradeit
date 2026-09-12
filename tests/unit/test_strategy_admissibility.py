@@ -43,14 +43,31 @@ def test_a_survivor_biased_corpus_permits_no_evidence() -> None:
     assert "failures are absent" in verdict.reason
 
 
-def test_every_other_classification_permits_evidence() -> None:
-    """The standing rule lifts when the gate says anything other than
-    survivor-biased, and the three remaining classes are treated alike because
-    no written rule distinguishes them."""
-    for klass in SurvivorshipClass:
-        if klass is BIASED:
-            continue
+def test_the_classes_above_the_line_permit_evidence() -> None:
+    """Where the line sits is a decision; that there is exactly one is the design.
+
+    It sat below ``PARTIALLY_SURVIVORSHIP_CORRECTED`` until 2026-09-12, when
+    that class was unreachable. Adopting §5's denominator moved the same corpus
+    into it on the same day with no new data, and the owner kept the rule in
+    force, so the line moved with it.
+    """
+    for klass in (
+        SurvivorshipClass.MATERIALLY_SURVIVORSHIP_CORRECTED,
+        SurvivorshipClass.SURVIVORSHIP_SAFE_RESEARCH_GRADE,
+    ):
         assert admissibility(klass).permits_evidence, klass
+
+
+def test_a_partial_correction_does_not_permit_evidence() -> None:
+    """A change of denominator must not be able to unlock a promotion.
+
+    At the 0.25 boundary nearly three quarters of the dated exits are still
+    unpriced. The corpus that crossed it on 2026-09-12 was the same corpus it
+    had been the day before.
+    """
+    verdict = admissibility(SurvivorshipClass.PARTIALLY_SURVIVORSHIP_CORRECTED)
+    assert not verdict.permits_evidence
+    assert "still unpriced" in verdict.reason
 
 
 def test_entering_backtesting_is_not_a_claim_about_results() -> None:
@@ -107,15 +124,28 @@ def test_a_profitable_result_does_not_change_the_answer() -> None:
             )
 
 
-def test_the_rule_lifts_when_the_gate_stops_saying_survivor_biased() -> None:
+def test_the_rule_lifts_at_a_material_correction() -> None:
     version = promote_on_corpus(
         _at(StrategyState.BACKTESTING),
         StrategyState.OUT_OF_SAMPLE_TESTING,
         citation="backtest/2026-09",
-        classification=SurvivorshipClass.PARTIALLY_SURVIVORSHIP_CORRECTED,
+        classification=SurvivorshipClass.MATERIALLY_SURVIVORSHIP_CORRECTED,
         now=NOW,
     )
     assert version.state is StrategyState.OUT_OF_SAMPLE_TESTING
+
+
+def test_a_partial_correction_still_refuses_the_promotion() -> None:
+    """The regression this file exists to prevent: a promotion unlocked by
+    arithmetic rather than by data."""
+    with pytest.raises(EvidenceNotPermitted):
+        promote_on_corpus(
+            _at(StrategyState.BACKTESTING),
+            StrategyState.OUT_OF_SAMPLE_TESTING,
+            citation="backtest/2026-09",
+            classification=SurvivorshipClass.PARTIALLY_SURVIVORSHIP_CORRECTED,
+            now=NOW,
+        )
 
 
 def test_a_demotion_is_permitted_on_a_biased_corpus() -> None:

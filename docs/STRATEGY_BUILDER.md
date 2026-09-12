@@ -279,7 +279,7 @@ a version runs *on a corpus whose classification permits the claim*.
 That is a transcription rather than a decision. The threshold, the
 classification and the sentence that lifts the rule are all already written:
 *build the machinery on it; do not believe its numbers — the rule lifts when
-the gate says something other than `SURVIVOR_BIASED`, and not before.* A test
+the gate reaches `MATERIALLY_SURVIVORSHIP_CORRECTED` and a decision is recorded, and not before.* The gate read `PARTIALLY_SURVIVORSHIP_CORRECTED` from 2026-09-12 and the rule deliberately did not lift with it — see `EDGAR_DELISTING_DENOMINATOR.md` §7e.* A test
 puts a 41% CAGR in the citation and confirms the refusal is unchanged, because
 the refusal is about the corpus and not about the number.
 

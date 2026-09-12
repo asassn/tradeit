@@ -577,7 +577,7 @@ If you must query directly:
 
 ## 5. What this corpus does **not** claim
 
-* **It is not survivorship-safe.** The gate returns `SURVIVOR_BIASED`. Of 30,646
+* **It is not survivorship-safe.** The gate returns `PARTIALLY_SURVIVORSHIP_CORRECTED` as of 2026-09-12 — 8,079 of 21,618 dated Exchange Act exits priced, 37.4% — which is a measurement and not a permission; the standing rule against believing its numbers did not lift with it (§7e). Of 30,646
   registrants with a confirmed dated EDGAR exit, identity is held for 100%, a
   ticker for ~32%, and prices for ~21%. **No strategy result computed on it
   today is evidence of profitability.**

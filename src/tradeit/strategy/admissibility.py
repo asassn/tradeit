@@ -5,11 +5,11 @@ rungs above it — a version must run *"on a corpus whose classification permits
 the claim"* — and the platform's standing rule says what that means today:
 
     No strategy result computed on ``research-01`` today is evidence of
-    profitability. The survivorship gate returns ``SURVIVOR_BIASED``. A
-    backtest on it is missing the companies that failed, so a good result means
-    the failures are absent, not that the strategy works. **Build the machinery
-    on it; do not believe its numbers.** The rule lifts when the gate says
-    something other than ``SURVIVOR_BIASED``, and not before.
+    profitability. A backtest on it is missing the companies that failed, so a
+    good result means the failures are absent, not that the strategy works.
+    **Build the machinery on it; do not believe its numbers.** The rule lifts
+    when the gate reaches ``MATERIALLY_SURVIVORSHIP_CORRECTED`` and a decision
+    is recorded, and not before.
 
 That distinction — *run* versus *believe* — is the whole of this module. A
 version may enter ``BACKTESTING`` on a survivor-biased corpus, because building
@@ -19,12 +19,25 @@ results meant something.
 
 **The line is transcribed, not chosen.** The threshold, the classification and
 the sentence that lifts the rule are all written down already; encoding them is
-transcription. What is deliberately *not* here is any finer gradation — nothing
-says that ``PARTIALLY_SURVIVORSHIP_CORRECTED`` permits paper trading but not
-capital, and inventing that distinction would be exactly the "backtesting
-assumption" that needs a scoped proposition rather than a commit. All three
-non-biased classes are treated alike until somebody decides otherwise on
-purpose.
+transcription.
+
+**Updated 2026-09-12, and the update is also a transcription.** This module
+used to permit evidence for every class except ``SURVIVOR_BIASED``, because that
+was the only class the gate could return: ``EDGAR_DELISTING_DENOMINATOR.md``
+§7e measured the old denominator unreachable — perfect identity resolution
+still landed near 23.8% against a 0.25 threshold. When the owner adopted §5's
+denominator on 2026-09-12 the grade moved to
+``PARTIALLY_SURVIVORSHIP_CORRECTED`` **on the same corpus, the same day, with no
+new data** — and under the old code that change of arithmetic would by itself
+have unlocked promotion above ``BACKTESTING``.
+
+The owner kept the rule in force through that change. So the line now sits
+where the rule says it does: evidence requires
+``MATERIALLY_SURVIVORSHIP_CORRECTED`` or better. That is still not a finer
+gradation of what each class *permits* — ``PARTIALLY`` and ``SURVIVOR_BIASED``
+are treated alike, and the two classes above are treated alike — it is the same
+binary line, moved to where the decision put it. 37.4% coverage means nearly two
+thirds of the companies EDGAR shows exiting are still unpriced.
 
 A second thing left out on purpose: this asks nothing about *which* corpus a
 run used. Binding a version to a corpus is persistence, which does not exist
@@ -91,8 +104,9 @@ def admissibility(
 ) -> CorpusAdmissibility:
     """Map a classification to what it permits.
 
-    Binary by design. See the module docstring: the finer gradations are
-    unwritten, and writing them here would be deciding them.
+    Binary by design, with the line between the second and third classes since
+    2026-09-12. See the module docstring: the move was a transcription of the
+    owner's decision, not a new gradation, and the finer ones remain unwritten.
     """
     if classification is SurvivorshipClass.SURVIVOR_BIASED:
         return CorpusAdmissibility(
@@ -102,6 +116,19 @@ def admissibility(
                 "the corpus is survivor-biased; a good result means the failures are "
                 "absent, not that the strategy works. Machinery may be built and run "
                 "on it, and its numbers may not be believed"
+            ),
+            measured_at=measured_at,
+        )
+    if classification is SurvivorshipClass.PARTIALLY_SURVIVORSHIP_CORRECTED:
+        return CorpusAdmissibility(
+            classification=classification,
+            permits_evidence=False,
+            reason=(
+                "the correction is real and partial: at the 0.25 boundary nearly three "
+                "quarters of the dated exits are still unpriced, and a deficit that size "
+                "changes conclusions. Machinery may be built and run on it, and its "
+                "numbers may not be believed. See EDGAR_DELISTING_DENOMINATOR.md §7e, "
+                "2026-09-12"
             ),
             measured_at=measured_at,
         )

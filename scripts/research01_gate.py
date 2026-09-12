@@ -37,6 +37,7 @@ from sqlalchemy.orm import sessionmaker
 
 from tradeit.core.calendar import TradingCalendar
 from tradeit.edgar.denominator import CoverageBounds, classify_corpus
+from tradeit.edgar.evidence import EvidenceType
 from tradeit.edgar.index import IndexQuarter
 from tradeit.edgar.pipeline import BuildOptions, build_denominator
 from tradeit.research01.completeness import assess_span, summarise
@@ -44,6 +45,7 @@ from tradeit.storage.tables import (
     IssuerIdentifier,
     Security,
     SecurityPriceFact,
+    SymbolAlias,
 )
 
 
@@ -166,17 +168,69 @@ def main() -> int:
         hit = len(set(names) & priced)
         print(f"  {year}  {hit:>5,} of {len(names):>6,}  ({100 * hit / len(names):5.2f}%)")
 
-    # full_denominator stays len(denom.resolutions) by the owner's decision of
-    # 2026-09-05 (§7e): the pessimistic reading is kept deliberately, and this
-    # script does not quietly change it.
+    # §5's denominator, adopted by the owner on 2026-09-12 after §7e's second
+    # measurement showed the previous reading could not be passed at all --
+    # perfect identity resolution and the observed price-hit rate still landed
+    # at 23.8%, while the denominator grew every quarter with EDGAR.
+    #
+    #   bounded_coverage = priced / every dated exit entry   (pessimistic: an
+    #                      entry whose identity is unresolved is assumed
+    #                      uncovered, which is what makes it a lower bound)
+    #   matched_coverage = priced / entries whose identity IS resolved
+    #
+    # Identity resolution is proxied by holding a ticker for the CIK, as §7e
+    # did. It is a proxy and is labelled one: §4's evidence rules are stricter,
+    # so the true resolved count is at most this and the true matched_coverage
+    # at least this.
+    resolved_ids = {
+        int(v)
+        for v in session.scalars(
+            select(IssuerIdentifier.value_normalized)
+            .join(Security, Security.issuer_id == IssuerIdentifier.issuer_id)
+            .join(SymbolAlias, SymbolAlias.security_id == Security.security_id)
+            .where(IssuerIdentifier.namespace == "sec_cik", SymbolAlias.alias_kind == "ticker")
+            .distinct()
+        ).all()
+    }
+    resolved_entries = set(dated_exits) & resolved_ids
     bounds = CoverageBounds(
+        matched_numerator=len(covered),
+        resolved_denominator=len(resolved_entries),
+        full_denominator=len(dated_exits),
+    )
+    classification = classify_corpus(bounds, controls_passed=30, controls_total=30)
+    print("\n=== classification ===")
+    print(f"  dated exits in scope (the denominator): {len(dated_exits):,}")
+    print(f"  of those, identity resolved (ticker held): {len(resolved_entries):,}")
+    print(f"  of those, priced: {len(covered):,}")
+    print(json.dumps(classification.summary(), indent=1, default=str))
+
+    # Both readings, published side by side and permanently, so the change of
+    # denominator can never be mistaken for a change in the corpus. The second
+    # is what this gate reported until 2026-09-12.
+    legacy = CoverageBounds(
         matched_numerator=len(covered),
         resolved_denominator=len(dated_exits),
         full_denominator=len(denom.resolutions),
     )
-    classification = classify_corpus(bounds, controls_passed=30, controls_total=30)
-    print("\n=== classification ===")
-    print(json.dumps(classification.summary(), indent=1, default=str))
+    legacy_class = classify_corpus(legacy, controls_passed=30, controls_total=30)
+    print("\n=== the previous reading, kept for comparison (§7e) ===")
+    print(
+        f"  numerator over every registrant resolution: {len(covered):,} / "
+        f"{len(denom.resolutions):,} = {legacy.bounded_coverage:.2%} -> {legacy_class.assigned}"
+    )
+    never_reported = sum(1 for r in denom.resolutions if not r.is_exchange_act)
+    still_reporting = sum(
+        1
+        for r in denom.resolutions
+        if r.evidence_type is EvidenceType.NON_EXIT_REGISTRANT_STILL_REPORTING
+    )
+    print(
+        "  It divides by every registrant EDGAR has ever seen, including "
+        f"{never_reported:,} that never reported under the Exchange Act and "
+        f"{still_reporting:,} determined NOT to have exited. §7e measured it "
+        "unreachable: at perfect resolution it tops out near 23.8%."
+    )
 
     print("\n=== limitations, which are part of the result ===")
     print("  * The denominator holds NO exchange-listing evidence before 2006")

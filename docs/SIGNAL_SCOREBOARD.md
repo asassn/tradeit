@@ -1402,3 +1402,64 @@ the second time. Had the weights moved on §21, the system would now be carrying
 a factor whose out-of-sample edge is *negative* in both halves of a decade.
 
 **Ledger: 33 → 35 trials.** No result here is evidence of profitability.
+
+---
+
+## §23 — the gate's denominator changed; nothing above it did — 2026-09-12
+
+Every section from §13 to §22 closes by saying the corpus gate reads
+`SURVIVOR_BIASED`. **It now reads `PARTIALLY_SURVIVORSHIP_CORRECTED`, and not
+one of those results changes.** This section exists so that is impossible to
+misread.
+
+### What happened
+
+`bounded_coverage` divided the priced dead companies by **every registrant EDGAR
+has ever seen** — 96,822, including 50,354 that never reported under the
+Exchange Act and 12,143 the pipeline had determined *did not exit at all*. §5 of
+`EDGAR_DELISTING_DENOMINATOR.md` defines it over dated exit **entries**. §7e
+recorded the discrepancy on 2026-09-05, the owner kept the pessimistic reading
+because nothing depended on it, and a later measurement showed the kept reading
+was **unreachable**: perfect identity resolution at the observed price-hit rate
+tops out near 23.8% against a 0.25 threshold, with a denominator that grows
+every quarter as EDGAR grows.
+
+Measured 2026-09-12, on the same corpus, the same day:
+
+| reading | coverage | grade |
+|---|---|---|
+| §5's denominator (adopted) | 8,079 / 21,618 = **37.4%** | `PARTIALLY_SURVIVORSHIP_CORRECTED` |
+| previous (still published beside it) | 8,079 / 96,822 = 8.3% | `survivor_biased` |
+
+The corpus did not improve that morning. The arithmetic did. Priced dated exits
+did rise 5,423 → 8,079 in a week (**+49%**), which the old ratio hid behind a
+crawl from 4.72% to 8.34%.
+
+### Why no factor verdict moves
+
+**A denominator is not evidence about a signal.** §13's `pattern_quality` fired
+on 99.6% of scan points; §18's `relative_strength` blended a reversal horizon
+against a momentum one; §22's `volume_momentum` reversed out of sample. None of
+those findings referenced the gate, and none is softened by it. The weights stay
+equal at 0.25.
+
+**And the standing rule did not lift with the grade.** Its trigger — "lifts when
+the gate says something other than `SURVIVOR_BIASED`" — was written when that was
+the only grade the gate could return, so it would have fired on the arithmetic.
+It now lifts at `MATERIALLY_SURVIVORSHIP_CORRECTED` plus a recorded decision.
+
+**The code enforced that, not just the prose.** `admissibility()` permitted
+evidence for every class except `SURVIVOR_BIASED`, so the change would have
+silently unlocked promoting a strategy above `BACKTESTING` — on a corpus where
+**nearly two thirds of the companies EDGAR shows exiting are still unpriced**.
+`PARTIALLY_SURVIVORSHIP_CORRECTED` now refuses evidence too, and a test asserts
+the refusal survives, because the regression to fear is a promotion unlocked by
+arithmetic rather than by data.
+
+### What is actually still missing
+
+37.4% is a real correction and an incomplete one. The remaining gap is
+13,539 dated exits with no price, of which 4,228 have a ticker resolved and
+9,311 have no identity yet. **Coverage above 45% — the next grade, where the
+rule does lift — needs roughly 1,650 more priced exits**, which is the first
+target in this project that is both concrete and reachable.

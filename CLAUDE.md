@@ -358,12 +358,21 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
   a machine-local authorisation file. Completing every roadmap phase does not by
   itself authorise it.
 - **No strategy result computed on `research-01` today is evidence of
-  profitability.** The survivorship gate has been run against it twice and
-  returns `SURVIVOR_BIASED` both times — 2.7% of the dated exits EDGAR knows
-  about. A backtest on it is missing the companies that failed, so a good
-  result means the failures are absent, not that the strategy works. Build the
-  machinery on it; **do not believe its numbers.** The rule lifts when the gate
-  says something other than `SURVIVOR_BIASED`, and not before.
+  profitability.** Measured 2026-09-12, under the §5 denominator adopted that
+  day: the gate reads **`PARTIALLY_SURVIVORSHIP_CORRECTED`** — 8,079 of 21,618
+  dated Exchange Act exits priced (**37.4%**), 65.6% of those whose identity
+  resolves, 91% of the held series recording the death, 30/30 controls. That is
+  a real improvement on the 2.7% this file used to quote, and it is **not**
+  safety: nearly two thirds of the companies EDGAR shows exiting are still
+  unpriced, so a backtest here is still missing failures. Build the machinery on
+  it; **do not believe its numbers.**
+  **The rule did not lift when the grade moved.** Its old trigger — "lifts when
+  the gate says something other than `SURVIVOR_BIASED`" — was written when that
+  was the only grade the gate could return (`EDGAR_DELISTING_DENOMINATOR.md`
+  §7e measured the old reading unreachable), and it would have fired on a change
+  of denominator rather than a change in the corpus. It now lifts at
+  **`MATERIALLY_SURVIVORSHIP_CORRECTED` (≥ 0.45) and an explicit decision
+  recorded in §7e**, not before.
 - **Goldbugger is a separate project.** Do not import its gold-specific
   architecture into TradeIt.
 
