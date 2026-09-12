@@ -105,6 +105,46 @@ been requested and has not been received. The remainder of the reply is **not
 transcribed into this repository**; do not restate it from memory, and quote it
 verbatim if it is ever recorded here.
 
+#### MEASURED 2026-09-12 — EODHD cannot represent a reused ticker
+
+**The first EODHD capability measured rather than stated**, and it bears
+directly on the control design: *"a control chosen because two unrelated issuers
+held its ticker is testing whether the vendor splices them."*
+
+Backfilling the survivorship gate's dated exits asked EODHD for 105 dead
+registrants' symbols, each request bounded to that registrant's own lifetime.
+**11 landed data. 45 returned HTTP 404. The remaining ~48 returned nothing
+inside their window** — and probing twenty of those for their *full* range shows
+why:
+
+| symbol | the dead registrant's window | what EODHD holds |
+|---|---|---|
+| `AAA.US` | 1996-05-17 … 1998-07-12 | 2020-09-09 … 2026-09-01 |
+| `ABR.US` | a registrant that exited | 2004-04-07 … 2026-09-01 |
+| `ACA.US` | a registrant that exited | 2018-10-30 … 2026-09-01 |
+| `AAIR.US` | 1996-06-28 … 1997-11-17 | 2009-05-18 … 2016-01-22 (Avantair Inc) |
+
+**EODHD serves one series per ticker: the most recent holder of it.** The
+delisted list confirms it structurally — **59,925 entries, 59,925 distinct
+codes, no duplicates** — so there is no symbol under which an earlier holder of
+a reused ticker could be addressed. `AAIR` resolves to Avantair Inc, delisted
+2016; the 1996 registrant that held the same letters is not addressable.
+
+**What this is and is not.** It is not a coverage failure — the vendor has
+deep US history and says so. It is a **symbology** limit: the identity this
+project keeps separate (ticker ≠ security ≠ issuer) is collapsed in the vendor's
+key, and a corpus that asked for a plain ticker would receive whichever company
+holds it now. That is precisely the splice the control universe exists to catch,
+and it means **the bounded-window discipline is not optional here**: without it
+these 48 requests would have imported a living company's bars under a dead
+registrant's identity.
+
+**The consequence for survivorship coverage.** Dead registrants whose ticker was
+later reused are unreachable through this vendor by symbol. Measured yield on
+the gate's targets: **~11%** — the cases where the dead registrant was its
+symbol's last holder. Reaching 45% coverage was projected on a 40% yield and is
+**not reachable by this path**; see `EDGAR_DELISTING_DENOMINATOR.md` §7e.
+
 #### Second reply, 2026-08-30 — depth answered, and EODHD is not disqualified
 
 From Levon V., EOD Level 1, cc Sales. Verbatim:

@@ -56,6 +56,12 @@ def main() -> int:
     )
     ap.add_argument("--db", default="sqlite:///research01.sqlite")
     ap.add_argument("--as-of", default="2026-09-01")
+    ap.add_argument(
+        "--dump-exits",
+        default=None,
+        help="write the dated exits in scope to JSON, so a backfill can target "
+        "them without rebuilding the denominator or re-deciding what counts as one",
+    )
     args = ap.parse_args()
 
     session = sessionmaker(bind=create_engine(args.db, future=True), future=True)()
@@ -231,6 +237,24 @@ def main() -> int:
         f"{still_reporting:,} determined NOT to have exited. §7e measured it "
         "unreachable: at perfect resolution it tops out near 23.8%."
     )
+
+    if args.dump_exits:
+        # The same set the classification was computed from, so a backfill
+        # targets exactly what the gate measures.
+        payload = {
+            "as_of": args.as_of,
+            "generated": dt.datetime.now(dt.UTC).isoformat(),
+            "scope": "confirmed, dated, Exchange Act reporters (§7g)",
+            "exits": {
+                str(cik): r.evidence_date.isoformat()
+                for cik, r in sorted(dated_exits.items())
+                if r.evidence_date is not None
+            },
+            "priced": sorted(covered),
+            "resolved": sorted(resolved_entries),
+        }
+        Path(args.dump_exits).write_text(json.dumps(payload, indent=1))
+        print(f"\ndated exits written to {args.dump_exits}")
 
     print("\n=== limitations, which are part of the result ===")
     print("  * The denominator holds NO exchange-listing evidence before 2006")
