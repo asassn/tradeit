@@ -1238,3 +1238,92 @@ the 9.8–24.8-point spread measured here rather than against hope.
 **Ledger: 28 → 29 trials.** Weights unchanged; `volume_accumulation` remains the
 only weighted factor never measured directly. Nothing here is evidence of
 profitability, and the corpus gate still reads `SURVIVOR_BIASED`.
+
+---
+
+## §21 — `volume_accumulation`, the last unmeasured factor — 2026-09-12
+
+The fourth and final weighted factor, measured on the same decade and the same
+four universes as `pattern_quality` (§13) and `relative_strength` (§18).
+Criteria [pre-registered](prereg/VOLUME_ACCUMULATION_2026-09-12.md) in `d930876`
+before the run. **236,988 observations.**
+
+### First, what the "real engine" turned out to be
+
+**There isn't one.** No module, no scorer, nothing in the codebase reads the
+name `volume_accumulation` except the weights dictionary. What exists is the
+indicator registry, and two of its features are accumulation claims in their own
+words: `volume_momentum` ("change in average volume — accumulation building or
+fading") and the OBV feature.
+
+**And the OBV feature was broken.** The registry published
+`slope(abs(obv) + 1, lookback)`, and the absolute value destroys the only thing
+OBV carries. Measured: a security closing **up** every session for forty
+sessions and one closing **down** every session both returned `+0.052632`.
+Replaced in `920f703` by `obv_trend` — net signed volume over the window as a
+share of the volume traded in it — with the sign, the bounds and the split
+invariance each a test. **A factor nobody had measured was carrying 25% of the
+score with one of its two features unable to tell buying from selling.**
+
+### The result
+
+| signal | horizon | IC (t) | spread | halves | samples | verdict |
+|---|---|---|---|---|---|---|
+| `volume_momentum` | 21 | **+0.0428 (+20.67)** | mean **+2.94%**, median +0.83% | +20.05%/yr, +5.22%/yr | **4/4** | **`ECONOMICALLY_USEFUL`** |
+| `volume_momentum` | 63 | **+0.0231 (+6.34)** | mean +2.68%, median +1.12% | +3.66%/yr, +0.79%/yr | **4/4** | **`ECONOMICALLY_USEFUL`** |
+| `obv_trend` | 21 | −0.0116 (−5.60) | mean −0.73% | −1.04%/yr, −2.49%/yr | 0/4 | `DETECTABLE_NOT_PROFITABLE` |
+| `obv_trend` | 63 | +0.0049 (+1.35) | mean +0.46% | +1.94%/yr, +0.36%/yr | 3/4 | `NOT_DETECTABLE` |
+
+**`volume_momentum` passes all three criteria at both horizons — the first
+signal in this document to pass every registered criterion.** Mean and median
+spreads agree in sign, so it is not outlier-dependent; the geometric edge is
+positive in both halves with confidence intervals excluding zero at 21 sessions;
+all four samples agree. Net of costs it reads **+32.7%/yr** at 21 sessions.
+
+### Why that number should not be celebrated yet
+
+**`relative_volume_20` produced `ECONOMICALLY_USEFUL` and +32.7%/yr net in
+sample too, and out of sample its sign flipped and it went to −0.2%/yr.** The
+identical figure is a coincidence of the cost arithmetic — its spread was −8.39%
+at 63 sessions against +2.94% here — and it is stated so nobody reads the two as
+the same run. But the *shape* is the same shape: a volume signal, a large
+in-sample net, a factor that has never survived contact with unseen data. §8
+said it plainly: one signal passing every in-sample gate out of twenty trials is
+what chance produces at the 5% level. This is one signal passing out of
+thirty-three.
+
+### The contrast inside the factor is the finding
+
+**Direction-blind volume growth predicts; signed buying pressure does not.**
+`volume_momentum` does not know whether the volume was buying or selling, and it
+works. `obv_trend` carries exactly that sign, and at 21 sessions it points the
+*wrong* way in all four samples.
+
+So whatever is being measured, **it is not accumulation.** Rising turnover is
+attention — a name being traded more than it was — and the factor's own name
+asserts something the evidence does not support. That is worth more than the
+t-statistic: it says the 25% weight is labelled wrong even if a signal underneath
+it is real.
+
+The two signals rank-correlate **+0.045** across 236,888 shared observations:
+they are very nearly independent measurements, not two views of one thing.
+
+**It is not only microcaps** (diagnostic, not a criterion). The 21-session IC
+runs +0.0510 under $5, +0.0435 from $5 to $20, and **+0.0258 above $20**
+(t +7.56, geometric quintile spread +1.1% per hold). The effect weakens with
+price but survives in every band.
+
+### What this changes
+
+**No weight moves.** §8's lesson is the governing one: the weights were not
+changed on `relative_volume_20`'s in-sample pass, and the system was right not
+to. `volume_momentum` has earned an out-of-sample test, not a weight.
+
+**The factor is now measured**, and all four weighted factors have been through
+their real engines: `pattern_quality` null (§13), `relative_strength` null (§18),
+`fundamental_quality` null (§10), and `volume_accumulation` carrying one signal
+that passed in sample and one that failed — with the passing one measuring
+something other than what the factor is called.
+
+**Ledger: 29 → 33 trials**, hurdle 2.112. No result here is evidence of
+profitability; the corpus gate still reads `SURVIVOR_BIASED`.
