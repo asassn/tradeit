@@ -66,6 +66,12 @@ class _Series:
         self.volumes = volumes
 
 
+#: The default is this script's original pair, so §21, §22 and §24 reproduce
+#: byte for byte. ``--signals`` widens it to any feature the engine publishes:
+#: the sampling, the causality argument and the universe construction are the
+#: same whatever is being sampled, and a second copy of this file would be a
+#: second thing to keep in step. The filename is left alone because three
+#: written sections cite it.
 SIGNALS = ("volume_momentum", "obv_trend")
 HORIZONS = (21, 63)
 
@@ -100,7 +106,13 @@ def main() -> int:
     ap.add_argument("--stride", type=int, default=21)
     ap.add_argument("--offset", type=int, required=True)
     ap.add_argument("--tag", default="volacc")
+    ap.add_argument(
+        "--signals",
+        default=",".join(SIGNALS),
+        help="comma-separated IndicatorEngine feature names to sample",
+    )
     args = ap.parse_args()
+    signals = tuple(name.strip() for name in args.signals.split(",") if name.strip())
 
     start = dt.date.fromisoformat(args.start)
     end = dt.date.fromisoformat(args.end)
@@ -132,14 +144,14 @@ def main() -> int:
             [b.volume for b in bars],
         )
         computed = engine.compute(bars, instrument_id=sid)
-        values = {name: computed.values[name] for name in SIGNALS}
+        values = {name: computed.values[name] for name in signals}
         used += 1
         for i, day in enumerate(series.dates):
             if day < start or i % args.stride:
                 continue
             if series.volumes[i] <= 0 or series.closes[i] <= 0:
                 continue
-            signal = [values[name][i] for name in SIGNALS]
+            signal = [values[name][i] for name in signals]
             if not any(np.isfinite(v) for v in signal):
                 continue
             forward: list[str] = []
@@ -167,7 +179,7 @@ def main() -> int:
     with path.open("w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
-            ["sample", "security_id", "session_date", *SIGNALS, *(str(h) for h in HORIZONS)]
+            ["sample", "security_id", "session_date", *signals, *(str(h) for h in HORIZONS)]
         )
         writer.writerows(rows)
     print(

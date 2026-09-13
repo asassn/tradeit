@@ -1,6 +1,6 @@
 # Signal scoreboard
 
-**As of 2026-09-12, code `613050d`.** A status record, not a findings document —
+**As of 2026-09-13, code `0a7d893`.** A status record, not a findings document —
 [`SIGNAL_RESEARCH_01.md`](SIGNAL_RESEARCH_01.md) holds the methodology and the
 reasoning. **Every number here is measured and every one will rot**; re-run the
 studies rather than quoting this later.
@@ -33,8 +33,8 @@ same way in all four in-sample specifications.
 
 | signal | scoring factor | hypothesis | best in-sample | sign held? | out-of-sample | status |
 |---|---|---|---|---|---|---|
-| `realized_vol_60` | *(none — unweighted)* | low volatility outperforms | **IC −0.060, t −10.01** | **yes, 4/4** | not yet run | **strongest candidate.** Spread unmeasurable by quantile — see below |
-| `atr_percent_14` | *(none — unweighted)* | low volatility outperforms | **IC −0.078, t −7.46** | **yes, 4/4** | not yet run | as above; same effect, second measure |
+| `realized_vol_60` | *(none — unweighted)* | low volatility outperforms | **IC −0.060, t −10.01** | **yes, 4/4** | **IC −0.0790, t −38.25, 4/4** | **SURVIVES its criteria — the only signal that has.** Mostly a price effect; reverses above ~$40 — see §26 |
+| `atr_percent_14` | *(none — unweighted)* | low volatility outperforms | **IC −0.078, t −7.46** | **yes, 4/4** | **IC −0.0790, t −38.27, 4/4** | **SURVIVES**; rank-correlated +0.91 with the row above, so one effect, not two — see §26 |
 | `relative_volume_20` | volume_accumulation 0.25 | *derived* | IC −0.069, t −4.54 | no — flipped | **IC +0.009, t +0.93** | **REJECTED.** Sign flipped, net +32.7%/yr → −0.2%/yr |
 | `momentum_21` | relative_strength 0.25 | one-month reversal | IC −0.016, t −2.15 | yes, 4/4 | not run | weak but consistent; never economically useful |
 | `momentum_126` | relative_strength 0.25 | 6-month momentum | IC +0.021, t +3.00 | yes, 4/4 | not run | weak but consistent; never economically useful |
@@ -1639,3 +1639,144 @@ declaring which test is primary**, not after it fails.
 2.2087, measured). Weights unchanged. No result here is evidence of
 profitability; the corpus gate reads `PARTIALLY_SURVIVORSHIP_CORRECTED` at
 38.7% and the standing rule against believing its numbers has not lifted.
+
+---
+
+## §26 — the volatility relationship survives its criteria, and is mostly a price effect — 2026-09-13
+
+**Registered in [`docs/prereg/VOLATILITY_OUT_OF_SAMPLE_2026-09-12.md`](prereg/VOLATILITY_OUT_OF_SAMPLE_2026-09-12.md)
+at `8754e1c`, before either signal had been computed on any session after
+2009-12-31.** Four disjoint samples of the 2010 population, 3,069 securities,
+**235,640 observations**, horizons 21 and 63, stride 21, quintiles, direction
+declared NEGATIVE.
+
+### Verdict: both signals survive at both horizons — the first thing here that has
+
+| signal | horizon | IC (t) | bottom quintile, 2010–14 | 2015–19 | samples | verdict |
+|---|---|---|---|---|---|---|
+| `realized_volatility_60` | 21 | **−0.0790 (−38.25)** | **+16.83%/yr** | **+14.56%/yr** | 4/4 | **SURVIVES** |
+| `realized_volatility_60` | 63 | **−0.0996 (−27.54)** | **+14.64%/yr** | **+15.09%/yr** | 4/4 | **SURVIVES** |
+| `atr_percent` | 21 | **−0.0790 (−38.27)** | **+14.99%/yr** | **+13.14%/yr** | 4/4 | **SURVIVES** |
+| `atr_percent` | 63 | **−0.1066 (−29.50)** | **+15.22%/yr** | **+14.75%/yr** | 4/4 | **SURVIVES** |
+
+All three criteria hold in all four cells, every bootstrap interval excludes
+zero, and **criterion 1 — the half-period test that retired `pattern_quality`,
+`relative_strength` and `obv_trend` — passes with the two halves within two
+points of each other** rather than reversing. Forty-six trials in, this is the
+first signal to survive.
+
+### Four things that must be read with it
+
+**1. The two signals are one signal.** Rank correlation **+0.9076** across
+235,414 shared observations. Four cells passed; they are not four independent
+confirmations, they are one effect measured twice at two horizons. The ledger
+charges 4 trials because 4 tests were run, but the evidence is nearer one.
+
+**2. The aggregator decided the verdict, and the choice was registered first.**
+Every cell grades `OUTLIER_DEPENDENT` on the arithmetic spread, which points
+the **other way**:
+
+| | mean spread | median spread | geometric verdict |
+|---|---|---|---|
+| `realized_volatility_60`, 21 | **+2.14%** | **−3.29%** | survives |
+| `realized_volatility_60`, 63 | **+2.28%** | **−8.44%** | survives |
+
+Mean and median disagree in sign in all four cells — exactly what §7 predicted
+in writing, and the reason the registration made criterion 1 geometric before
+any number existed. **A reader who prefers the arithmetic estimator should read
+this section as a failure**, and that is why both are printed.
+
+**3. Most of the information is avoidance, not selection.** The favoured
+quintile gains far less than the shunned one loses:
+
+| horizon | bottom (least volatile) | top (most volatile) |
+|---|---|---|
+| 21 | +1.40%/hold | **−4.28%/hold** |
+| 63 | +3.65%/hold | **−10.80%/hold** |
+
+§19 found the same shape in the 250-session rank and it is why the
+top-quintile number was a declared diagnostic rather than a discovery.
+
+**4. Costs do not kill it, and survivorship does not flatter it.** Under the
+project's own `annual_cost_drag` — 6.50bps per leg plus 5.10bps commission at
+the $9.81 median, 0.232% per round trip — the bottom quintile still compounds
+**+4.24%/yr net at 21 sessions and +5.80%/yr at 63**, against a universe
+compounding at **−8.56%/yr**. And the corpus's survivorship hole works
+*against* this result rather than for it: died-arm securities run **1.22–1.26×**
+the volatility of survivors, so the 61% of dated exits the corpus cannot price
+are plausibly the volatile ones, and their absence flatters the high-volatility
+bucket. That is an inference from the died arm, not a measurement of the
+missing.
+
+### And then the decomposition, which is the real finding
+
+Volatility and price are rank-correlated **−0.6732**. The least-volatile
+quintile has a median price of **$40.74**; the most-volatile quintile **$1.20**.
+So the registered test may have been sorting on price. Double-sorted —
+**diagnostic, no trials charged, nothing here promotable**:
+
+**Does volatility still predict inside a price quintile?**
+
+| price quintile | least volatile | most volatile |
+|---|---|---|
+| 1 (cheapest) | **+26.24%/yr** | **−27.27%/yr** |
+| 2 | +11.86%/yr | −18.30%/yr |
+| 3 | +4.38%/yr | −7.15%/yr |
+| 4 | **−1.16%/yr** | **−1.22%/yr** — gone |
+| 5 (priciest) | **−4.03%/yr** | **+7.17%/yr** — reversed |
+
+**Does price still predict inside a volatility quintile?**
+
+| volatility quintile | cheapest | priciest |
+|---|---|---|
+| 1 (least volatile) | −2.00%/yr | +4.02%/yr |
+| 3 | −10.94%/yr | +12.56%/yr |
+| 5 (most volatile) | **−29.41%/yr** | **+25.16%/yr** |
+
+**Price is the more robust variable.** It predicts inside every volatility
+quintile and strengthens monotonically. Volatility predicts only among cheap
+securities: it **vanishes** in the fourth price quintile and **reverses** in the
+fifth. Among securities above roughly $40, the low-volatility premium is
+negative.
+
+So the honest description of what passed is **not** "low volatility
+outperforms". It is closer to **"cheap and volatile securities lose money, and
+the two conditions are largely the same condition"** — which is a real and
+tradeable-sounding fact, and also the oldest confound in cross-sectional equity
+research.
+
+### What this licenses, and what it does not
+
+**It does not license a weight**, a strategy, or a position. The registration
+said a pass would license a scoped proposition, and the decomposition narrows
+even that: any proposition has to name **price** as the competing explanation
+and test against it, not alongside it.
+
+**The obvious next test is price itself, and it is not registered.** Sorting on
+price alone gives −33.96%/yr for the cheapest quintile and +20.85%/yr for the
+priciest — larger than the volatility sort produced. Nothing in this section
+promotes that. It needs its own registration, its own trials, and its own
+liquidity and cost treatment, because a $1.20 security's tradability is not the
+$9.81 median's.
+
+**The standing rule does not lift.** The corpus gate reads
+`PARTIALLY_SURVIVORSHIP_CORRECTED` at 38.7%, and no result computed on
+`research-01` today is evidence of profitability. This one included.
+
+### The result that matters most is about the pipeline
+
+Fifteen signals had been measured and all fifteen failed. That is consistent
+with two very different worlds: one where this corpus has no exploitable
+structure, and one where **the machinery cannot detect structure that is there**.
+Those could not be told apart from nulls alone.
+
+The low-volatility anomaly is among the most documented effects in the
+literature. The pipeline found it, out of the box, at t −38, holding in both
+halves, in 4 of 4 samples, surviving costs — **and then correctly identified
+that most of it is a price effect.** That is what a working instrument looks
+like. It does not make the fifteen nulls more likely to be wrong; it makes them
+more likely to be right.
+
+**Ledger: 42 → 46 trials**, hurdle 2.2442 (`expected_max_of_normals(46)` =
+2.2441708, measured). Weights unchanged — volatility carries none, and §12's
+argument concerns the four factors that do.
