@@ -1780,3 +1780,59 @@ more likely to be right.
 **Ledger: 42 → 46 trials**, hurdle 2.2442 (`expected_max_of_normals(46)` =
 2.2441708, measured). Weights unchanged — volatility carries none, and §12's
 argument concerns the four factors that do.
+
+### Addendum, same day — the effect does not survive a liquidity floor
+
+Added after §26 was committed, from a diagnostic §26 itself named as missing:
+the 2010–2019 runs carried **no liquidity floor**, and the effect concentrated
+in $1.20 securities. The panel was rebuilt carrying the engine's own
+`avg_dollar_volume_20`. **No trials charged; this promotes nothing and retracts
+nothing that was registered.** It changes what the registered result *means*.
+
+`realized_volatility_60`, 21 sessions, by minimum average dollar volume:
+
+| floor | observations kept | least volatile | most volatile | universe |
+|---|---|---|---|---|
+| none | 233,012 | +7.17%/yr | **−43.33%/yr** | −8.56%/yr |
+| $250k/day | 158,050 | +6.77%/yr | −11.43%/yr | +1.54%/yr |
+| $1M/day | 131,539 | +6.32%/yr | −6.03%/yr | +2.89%/yr |
+| $5M/day | 95,682 | +6.36%/yr | −1.86%/yr | +4.16%/yr |
+| **$25M/day** | 51,789 | **+7.31%/yr** | **−0.86%/yr** | **+4.75%/yr** |
+
+**The favoured quintile barely moves — +7.17% to +7.31%.** Everything else
+does. The shunned quintile goes from −43.33%/yr to **−0.86%/yr**, and the
+universe from −8.56%/yr to **+4.75%/yr**. So the low-volatility *edge over the
+universe* collapses from **+15.73 pp/yr to +2.56 pp/yr** once the universe is
+restricted to securities anyone could actually trade.
+
+**§26's headline number was mostly measuring illiquidity.** The −8.56%/yr
+universe it was scored against was dominated by securities trading under
+$250k/day. The honest one-line description of what survived the registered
+criteria is now: **"illiquid securities lose money over multi-day holds, and
+illiquidity, cheapness and volatility are largely the same condition."** The
+registered verdict stands as recorded — the criteria were met — but nothing
+should be built on it as a volatility finding.
+
+A residual of **+2.56 pp/yr** at a $25M/day floor may still be real. It has not
+been tested against the hurdle, in halves, or across samples, and doing so is a
+new registration.
+
+### And the same shape appears in the extreme tail
+
+Quintiles are what every one of the sixteen signals was scored on. Measured at
+finer fractions, 21 sessions, no liquidity floor:
+
+| tail | least volatile | most volatile |
+|---|---|---|
+| 20% | +7.17%/yr | −43.33%/yr |
+| 5% | +5.68%/yr | −67.80%/yr |
+| 1% | +3.27%/yr | −74.87%/yr |
+| **0.2%** | +4.28%/yr | **−92.83%/yr** |
+
+**The buy side is flat across four orders of magnitude of selectivity; the avoid
+side more than doubles.** A quintile average is the right granularity for
+finding something to hold and the wrong one for finding something to refuse —
+which is precisely what §20 and §25 tried to build gates on, with an estimator
+that had already averaged the signal away. Read with the table above, both
+diagnostics are the same fact seen twice: the extreme tail of "volatile" is the
+extreme tail of "untradeable".

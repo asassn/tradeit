@@ -319,3 +319,85 @@ pursuing:
    `fundamental_quality` need engines this study did not use, and
    `sector_strength` carries a 0.10 weight on a classification the corpus does
    not contain.
+
+---
+
+## 9. What an outside practitioner's method exposed — 2026-09-13
+
+The owner supplied five documents describing a working day trader's selection
+system (Ross Cameron / Warrior Trading: stock-selection criteria, a small-account
+strategy, a technical-analysis series, a trading-plan worksheet, a candlestick
+reference). They are **marketing material for a trading-education business**,
+carrying an explicit disclaimer that customer results are not tracked; one
+trader's record is n = 1 and self-selected. **The track record is not evidence.
+The structure is still worth something**, and what follows is only the part that
+survives that distinction.
+
+### The method, compressed
+
+Five criteria, all required at once: relative volume ≥ 5× the 30-day average;
+already up ≥ 10% on the day or gapping ≥ 20% premarket; a news catalyst; price
+$1–$20; and float under 20M shares — which he calls his most important
+criterion. Entry is a micro-pullback or a break of the premarket high on 1-min,
+5-min or 10-second charts. Exit is 2:1 profit-to-loss with the stop at the
+pullback low, cut inside five minutes if it does not work. He trades the top two
+or three percentage gainers of the day.
+
+**It is a Day-horizon strategy and this corpus cannot test it.** Float, news,
+premarket and sub-minute bars are all absent; `intraday-01` does not exist. That
+is the honest answer and it is not the useful one.
+
+### Four things it exposed that were not known here
+
+**1. Sixteen signals were scored on quintiles. He selects about 0.1% of the
+market.** Measured on §26's panel, the buy side is flat from the 20% bucket to
+the 0.2% bucket (+7.17% to +4.28%/yr) while the avoid side more than doubles
+(−43.33% to −92.83%/yr). **A quantile average is the right instrument for
+finding something to hold and the wrong one for finding something to refuse.**
+§20 and §25 both built gates — refusal devices — on an estimator that had
+already averaged the refusal signal away, and both failed. That is a design
+error, not a result.
+
+**2. Every test here was univariate; his is a five-way conjunction.** A clause
+that is worthless as a quantile sort can still be load-bearing in a filter that
+admits three securities a day. Nothing in this machinery can express a
+conjunction, and nothing has tested one.
+
+**3. `float` is in the corpus and was never used.** `CommonStockSharesOutstanding`
+(569,592 facts, 1987–2026) and `WeightedAverageNumberOfSharesOutstandingBasic`
+(736,054) cover **79.0%** of §26's universe, point-in-time with
+`knowledge_time` — subject to §8's backfill lag, which bites the early years.
+Shares outstanding × price is **market capitalisation**, and §26 plus its
+addendum now point hard at size and liquidity as the variables that price and
+volatility have both been proxying for. The corpus could answer that and has not
+been asked.
+
+**4. His stated edge is risk management, and that is where ours is too.** 2:1
+profit-to-loss, cut in five minutes, a daily maximum loss, three consecutive
+losers and stop. The only positive result this project has produced is §7's
+equal-risk sizing beating equal-dollar sizing in both periods. Two unrelated
+sources, one conclusion: **the edge is in sizing and loss-cutting, not in
+selection.** That deserves more weight than it has been given here.
+
+### What must not be taken
+
+**His derivation.** He analysed his own trades, found what the winners had in
+common, and restricted to that. **That is fitting criteria to outcomes with no
+out-of-sample test** — the precise failure the registration discipline exists to
+prevent. Adopting his conclusions is legitimate; adopting his method would undo
+§§19–26.
+
+**His thresholds.** 5×, 10%, $1–$20, 20M shares are fitted to his sample, his
+era and his account size. If they are ever tested here they enter as
+hypotheses with a registration, never as settings.
+
+### The one substantive caution
+
+The population he buys is catastrophic on any multi-day hold: the most volatile
+0.2% of this corpus loses **92.8% annualised** over 21 sessions, and §26's
+addendum shows that is largely a statement about untradeable securities. That
+does not refute an intraday method — it is a horizon statement, and Day, Swing
+and Retirement are separate systems by design. But it does mean any edge in that
+population must come **entirely** from intraday timing and loss-cutting, with no
+help from drift. That is a high bar, and it is exactly the bar this corpus cannot
+measure.
