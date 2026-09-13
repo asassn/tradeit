@@ -1721,6 +1721,105 @@ to *exchange* delistings, it is largely blind to the registrants themselves.
 numerator by this route. Any future coverage there needs a source outside EDGAR
 filing text.
 
+## 7h. SCOPED 2026-09-13 — what reaching 45% would actually take
+
+§27 closed the signal line with the finding that every apparent edge in §26 was
+liquidity, and the registration bound the work to the corpus rather than to
+another signal. This scopes that, re-measured today rather than recalled.
+
+### The shortfall, and the two pools
+
+| | count |
+|---|---|
+| dated Exchange Act exits (denominator) | **21,618** |
+| priced | **8,371 (38.72%)** |
+| needed for 45% | 9,729 |
+| **shortfall** | **1,358** |
+| POOL A — identity resolved, no price series | **4,022** |
+| POOL B — no identity resolved | **9,311** |
+
+**Pool A alone is three times the shortfall.** Pricing 33.8% of it would clear
+45% without resolving a single additional identity. So the binding constraint is
+**not** EDGAR work, and more identity resolution is not the lever.
+
+### Coverage is an age problem, not a coverage-of-effort problem
+
+| era | exits | priced | coverage | POOL A | POOL B |
+|---|---|---|---|---|---|
+| pre-1999 | 1,901 | 70 | **3.7%** | 589 | 1,242 |
+| 1999–2006 | 7,140 | 1,930 | 27.0% | 1,295 | 3,915 |
+| 2007–2014 | 5,677 | 2,133 | 37.6% | 1,510 | 2,034 |
+| 2015–2026 | 6,900 | 4,238 | **61.4%** | 542 | 2,120 |
+
+The modern era is already past 45%. The deficit is historical, and worst exactly
+where `research-01` was built to look.
+
+### Pool A is exhausted against the vendor we have
+
+`PHASE_06_VENDOR_MATRIX.md` records the full run: **4,028 ticker-resolved
+targets requested, 2,137 responded, 1,831 returned 404, 292 became newly priced
+exits — a 7.2% yield.** The 404s were confirmed real by a random sample of
+twenty returning zero, after a first, biased probe suggested otherwise. And
+EODHD's symbology cannot represent ticker reuse at all — 59,925 entries, 59,925
+distinct codes — so a responded ticker is often a *later* holder of the code,
+which per-bar identity resolution then correctly refuses.
+
+**Pool A has already been attempted end to end.** What remains is what that run
+could not supply.
+
+### So no amount of free work reaches 45%, and here is the arithmetic
+
+Take Pool B at its most optimistic. Suppose identity resolves for 40% of the
+9,311 — generous, since they have already resisted five resolver passes — and
+suppose those price at the same 7.2% the vendor delivered. That is **about 270
+newly priced exits against a shortfall of 1,358.** The vendor matrix reached the
+same conclusion independently at roughly 337.
+
+**45% is not reachable with the sources this project holds.** That is a measured
+statement, not a judgement about effort.
+
+### Three options, and they are not equally good
+
+**1. Free-tier keys for a second source — untested, and the only free lever
+left.** `src/tradeit/acquisition/` already contains built clients for `tiingo`,
+`fmp` and `twelvedata`. None has a credential: `.env` holds `EODHD_API_KEY` and
+`EDGAR_USER_AGENT` and nothing else. Whether any of them holds pre-2010 delisted
+US equities is **unmeasured**, and their free-tier symbol and request caps are
+vendor claims that must be measured rather than read. Cost: nothing but the
+owner creating accounts. This is the *free work before paid work* rule and it
+has not been done.
+
+**2. A paid survivorship-free source.** If (1) fails, this is what remains.
+Candidates to be priced — **none verified, none contacted, and the owner sends
+every vendor email** — include Norgate Data, Sharadar's SEP via Nasdaq Data
+Link, and CRSP, which is the reference standard and probably out of reach at
+institutional pricing. A proposal would have to name what it buys, what it
+costs, and what it would let us measure that we cannot now.
+
+**3. Change the research design instead of the corpus — and this one is free and
+already validated.** The gate exists because a backtest missing the companies
+that failed is fiction. That argument bites *absolute* cross-sectional claims.
+It bites **paired** designs far less: when both arms run on one universe, the
+missing companies are missing from both. §20 and §25 ran gated against ungated
+on identical universes; §7's sizing experiment ran equal-risk against
+equal-dollar the same way. Those comparisons are interpretable at 38.7% in a way
+that "the bottom quintile earns X" is not.
+
+**Two of twenty-seven sections used that design.** Everything else asked a
+question the corpus cannot currently answer — which is a large part of why
+seventeen signals produced seventeen nulls and one explained-away pass.
+
+### What this section decides and what it does not
+
+It decides the **ordering**: option 1 before option 2, because free precedes
+paid, and option 3 alongside both, because it costs nothing and is already
+known to work.
+
+It does **not** move the threshold. The rule lifts at
+`MATERIALLY_SURVIVORSHIP_CORRECTED` (≥ 0.45) plus a decision recorded in §7e,
+and nothing here is a reason to lower a bar because clearing it turned out to be
+expensive.
+
 ## 8. Build order
 
 | step | output | cost |
