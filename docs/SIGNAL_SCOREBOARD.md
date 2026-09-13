@@ -1,6 +1,6 @@
 # Signal scoreboard
 
-**As of 2026-09-13, code `0a7d893`.** A status record, not a findings document —
+**As of 2026-09-13, code `1a0154f`.** A status record, not a findings document —
 [`SIGNAL_RESEARCH_01.md`](SIGNAL_RESEARCH_01.md) holds the methodology and the
 reasoning. **Every number here is measured and every one will rot**; re-run the
 studies rather than quoting this later.
@@ -33,8 +33,8 @@ same way in all four in-sample specifications.
 
 | signal | scoring factor | hypothesis | best in-sample | sign held? | out-of-sample | status |
 |---|---|---|---|---|---|---|
-| `realized_vol_60` | *(none — unweighted)* | low volatility outperforms | **IC −0.060, t −10.01** | **yes, 4/4** | **IC −0.0790, t −38.25, 4/4** | **SURVIVES its criteria — the only signal that has.** Mostly a price effect; reverses above ~$40 — see §26 |
-| `atr_percent_14` | *(none — unweighted)* | low volatility outperforms | **IC −0.078, t −7.46** | **yes, 4/4** | **IC −0.0790, t −38.27, 4/4** | **SURVIVES**; rank-correlated +0.91 with the row above, so one effect, not two — see §26 |
+| `realized_vol_60` | *(none — unweighted)* | low volatility outperforms | **IC −0.060, t −10.01** | **yes, 4/4** | **IC −0.0790, t −38.25, 4/4** | **passed its criteria (§26) and was then explained away (§27): the effect is illiquidity, and vanishes above $1M/day.** Build nothing on it |
+| `atr_percent_14` | *(none — unweighted)* | low volatility outperforms | **IC −0.078, t −7.46** | **yes, 4/4** | **IC −0.0790, t −38.27, 4/4** | same effect as the row above (rank correlation +0.91), same explanation — see §26, §27 |
 | `relative_volume_20` | volume_accumulation 0.25 | *derived* | IC −0.069, t −4.54 | no — flipped | **IC +0.009, t +0.93** | **REJECTED.** Sign flipped, net +32.7%/yr → −0.2%/yr |
 | `momentum_21` | relative_strength 0.25 | one-month reversal | IC −0.016, t −2.15 | yes, 4/4 | not run | weak but consistent; never economically useful |
 | `momentum_126` | relative_strength 0.25 | 6-month momentum | IC +0.021, t +3.00 | yes, 4/4 | not run | weak but consistent; never economically useful |
@@ -44,6 +44,7 @@ same way in all four in-sample specifications.
 | `rsi_14` | pattern_quality 0.25 | mean reversion | IC −0.015, t −1.70 | no — flipped | not run | never detectable |
 | `sector_strength` | ~~sector_strength 0.10~~ → retired | **strong sectors outperform** | 2000s IC +0.026 t +2.93; 2010s IC −0.018 t −2.48 | **no — reverses by decade** | n/a | **significant in both directions.** Worse than a null: the relationship inverts |
 | `volume_momentum` | volume_accumulation 0.25 | rising volume is accumulation | **IC +0.043, t +20.67** | **yes, 4/4 samples** | **IC +0.004, t +1.95** | **REJECTED.** Passed every criterion in sample, net +32.7%/yr → +3.4%/yr, geometric edge +20.1%/yr → **−11.4%/yr** — see §21, §22 |
+| `market_cap` | *(none — unweighted)* | larger capitalisation outperforms | not run | n/a | **IC −0.0002, t −0.07** | **REJECTED.** Nothing, at a test resolving 0.0073. Closes the §26 line — see §27 |
 | `obv_trend` | volume_accumulation 0.25 | accumulation, **signed** | IC −0.012, t −5.60 | **consistently NEGATIVE, 4/4** | **IC −0.034, t −16.27, 4/4** | **replicated and strengthened, inverted to the factor's own prior.** Fails half-period consistency as a signal (§24) and as an exclusion gate (§25); see §21 |
 
 ### Factors that used to carry weight and no longer do
@@ -1836,3 +1837,88 @@ which is precisely what §20 and §25 tried to build gates on, with an estimator
 that had already averaged the signal away. Read with the table above, both
 diagnostics are the same fact seen twice: the extreme tail of "volatile" is the
 extreme tail of "untradeable".
+
+---
+
+## §27 — market capitalisation fails, and it closes the whole §26 line — 2026-09-13
+
+**Registered in [`docs/prereg/MARKET_CAP_2026-09-13.md`](prereg/MARKET_CAP_2026-09-13.md)
+at `1a0154f`,** before market cap had been computed on any session at any
+horizon. Point-in-time shares outstanding × close, four samples, a $1M/day
+liquidity floor **in the specification**, 2010–2019.
+
+### Verdict: fails all four criteria at both horizons
+
+| | 21 sessions | 63 sessions |
+|---|---|---|
+| n above the floor | 97,241 | 94,804 |
+| IC (t) | **−0.0002 (−0.07)** | **−0.0021 (−0.38)** |
+| criterion 1, both halves | fail | fail |
+| criterion 2, IC past 2.2763 | fail | fail |
+| criterion 3, sign in ≥3 of 4 | **2/4** fail | **2/4** fail |
+| criterion 4, survives price conditioning | **2/5 bands** fail | **2/5 bands** fail |
+| `SignalStudy` verdict | `not_detectable` | `not_detectable` |
+
+An IC of −0.0002 against a test that resolves 0.0073 is not a weak effect. It is
+nothing. **The pre-registered resolution estimate was accurate**: 97,242
+observations predicted, 97,241 measured.
+
+### The registration said a fail would be more informative. It was
+
+Criterion 4 asked whether market cap survives conditioning on price: **2 of 5
+bands.** The declared symmetric diagnostic asked the reverse, whether price
+survives conditioning on market cap: **1 of 5.** Neither variable survives the
+other. That is not "price wins" — it is both losing once the universe is
+restricted to securities anyone can trade.
+
+This is the measurement that closes it. Both variables, by minimum average
+dollar volume, 21 sessions:
+
+| floor | cheapest | priciest | smallest cap | largest cap | universe |
+|---|---|---|---|---|---|
+| none | **−24.67%/yr** | −11.25%/yr | −20.54%/yr | −9.23%/yr | −7.32%/yr |
+| $250k/day | −4.04%/yr | −0.97%/yr | −2.64%/yr | +1.61%/yr | +2.30%/yr |
+| **$1M/day** | **−0.55%/yr** | **+0.55%/yr** | +0.61%/yr | +2.24%/yr | +3.70%/yr |
+| $5M/day | +2.94%/yr | +2.24%/yr | +3.58%/yr | +3.44%/yr | +4.90%/yr |
+| $25M/day | **+5.69%/yr** | **+2.85%/yr** | +4.27%/yr | +3.50%/yr | +5.32%/yr |
+
+**§26 measured the cheapest price quintile at −33.96%/yr and the priciest at
++20.85%/yr. That was with no liquidity floor.** At $1M/day the same spread is
+1.1 points. At $5M/day it inverts. At $25M/day the *cheapest* quintile beats the
+priciest by 2.8 points — the opposite sign, and the direction the classical value
+premium would predict.
+
+### What the whole line amounted to
+
+Four variables were chased through §26, its addendum and this section —
+volatility, price, market capitalisation, liquidity. **They are one variable,
+and it is liquidity.** Every apparent edge was the gap between securities that
+can be traded and securities that cannot, and it disappears the moment the
+universe is restricted to the former. The universe's own return tells the story
+without any signal at all: **−7.32%/yr unrestricted, +5.32%/yr above $25M/day.**
+
+`realized_volatility_60` and `atr_percent` passed their registered criteria in
+§26 and that record stands — the criteria were met and the run was honest. But
+**nothing should be built on any of it**, and the master table above now says so.
+
+### What this licenses
+
+**Closing the enquiry, exactly as the registration said a fail would.** Its own
+words, committed before the run:
+
+> If the best-specified version of the variable does not survive its own
+> criteria on the data that suggested it, then price, volatility and
+> illiquidity were describing the corpus's coverage gaps rather than the
+> market, and the honest next step is the corpus rather than another signal.
+
+That is now the measured outcome and it is binding. No other capitalisation
+definition, floor or quantile will be tried on this data.
+
+**One observation that is not a finding and must not become one.** Above
+$25M/day the cheapest quintile beats the priciest by 2.84 points a year. It is
+unregistered, untested against the hurdle, unmeasured in halves and across
+samples, and sits inside a corpus whose gate reads 38.7%. It is recorded so that
+nobody rediscovers it as a surprise, not as a result.
+
+**Ledger: 46 → 50 trials**, hurdle 2.2763 (`expected_max_of_normals(50)` =
+2.2763031, measured). Seventeen signals measured, none surviving.
