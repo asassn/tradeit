@@ -79,22 +79,58 @@ Nothing enters `research-01` until these are read.
 
 | # | test | pass | source |
 |---|---|---|---|
-| 1 | **Pool A yield** — the same random, staged probe that measured Tiingo, graded on Sharadar's `permaticker` and its first and last price dates against each EDGAR exit | **≥ 33.8%** PLAUSIBLE, which alone clears 45% | §7h |
+| 1 | **net new priced exits** — a random, staged probe first (as for Tiingo, graded on `permaticker` and first and last price dates against each EDGAR exit), then the gate itself after per-bar identity resolution | **≥ 1,358** newly priced dated exits, drawn from any pool, so `bounded_coverage` reaches 0.45 | §7h, gate G3 |
 | 2 | **pre-2015 deaths** — the deficit's actual location | a material share of Pool A exits before 2015 graded PLAUSIBLE, not just recent ones | §7h era table |
 | 3 | **dead controls** — of the 30 manually verified | ≥ 26 of 30 reconstructed; all six short-lived failures present | gate G4 |
 | 4 | **reused tickers** — BBBY, GM, AOL | zero series spliced across two companies; each company separable | gate G5, **N4 absolute** |
 | 5 | **raw prices and splits** | unadjusted prices available; implied split ratios step on known dates | gate G6, G7 |
 | 6 | **bulk download in the month** | the full history lands inside the 30 days | gate G8 |
 
-**Stop rule.** If test 4 fails, stop — N4 is absolute. If test 1 comes in under
-about 15%, or test 2 finds nothing before 2015, cancel before renewal and move
-to Norgate. Only a pass on all six reaches a separate decision about ingesting
+**Stop rule.** If test 4 fails, stop — N4 is absolute. If the staged probe
+projects well short of 1,358, or test 2 finds nothing before 2015, cancel before
+renewal and move to Norgate.
+
+**Corrected 2026-09-14, before any purchase.** Test 1 first read "≥ 33.8% of
+Pool A". That was the wrong bar for a vendor that carries listed stocks, because
+the unpriced set is mostly not listed stocks — see *Which dead companies a paid
+vendor can reach* below — and Pool B's listed companies were left out entirely.
+The bar is now the gap itself, counted by the gate. Only a pass on all six reaches a separate decision about ingesting
 the data and about an annual plan.
 
 **One possible bonus, unmeasured.** Sharadar's ticker table carries each
 company's SEC filings link. If that link holds a CIK, the same month could also
 supply identities for some of the 9,311 dead companies we have not been able to
 name (Pool B). That is a hope until it is read in a real file.
+
+### Which dead companies a paid vendor can reach — measured 2026-09-14
+
+Every dated exit classified from its own EDGAR forms in the local full-index:
+**ever registered a class on an exchange** (8-A12B, Form 25, 15-12B), **12(g)
+only** (15-12G), or **15(d) only** — reporting because of a registered offering,
+with no class ever registered for trading.
+
+| class | dated exits | priced | coverage |
+|---|---|---|---|
+| ever exchange-registered | 9,429 | 5,706 | **60.5%** |
+| 12(g) only | 7,476 | 2,367 | 31.7% |
+| 15(d) only, no registered class | 4,594 | 264 | **5.7%** |
+| no exit form found | 119 | 34 | 28.6% |
+
+**The 12(g) row is not "over the counter" before August 2006.** Nasdaq became a
+registered national securities exchange only then, so a Nasdaq company before
+it registered under 12(g) and deregistered on 15-12G — the dot-com failures this
+corpus exists for sit largely in that row. Norgate's delisted data excludes
+"OTC-only Common Stocks" but carries delisted Nasdaq stocks; Sharadar's position
+on OTC is unstated. So the reachable set for either vendor is the 3,723 unpriced
+exchange-registered exits **plus an unmeasured share of the pre-2006 12(g)
+exits**, not the exchange row alone.
+
+**The 15(d)-only row is out of any price vendor's reach** — 4,594 exits, 5.7%
+priced — because most never had a security that traded. It is recorded here as
+an observation about the denominator and **not** as a proposal to change it:
+§5's denominator is a written decision, and a first reading of this same table
+nearly treated pre-2006 Nasdaq companies as over-the-counter, which is how an
+exclusion argued from convenience goes wrong.
 
 ### What stays broken without it
 
