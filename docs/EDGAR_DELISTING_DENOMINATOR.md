@@ -1870,6 +1870,11 @@ which says the understatement is small exactly where the deficit is.
 **no free source this project can reach closes the gap**, and the ordering above
 moves to option 2 — a costed proposal — with option 3 continuing alongside.
 
+**Option 2 is drafted** in
+[`PROPOSAL_SURVIVORSHIP_DATA_2026-09-14.md`](PROPOSAL_SURVIVORSHIP_DATA_2026-09-14.md):
+one $39 month of Sharadar's full-history prices as a measurement, judged on the
+purchase gate's existing criteria, with Norgate as the fallback. Not bought.
+
 ## 8. Build order
 
 | step | output | cost |
