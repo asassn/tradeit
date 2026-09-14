@@ -1820,6 +1820,56 @@ It does **not** move the threshold. The rule lifts at
 and nothing here is a reason to lower a bar because clearing it turned out to be
 expensive.
 
+### Option 1, measured 2026-09-14 — Tiingo and FMP free tiers cannot close the gap
+
+The owner supplied free-tier keys. `scripts/research01_probe_vendor_coverage.py`
+asked each vendor for a **random** sample of Pool A — seeded, uniform, widened in
+stages, because EODHD's first probe sampled only its own delisted list and was
+wrong. It ingests nothing. Each request runs from the registrant's first filing
+to 400 days past its exit, and **bars continuing past the exit count against
+identity**, not for coverage. 184 tickers claimed by two dated exits (368 exits)
+were excluded rather than graded.
+
+**Controls first, so a broken probe could not pass for an empty vendor.** AAPL
+returned prices from both. Of the dead controls from the 30 manually verified —
+LEH, ENE, WCOM, EXDS, BBBY — Tiingo holds **name-only stubs with no start or end
+date**, under the exchange ticker and under the bankruptcy ticker alike (LEHMQ,
+ENRNQ, WCOEQ, PSIXQ). The one exception is Bed Bath & Beyond, whose full
+1992–2023 series sits under **BBBYQ** and not under BBBY. FMP refused every dead
+control with `Premium Query Parameter: 'Special Endpoint : This value set for
+'symbol' is not available'`.
+
+| | graded | PLAUSIBLE | yield |
+|---|---|---|---|
+| Tiingo, random Pool A | 78 of 100 before the hourly quota | **2** (PBNC exit 2018, IPOD exit 2022) | **2.6%**, 95% CI 0.7–8.9% |
+| Tiingo, exits before 2015 | 67 | **0** | upper bound 5.4% |
+| FMP, random Pool A | 100 of 100 | **0** — all `PAYWALLED` | not measurable on this plan |
+
+Tiingo also graded 2 `NO_BARS_IN_LIFETIME` — the ticker exists, held by a later
+issuer — and stopped with *"You have run over your hourly request allocation"*
+after about a hundred requests in the hour, counting the controls.
+
+**What that means for 45%.** Applied to Pool A, Tiingo's yield is **about 103
+exits, range 28–357**, against a shortfall of 1,358. Coverage would move from
+38.72% to **39.20%**, 40.37% at the upper bound. Both hits exited after 2015,
+where coverage is already 61.4%; the pre-2015 deficit, which is the whole
+problem, gained nothing. At roughly a hundred requests an hour, the full pool
+would take about forty hours of free quota to confirm it.
+
+**FMP is a plan restriction, not a coverage measurement.** The free plan serves
+a fixed symbol set and refuses the rest before looking. Whether a paid FMP plan
+holds these series is unmeasured.
+
+**One limitation stated rather than buried.** The probe asks for each company
+under the exchange ticker its filings name. BBBYQ shows a vendor can file a dead
+company under its last ticker instead, so Tiingo's yield is a lower bound. The
+four older controls are null-dated stubs under their bankruptcy tickers as well,
+which says the understatement is small exactly where the deficit is.
+
+**Option 1 is exhausted.** With EODHD, Tiingo and FMP's free plan all measured,
+**no free source this project can reach closes the gap**, and the ordering above
+moves to option 2 — a costed proposal — with option 3 continuing alongside.
+
 ## 8. Build order
 
 | step | output | cost |
