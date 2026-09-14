@@ -33,9 +33,19 @@ relationship is real and not monetisable this way, which is an answer worth
 having in writing.
 
 Neither arm is expected to be profitable. The entry rule is a deliberately
-unremarkable moving-average baseline and the corpus gate reads SURVIVOR_BIASED.
-**What is being compared is the difference between the arms, not the level of
-either.**
+unremarkable moving-average baseline and the corpus gate reads
+``PARTIALLY_SURVIVORSHIP_CORRECTED`` at 38.7% -- it read ``SURVIVOR_BIASED``
+when this file was written. **What is being compared is the difference between
+the arms, not the level of either**, and §7h of the denominator document is why
+that matters: a paired comparison loses the same missing companies from both
+arms, so it survives a coverage hole that an absolute claim does not.
+
+**Liquidity and disjoint samples, added 2026-09-13.** §27 measured every
+apparent edge in §26 as illiquidity, so ``--min-dollar-volume`` admits a
+security on its **trailing year's** median dollar volume -- 2009 data for a 2010
+start, never the test window, so no future information enters the universe --
+and ``--offset`` cuts the survivors into disjoint samples the way §20 and §25
+did, because one sample's number carries noise the size of the effect.
 """
 
 from __future__ import annotations
@@ -43,6 +53,8 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import sqlite3
+import statistics
 import sys
 import time
 from decimal import Decimal
@@ -61,25 +73,54 @@ from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.strategy.config import StrategyConfig
 
 
-def _universe(path: str, start: str, end: str, min_bars: int, cap: int) -> list[int]:
+def _liquid(db: str, ids: list[int], year_end: str, floor: float) -> set[int]:
+    """Securities whose median dollar volume in the year BEFORE the window clears.
+
+    Causal by construction: the admission year ends the day the test window
+    opens, so nothing the universe knows comes from inside the test. A security
+    with fewer than 100 sessions in that year is refused rather than guessed at.
+    """
+    if floor <= 0:
+        return set(ids)
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    con.execute("PRAGMA busy_timeout=300000")
+    start = f"{int(year_end[:4]) - 1}-01-01"
+    keep: set[int] = set()
+    for sid in ids:
+        rows = con.execute(
+            "select close*volume from security_price_facts where security_id=? and "
+            "adjustment_basis='raw' and volume>0 and close>0 and session_date between ? and ?",
+            (sid, start, year_end),
+        ).fetchall()
+        if len(rows) >= 100 and statistics.median(r[0] for r in rows) >= floor:
+            keep.add(sid)
+    return keep
+
+
+def _universe(
+    path: str, start: str, end: str, min_bars: int, cap: int, *, db: str, floor: float, offset: int
+) -> list[int]:
     with open(path) as handle:
         spans = [
             (int(sid), first, last, int(count)) for sid, first, last, count in csv.reader(handle)
         ]
     alive = [row for row in spans if row[1] <= start <= row[2] and row[3] >= min_bars]
+    liquid = _liquid(db, sorted(row[0] for row in alive), f"{int(start[:4]) - 1}-12-31", floor)
+    alive = [row for row in alive if row[0] in liquid]
     died = sorted(row[0] for row in alive if row[2] < end)
     survived = sorted(row[0] for row in alive if row[2] >= end)
 
-    def thin(ids: list[int], limit: int) -> list[int]:
-        if len(ids) <= limit:
-            return ids
-        step = len(ids) / limit
-        return [ids[int(i * step)] for i in range(limit)]
+    def slice_(ids: list[int], limit: int) -> list[int]:
+        """The offset-th disjoint block of `limit` ids, as §20 and §25 cut them."""
+        lo = offset * limit
+        return ids[lo : lo + limit]
 
-    chosen = sorted(thin(survived, cap) + thin(died, cap))
+    s_, d_ = slice_(survived, cap), slice_(died, cap)
+    chosen = sorted(s_ + d_)
     print(
-        f"universe: {len(chosen):,} securities "
-        f"({len(thin(survived, cap)):,} survived, {len(thin(died, cap)):,} stopped printing)"
+        f"universe: {len(chosen):,} securities ({len(s_):,} survived, {len(d_):,} stopped "
+        f"printing) from {len(survived):,}/{len(died):,} clearing ${floor:,.0f}/day, "
+        f"offset {offset}"
     )
     return chosen
 
@@ -170,6 +211,15 @@ def main() -> int:
     ap.add_argument("--risk-free", type=float, default=0.03)
     ap.add_argument("--delisting-after", type=int, default=10)
     ap.add_argument("--delisting-recovery", type=Decimal, default=Decimal("0.5"))
+    ap.add_argument(
+        "--min-dollar-volume",
+        type=float,
+        default=0.0,
+        help="admit only securities whose TRAILING-year median dollar volume clears this",
+    )
+    ap.add_argument(
+        "--offset", type=int, default=0, help="which disjoint block of the universe to use"
+    )
     args = ap.parse_args()
 
     session: Session = sessionmaker(
@@ -177,7 +227,16 @@ def main() -> int:
     )()
     config = StrategyConfig(name="vol_sizing_experiment")
     liquidity = config.liquidity
-    universe = _universe(args.spans, args.start, args.end, args.min_bars, args.cap)
+    universe = _universe(
+        args.spans,
+        args.start,
+        args.end,
+        args.min_bars,
+        args.cap,
+        db=args.db.replace("sqlite:///", ""),
+        floor=args.min_dollar_volume,
+        offset=args.offset,
+    )
 
     shared = {
         "fast": args.fast,
@@ -251,10 +310,19 @@ def main() -> int:
                 "criterion that is\n  not a capture: the risk-adjusted gain came "
                 "with more risk, not less."
             )
+    if a is not None and b is not None:
+        print(
+            f"RESULT,{args.offset},{args.min_dollar_volume:.0f},{args.delisting_recovery},"
+            f"{a.total_return_pct:.6f},{b.total_return_pct:.6f},{a.cagr:.6f},{b.cagr:.6f},"
+            f"{a.max_drawdown_pct:.6f},{b.max_drawdown_pct:.6f},"
+            f"{'' if a.sharpe is None else format(a.sharpe, '.6f')},"
+            f"{'' if b.sharpe is None else format(b.sharpe, '.6f')},"
+            f"{a.trade_count},{b.trade_count}"
+        )
     print(
         "\nThe difference between the arms is the result. Neither level is evidence of\n"
         "profitability: the entry rule is a deliberately unremarkable baseline and the\n"
-        "corpus gate reads SURVIVOR_BIASED."
+        "corpus gate reads PARTIALLY_SURVIVORSHIP_CORRECTED at 38.7%."
     )
     return 0
 

@@ -1922,3 +1922,73 @@ nobody rediscovers it as a surprise, not as a result.
 
 **Ledger: 46 → 50 trials**, hurdle 2.2763 (`expected_max_of_normals(50)` =
 2.2763031, measured). Seventeen signals measured, none surviving.
+
+---
+
+## §28 — equal-risk sizing on a tradeable universe: a trade-off, not an improvement — 2026-09-14
+
+**Descriptive, not registered, no trials charged.** §7h showed paired designs
+survive the corpus's coverage hole, and the only positive result this project
+has — §7's equal-risk sizing beating equal-dollar — had never been run on a
+universe anyone could trade. A power check before launch showed a registered
+test could not resolve §7's effect (+0.34 to +0.81 pp/yr) with the four disjoint
+samples a $1M/day floor allows, so this was run **to measure the paired standard
+deviation** a properly powered design would need, and declared as such before
+any number existed.
+
+Four disjoint samples of 298 securities (149 survived, 149 died), admitted on
+**trailing-year** median dollar volume ≥ $1M/day, 2010–2019, recovery 1.0, same
+entry rule, same costs, arms differing only in the stop that sets size.
+
+| sample | CAGR A → B | Sharpe A → B | max drawdown A → B |
+|---|---|---|---|
+| 0 | 3.20% → 5.10% (**+1.89**) | 0.06 → 0.26 | 11.95% → 14.64% (**+2.69**) |
+| 1 | 5.82% → 5.49% (**−0.33**) | 0.40 → 0.29 | 12.83% → 20.30% (**+7.46**) |
+| 2 | 6.03% → 8.11% (**+2.07**) | 0.45 → 0.54 | 8.09% → 12.58% (**+4.49**) |
+| 3 | 2.21% → 4.52% (**+2.32**) | −0.07 → 0.20 | 12.71% → 14.24% (**+1.53**) |
+
+| paired difference, B − A | mean | sd | t | B better |
+|---|---|---|---|---|
+| CAGR | **+1.49 pp/yr** | 1.22 pp | +2.44 | 3 of 4 |
+| Sharpe | +0.11 | 0.17 | +1.37 | 3 of 4 |
+| max drawdown | **+4.04 pp worse** | 2.59 pp | **+3.13** | **0 of 4** |
+
+### What it shows
+
+**Equal-risk sizing buys return with drawdown.** It raised CAGR in three samples
+of four and **worsened drawdown in all four**, and the drawdown effect is the
+more consistent of the two. Sizing inversely to ATR puts the largest positions in
+the quietest names, which concentrates notional exactly where a gap hurts most.
+Sharpe moves little and not reliably.
+
+Under §7's own criterion — Sharpe up **and** drawdown not worse — **not one of
+the four samples is a capture.** That is the same shape §7 recorded out of sample
+(return and Sharpe up, drawdown worse, graded `MIXED`), now seen on a tradeable
+universe and in every sample rather than once. So the project's only positive
+result is better described as **a risk dial** than as an edge: it moves the
+portfolio along a return/drawdown line rather than off it.
+
+### What it must not be read as
+
+**A t of +2.44 on CAGR is not a finding.** It would clear the 2.306 hurdle a
+four-trial registration would have faced, and it was not registered; that is
+precisely the result the discipline exists to refuse. It was computed on data
+already used by §7's 2010–2024 run and by §§22–27.
+
+### The number it was run for
+
+**Measured paired CAGR sd: 1.22 pp.** At a four-trial hurdle, four samples resolve
+about **1.41 pp/yr**. So:
+
+| effect to resolve | disjoint samples needed | feasible at $1M/day? |
+|---|---|---|
+| 0.34 pp/yr (§7 out of sample) | ~69 | no |
+| 0.81 pp/yr (§7 in sample) | ~13 | no |
+| ≥ 1.5 pp/yr | 4 | yes |
+
+A registered test of this comparison is feasible **only** for an effect of about
+1.5 pp/yr or more, and only on a period this one has not used. There is no such
+period for 2010–2024, and the pre-2010 decade is where the liquid died arm is
+thinnest. That is recorded as the design constraint, not worked around.
+
+**Ledger unchanged at 50 trials.**
