@@ -1676,6 +1676,44 @@ decision recorded here. None has been. What bears on that decision, measured:
 - **Sharadar dividends were not ingested** — whether its dividend amounts are
   restated for later splits is unmeasured.
 
+### DECISION 2026-09-15 — the owner lifts the standing rule, with four limitations
+
+**Recorded in the owner's words:** *"lift the rule with the stated limitations."*
+
+It was taken after the two blockers named above were closed and measured: the
+gate reads `MATERIALLY_SURVIVORSHIP_CORRECTED` (10,038 of 21,618, bounded 0.4643,
+matched 0.8156, controls 30/30), and the split double count of
+`RESEARCH_01_DATA_DICTIONARY.md` §0.1a was fixed as a read rule, with the gate
+unchanged on re-run. `PHASE_06_PURCHASE_GATE.md` §4 names this outcome —
+materially corrected, limitations declared — and it is what is recorded.
+
+**From this date a result computed on `research-01` may be treated as
+evidence**, still subject to everything else the project requires of evidence:
+pre-registration, out-of-sample testing, the trial ledger, and paired designs
+where they fit. Lifting the rule does not make any result profitable, and the
+signal scoreboard's seventeen measured signals are unchanged by it.
+
+**The four limitations, which travel with every result:**
+
+1. **Coverage is thin before 2007** — 8.0% of dated exits before 1999, 36.9% for
+   1999–2006, against 48.0% for 2007–2014 and 65.6% after. A result that rests on
+   the pre-2007 years, the dot-com era especially, must say so and must not be
+   read as survivorship-corrected for that era.
+2. **1,634,744 raw prints (4.23%) are withheld** before 1,872 splits whose
+   records contradict the prints. A universe or signal that needs those years for
+   those 1,198 securities is reading around a gap.
+3. **Splits the vendor never recorded are not caught.** Earlier `raw` levels for
+   such securities may already be adjusted, so price floors, dollar-volume floors
+   and market capitalisations built on them can be wrong. Returns across them are
+   not double-counted.
+4. **Every result measured before 2026-09-15 ran on the double-counted reads**
+   and must be re-run before it is relied on — every section of
+   `SIGNAL_SCOREBOARD.md` through §28 included.
+
+**Demotion stays possible.** If a later measurement shows coverage or price
+correctness materially worse than recorded here, the rule returns, and that
+reversal is recorded here the same way.
+
 ## 7g. MEASURED 2026-09-06 — 1,800 of the 1,811 never traded on an exchange
 
 **Correcting §7d.** When the `N-8F` recognition was applied, this document

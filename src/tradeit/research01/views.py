@@ -278,14 +278,16 @@ README: tuple[tuple[str, str, str], ...] = (
         "base tables: each one has a convention already applied.",
     ),
     (
-        "no backtest here is evidence of profitability",
+        "evidence of profitability: four limitations",
         "security_price_facts",
-        "The survivorship gate reads MATERIALLY_SURVIVORSHIP_CORRECTED as of "
-        "2026-09-15, but the standing rule has not been lifted by the owner's "
-        "recorded decision and coverage before 2007 is still thin. Companies "
-        "that failed are partly absent, so a good strategy "
-        "result means the failures are missing, not that the strategy works. "
-        "Build machinery on this corpus; do not believe its returns. "
+        "The survivorship gate reads MATERIALLY_SURVIVORSHIP_CORRECTED, and on "
+        "2026-09-15 the owner decided results here may count as evidence with "
+        "four limitations: coverage before 2007 is thin (8.0% before 1999), so "
+        "pre-2007 results are not survivorship-corrected for that era; raw "
+        "prints before contradicted splits are withheld; splits the vendor never "
+        "recorded are not caught; and results measured before that date must be "
+        "re-run. Evidence is still not profitability: pre-registration and "
+        "out-of-sample tests decide what a result is worth. "
         "v_registrants shows the coverage side of it: every registrant with a "
         "CIK, and whether this corpus can ticker and price it. It is not "
         "filtered to companies that exited -- `issuers` has no lifecycle "

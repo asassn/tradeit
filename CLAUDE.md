@@ -358,23 +358,23 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
 - Live trading is disabled by an interlock in `src/tradeit/config.py` requiring
   a machine-local authorisation file. Completing every roadmap phase does not by
   itself authorise it.
-- **No strategy result computed on `research-01` today is evidence of
-  profitability.** Measured 2026-09-15, after Sharadar prices were landed for
-  the 1,666 dated exits whose identity the corpus already held: the gate reads
+- **A result computed on `research-01` may count as evidence — with four
+  limitations, by the owner's decision of 2026-09-15** recorded in
+  `EDGAR_DELISTING_DENOMINATOR.md` §7e. The gate reads
   **`MATERIALLY_SURVIVORSHIP_CORRECTED`** — 10,038 of 21,618 dated Exchange Act
-  exits priced (**46.4%**), 81.6% of those whose identity resolves, 30/30
-  controls. **The rule has not lifted.** It lifts at that grade **and an
-  explicit decision recorded in `EDGAR_DELISTING_DENOMINATOR.md` §7e**, and no
-  decision is recorded. Coverage before 2007 is still well under 45% (8.0%
-  before 1999, 36.9% for 1999–2006). The split double count recorded in
-  `RESEARCH_01_DATA_DICTIONARY.md` §0.1a was fixed on 2026-09-15 as a read
-  rule — 671 splits already inside `raw` are no longer applied twice, and
-  1,634,744 prints before 1,872 contradicted splits are withheld — but **every
-  result measured before that date ran on the double-counted reads.** Until the
-  decision is recorded, build the machinery on it; **do not believe its numbers.**
-  The old trigger — "lifts when the gate says something other than
-  `SURVIVOR_BIASED`" — was retired because it would have fired on a change of
-  denominator rather than a change in the corpus (§7e).
+  exits priced (46.4%), 81.6% of those whose identity resolves, 30/30 controls —
+  and the split double count of `RESEARCH_01_DATA_DICTIONARY.md` §0.1a is fixed
+  as a read rule. The limitations travel with every result: **(1)** coverage is
+  thin before 2007 (8.0% before 1999, 36.9% for 1999–2006), so pre-2007 results
+  are not survivorship-corrected for that era; **(2)** 1,634,744 raw prints
+  (4.23%) are withheld before contradicted splits; **(3)** splits the vendor never
+  recorded are not caught, so price levels built on them can be wrong; **(4)**
+  every result measured before 2026-09-15 ran on double-counted reads and must be
+  re-run before it is relied on.
+  **Lifting the rule is not evidence of profitability.** Pre-registration,
+  out-of-sample testing and the trial ledger still decide what a result is worth,
+  and the rule returns if a later measurement shows the corpus materially worse
+  than recorded.
 - **Goldbugger is a separate project.** Do not import its gold-specific
   architecture into TradeIt.
 
