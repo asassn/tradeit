@@ -1875,6 +1875,13 @@ moves to option 2 — a costed proposal — with option 3 continuing alongside.
 one $39 month of Sharadar's full-history prices as a measurement, judged on the
 purchase gate's existing criteria, with Norgate as the fallback. Not bought.
 
+**Option 2, measured 2026-09-14.** The owner bought the month. Joined on CIK,
+2,879 unpriced dated exits have Sharadar series whose dates fit the EDGAR exit
+and 2,877 of them verify on real bars — 2,279 before 2015. If all priced,
+coverage would be **52.03%**. That is a projection: nothing is ingested, test 5
+(what "raw" means across the two vendors) is open, and the gate counts only
+after per-bar identity resolution. Full results in the proposal document.
+
 ## 8. Build order
 
 | step | output | cost |

@@ -1,6 +1,6 @@
 # Proposal — buy one month of dead-company price data to measure it
 
-**Status: PROPOSAL. Nothing bought, no vendor contacted.** The owner decides and
+**Status: BOUGHT 2026-09-14 by the owner (one month, $39) and MEASURED — see below. Nothing ingested.** The owner decides and
 makes any purchase. Written against the criteria in
 [`PHASE_06_PURCHASE_GATE.md`](PHASE_06_PURCHASE_GATE.md), which were fixed
 before any vendor data was seen, rather than against new ones.
@@ -131,6 +131,63 @@ an observation about the denominator and **not** as a proposal to change it:
 §5's denominator is a written decision, and a first reading of this same table
 nearly treated pre-2006 Nasdaq companies as over-the-counter, which is how an
 exclusion argued from convenience goes wrong.
+
+### MEASURED 2026-09-14 — the owner bought the month, and it passes
+
+`scripts/research01_probe_sharadar.py`, staged a handful → a hundred → the rest.
+Nothing ingested. **Joined on the SEC CIK carried in Sharadar's `tickers`
+table**, not on ticker: stage 1 found `PSIX` is Power Solutions International
+(CIK 1137091), not PSINet, and `AOL` is the 2009–2015 AOL Inc — a ticker join
+would have credited both to the wrong company.
+
+The `tickers` table for `table=stocks`: **20,971 securities, 14,642 delisted,
+20,870 carrying a CIK.**
+
+**Metadata join, every dated exit.** A match is `DATES_FIT` when Sharadar's
+first price is on or before the EDGAR exit and its last price falls between 180
+days before and 120 days after it — the EDGAR exit date is the independent
+evidence here.
+
+| | exits | `DATES_FIT` | no CIK match | ends early | ends late |
+|---|---|---|---|---|---|
+| already priced (a control) | 8,371 | 5,862 (70.0%) | 1,745 | 632 | 131 |
+| **unpriced — the gap** | 13,247 | **2,879 (21.7%)** | 9,600 | 583 | 185 |
+
+**Real bars, every one of the 2,879**, requested to 400 days past the exit so a
+continuing successor would show: **2,877 PLAUSIBLE, 2 NO_BARS_IN_LIFETIME** —
+both exits in January 1998, days after Sharadar's history begins on 1997-12-31.
+
+| exit era | PLAUSIBLE |
+|---|---|
+| before 1999 | 156 |
+| 1999–2006 | **1,318** |
+| 2007–2014 | **805** |
+| 2015+ | 598 |
+
+**If every one priced, coverage would be 10,248 / 21,618 = 52.03%** against the
+9,729 that 45% needs — and **2,279 of the 2,877 are in the pre-2015 deficit.**
+
+**That arithmetic is a projection, and the gate does not count it.** Bars
+agreeing with Sharadar's own first and last dates is partly circular; the
+independent evidence is below.
+
+| # | test, fixed before purchase | result |
+|---|---|---|
+| 1 | ≥ 1,358 newly priced exits | **projected 2,877** before per-bar identity resolution; counted by the gate only after ingestion |
+| 2 | material pre-2015 hits | **2,279** ✅ |
+| 3 | ≥ 26 of 30 controls, short-lived failures present | **29 of 30 by CIK or name** — ENE as ENRNQ under its 1997 successor CIK 1024401, FRC as FRCB — with all four labelled short-lived failures (IPET, ETYSQ, WBVN, KOOP) present. The 30th, the original AOL (CIK 883780), has no row of its own; its 1992–2001 prices sit inside `TWX` under AOL Time Warner's CIK 1105705, AOL having been the acquirer ✅ |
+| 4 | reused tickers never spliced (N4) | **BBBY** → `BBBYQ` 1992–2023; **GM** → `MTLQQ` to 2011-03-31, separate from GENERAL MOTORS CO (CIK 1467858) from 2010-11-18; **AOL** 2009–2015 separate from the original ✅ |
+| 5 | raw prices and split steps | **open.** Against EODHD's `raw` closes already in `research-01`, 49 securities, 79,425 shared sessions: 36 agree ≥ 95% within 1%, median difference 0.000%. Of the 13 that do not, five agree 99.9–100% with Sharadar's **split-adjusted** close — so one of the two vendors' "raw" is not raw, and which one is not yet known; about four are a share class or a unit (PHI's two classes, SPCHB a class B, RAMR a constant 1,000×); two (GAMI, RAMP1) are unexplained, on either side |
+| 6 | full history inside the month | tickers in three requests; 2,879 price series in one run ✅ |
+
+**Sharadar is not a superset.** 1,745 already-priced exits have no CIK match in
+it and 632 end early, so it adds to the corpus rather than replacing EODHD.
+
+**What remains before any of it counts.** Ingestion is a separate decision —
+it changes what the corpus claims — and would have to pass the corpus's own
+per-bar identity resolution and settle test 5's adjustment question first. The
+standing rule lifts only when the gate *measures* ≥ 0.45 **and** a decision is
+recorded in `EDGAR_DELISTING_DENOMINATOR.md` §7e.
 
 ### What stays broken without it
 
