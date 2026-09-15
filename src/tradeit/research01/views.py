@@ -280,8 +280,8 @@ README: tuple[tuple[str, str, str], ...] = (
     (
         "no backtest here is evidence of profitability",
         "security_price_facts",
-        "The survivorship gate returns SURVIVOR_BIASED against this corpus. "
-        "Companies that failed are substantially absent, so a good strategy "
+        "The survivorship gate has not reached MATERIALLY_SURVIVORSHIP_CORRECTED "
+        "against this corpus. Companies that failed are partly absent, so a good strategy "
         "result means the failures are missing, not that the strategy works. "
         "Build machinery on this corpus; do not believe its returns. "
         "v_registrants shows the coverage side of it: every registrant with a "
@@ -297,6 +297,17 @@ README: tuple[tuple[str, str, str], ...] = (
         "returns and any comparison across time, 'raw' to reconstruct what a "
         "trader saw on the day, and never mix them in one calculation. "
         "v_prices and v_prices_raw each pick one.",
+    ),
+    (
+        "raw is not always the unadjusted print",
+        "security_price_facts",
+        "At a 533-split sample, EODHD's raw close jumped by the split ratio at "
+        "65.1% of splits and was already split-adjusted at 14.3%. Where raw is "
+        "adjusted and the split is recorded, a backtest holding through it "
+        "adjusts twice; where the split is not recorded, earlier price levels "
+        "are wrong. Check that raw jumps at a recorded split before trusting a "
+        "price level. Rows with source 'sharadar-backfill' are rebuilt from the "
+        "printed close.",
     ),
     (
         "a session can have more than one revision",

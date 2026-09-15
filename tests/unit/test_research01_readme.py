@@ -57,12 +57,20 @@ def test_the_first_entry_orients_a_reader_who_stops_there(prepared: Session) -> 
 
 
 def test_the_survivorship_warning_is_present_and_early(prepared: Session) -> None:
-    """The standing rule that no result here is evidence of profitability."""
+    """The standing rule that no result here is evidence of profitability.
+
+    This used to pin the text ``SURVIVOR_BIASED``, which was the gate's grade
+    when it was written and went stale when the grade moved. The invariant it
+    was asserting is that the warning is early and names the grade the rule
+    lifts at, so a reader knows what would have to change -- not any one past
+    reading of the gate.
+    """
     ordinal, guidance = prepared.execute(
         text("select ordinal, guidance from corpus_readme where topic like '%profitability%'")
     ).one()
     assert ordinal <= 2
-    assert "SURVIVOR_BIASED" in guidance
+    assert "MATERIALLY_SURVIVORSHIP_CORRECTED" in guidance
+    assert "do not believe" in guidance
 
 
 def test_every_view_the_module_builds_is_mentioned_somewhere(prepared: Session) -> None:

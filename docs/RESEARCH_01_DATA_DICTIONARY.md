@@ -20,13 +20,13 @@ will be rediscovered the hard way.
 
 ---
 
-## 0. Seven ways this corpus will mislead you
+## 0. Eight ways this corpus will mislead you
 
 Every one of these has produced a confident wrong answer during construction,
 most of them mine. They are listed first because a reader who stops here has
 still got the most important part.
 
-**Five of the seven are now handled by the query views in §3a, and 0.5 has been
+**Five of the eight are now handled by the query views in §3a, and 0.5 has been
 fixed outright.** They are still described here, because a view helps only a
 caller who uses it and a raw `SELECT` still meets every trap below.
 
@@ -53,6 +53,39 @@ which looked like a data-quality triumph and was an artefact of counting rows.
 **Which basis to use:** `total` for returns and any cross-time comparison;
 `raw` for reconstructing what a trader actually saw on the day. Never mix them
 in one calculation.
+
+### 0.1a `raw` is **not always** the unadjusted print
+
+§0.1 describes `raw` as the vendor's unadjusted print. For EODHD's rows that is
+true most of the time and not always. Measured 2026-09-14 at 533 randomly
+sampled recorded splits whose ratio differs from 1 by more than 0.2, looking at
+the `raw` close either side of the ex-date:
+
+| what the EODHD `raw` close does at the split | splits | share |
+|---|---|---|
+| jumps by the split ratio — genuinely unadjusted | 347 | 65.1% |
+| does not jump — **already split-adjusted** | 76 | 14.3% |
+| ambiguous | 110 | 20.6% |
+
+Worked examples, against Sharadar's printed close for the same session:
+
+```
+THQ   2012-07-06   raw 5.2000   printed 0.5200   (1-for-10 reverse split 2012-07-09)
+VCI   1999-05-12   raw 38.0420  printed 57.0630  (3-for-2 split 1999-05-13)
+```
+
+**Why it matters.** `CorpusSessionData` trades `raw` and changes a holding's
+share count when `security_corporate_action_facts` records a split. Where `raw`
+is already split-adjusted **and** the split is recorded (VCI above), a position
+held across the split is adjusted twice. Where the split is not recorded (THQ),
+nothing is double-counted but every earlier price level is wrong — so a price
+floor, a dollar-volume floor or a market capitalisation computed from those
+bars is wrong too.
+
+**Not handled by any read path yet.** The tell is a recorded split whose ex-date
+shows no jump in `raw`. Rows with `source = 'sharadar-backfill'` are
+reconstructed from Sharadar's printed close (`tradeit.research01.sharadar_client`)
+and jumped at every split checked.
 
 ### 0.2 `symbol_aliases.valid_to` is **exclusive**
 

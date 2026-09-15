@@ -206,7 +206,7 @@ restate any of them from memory or from a document.
 2. [`docs/PHASE_06_IMPROVEMENT_PLAN.md`](docs/PHASE_06_IMPROVEMENT_PLAN.md) —
    where work currently is, its milestone table and its measured status.
 3. [`docs/RESEARCH_01_DATA_DICTIONARY.md`](docs/RESEARCH_01_DATA_DICTIONARY.md)
-   — **read before querying the corpus.** Its §0 lists six ways the file
+   — **read before querying the corpus.** Its §0 lists the ways the file
    returns a confident wrong answer, each discovered by getting one. Written
    for a reader with no other context, so it also serves anyone pointing
    another tool at the database. **Add to it whenever a new reading rule is
