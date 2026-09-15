@@ -189,6 +189,29 @@ per-bar identity resolution and settle test 5's adjustment question first. The
 standing rule lifts only when the gate *measures* ≥ 0.45 **and** a decision is
 recorded in `EDGAR_DELISTING_DENOMINATOR.md` §7e.
 
+### INGESTED 2026-09-15 — and measured by the gate
+
+The owner authorised ingestion. Test 5 was settled first: Sharadar's
+`closeunadj` jumps at every split checked, while EODHD's `raw` close is already
+split-adjusted at 14.3% of 533 sampled splits (`RESEARCH_01_DATA_DICTIONARY.md`
+§0.1a), so Sharadar's printed close became the raw basis. Landed for the **1,666**
+exits whose identity the corpus already held, staged 5 → 100 → the rest:
+
+| | |
+|---|---|
+| bars landed (raw and total) | **5,526,203** |
+| splits landed | 576 |
+| rejected — outside the curated alias interval | 142,802 |
+| rejected — ticker claimed by two securities that day | 2,276 |
+| duplicates of rows EODHD already supplied | 41,909 |
+| failures | 0 |
+
+**The gate: 10,038 of 21,618 dated exits priced, `bounded_coverage` 0.4643,
+`matched_coverage` 0.8156, controls 30/30 — `MATERIALLY_SURVIVORSHIP_CORRECTED`.**
+Test 1's bar of 1,358 newly priced exits is met by the gate's own count
+(+1,667). The 1,211 exits without curated identity were not landed. Lifting the
+standing rule is a separate decision (`EDGAR_DELISTING_DENOMINATOR.md` §7e).
+
 ### What stays broken without it
 
 - **The 45% rule stays in force**, so no backtest or signal result on this

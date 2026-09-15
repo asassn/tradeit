@@ -1635,6 +1635,47 @@ This is Milestone 0a in `PHASE_06_IMPROVEMENT_PLAN.md` and it is the work that
 should start first, because it is the instrument every later judgement depends
 on.
 
+### MEASURED 2026-09-15 — the gate reads `MATERIALLY_SURVIVORSHIP_CORRECTED`; **no decision recorded**
+
+After the owner bought one month of Sharadar prices and authorised ingestion
+(`PROPOSAL_SURVIVORSHIP_DATA_2026-09-14.md`), `research01_backfill_sharadar.py`
+landed prices for the 1,666 dated exits whose identity the corpus already held.
+`research01_gate.py`, re-run afterwards:
+
+| | before | after |
+|---|---|---|
+| dated Exchange Act exits priced | 8,371 | **10,038** |
+| `bounded_coverage` | 0.3872 | **0.4643** |
+| `matched_coverage` | 0.6802 | **0.8156** |
+| series that record the death | 91.1% | 91.9% |
+| controls | 30/30 | 30/30 |
+| grade | `PARTIALLY_SURVIVORSHIP_CORRECTED` | **`MATERIALLY_SURVIVORSHIP_CORRECTED`** |
+
+Both of the purchase gate's G3 thresholds now hold — bounded ≥ 0.45 and matched
+≥ 0.60 — measured by the gate itself, not projected.
+
+**The standing rule has not lifted.** It lifts at this grade **and** an explicit
+decision recorded here. None has been. What bears on that decision, measured:
+
+| exit era | coverage |
+|---|---|
+| before 1999 | **8.0%** (152 of 1,901) — Sharadar's history begins 1997-12-31 |
+| 1999–2006 | 36.9% |
+| 2007–2014 | 48.0% |
+| 2015–2026 | 65.6% |
+
+- **Coverage is uneven by era.** The dot-com and pre-2007 years remain below
+  45% even though the whole clears it; `PHASE_06_PURCHASE_GATE.md` C1/C6 is the
+  shape of limitation that would have to be declared.
+- **A price-correctness defect is open and independent of coverage.**
+  `RESEARCH_01_DATA_DICTIONARY.md` §0.1a: at 14.3% of sampled splits EODHD's
+  `raw` close is already split-adjusted, so a backtest holding through a
+  recorded split adjusts twice. Survivorship coverage does not fix that.
+- **1,211 more exits have Sharadar series that fit** but no curated identity,
+  and were deliberately not landed.
+- **Sharadar dividends were not ingested** — whether its dividend amounts are
+  restated for later splits is unmeasured.
+
 ## 7g. MEASURED 2026-09-06 — 1,800 of the 1,811 never traded on an exchange
 
 **Correcting §7d.** When the `N-8F` recognition was applied, this document

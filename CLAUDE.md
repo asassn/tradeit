@@ -359,22 +359,21 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
   a machine-local authorisation file. Completing every roadmap phase does not by
   itself authorise it.
 - **No strategy result computed on `research-01` today is evidence of
-  profitability.** Measured 2026-09-12, under the §5 denominator adopted that
-  day, re-measured the same evening after a backfill: the gate reads
-  **`PARTIALLY_SURVIVORSHIP_CORRECTED`** — 8,371 of 21,618 dated Exchange Act
-  exits priced (**38.7%**), 68.0% of those whose identity resolves, 30/30
-  controls. That is
-  a real improvement on the 2.7% this file used to quote, and it is **not**
-  safety: nearly two thirds of the companies EDGAR shows exiting are still
-  unpriced, so a backtest here is still missing failures. Build the machinery on
-  it; **do not believe its numbers.**
-  **The rule did not lift when the grade moved.** Its old trigger — "lifts when
-  the gate says something other than `SURVIVOR_BIASED`" — was written when that
-  was the only grade the gate could return (`EDGAR_DELISTING_DENOMINATOR.md`
-  §7e measured the old reading unreachable), and it would have fired on a change
-  of denominator rather than a change in the corpus. It now lifts at
-  **`MATERIALLY_SURVIVORSHIP_CORRECTED` (≥ 0.45) and an explicit decision
-  recorded in §7e**, not before.
+  profitability.** Measured 2026-09-15, after Sharadar prices were landed for
+  the 1,666 dated exits whose identity the corpus already held: the gate reads
+  **`MATERIALLY_SURVIVORSHIP_CORRECTED`** — 10,038 of 21,618 dated Exchange Act
+  exits priced (**46.4%**), 81.6% of those whose identity resolves, 30/30
+  controls. **The rule has not lifted.** It lifts at that grade **and an
+  explicit decision recorded in `EDGAR_DELISTING_DENOMINATOR.md` §7e**, and no
+  decision is recorded. Two measured facts stand against lifting it blind:
+  coverage before 2007 is still well under 45% (8.0% before 1999, 36.9% for
+  1999–2006), and `RESEARCH_01_DATA_DICTIONARY.md` §0.1a records that EODHD's
+  `raw` close is already split-adjusted at 14.3% of sampled splits, so a
+  backtest holding through such a split adjusts twice. Until the decision is
+  recorded, build the machinery on it; **do not believe its numbers.**
+  The old trigger — "lifts when the gate says something other than
+  `SURVIVOR_BIASED`" — was retired because it would have fired on a change of
+  denominator rather than a change in the corpus (§7e).
 - **Goldbugger is a separate project.** Do not import its gold-specific
   architecture into TradeIt.
 

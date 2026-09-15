@@ -280,8 +280,10 @@ README: tuple[tuple[str, str, str], ...] = (
     (
         "no backtest here is evidence of profitability",
         "security_price_facts",
-        "The survivorship gate has not reached MATERIALLY_SURVIVORSHIP_CORRECTED "
-        "against this corpus. Companies that failed are partly absent, so a good strategy "
+        "The survivorship gate reads MATERIALLY_SURVIVORSHIP_CORRECTED as of "
+        "2026-09-15, but the standing rule has not been lifted by the owner's "
+        "recorded decision, coverage before 2007 is still thin, and some raw "
+        "prices are split-adjusted. Companies that failed are partly absent, so a good strategy "
         "result means the failures are missing, not that the strategy works. "
         "Build machinery on this corpus; do not believe its returns. "
         "v_registrants shows the coverage side of it: every registrant with a "
