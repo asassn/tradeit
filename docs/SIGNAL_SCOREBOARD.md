@@ -5,6 +5,15 @@
 reasoning. **Every number here is measured and every one will rot**; re-run the
 studies rather than quoting this later.
 
+> **Read every section below with this, 2026-09-15.** Sections up to and
+> including §28 read prices through `price_series` and `CorpusSessionData`
+> **before** those paths learned that some EODHD `raw` closes are already
+> split-adjusted (`RESEARCH_01_DATA_DICTIONARY.md` §0.1a). At 671 recorded
+> splits in 523 securities a split was applied twice — a 3-for-2 read as a 50%
+> move nobody earned — and 1,872 more are now withheld as contradicted. No
+> section has been re-run. Findings that rest on large, many-sample effects are
+> unlikely to be reversed by it; any that rest on a few extreme returns could be.
+
 ## What is being tested, and what is not
 
 A **signal** answers one question: does this measurement predict future

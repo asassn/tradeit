@@ -365,12 +365,13 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
   exits priced (**46.4%**), 81.6% of those whose identity resolves, 30/30
   controls. **The rule has not lifted.** It lifts at that grade **and an
   explicit decision recorded in `EDGAR_DELISTING_DENOMINATOR.md` §7e**, and no
-  decision is recorded. Two measured facts stand against lifting it blind:
-  coverage before 2007 is still well under 45% (8.0% before 1999, 36.9% for
-  1999–2006), and `RESEARCH_01_DATA_DICTIONARY.md` §0.1a records that EODHD's
-  `raw` close is already split-adjusted at 14.3% of sampled splits, so a
-  backtest holding through such a split adjusts twice. Until the decision is
-  recorded, build the machinery on it; **do not believe its numbers.**
+  decision is recorded. Coverage before 2007 is still well under 45% (8.0%
+  before 1999, 36.9% for 1999–2006). The split double count recorded in
+  `RESEARCH_01_DATA_DICTIONARY.md` §0.1a was fixed on 2026-09-15 as a read
+  rule — 671 splits already inside `raw` are no longer applied twice, and
+  1,634,744 prints before 1,872 contradicted splits are withheld — but **every
+  result measured before that date ran on the double-counted reads.** Until the
+  decision is recorded, build the machinery on it; **do not believe its numbers.**
   The old trigger — "lifts when the gate says something other than
   `SURVIVOR_BIASED`" — was retired because it would have fired on a change of
   denominator rather than a change in the corpus (§7e).

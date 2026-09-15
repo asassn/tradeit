@@ -61,11 +61,14 @@ from tradeit.research01.series import (
     AdjustedBar,
     Coherence,
     SplitAdjustment,
+    SplitEvidence,
     adjudicated_bound,
     adjudicated_window,
     known_splits,
     price_series,
     series_coherence,
+    split_evidence,
+    split_reading,
 )
 from tradeit.research01.ticker_cik import (
     Candidate,
@@ -108,6 +111,7 @@ __all__ = [
     "Resolution",
     "SeedReport",
     "SplitAdjustment",
+    "SplitEvidence",
     "VendorAction",
     "VendorAliasReport",
     "VendorBar",
@@ -141,4 +145,6 @@ __all__ = [
     "run_backfill",
     "seed_identity",
     "series_coherence",
+    "split_evidence",
+    "split_reading",
 ]

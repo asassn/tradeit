@@ -282,8 +282,8 @@ README: tuple[tuple[str, str, str], ...] = (
         "security_price_facts",
         "The survivorship gate reads MATERIALLY_SURVIVORSHIP_CORRECTED as of "
         "2026-09-15, but the standing rule has not been lifted by the owner's "
-        "recorded decision, coverage before 2007 is still thin, and some raw "
-        "prices are split-adjusted. Companies that failed are partly absent, so a good strategy "
+        "recorded decision and coverage before 2007 is still thin. Companies "
+        "that failed are partly absent, so a good strategy "
         "result means the failures are missing, not that the strategy works. "
         "Build machinery on this corpus; do not believe its returns. "
         "v_registrants shows the coverage side of it: every registrant with a "
@@ -303,12 +303,13 @@ README: tuple[tuple[str, str, str], ...] = (
     (
         "raw is not always the unadjusted print",
         "security_price_facts",
-        "At a 533-split sample, EODHD's raw close jumped by the split ratio at "
-        "65.1% of splits and was already split-adjusted at 14.3%. Where raw is "
-        "adjusted and the split is recorded, a backtest holding through it "
-        "adjusts twice; where the split is not recorded, earlier price levels "
-        "are wrong. Check that raw jumps at a recorded split before trusting a "
-        "price level. Rows with source 'sharadar-backfill' are rebuilt from the "
+        "EODHD's raw close is sometimes already split-adjusted. price_series and "
+        "the backtester now test each recorded split against the raw and total "
+        "prints: a split already inside raw is not applied again, and prints "
+        "before a split whose record contradicts the prints are withheld. A raw "
+        "SELECT does neither, so it still double-counts those splits. A split "
+        "that was never recorded is not caught: earlier raw levels may be "
+        "adjusted. Rows with source 'sharadar-backfill' are rebuilt from the "
         "printed close.",
     ),
     (

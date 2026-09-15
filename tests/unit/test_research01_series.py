@@ -25,7 +25,13 @@ from tradeit.research01 import (
     price_series,
     series_coherence,
 )
-from tradeit.research01.series import PrintRow, admit_prints
+from tradeit.research01.series import (
+    PrintRow,
+    SplitEvidence,
+    admit_prints,
+    split_evidence,
+    split_reading,
+)
 from tradeit.storage.tables import (
     Issuer,
     IssuerIdentifier,
@@ -207,6 +213,97 @@ class TestMechanics:
         _bar(db_session, sid, dt.date(2020, 8, 27), Decimal("121.15"), basis="total")
         db_session.flush()
         assert price_series(db_session, sid, as_of=dt.datetime(2021, 1, 1, tzinfo=UTC)) == []
+
+
+class TestASplitAlreadyInsideRaw:
+    """At 667 real splits the vendor's ``raw`` close was already split-adjusted
+    and both read paths adjusted it again; Sharadar's printed close confirmed
+    33 of 33 sampled. Each case stores three sessions of ``raw`` and ``total``
+    either side of a recorded split on SPLIT_DAY and asks what each basis does.
+    """
+
+    BEFORE = (dt.date(2020, 8, 26), dt.date(2020, 8, 27), dt.date(2020, 8, 28))
+    AFTER = (SPLIT_DAY, dt.date(2020, 9, 1), dt.date(2020, 9, 2))
+    AS_OF = dt.datetime(2021, 1, 1, tzinfo=UTC)
+
+    def _series(
+        self,
+        session: Session,
+        *,
+        raw: tuple[str, str],
+        total: tuple[str, str] = ("50", "50"),
+        ratio: str = "2",
+    ) -> int:
+        sid = _security(session).security_id
+        for days, index in ((self.BEFORE, 0), (self.AFTER, 1)):
+            for day in days:
+                _bar(session, sid, day, Decimal(raw[index]))
+                _bar(session, sid, day, Decimal(total[index]), basis="total")
+        _split(session, sid, SPLIT_DAY, Decimal(ratio))
+        session.flush()
+        return sid
+
+    def _evidence(self, session: Session, sid: int, ratio: str = "2") -> SplitEvidence:
+        return split_evidence(session, sid, SPLIT_DAY, Decimal(ratio))
+
+    def test_a_genuine_print_is_still_adjusted(self, db_session: Session) -> None:
+        sid = self._series(db_session, raw=("100", "50"))
+        assert self._evidence(db_session, sid) is SplitEvidence.IN_RAW
+        first = price_series(db_session, sid, as_of=self.AS_OF)[0]
+        assert first.close == Decimal("50")
+        assert first.split_factor == 2
+
+    def test_an_already_adjusted_raw_is_not_adjusted_twice(self, db_session: Session) -> None:
+        """The bug: 50 read as 25, a halving that never happened."""
+        sid = self._series(db_session, raw=("50", "50"))
+        assert self._evidence(db_session, sid) is SplitEvidence.ALREADY_ADJUSTED
+        first = price_series(db_session, sid, as_of=self.AS_OF)[0]
+        assert first.close == Decimal("50")
+        assert first.split_factor == 1
+        assert known_splits(db_session, sid, as_of=self.AS_OF) == []
+
+    def test_an_audit_still_sees_every_recorded_split(self, db_session: Session) -> None:
+        sid = self._series(db_session, raw=("50", "50"))
+        assert len(known_splits(db_session, sid, as_of=self.AS_OF, include_disputed=True)) == 1
+
+    def test_a_flat_raw_against_a_moving_total_is_contradicted(self, db_session: Session) -> None:
+        """BNCN's shape, 2005-11-16: ``raw`` flat, ``total`` up by the ratio.
+        Sharadar found this cell 9 prints to 23 adjusted, so neither reading
+        may be acted on."""
+        sid = self._series(db_session, raw=("50", "50"), total=("25", "50"))
+        assert self._evidence(db_session, sid) is SplitEvidence.CONTRADICTED
+
+    def test_both_bases_jumping_is_contradicted(self, db_session: Session) -> None:
+        sid = self._series(db_session, raw=("100", "50"), total=("100", "50"))
+        assert self._evidence(db_session, sid) is SplitEvidence.CONTRADICTED
+
+    def test_a_contradicted_split_withholds_the_prints_before_it(self, db_session: Session) -> None:
+        """A 1-for-2 on record, a 2-for-1 in the prices: no factor can be stated,
+        so the earlier prints are not served and the later ones are."""
+        sid = self._series(db_session, raw=("100", "50"), ratio="0.5")
+        assert self._evidence(db_session, sid, "0.5") is SplitEvidence.CONTRADICTED
+        applied, floor = split_reading(db_session, sid, as_of=self.AS_OF)
+        assert applied == [] and floor == SPLIT_DAY
+        served = [b.session_date for b in price_series(db_session, sid, as_of=self.AS_OF)]
+        assert served == list(self.AFTER)
+        audited = price_series(db_session, sid, as_of=self.AS_OF, include_disputed=True)
+        assert len(audited) == 6
+
+    def test_too_few_sessions_is_no_evidence_and_applied_as_recorded(
+        self, db_session: Session
+    ) -> None:
+        """The ordinary state for a short fixture, and for 1,275 real splits with
+        prints missing on one side: nothing changes."""
+        sid = _security(db_session).security_id
+        _bar(db_session, sid, self.BEFORE[-1], Decimal("100"))
+        _split(db_session, sid, SPLIT_DAY, Decimal(2))
+        db_session.flush()
+        assert self._evidence(db_session, sid) is SplitEvidence.NO_EVIDENCE
+        assert price_series(db_session, sid, as_of=self.AS_OF)[0].close == Decimal("50")
+
+    def test_a_split_too_small_to_test_is_applied_as_recorded(self, db_session: Session) -> None:
+        sid = self._series(db_session, raw=("50", "50"), ratio="1.03")
+        assert self._evidence(db_session, sid, "1.03") is SplitEvidence.TOO_SMALL
 
 
 class TestSeriesCoherence:

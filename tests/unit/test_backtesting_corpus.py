@@ -211,6 +211,56 @@ class TestSplits:
         assert data.splits_on(DAY) == {sid: Decimal(2)}
         assert data.split_count == 1
 
+    def _recorded(self, session: Session, sid: int, ratio: str) -> None:
+        session.add(
+            SecurityCorporateActionFact(
+                security_id=sid,
+                action_type="split",
+                ex_date=DAY,
+                ratio=Decimal(ratio),
+                event_time=_close(DAY),
+                knowledge_time=_close(DAY),
+                knowledge_source=KnowledgeTimeSource.VENDOR_INGEST,
+                source="test",
+            )
+        )
+
+    BEFORE = (dt.date(2020, 5, 27), dt.date(2020, 5, 28), dt.date(2020, 5, 29))
+    AFTER = (DAY, dt.date(2020, 6, 2), dt.date(2020, 6, 3))
+
+    def _prints(self, session: Session, sid: int, raw: tuple[str, str]) -> None:
+        for days, index in ((self.BEFORE, 0), (self.AFTER, 1)):
+            for day in days:
+                _bar(session, sid, day, close=raw[index])
+                _bar(session, sid, day, basis="total", close="50")
+
+    def test_a_split_already_inside_raw_does_not_change_the_share_count(
+        self, db_session: Session
+    ) -> None:
+        """Measured at 667 real splits: the vendor's raw close was already
+        adjusted, and changing the holding's share count doubled the split."""
+        sid = _security(db_session)
+        self._prints(db_session, sid, ("50", "50"))
+        self._recorded(db_session, sid, "2")
+        db_session.flush()
+        assert _data(db_session, sid).splits_on(DAY) == {}
+
+    def test_a_genuine_split_still_changes_the_share_count(self, db_session: Session) -> None:
+        sid = _security(db_session)
+        self._prints(db_session, sid, ("100", "50"))
+        self._recorded(db_session, sid, "2")
+        db_session.flush()
+        assert _data(db_session, sid).splits_on(DAY) == {sid: Decimal(2)}
+
+    def test_prints_before_a_contradicted_split_are_not_traded(self, db_session: Session) -> None:
+        sid = _security(db_session)
+        self._prints(db_session, sid, ("100", "50"))
+        self._recorded(db_session, sid, "0.5")
+        db_session.flush()
+        data = _data(db_session, sid)
+        assert data.sessions(dt.date(2020, 1, 1), dt.date(2020, 12, 31)) == list(self.AFTER)
+        assert data.excluded_contradicted_split == 3
+
     def test_a_session_with_no_split_reports_nothing(self, db_session: Session) -> None:
         sid = _security(db_session)
         _bar(db_session, sid, DAY, close="100")

@@ -30,6 +30,7 @@ adjusted number twice, with the vendor's epoch still inside it.
 from __future__ import annotations
 
 import datetime as dt
+import math
 from bisect import bisect_right
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -46,12 +47,15 @@ __all__ = [
     "AdjustedBar",
     "Coherence",
     "SplitAdjustment",
+    "SplitEvidence",
     "adjudicated_bound",
     "adjudicated_window",
     "admit_prints",
     "known_splits",
     "price_series",
     "series_coherence",
+    "split_evidence",
+    "split_reading",
 ]
 
 #: Actions that change the share count and therefore the comparability of a
@@ -213,6 +217,157 @@ def adjudicated_bound(session: Session, security_id: int) -> dt.date | None:
     )
 
 
+class SplitEvidence(StrEnum):
+    """Whether a recorded split is already inside the stored ``raw`` prints.
+
+    **Why this exists.** Both read paths adjust ``raw`` by the recorded splits:
+    ``price_series`` divides earlier prints, and ``CorpusSessionData`` changes a
+    holding's share count on the ex-date. That is right only if ``raw`` is the
+    print, and for some EODHD rows it is not -- see
+    ``RESEARCH_01_DATA_DICTIONARY.md`` §0.1a.
+
+    **The test, and why it is two tests.** Around the ex-date each basis is
+    judged on its own, from the median of up to five closes either side: it
+    *jumps* if its level moves by about ``1 / ratio``, is *flat* if it barely
+    moves, and is *other* otherwise. A first version compared ``raw`` against
+    ``total`` in one ratio and assumed ``total`` was always adjusted. It is not:
+    BNCN's EODHD ``total`` jumps at its 2005 5-for-4 while its ``raw`` is flat,
+    and that one-ratio test read an already-adjusted ``raw`` as a genuine print.
+
+    **Which cells act, and why only these.** Measured 2026-09-15 against
+    Sharadar's printed close, whose ``closeunadj`` steps at every split checked,
+    on up to forty splits per cell where Sharadar could decide:
+
+    ============================  ========  =========================
+    raw / total                   splits    Sharadar says
+    ============================  ========  =========================
+    jumps / flat                  7,282     36 of 36 the print
+    flat / flat                     667     33 of 33 already adjusted
+    flat / other                    772     9 print, 23 adjusted
+    jumps / jumps                    63     14 print, 2 adjusted
+    jumps / other, and raw other  1,000+    mixed
+    ============================  ========  =========================
+
+    Only the two cells that were right every time act. Every mixed cell is
+    :attr:`CONTRADICTED`: acting on a 72% cell is a wrong adjustment at 28% of
+    its splits, and the corpus prefers a withheld print to a wrong one.
+
+    **It reads bars regardless of their knowledge_time**, deliberately. The
+    question is whether a vendor's stored number is the print, not what the
+    market knew, and both bases are read on the same sessions either side.
+    """
+
+    #: ``raw`` jumps and ``total`` is flat: the print. Adjust it.
+    IN_RAW = "in_raw"
+    #: Both flat: ``raw`` is already adjusted. **Do not adjust again.**
+    ALREADY_ADJUSTED = "already_adjusted"
+    #: Any other shape. The prints disagree with each other or with the recorded
+    #: ratio, so no factor can be stated and prints before it are withheld.
+    CONTRADICTED = "contradicted"
+    #: Fewer than :data:`SPLIT_TEST_MIN_SESSIONS` closes of either basis on a
+    #: side. Applied as recorded; a read cannot span a gap like that anyway.
+    NO_EVIDENCE = "no_evidence"
+    #: Under :data:`SPLIT_TEST_MIN_RATIO` from 1, where an ordinary week's move
+    #: is as large as the split. Applied as recorded; the error either way is
+    #: under five percent.
+    TOO_SMALL = "too_small"
+
+
+#: Splits closer to 1 than this are not tested -- see :attr:`SplitEvidence.TOO_SMALL`.
+SPLIT_TEST_MIN_RATIO = 0.05
+#: How far a basis's level may sit from the expected step, as a share of the
+#: split's own log size, and still be read as jumping or as flat.
+SPLIT_TEST_TOLERANCE = 0.35
+#: Closes read either side of the ex-date, and the fewest that make a level.
+SPLIT_TEST_SESSIONS = 5
+SPLIT_TEST_MIN_SESSIONS = 3
+_APPLIED = frozenset({SplitEvidence.IN_RAW, SplitEvidence.NO_EVIDENCE, SplitEvidence.TOO_SMALL})
+
+
+def _level(
+    session: Session, security_id: int, ex_date: dt.date, basis: str, *, before: bool
+) -> float | None:
+    fact = SecurityPriceFact
+    date_rule = fact.session_date < ex_date if before else fact.session_date >= ex_date
+    closes = session.scalars(
+        select(fact.close)
+        .where(
+            fact.security_id == security_id,
+            fact.adjustment_basis == basis,
+            fact.close > 0,
+            date_rule,
+        )
+        .order_by(fact.session_date.desc() if before else fact.session_date)
+        .limit(SPLIT_TEST_SESSIONS)
+    ).all()
+    if len(closes) < SPLIT_TEST_MIN_SESSIONS:
+        return None
+    ordered = sorted(float(c) for c in closes)
+    return ordered[len(ordered) // 2]
+
+
+def _shape(before: float, after: float, ratio: float) -> str:
+    size = abs(math.log(ratio))
+    step = math.log(after / before)
+    if abs(step + math.log(ratio)) < SPLIT_TEST_TOLERANCE * size:
+        return "jumps"
+    if abs(step) < SPLIT_TEST_TOLERANCE * size:
+        return "flat"
+    return "other"
+
+
+def split_evidence(
+    session: Session, security_id: int, ex_date: dt.date, ratio: Decimal
+) -> SplitEvidence:
+    """Classify one recorded split against the stored prints. See :class:`SplitEvidence`."""
+    value = float(ratio)
+    if abs(math.log(value)) < math.log(1 + SPLIT_TEST_MIN_RATIO):
+        return SplitEvidence.TOO_SMALL
+    levels = [
+        _level(session, security_id, ex_date, basis, before=side)
+        for basis in ("raw", "total")
+        for side in (True, False)
+    ]
+    if any(level is None for level in levels):
+        return SplitEvidence.NO_EVIDENCE
+    raw_before, raw_after, total_before, total_after = (float(x) for x in levels)  # type: ignore[arg-type]
+    raw, total = _shape(raw_before, raw_after, value), _shape(total_before, total_after, value)
+    if raw == "jumps" and total == "flat":
+        return SplitEvidence.IN_RAW
+    if raw == "flat" and total == "flat":
+        return SplitEvidence.ALREADY_ADJUSTED
+    return SplitEvidence.CONTRADICTED
+
+
+def split_reading(
+    session: Session, security_id: int, *, as_of: dt.datetime
+) -> tuple[list[SplitAdjustment], dt.date | None]:
+    """The splits a read should apply, and the date before which it must not read.
+
+    Returns ``(applied, floor)``. ``applied`` omits splits already inside ``raw``
+    and contradicted ones. ``floor`` is the latest contradicted ex-date, or
+    ``None``: prints **before** it are withheld, because they would need a split
+    factor nobody can state. Withheld before rather than after, so a series keeps
+    its ending -- which is where a survivorship study looks.
+    """
+    applied: list[SplitAdjustment] = []
+    floor: dt.date | None = None
+    for split in known_splits(session, security_id, as_of=as_of, include_disputed=True):
+        if not _within_adjudication(session, security_id, split.ex_date):
+            continue
+        evidence = split_evidence(session, security_id, split.ex_date, split.ratio)
+        if evidence in _APPLIED:
+            applied.append(split)
+        elif evidence is SplitEvidence.CONTRADICTED:
+            floor = split.ex_date if floor is None else max(floor, split.ex_date)
+    return applied, floor
+
+
+def _within_adjudication(session: Session, security_id: int, ex_date: dt.date) -> bool:
+    bound = adjudicated_bound(session, security_id)
+    return bound is None or ex_date < bound
+
+
 def known_splits(
     session: Session,
     security_id: int,
@@ -254,10 +409,19 @@ def known_splits(
         .where(*conditions)
         .order_by(SecurityCorporateActionFact.ex_date)
     ).all()
-    return [
+    splits = [
         SplitAdjustment(ex_date=ex, ratio=Decimal(str(ratio)), knowledge_time=kt)
         for ex, ratio, kt in rows
         if ratio and Decimal(str(ratio)) > 0
+    ]
+    if include_disputed:
+        return splits
+    # Splits the vendor had already folded into ``raw`` are not applied again,
+    # and contradicted ones are not applied at all -- see SplitEvidence.
+    return [
+        split
+        for split in splits
+        if split_evidence(session, security_id, split.ex_date, split.ratio) in _APPLIED
     ]
 
 
@@ -363,9 +527,15 @@ def price_series(
             continue
         latest[session_date] = (o, h, low, c, v)
 
-    splits = known_splits(session, security_id, as_of=as_of, include_disputed=include_disputed)
+    if include_disputed:
+        splits = known_splits(session, security_id, as_of=as_of, include_disputed=True)
+        floor = None
+    else:
+        splits, floor = split_reading(session, security_id, as_of=as_of)
 
-    ordered: list[PrintRow] = [(day, *latest[day]) for day in sorted(latest)]
+    ordered: list[PrintRow] = [
+        (day, *latest[day]) for day in sorted(latest) if floor is None or day >= floor
+    ]
     if not include_disputed:
         # On raw values, before adjustment: the anchor is a raw close, and the
         # split reset inside the rule is what stops a pre-split close carrying

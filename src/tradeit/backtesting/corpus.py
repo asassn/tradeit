@@ -84,7 +84,7 @@ from sqlalchemy.orm import Session
 from tradeit.core.enums import Bartimeframe, KnowledgeTimeSource
 from tradeit.core.models import OhlcvBar
 from tradeit.portfolio.cycle import EntryCandidate
-from tradeit.research01.series import PrintRow, adjudicated_window, admit_prints, known_splits
+from tradeit.research01.series import PrintRow, adjudicated_window, admit_prints, split_reading
 from tradeit.storage.tables import SecurityPriceFact
 
 __all__ = ["CandidateSource", "CorpusSessionData", "SessionBars"]
@@ -135,6 +135,9 @@ class CorpusSessionData:
     #: Zero-volume bars asserting a price nobody traded. Counted apart from the
     #: other two because it is a different vendor failure with a different fix.
     excluded_untraded: int = field(default=0, init=False)
+    #: Prints before a split whose record contradicts the prices themselves --
+    #: see :class:`tradeit.research01.series.SplitEvidence`.
+    excluded_contradicted_split: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         if not self.universe:
@@ -211,7 +214,7 @@ class CorpusSessionData:
         found: set[dt.date] = set()
         for security_id in self.universe:
             window_start, window_end = adjudicated_window(self.session, security_id)
-            splits = known_splits(self.session, security_id, as_of=as_of)
+            splits, split_floor = split_reading(self.session, security_id, as_of=as_of)
             admitted: list[PrintRow] = []
             for row in self._rows(security_id):
                 day, open_, high, low, close, volume = row
@@ -223,6 +226,11 @@ class CorpusSessionData:
                     # price of exactly zero. Treating one as a real print books
                     # a -100% return on a session nobody traded.
                     self.excluded_non_positive += 1
+                    continue
+                if split_floor is not None and day < split_floor:
+                    # Before a split whose record contradicts the prints: no
+                    # factor can be stated for these, so they are not traded.
+                    self.excluded_contradicted_split += 1
                     continue
                 if window_start is not None and day < window_start:
                     self.excluded_out_of_window += 1

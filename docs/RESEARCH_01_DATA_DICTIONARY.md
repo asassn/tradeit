@@ -82,10 +82,34 @@ nothing is double-counted but every earlier price level is wrong — so a price
 floor, a dollar-volume floor or a market capitalisation computed from those
 bars is wrong too.
 
-**Not handled by any read path yet.** The tell is a recorded split whose ex-date
-shows no jump in `raw`. Rows with `source = 'sharadar-backfill'` are
-reconstructed from Sharadar's printed close (`tradeit.research01.sharadar_client`)
-and jumped at every split checked.
+**Now handled by `price_series` and `CorpusSessionData` alike, 2026-09-15,**
+through one function, `tradeit.research01.series.split_reading`, which classifies
+every recorded split by `SplitEvidence`. Around the ex-date `raw` and `total` are
+each judged on their own from up to five closes either side — *jumps* by the
+ratio, *flat*, or *other* — because a first version that compared them in one
+ratio assumed `total` is always adjusted, and it is not (BNCN's EODHD `total`
+jumps at its 2005 5-for-4 while its `raw` is flat).
+
+Only the two shapes that Sharadar's printed close confirmed every time act:
+
+| raw / total | splits | Sharadar's printed close says | read |
+|---|---|---|---|
+| jumps / flat | 7,731 | 36 of 36 the print | **split applied** |
+| flat / flat | 671 | 33 of 33 already adjusted | **not applied again** — the double count, in 523 securities |
+| any other shape | 1,872 | mixed (e.g. flat / other: 9 print, 23 adjusted) | **prints before it withheld** |
+| too few closes on a side | 1,275 | — | applied as recorded |
+| under 5% from 1 | 356 | — | applied as recorded |
+
+**What the withholding costs:** 1,634,744 raw prints (4.23%) across 1,198
+securities are not served before a contradicted split. They stay in the table,
+and `include_disputed=True` returns them. Withheld *before* the split rather than
+after, so each series keeps its ending.
+
+**Not fixed: a split that was never recorded.** THQ's 1-for-10 of 2012-07-09 has
+no row here, so nothing is double-counted, but its earlier `raw` levels are
+already adjusted and a price floor or market capitalisation computed from them is
+wrong. Rows with `source = 'sharadar-backfill'` are rebuilt from the printed close
+and do not have this problem.
 
 ### 0.2 `symbol_aliases.valid_to` is **exclusive**
 
