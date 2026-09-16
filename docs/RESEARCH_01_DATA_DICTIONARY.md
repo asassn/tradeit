@@ -92,17 +92,28 @@ jumps at its 2005 5-for-4 while its `raw` is flat).
 
 Only the two shapes that Sharadar's printed close confirmed every time act:
 
-| raw / total | splits | Sharadar's printed close says | read |
-|---|---|---|---|
-| jumps / flat | 7,731 | 36 of 36 the print | **split applied** |
-| flat / flat | 671 | 33 of 33 already adjusted | **not applied again** — the double count, in 523 securities |
-| any other shape | 1,872 | mixed (e.g. flat / other: 9 print, 23 adjusted) | **prints before it withheld** |
-| too few closes on a side | 1,275 | — | applied as recorded |
-| under 5% from 1 | 356 | — | applied as recorded |
+| raw / total | Sharadar's printed close says | read |
+|---|---|---|
+| jumps / flat | 36 of 36 the print | **split applied** |
+| flat / flat | 33 of 33 already adjusted | **not applied again** — the double count |
+| any other shape | mixed (e.g. flat / other: 9 print, 23 adjusted) | **prints before it withheld**, unless a recorded verdict settles it |
+| too few closes on a side | — | applied as recorded |
+| under 5% from 1 | — | applied as recorded |
 
-**What the withholding costs, after arbitration (2026-09-16):** **918,473 raw
-prints (2.38%) across 730 securities** are not served before a split still
-contradicted. They stay in the table, and `include_disputed=True` returns them.
+Counts move as splits land. Measured 2026-09-16 over **14,068 recorded splits**,
+after 1,807 arrived from Sharadar that EODHD did not have:
+
+| | splits |
+|---|---|
+| applied — `raw` is the print | **8,581** |
+| not applied — `raw` already carries it | **1,957** |
+| contradicted — prints before it withheld | **1,151** |
+| too few closes either side | 1,860 |
+| under 5% from 1 | 519 |
+
+**What the withholding costs (2026-09-16, after two arbitration passes):**
+**974,295 raw prints (2.42%) across 783 securities** are not served before a
+split still contradicted. They stay in the table, and `include_disputed=True` returns them.
 Withheld *before* the split rather than after, so each series keeps its ending.
 
 **A second vendor settles what the corpus's own prints cannot.**
@@ -115,15 +126,22 @@ them. Measured over all 1,872 contradicted splits:
 
 | outcome | splits |
 |---|---|
-| decided: raw is already adjusted | 424 |
-| decided: raw is the print | 397 |
-| no Sharadar series covering the ex-date | 514 |
-| Sharadar shows no adjustment on that session, so it proves nothing | 203 |
-| stored raw matches neither close | 210 |
-| Sharadar has no bar that session | 81 |
+| decided: raw is already adjusted | 648 |
+| decided: raw is the print | 503 |
+| no Sharadar series covering the ex-date | 546 |
+| Sharadar shows no adjustment on that session, so it proves nothing | 205 |
+| stored raw matches neither close | 274 |
+| Sharadar has no bar that session | 83 |
 
-That moved 1,872 contradicted splits to **1,051** and released **716,271
-prints**. A split with no verdict keeps withholding what precedes it.
+**1,151 verdicts** stand over two passes -- the second run after Sharadar's own
+splits landed, which created contradictions of their own. A split with no verdict
+keeps withholding what precedes it.
+
+**Landing a missing split can withhold data rather than release it, and that is
+the honest direction.** The 1,807 splits Sharadar supplied included 393 the
+prints then contradicted, taking withheld prints from 2.38% to 2.97% before the
+second arbitration brought them back to 2.42%. Those series previously read as
+clean because nobody had recorded their split at all.
 
 **Not fixed: a split that was never recorded.** THQ's 1-for-10 of 2012-07-09 has
 no row here, so nothing is double-counted, but its earlier `raw` levels are
