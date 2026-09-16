@@ -72,6 +72,33 @@ verbatim. No purchase should proceed without it, at any price.
 before any data was seen and remain the standard any replacement vendor is held
 to; only the vendor it names is out, and only on price.
 
+#### MEASURED 2026-09-16 — EODHD's corporate-action feed is incomplete, and Sharadar's is not
+
+A capability fact, measured rather than asserted, so nobody rediscovers it.
+
+**8,818 of 17,428 priced securities carried no corporate action at all.** Asked
+for 105 of them through `HttpEodhdClient`, bounded to each security's own alias
+interval, **EODHD returned nothing every time**. That is not a lookup failure:
+**15 of 15 of those same symbols returned price data** from the same client in
+the same window, so the symbols exist and the requests are well formed.
+
+**The control settles it.** THQ split four times between 1999 and 2012.
+`splits` for `THQI.US` across 2011–2013 returns **nothing**; Sharadar returns all
+four, including the 1-for-10 of 2012-07-09 whose absence is the worked example in
+`RESEARCH_01_DATA_DICTIONARY.md` §0.1a.
+
+**What Sharadar then supplied.** Asked about 14,278 securities it covers by CIK:
+**1,807 splits landed that EODHD did not have**, across 4,035 securities, with
+5,952 already-known splits correctly refused as duplicates and 2,053 securities
+refused because more than one security sits under the CIK and nothing in the
+vendor's row says which share class it means.
+
+**The consequence for the matrix.** Rows 7 and 8 of §2a record splits and
+dividends as present for EODHD, and they are — for some securities. Presence is
+not completeness, and this is the first measurement of the difference: for the
+population this corpus exists for, the action feed is materially thinner than
+the price feed it comes with.
+
 ### 1.2 The candidate field as it now stands
 
 | vendor | status | on what ground |
