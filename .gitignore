@@ -86,6 +86,11 @@ htmlcov/
 # a 16,000-row vendor corpus nearly became a tracked file. Downloaded vendor
 # data is never committed, and a checkpoint is operational state, not evidence.
 /research01.sqlite
+# SQLite's own journal and WAL sidecars for it. They appear whenever a write is
+# in flight and are not evidence of anything.
+/research01.sqlite-journal
+/research01.sqlite-wal
+/research01.sqlite-shm
 /.research01_backfill.json
 /.research01_confirm.json
 /.research01_confirmed_backfill.json
