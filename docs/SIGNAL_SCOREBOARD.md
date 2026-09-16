@@ -11,8 +11,10 @@ studies rather than quoting this later.
 > split-adjusted (`RESEARCH_01_DATA_DICTIONARY.md` §0.1a). At 671 recorded
 > splits in 523 securities a split was applied twice — a 3-for-2 read as a 50%
 > move nobody earned — and 1,872 more are now withheld as contradicted. No
-> section has been re-run. Findings that rest on large, many-sample effects are
-> unlikely to be reversed by it; any that rest on a few extreme returns could be.
+> **§26 and §27 have since been re-run — see §29 — and neither moved**: every
+> number softened by 3–5% in relative terms and no verdict changed. The rest have
+> not been re-run. Findings that rest on large, many-sample effects are unlikely
+> to be reversed; any that rest on a few extreme returns could be.
 
 ## What is being tested, and what is not
 
@@ -2044,3 +2046,68 @@ period for 2010–2024, and the pre-2010 decade is where the liquid died arm is
 thinnest. That is recorded as the design constraint, not worked around.
 
 **Ledger unchanged at 50 trials.**
+
+---
+
+## §29 — §26 and §27 re-measured on the corrected corpus: nothing moved — 2026-09-16
+
+Limitation (4) of the owner's decision requires every result measured before
+2026-09-15 to be re-run before it is relied on, because those ran on reads that
+double-counted splits. This is that re-run for the strongest finding.
+
+**A strict re-run, so only one thing changed.** Same universe file
+(`security_spans.csv`, untouched since 2026-09-11), same four disjoint samples,
+same signals, same registered criteria, same verdict script. What changed is
+underneath: **1,980 splits no longer applied twice, 8,895 applied correctly
+(1,807 of them recovered from Sharadar), 1,029,023 prints withheld** before
+splits whose records contradict the prices, and history reaching back to
+1990-01-02. Adding the 2,877 newly priced dead companies would have changed the
+universe as well, so they are deliberately **not** in this run: it isolates the
+corrections.
+
+### §26's criteria: still passing, on slightly smaller numbers
+
+| | §26 (2026-09-13) | re-measured |
+|---|---|---|
+| observations | 235,640 | 232,830 |
+| `realized_volatility_60` IC, 21 | −0.0790 (t −38.25) | **−0.0767 (t −36.93)** |
+| `realized_volatility_60` IC, 63 | −0.0996 (t −27.54) | **−0.0960 (t −26.37)** |
+| `atr_percent` IC, 21 | −0.0790 (t −38.27) | **−0.0765 (t −36.82)** |
+| `atr_percent` IC, 63 | −0.1066 (t −29.50) | **−0.1027 (t −28.24)** |
+| bottom quintile, 2010–14 / 2015–19 (rv60, 21) | +16.83% / +14.56% a year | **+15.02% / +13.97%** |
+| criteria 1, 2, 3 | pass, pass, 4/4 | **pass, pass, 4/4** |
+| arithmetic spread | `outlier_dependent`, mean and median opposite in sign | **unchanged in kind** |
+
+Every number softened by roughly 3–5% in relative terms and not one changed a
+verdict. Both signals still survive at both horizons.
+
+### §27's explanation: still the whole story
+
+`realized_volatility_60`, 21 sessions, by minimum average dollar volume:
+
+| floor | least volatile | most volatile | universe | edge over universe |
+|---|---|---|---|---|
+| none | +7.30%/yr | **−39.66%/yr** | −7.09%/yr | +14.4 pp |
+| $1M/day | +6.35%/yr | −5.86%/yr | +2.92%/yr | +3.4 pp |
+| **$25M/day** | **+7.34%/yr** | **−0.63%/yr** | **+4.80%/yr** | **+2.54 pp** |
+
+§27 measured that same edge at +15.73 pp with no floor and **+2.56 pp** at
+$25M/day. The re-measurement lands on **+2.54 pp**. The conclusion is untouched:
+the apparent volatility effect is liquidity, and what survives a tradeable
+universe is about two and a half points a year that has never been tested
+against a hurdle.
+
+### What this says about the corrections, and what it does not
+
+**It is reassuring about the corpus, not about the signal.** A double-counted
+split injects a fabricated ±50% or ten-fold return at a single session — exactly
+the shape a quantile mean is sensitive to. That 1,980 of them were being applied
+and the geometric edges still moved only 3–5% says the finding never rested on
+them. Had it rested on them, this run is what would have shown it.
+
+**Seventeen signals remain measured and null, and §27's closure stands.** Nothing
+here reopens anything.
+
+**Still un-re-run:** every other section through §28. This one was taken first
+because it was the strongest, and the rest are a queue, not a formality — the
+sections resting on a handful of extreme returns are the ones most likely to move.
