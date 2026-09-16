@@ -360,17 +360,19 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
   itself authorise it.
 - **A result computed on `research-01` may count as evidence — with four
   limitations, by the owner's decision of 2026-09-15** recorded in
-  `EDGAR_DELISTING_DENOMINATOR.md` §7e. The gate reads
-  **`MATERIALLY_SURVIVORSHIP_CORRECTED`** — 10,038 of 21,618 dated Exchange Act
-  exits priced (46.4%), 81.6% of those whose identity resolves, 30/30 controls —
-  and the split double count of `RESEARCH_01_DATA_DICTIONARY.md` §0.1a is fixed
-  as a read rule. The limitations travel with every result: **(1)** coverage is
-  thin before 2007 (8.0% before 1999, 36.9% for 1999–2006), so pre-2007 results
-  are not survivorship-corrected for that era; **(2)** 1,634,744 raw prints
-  (4.23%) are withheld before contradicted splits; **(3)** splits the vendor never
-  recorded are not caught, so price levels built on them can be wrong; **(4)**
-  every result measured before 2026-09-15 ran on double-counted reads and must be
-  re-run before it is relied on.
+  `EDGAR_DELISTING_DENOMINATOR.md` §7e. Measured 2026-09-16, the gate reads
+  **`MATERIALLY_SURVIVORSHIP_CORRECTED`** — 11,249 of 21,618 dated Exchange Act
+  exits priced (**52.0%**), 91.4% of those whose identity resolves, 30/30
+  controls — and the split double count of `RESEARCH_01_DATA_DICTIONARY.md`
+  §0.1a is fixed as a read rule. The limitations travel with every result:
+  **(1)** coverage is thinnest in the oldest years (25.4% for 1998, 52.9% for
+  1999), so a result resting on them says so; **(2)** 918,473 raw prints (2.38%)
+  are withheld before splits still contradicted; **(3)** splits the vendor never
+  recorded are not caught, so price levels built on them can be wrong — and only
+  49.7% of securities carry any corporate action at all; **(4)** every result
+  measured before 2026-09-15 ran on double-counted reads and must be re-run
+  before it is relied on; **(5)** 1,206 priced exits rest on `vendor_symbol`
+  identity from Sharadar rather than a ticker read from a filing.
   **Lifting the rule is not evidence of profitability.** Pre-registration,
   out-of-sample testing and the trial ledger still decide what a result is worth,
   and the rule returns if a later measurement shows the corpus materially worse

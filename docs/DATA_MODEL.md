@@ -1,6 +1,6 @@
 # Data Model
 
-**70 tables are defined** in `src/tradeit/storage/tables.py` and created by
+**71 tables are defined** in `src/tradeit/storage/tables.py` and created by
 `migrations/versions/` — measured from the ORM metadata, not counted by hand.
 The schema has been applied to PostgreSQL 16 and is verified by
 `tests/integration/test_phase2_schema.py`, which includes a drift check
@@ -1062,6 +1062,7 @@ Domain 1 was renamed, re-keyed or extended — all of it is load-bearing for
 | `security_price_facts` | Daily bars carrying an explicit `adjustment_basis`, so raw, split and total series coexist |
 | `security_corporate_action_facts` | Splits, dividends and other actions on a security. Carries no `new_ticker` |
 | `security_fundamental_facts` | Narrow financial facts for a security, with an `as_reported` / `restated` basis |
+| `security_split_price_verdicts` | What a second vendor's **printed** close says about a split the stored prices contradict, with the three closes the call rests on |
 
 **The names depart from `PHASE_06_IMPROVEMENT_PLAN.md` §8 deliberately.** The
 plan says `price_facts`, `corporate_action_facts` and `fundamental_facts`. Only

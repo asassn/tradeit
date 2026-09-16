@@ -1714,6 +1714,39 @@ signal scoreboard's seventeen measured signals are unchanged by it.
 correctness materially worse than recorded here, the rule returns, and that
 reversal is recorded here the same way.
 
+### MEASURED 2026-09-16 — 52.04%, and part of it rests on vendor identity
+
+Two runs after the decision above, both from the month of Sharadar already paid
+for:
+
+* **Contradicted splits arbitrated.** 821 of 1,872 settled from Sharadar's
+  printed close into `security_split_price_verdicts`, releasing 716,271 prints
+  that the split fix had withheld (4.23% → 2.38%).
+* **The 1,211 verified exits with no curated ticker landed** under
+  `alias_kind="vendor_symbol"` — 1,206 of them, 3,322,860 bars, 4 bars refused
+  outside the span. A random 20 of those securities were checked back against
+  Sharadar: **24,096 of 24,096 stored closes equal its printed close**, and the
+  issuers carry no `ticker` alias, only the vendor span.
+
+| | 2026-09-15 | now |
+|---|---|---|
+| dated exits priced | 10,038 | **11,249** |
+| `bounded_coverage` | 0.4643 | **0.5204** |
+| `matched_coverage` | 0.8156 | **0.9140** |
+| series recording the death | 91.9% | 92.2% |
+| controls | 30/30 | 30/30 |
+
+Coverage in the years the corpus exists for moved with it: 1998 16.6% → 25.4%,
+1999 37.4% → 52.9%, 2000 44.6% → 60.0%, 2001 40.5% → 53.5%.
+
+**A fifth limitation now travels with the four in the decision above.**
+**1,206 of the priced exits rest on `vendor_symbol` identity** — Sharadar's CIK
+and price span agreeing with EDGAR's exit date — rather than on a ticker read
+from a filing. It is weaker evidence, it is recorded in the alias kind and its
+citation, and a result that depends on those securities should say so. The
+importer resolves against a vendor span only when a caller asks for it at the
+call site, so nothing picks them up by accident.
+
 ## 7g. MEASURED 2026-09-06 — 1,800 of the 1,811 never traded on an exchange
 
 **Correcting §7d.** When the `N-8F` recognition was applied, this document

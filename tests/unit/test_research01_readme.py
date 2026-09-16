@@ -71,7 +71,10 @@ def test_the_survivorship_warning_is_present_and_early(prepared: Session) -> Non
     assert ordinal <= 2
     assert "MATERIALLY_SURVIVORSHIP_CORRECTED" in guidance
     assert "limitations" in guidance
-    assert "before 2007" in guidance
+    # Where the decision and its limitations are recorded, so a reader with only
+    # the database can find them. Pinned in place of any one limitation's
+    # wording, which moved as soon as coverage did.
+    assert "EDGAR_DELISTING_DENOMINATOR.md" in guidance
 
 
 def test_every_view_the_module_builds_is_mentioned_somewhere(prepared: Session) -> None:

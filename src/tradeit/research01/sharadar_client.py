@@ -24,11 +24,18 @@ at 65%, did not jump at 14%, and was ambiguous at 21% -- so that feed's ``raw``
 is sometimes already split-adjusted. Sharadar's ``closeunadj`` jumped at every
 split checked. It is the one to trust for this basis.
 
-**Dividends are not parsed.** Whether Sharadar's dividend ``value`` is the
-amount declared or one restated for later splits has not been established, and
-a restated amount is a look-ahead through an ordinary-looking number -- the
-reason ``eodhd_client.parse_dividends`` takes ``unadjustedValue`` only. Until it
-is measured, dividends stay out rather than being guessed at.
+**Dividends are not parsed, and now for a measured reason.** Sharadar's
+dividend ``value`` is **restated for later splits**. Measured 2026-09-16 on 60
+dividends that have a split of more than 20% after them, against the declared
+amount this corpus already holds from EODHD's ``unadjustedValue``: 52 matched
+the restated figure, 8 differed for another reason, and **none matched the
+amount declared**. Landing it as declared would put a later split's ratio into
+an earlier dividend -- a look-ahead through an ordinary-looking number, which is
+why ``eodhd_client.parse_dividends`` takes ``unadjustedValue`` only.
+
+Recovering the declared amount from it is arithmetic on the splits that follow
+the ex-date, and is a separate piece of work with its own failure mode: a split
+missing from the record would leave the dividend restated and looking fine.
 """
 
 from __future__ import annotations
