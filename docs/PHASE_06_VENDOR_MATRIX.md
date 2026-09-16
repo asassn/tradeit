@@ -72,6 +72,19 @@ verbatim. No purchase should proceed without it, at any price.
 before any data was seen and remain the standard any replacement vendor is held
 to; only the vendor it names is out, and only on price.
 
+#### MEASURED 2026-09-16 — Sharadar's `firstpricedate` is not what it serves
+
+Its `tickers` table gives AAPL, MSFT and KO a `firstpricedate` of 1986. Its
+`stocks` table, on the Prices plan bought for this work, returns **nothing for
+any of them before 1997-12-31** — checked year by year, with 1997 returning a
+single session and 1998 onwards returning full years.
+
+The field describes when the security existed, not what the plan holds. Taken at
+face value it made 6,099 securities look like they had earlier history to
+recover; measured against the real floor the number is **2,219**, and a sample of
+twelve returned earlier bars for twelve. The same rule as every other row here:
+a vendor's field is an assertion until a file is loaded and checked.
+
 #### MEASURED 2026-09-16 — EODHD's corporate-action feed is incomplete, and Sharadar's is not
 
 A capability fact, measured rather than asserted, so nobody rediscovers it.

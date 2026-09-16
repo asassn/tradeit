@@ -950,6 +950,49 @@ made.
 
 ---
 
+### Addendum 2026-09-16 — a second source agrees, and names most of the residue
+
+§16 read one kind of evidence from one source: 8-K item numbers, Form 15 holder
+counts and bankruptcy headings, all from the companies' own EDGAR filings.
+Sharadar publishes lifecycle events of its own — `bankruptcyliquidation`,
+`acquisitionby`, `regulatorydelisting`, `voluntarydelisting` — and the month
+bought for prices answers this for free. **1,617 of the 1,737 classified
+securities carry a Sharadar row under the same CIK.** Nothing was written to the
+corpus; this is a comparison.
+
+| EDGAR says | bankrupt | acquired | delisted by exchange | delisted voluntarily | delisted, unstated | total |
+|---|---|---|---|---|---|---|
+| acquired | 18 | **879** | 9 | 1 | 8 | 915 |
+| acquisition_indicated | 22 | **182** | 7 | 10 | 8 | 229 |
+| extinguished | 15 | **161** | 3 | 1 | 4 | 184 |
+| distress_indicated | **39** | 5 | 14 | 16 | 5 | 79 |
+| bankrupt | **68** | 1 | 1 | 0 | 0 | 70 |
+| deregistered_unexplained | 18 | 22 | 9 | 7 | 4 | 60 |
+| kept_reporting | 19 | 8 | 18 | 0 | 2 | 47 |
+| unresolved | 17 | 12 | 0 | 3 | 1 | 33 |
+
+**Where both speak plainly they agree.** 879 of 915 `acquired` (96.1%) and 68 of
+70 `bankrupt` (97.1%). That is independent corroboration of the two categories
+§17's recovery assumption rests on, from a source that never saw the filings.
+
+**It names most of what EDGAR could not.** Every one of the 60
+`deregistered_unexplained` and all 33 `unresolved` carry some Sharadar event —
+40 and 29 of them an acquisition or a bankruptcy. Half of `distress_indicated`
+(39 of 79) is named outright as bankruptcy. §16's 17.2% unexplained residue is
+substantially explainable by a second source.
+
+**The disagreements are mostly not contradictions.** 18 companies EDGAR reads as
+acquired carry a Sharadar bankruptcy event, which is the ordinary shape of an
+acquisition out of bankruptcy — both true, in that order. The 19 `kept_reporting`
+with a bankruptcy event are the same shape seen from the other side: a company
+whose security died while the registrant went on filing.
+
+**What this does and does not license.** It does not change a single recorded
+cause: EDGAR is primary, a vendor is not, and rewriting a classification on a
+vendor event would undo the distinction §16 exists to make. What it supports is
+confidence in §17's recovery assumption — bought-out holdings paid, bankrupt
+ones did not — which the survivorship gap measurement depends on.
+
 ## §17 — the survivorship gap with each dead company's actual fate — 2026-09-12
 
 §16 classified why each dead company stopped trading. This puts that into the
