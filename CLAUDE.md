@@ -366,8 +366,10 @@ caches. Never reintroduce an unanchored `data/` ignore rule.
   controls — and the split double count of `RESEARCH_01_DATA_DICTIONARY.md`
   §0.1a is fixed as a read rule. The limitations travel with every result:
   **(1)** coverage is thinnest in the oldest years (25.4% for 1998, 52.9% for
-  1999), so a result resting on them says so; **(2)** 974,295 raw prints (2.42%)
-  are withheld before splits still contradicted; **(3)** splits no vendor
+  1999), and history now reaches 1990-01-02 for **survivors only**, so a result
+  resting on those years is survivor-weighted by an amount nothing here can
+  measure (`RESEARCH_01_DATA_DICTIONARY.md` §0.1b); **(2)** 1,029,023 raw prints
+  (2.49%) are withheld before splits still contradicted; **(3)** splits no vendor
   recorded are still not caught, so price levels built on them can be wrong —
   1,807 such splits were recovered from Sharadar on 2026-09-16 and 51.7% of
   securities now carry an action, up from 49.7%; **(4)** every result

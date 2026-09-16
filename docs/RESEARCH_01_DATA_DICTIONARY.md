@@ -105,14 +105,14 @@ after 1,807 arrived from Sharadar that EODHD did not have:
 
 | | splits |
 |---|---|
-| applied — `raw` is the print | **8,581** |
-| not applied — `raw` already carries it | **1,957** |
-| contradicted — prints before it withheld | **1,151** |
-| too few closes either side | 1,860 |
+| applied — `raw` is the print | **8,895** |
+| not applied — `raw` already carries it | **1,980** |
+| contradicted — prints before it withheld | **1,172** |
+| too few closes either side | 1,502 |
 | under 5% from 1 | 519 |
 
-**What the withholding costs (2026-09-16, after two arbitration passes):**
-**974,295 raw prints (2.42%) across 783 securities** are not served before a
+**What the withholding costs (2026-09-16, after three arbitration passes):**
+**1,029,023 raw prints (2.49%) across 798 securities** are not served before a
 split still contradicted. They stay in the table, and `include_disputed=True` returns them.
 Withheld *before* the split rather than after, so each series keeps its ending.
 
@@ -148,6 +148,26 @@ no row here, so nothing is double-counted, but its earlier `raw` levels are
 already adjusted and a price floor or market capitalisation computed from them is
 wrong. Rows with `source = 'sharadar-backfill'` are rebuilt from the printed close
 and do not have this problem.
+
+### 0.1b History before 1998 is **survivor-heavy**, and the corpus cannot say how badly
+
+The corpus's earliest session is now **1990-01-02**. 2,484,305 of its prints
+arrived on 2026-09-16 from Sharadar, extending 1,778 securities backwards to
+wherever their own alias interval begins — 783,506 more bars were refused for
+falling outside one.
+
+**Those are survivors' prints.** The survivorship denominator holds no
+exchange-listing evidence before roughly 2002 (`EDGAR_DELISTING_DENOMINATOR.md`
+§7be) and the gate's coverage of dated exits is 25.4% for 1998 and lower before
+it, so the companies that failed in those years are largely absent and cannot be
+counted. Lengthening the survivors' history there makes the window **more**
+survivor-weighted, not less.
+
+**What follows for a study.** A cross-section that reaches before ~2002 is
+reading a universe whose failures are missing in a proportion this corpus cannot
+measure. That is a different and worse condition than the 52.04% coverage the
+gate reports for the denominator as a whole, and it is why the four limitations
+recorded with the owner's decision name the oldest years first.
 
 ### 0.2 `symbol_aliases.valid_to` is **exclusive**
 
