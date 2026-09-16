@@ -41,7 +41,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from tradeit.core.calendar import TradingCalendar
-from tradeit.storage.tables import SecurityCorporateActionFact, SecurityPriceFact, SymbolAlias
+from tradeit.storage.tables import (
+    SecurityCorporateActionFact,
+    SecurityPriceFact,
+    SecuritySplitPriceVerdict,
+    SymbolAlias,
+)
 
 __all__ = [
     "AdjustedBar",
@@ -316,10 +321,38 @@ def _shape(before: float, after: float, ratio: float) -> str:
     return "other"
 
 
+def recorded_verdict(session: Session, security_id: int, ex_date: dt.date) -> SplitEvidence | None:
+    """A second vendor's answer for this split, latest revision, or ``None``.
+
+    Written by ``scripts/research01_arbitrate_splits.py`` from a vendor's
+    **printed** close, with the three closes it rests on stored beside it. Read
+    only where the corpus's own prints cannot decide -- see :func:`split_evidence`.
+    """
+    row = session.execute(
+        select(SecuritySplitPriceVerdict.verdict)
+        .where(
+            SecuritySplitPriceVerdict.security_id == security_id,
+            SecuritySplitPriceVerdict.ex_date == ex_date,
+        )
+        .order_by(SecuritySplitPriceVerdict.knowledge_time.desc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    return SplitEvidence.IN_RAW if row[0] == "in_raw" else SplitEvidence.ALREADY_ADJUSTED
+
+
 def split_evidence(
     session: Session, security_id: int, ex_date: dt.date, ratio: Decimal
 ) -> SplitEvidence:
-    """Classify one recorded split against the stored prints. See :class:`SplitEvidence`."""
+    """Classify one recorded split against the stored prints. See :class:`SplitEvidence`.
+
+    **A recorded verdict is consulted only where the prints contradict**, not
+    ahead of them. The two acting shapes were right at 69 of 69 sampled splits
+    against a second vendor, so preferring a stored row there would add a query
+    per split to every read and change nothing. Where the prints cannot decide,
+    the recorded row is the only evidence there is.
+    """
     value = float(ratio)
     if abs(math.log(value)) < math.log(1 + SPLIT_TEST_MIN_RATIO):
         return SplitEvidence.TOO_SMALL
@@ -336,7 +369,7 @@ def split_evidence(
         return SplitEvidence.IN_RAW
     if raw == "flat" and total == "flat":
         return SplitEvidence.ALREADY_ADJUSTED
-    return SplitEvidence.CONTRADICTED
+    return recorded_verdict(session, security_id, ex_date) or SplitEvidence.CONTRADICTED
 
 
 def split_reading(

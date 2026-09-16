@@ -38,6 +38,7 @@ from tradeit.storage.tables import (
     Security,
     SecurityCorporateActionFact,
     SecurityPriceFact,
+    SecuritySplitPriceVerdict,
     SymbolAlias,
 )
 
@@ -300,6 +301,70 @@ class TestASplitAlreadyInsideRaw:
         db_session.flush()
         assert self._evidence(db_session, sid) is SplitEvidence.NO_EVIDENCE
         assert price_series(db_session, sid, as_of=self.AS_OF)[0].close == Decimal("50")
+
+    def _verdict(self, session: Session, sid: int, verdict: str) -> None:
+        session.add(
+            SecuritySplitPriceVerdict(
+                security_id=sid,
+                ex_date=SPLIT_DAY,
+                verdict=verdict,
+                decided_by="sharadar",
+                compared_session=self.BEFORE[-1],
+                stored_raw_close=Decimal("50"),
+                vendor_printed_close=Decimal("100"),
+                vendor_adjusted_close=Decimal("50"),
+                knowledge_time=dt.datetime(2026, 9, 16, tzinfo=UTC),
+                citation="sharadar stocks TEST 2020-08-28",
+                source="test",
+            )
+        )
+        session.flush()
+
+    def test_a_recorded_verdict_settles_a_contradicted_split(self, db_session: Session) -> None:
+        """A second vendor's printed close decides what the corpus's own prints
+        cannot. 51 of the first 100 contradicted splits were settled this way."""
+        sid = self._series(db_session, raw=("50", "50"), total=("25", "50"))
+        assert self._evidence(db_session, sid) is SplitEvidence.CONTRADICTED
+        self._verdict(db_session, sid, "already_adjusted")
+        assert self._evidence(db_session, sid) is SplitEvidence.ALREADY_ADJUSTED
+        applied, floor = split_reading(db_session, sid, as_of=self.AS_OF)
+        assert applied == [] and floor is None
+        assert len(price_series(db_session, sid, as_of=self.AS_OF)) == 6
+
+    def test_a_verdict_of_in_raw_restores_the_adjustment(self, db_session: Session) -> None:
+        sid = self._series(db_session, raw=("50", "50"), total=("25", "50"))
+        self._verdict(db_session, sid, "in_raw")
+        assert self._evidence(db_session, sid) is SplitEvidence.IN_RAW
+        applied, floor = split_reading(db_session, sid, as_of=self.AS_OF)
+        assert [s.ex_date for s in applied] == [SPLIT_DAY] and floor is None
+
+    def test_a_verdict_never_overrides_the_prints_themselves(self, db_session: Session) -> None:
+        """Consulted only where the prints contradict. The two acting shapes were
+        right at 69 of 69 sampled splits, so a stored row cannot overturn them."""
+        sid = self._series(db_session, raw=("100", "50"))
+        self._verdict(db_session, sid, "already_adjusted")
+        assert self._evidence(db_session, sid) is SplitEvidence.IN_RAW
+
+    def test_the_latest_verdict_wins(self, db_session: Session) -> None:
+        sid = self._series(db_session, raw=("50", "50"), total=("25", "50"))
+        self._verdict(db_session, sid, "in_raw")
+        db_session.add(
+            SecuritySplitPriceVerdict(
+                security_id=sid,
+                ex_date=SPLIT_DAY,
+                verdict="already_adjusted",
+                decided_by="later-source",
+                compared_session=self.BEFORE[-1],
+                stored_raw_close=Decimal("50"),
+                vendor_printed_close=Decimal("100"),
+                vendor_adjusted_close=Decimal("50"),
+                knowledge_time=dt.datetime(2026, 10, 1, tzinfo=UTC),
+                citation="a later source disagreeing",
+                source="test",
+            )
+        )
+        db_session.flush()
+        assert self._evidence(db_session, sid) is SplitEvidence.ALREADY_ADJUSTED
 
     def test_a_split_too_small_to_test_is_applied_as_recorded(self, db_session: Session) -> None:
         sid = self._series(db_session, raw=("50", "50"), ratio="1.03")

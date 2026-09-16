@@ -100,10 +100,30 @@ Only the two shapes that Sharadar's printed close confirmed every time act:
 | too few closes on a side | 1,275 | — | applied as recorded |
 | under 5% from 1 | 356 | — | applied as recorded |
 
-**What the withholding costs:** 1,634,744 raw prints (4.23%) across 1,198
-securities are not served before a contradicted split. They stay in the table,
-and `include_disputed=True` returns them. Withheld *before* the split rather than
-after, so each series keeps its ending.
+**What the withholding costs, after arbitration (2026-09-16):** **918,473 raw
+prints (2.38%) across 730 securities** are not served before a split still
+contradicted. They stay in the table, and `include_disputed=True` returns them.
+Withheld *before* the split rather than after, so each series keeps its ending.
+
+**A second vendor settles what the corpus's own prints cannot.**
+`security_split_price_verdicts` holds one row per settled split — the verdict,
+who decided it, the session compared and the three closes it rests on — written
+by `scripts/research01_arbitrate_splits.py` from Sharadar's **printed** close.
+`split_evidence` consults it **only where the prints contradict**: the two acting
+shapes were right at 69 of 69 sampled splits, so a stored row cannot overturn
+them. Measured over all 1,872 contradicted splits:
+
+| outcome | splits |
+|---|---|
+| decided: raw is already adjusted | 424 |
+| decided: raw is the print | 397 |
+| no Sharadar series covering the ex-date | 514 |
+| Sharadar shows no adjustment on that session, so it proves nothing | 203 |
+| stored raw matches neither close | 210 |
+| Sharadar has no bar that session | 81 |
+
+That moved 1,872 contradicted splits to **1,051** and released **716,271
+prints**. A split with no verdict keeps withholding what precedes it.
 
 **Not fixed: a split that was never recorded.** THQ's 1-for-10 of 2012-07-09 has
 no row here, so nothing is double-counted, but its earlier `raw` levels are

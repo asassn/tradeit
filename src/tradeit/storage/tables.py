@@ -3149,6 +3149,57 @@ class SecurityCorporateActionFact(Base, TimestampMixin):
     )
 
 
+class SecuritySplitPriceVerdict(Base, TimestampMixin):
+    """What a second vendor's printed close says about one recorded split.
+
+    :func:`tradeit.research01.series.split_evidence` decides from the stored
+    prints whether a recorded split is already inside the ``raw`` basis. At
+    1,872 splits the prints contradict each other or the recorded ratio and it
+    can decide nothing, so the reads withhold what precedes them. A row here is
+    a second vendor answering that question with its **printed** close, and it
+    carries the three closes the answer rests on so the call can be checked
+    without re-fetching anything.
+
+    Append-only and revisioned like every other fact table here: a later source
+    may disagree, both rows stay, and the read takes the latest
+    ``knowledge_time``.
+    """
+
+    __tablename__ = "security_split_price_verdicts"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.security_id", ondelete="CASCADE"), nullable=False
+    )
+    ex_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    #: ``in_raw`` -- the stored raw close is the print, so apply the split.
+    #: ``already_adjusted`` -- it is the vendor's adjusted close; do not apply.
+    verdict: Mapped[str] = mapped_column(String(32), nullable=False)
+    decided_by: Mapped[str] = mapped_column(String(32), nullable=False)
+    compared_session: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    stored_raw_close: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    vendor_printed_close: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    vendor_adjusted_close: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    knowledge_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    citation: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "security_id",
+            "ex_date",
+            "decided_by",
+            "knowledge_time",
+            name="uq_split_verdict_revision",
+        ),
+        Index("ix_split_verdict_lookup", "security_id", "ex_date", "knowledge_time"),
+        CheckConstraint("verdict IN ('in_raw', 'already_adjusted')", name="ck_split_verdict_value"),
+        CheckConstraint(
+            "stored_raw_close > 0 AND vendor_printed_close > 0 AND vendor_adjusted_close > 0",
+            name="ck_split_verdict_prices",
+        ),
+    )
+
+
 class SecurityFundamentalFact(Base, TimestampMixin):
     """Narrow financial facts for a security, with restatement history.
 
