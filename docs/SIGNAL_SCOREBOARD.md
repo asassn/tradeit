@@ -11,9 +11,9 @@ studies rather than quoting this later.
 > split-adjusted (`RESEARCH_01_DATA_DICTIONARY.md` §0.1a). At 671 recorded
 > splits in 523 securities a split was applied twice — a 3-for-2 read as a 50%
 > move nobody earned — and 1,872 more are now withheld as contradicted. No
-> **§26 and §27 have since been re-run — see §29 — and neither moved**: every
-> number softened by 3–5% in relative terms and no verdict changed. The rest have
-> not been re-run. Findings that rest on large, many-sample effects are unlikely
+> **§26, §27 and §18 have since been re-run — see §29 and §30 — and none moved**:
+> every number softened, by 3–5% in §26 and rather more in §18, and no verdict
+> changed. The rest have not been re-run. Findings that rest on large, many-sample effects are unlikely
 > to be reversed; any that rest on a few extreme returns could be.
 
 ## What is being tested, and what is not
@@ -2111,3 +2111,53 @@ here reopens anything.
 **Still un-re-run:** every other section through §28. This one was taken first
 because it was the strongest, and the rest are a queue, not a formality — the
 sections resting on a handful of extreme returns are the ones most likely to move.
+
+---
+
+## §30 — §18 re-measured: the mean/median disagreement was real, not a split artefact — 2026-09-17
+
+§18 failed on one fact: at 63 sessions `relative_strength`'s quantile spread was
+**negative by mean and positive by median**, which `SignalStudy` grades
+`OUTLIER_DEPENDENT`. That disagreement is exactly the shape a fabricated return
+produces — one session carrying a spurious ±50% or ten-fold move drags a mean and
+leaves a median alone — and the 2000s are where the corrected splits are densest.
+So this was the section most likely to have failed for the wrong reason.
+
+**Strict re-run**, as §29: same universe file, same four disjoint samples, same
+criteria, same verdict script, 2000–2009. Only the prices changed.
+
+| | §18 (2026-09-12) | re-measured |
+|---|---|---|
+| observations | 207,121 | 204,130 |
+| IC, 21 sessions | −0.0021 (t −0.93) | **−0.0039 (t −1.74)** |
+| IC, 63 sessions | **+0.0129 (t +3.32)** | **+0.0091 (t +2.33)** |
+| spread, 63 sessions | mean −2.32%, median **+0.82%** | mean −2.91%, median **+0.72%** |
+| geometric edge, 63: 2000–04 / 2005–09 | +6.85%/yr / −0.88%/yr | **+5.48%/yr / −0.87%/yr** |
+| declared sign, 63 | 4 of 4 samples | **3 of 4** |
+| verdict | `OUTLIER_DEPENDENT`, does not survive | **`OUTLIER_DEPENDENT`, does not survive** |
+
+Under the FLAT benchmark the same shape holds: IC +0.0081 (t +2.07), mean −3.16%
+against median +0.65%, and the same failure.
+
+### What this settles
+
+**The spread's sign disagreement is a property of the data.** It survived the
+removal of 1,980 double-counted splits and the addition of 1,807 that were
+missing. §18's criterion 1 failed because the top quintile's mean is dragged by a
+handful of enormous winners while its median sits slightly the other way — the
+same structural fact §7 described for volatility, and not an artefact of a
+corrupted bar.
+
+**Everything moved the way §29 did, and slightly further.** The 63-session IC
+fell from t +3.32 to t +2.33 and the sample agreement from 4 of 4 to 3 of 4, so
+the corrected data makes this signal look *weaker*, not stronger. It still clears
+its own hurdle of 2.01 and still fails on the spread, which is what decided it.
+
+**The diagnostic that mattered is unchanged.** The 250-session lookback alone
+still reads IC +0.0217 (t +5.52) at 63 sessions while the engine's composite
+does not survive — the finding §18 recorded about the engine blending opposite
+signals, now on corrected prices.
+
+**Two of the queue re-run, both unmoved.** §26, §27 and now §18 stand as
+recorded. The sections that remain are §13 `pattern_quality`, whose detector scan
+is hours rather than minutes, and the rest through §28.
