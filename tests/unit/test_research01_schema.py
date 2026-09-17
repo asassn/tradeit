@@ -105,6 +105,11 @@ RESEARCH01_TABLES = frozenset(
         "security_price_facts",
         "security_corporate_action_facts",
         "security_fundamental_facts",
+        # Added by 0019. The drift guard is only as complete as this set: a
+        # table missing from it is not merely unlisted, it is exempt from the
+        # column and type checks below, which is how a new table can drift
+        # unnoticed for exactly as long as nobody adds it.
+        "security_split_price_verdicts",
     }
 )
 

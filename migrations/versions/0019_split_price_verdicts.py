@@ -45,7 +45,22 @@ depends_on: str | Sequence[str] | None = None
 #: Defined locally, as 0013 and 0018 do: a migration should not shift because a
 #: constant moved in application code long after it ran.
 PK = sa.BigInteger().with_variant(sa.Integer, "sqlite")
-PRICE = sa.Numeric(20, 6)
+#: ``Numeric(18, 6)``, matching ``tables.PRICE`` and every price column 0002
+#: created. The first draft of this migration wrote ``Numeric(20, 6)`` and the
+#: ORM drift guard caught it the moment the table was added to
+#: ``RESEARCH01_TABLES`` -- which it had not been, so the guard was blind to
+#: this table until then.
+#:
+#: **Edited in place rather than corrected by a follow-up migration**, and the
+#: reason is specific to what these columns are: SQLite does not enforce numeric
+#: precision, and ``UTCDateTime``'s timezone flag changes binding rather than
+#: storage, so neither difference is physically present in a database this
+#: migration has already built. A follow-up ``alter_column`` would rebuild a
+#: 73 GB table to change nothing on disk. The alternative was rejected on that
+#: basis; if this schema is ever run on a backend that *does* enforce precision,
+#: the follow-up becomes the right answer and this note is the record of why it
+#: was not needed here.
+PRICE = sa.Numeric(18, 6)
 
 _TABLE = "security_split_price_verdicts"
 
@@ -73,11 +88,14 @@ def upgrade() -> None:
         sa.Column("stored_raw_close", PRICE, nullable=False),
         sa.Column("vendor_printed_close", PRICE, nullable=False),
         sa.Column("vendor_adjusted_close", PRICE, nullable=False),
-        sa.Column("knowledge_time", UTCDateTime(), nullable=False),
+        sa.Column("knowledge_time", UTCDateTime(timezone=True), nullable=False),
         sa.Column("citation", sa.Text(), nullable=False, server_default=""),
         sa.Column("source", sa.String(64), nullable=False),
         sa.Column(
-            "ingested_at", UTCDateTime(), nullable=False, server_default=sa.func.current_timestamp()
+            "ingested_at",
+            UTCDateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.current_timestamp(),
         ),
         sa.CheckConstraint(
             "verdict IN ('in_raw', 'already_adjusted')", name="ck_split_verdict_value"

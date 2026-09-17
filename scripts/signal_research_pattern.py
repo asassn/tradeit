@@ -54,7 +54,9 @@ rather than corrected silently, because detector thresholds are not this
 script's to move.
 
 **What is not claimed.** This measures the detectors as configured today against
-a corpus whose survivorship gate still reads ``SURVIVOR_BIASED``. It can find
+a corpus whose survivorship standing -- and the limitations that travel with any
+result computed on it -- are recorded in ``EDGAR_DELISTING_DENOMINATOR.md`` §7e
+and not restated here, because a grade written into a docstring rots. It can find
 that the factor does not grade. It cannot prove that it does.
 """
 
@@ -552,8 +554,10 @@ def _analyse(
     print(
         "\nEvidence, not a change. Detector thresholds and scoring weights are both\n"
         "strategy parameters; this run informs a decision and does not make one.\n"
-        "And the corpus gate still reads SURVIVOR_BIASED -- this universe keeps the\n"
-        "companies that failed, which is necessary and not sufficient."
+        "The corpus's survivorship standing and its limitations are whatever\n"
+        "EDGAR_DELISTING_DENOMINATOR.md §7e records today -- read it there rather\n"
+        "than from this line. This universe keeps the companies that failed, which\n"
+        "is necessary and not sufficient."
     )
     return 0
 

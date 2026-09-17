@@ -2161,3 +2161,145 @@ signals, now on corrected prices.
 **Two of the queue re-run, both unmoved.** §26, §27 and now §18 stand as
 recorded. The sections that remain are §13 `pattern_quality`, whose detector scan
 is hours rather than minutes, and the rest through §28.
+
+---
+
+## §31 — `pattern_quality` re-measured: the least scale-invariant section, and it did not move — 2026-09-17
+
+§13 is the section the split double count had the best chance of having broken,
+and it was left until last for that reason.
+
+**Why this one and not the others.** §29 and §30 re-ran ratio signals, and a
+ratio barely notices a mis-levelled price — a volatility or a momentum kernel
+divides the error out. Pattern detectors do not. The double count did not merely
+scale a series, it put a **spurious step inside the trailing window**: prices
+before an already-applied ex-date were divided by the ratio a second time, so a
+2-for-1 split left a 50% cliff in the middle of the 236 bars a detector reads. A
+fabricated gap is precisely what a bull flag, a breakout-retest or a tight
+consolidation is built to react to. Measured on this universe before the run:
+
+| | |
+|---|---|
+| splits with an ex-date inside the study decade | 2,761 |
+| of those, landed from Sharadar since §13 ran | 426 |
+| splits now arbitrated by a recorded verdict | 741 (508 `already_adjusted`, 233 `in_raw`) |
+| securities carrying a split that can fall inside a scan window | **1,703 of 4,306 (39.5%)** |
+
+Two securities in five had something change underneath them, against the one
+factor in the scoreboard whose measurement is not scale-invariant.
+
+**Strict re-run**, as §29 and §30: the same `security_spans.csv` from 2026-09-11,
+the same twelve enabled D1 detectors, the same 236-bar window, the same stride,
+the same `ACTIONABLE` states, the same tradability filter from Amendment 2, the
+same robustness script and seed. Only the prices changed. Eight shards, ~7.8
+CPU-hours.
+
+### More data, because fewer prints are withheld
+
+| | §13 (2026-09-10) | re-measured |
+|---|---|---|
+| securities scanned | 3,876 | **3,898** |
+| scan points | 285,177 | **308,129** |
+| removed for an untraded endpoint | 10.7% | **8.8%** (14,431 signal bars, 12,833 outcome bars) |
+| analysed after the filter | — | 280,865 points, 3,856 securities |
+| carrying a live pattern | 94.7% | **94.7%** (266,029) |
+
+The corrected corpus yields **8.0% more scan points**, which is the withheld-print
+floor falling from 4.23% to 2.49% showing up as bars a detector can read, plus 22
+securities that now clear the minimum bar count.
+
+### Reason 1 — it still cannot discriminate
+
+| | §13 | re-measured |
+|---|---|---|
+| any structure fired on | 99.6% of scan points | **99.9%** |
+| concurrent structures | median 8, max 28 | **median 8, max 28** |
+| of those live | median 5 | **median 5** |
+| quality p25 / median / p75 | 69 / 78 / 86 | **69 / 78 / 86** |
+
+Identical to the digit. A factor defined for almost every security on almost
+every day, reading about 78 whenever it is defined, cannot narrow a slate — and
+that was never a statistical claim, so no correction to the prices could touch
+it. `double_bottom` supplies the best structure on 106,698 of 266,029 graded
+points, which is the same crowding read a different way.
+
+### Reason 2 — the sign still depends on the statistic
+
+| statistic | 21s, §13 | 21s, now | 63s, §13 | 63s, now |
+|---|---|---|---|---|
+| Spearman (ranks) | +0.0056 (t +2.93) | **+0.0058 (t +2.98)** | +0.0154 (t +4.63) | **+0.0141 (t +4.20)** |
+| Pearson (levels) | −0.0246 (t −12.81) | **−0.0260 (t −13.39)** | −0.0177 (t −5.32) | **−0.0209 (t −6.24)** |
+| Pearson winsorized 1/99 | −0.0135 (t −7.03) | **−0.0141 (t −7.29)** | −0.0065 (t −1.94) | **−0.0090 (t −2.68)** |
+| Pearson less top 0.1% | −0.0144 (t −7.47) | **−0.0154 (t −7.95)** | −0.0101 (t −3.04) | **−0.0128 (t −3.80)** |
+
+`SIGN FLIPS between statistics` at both horizons, as before. **Every
+level-based reading is more negative than it was**, and the winsorized 63-session
+figure crossed its own threshold from t −1.94 to t −2.68 — so on corrected
+prices the negative side of the contradiction is *better* established, not worse.
+Ranks say positive and significant; levels say negative and more significant;
+both still cannot describe the same edge.
+
+### Reason 3 — the geometric edge is still a period, not a signal
+
+| horizon | period | §13 edge/yr | re-measured | CI |
+|---|---|---|---|---|
+| 21 | full sample | +2.17 pp | **+1.55 pp** | excludes 0 |
+| 21 | 2000–2004 | +6.45 pp | **+5.97 pp** | excludes 0 |
+| 21 | 2005–2009 | −1.33 pp | **−1.85 pp** | **includes 0** |
+| 63 | full sample | +2.90 pp | **+2.29 pp** | excludes 0 |
+| 63 | 2000–2004 | +8.10 pp | **+7.32 pp** | excludes 0 |
+| 63 | 2005–2009 | −1.13 pp | **−1.46 pp** | **includes 0** |
+
+The strongest case the factor had — that a portfolio *compounding* high quality
+beats ranking at random — survives in the full sample and **shrinks at both
+horizons**. The reversal in the second half of the decade survives and deepens.
+`sector_strength` was retired for this shape and the standard does not move.
+
+### The one verdict that changed, and it changed against the factor
+
+`SignalStudy` graded the 21-session cut `SPREAD_NOT_ESTABLISHED` in §13; on
+corrected prices it grades **`OUTLIER_DEPENDENT`** — spread −30.29% by mean
+against +0.43% by median, opposite signs. The 63-session cut was already
+`OUTLIER_DEPENDENT` and remains so (−55.47% against +1.01%). The information
+coefficients themselves barely moved: t +2.86 → **+2.87** at 21 sessions,
+t +4.51 → **+4.05** at 63.
+
+`pattern_present` fails at both horizons as before — `NOT_DETECTABLE` at 21
+(t −1.99) and at 63 (t +1.71 on 93,622 effective observations).
+
+### Verdict
+
+**§13 stands, on all three of its reasons, and two of them read slightly worse.**
+`pattern_quality` is not validated by its real detector on a corpus with the
+splits fixed. Nothing in the re-measurement rescues it, and the pre-registration's
+declared failure condition — *"a significant t on the IC alone with no
+established spread"* — is met at both horizons exactly as it was.
+
+**The weight does not move**, for §12's reason, which this does not touch:
+down-weighting a factor because it was measured would penalise the two factors
+that have been examined and reward the two that have not.
+
+### Registered and spent
+
+**No trials added.** This is a re-measurement of a registered test on corrected
+data, not a new test; the signal specification in
+[`prereg/PATTERN_QUALITY_2026-09-10.md`](prereg/PATTERN_QUALITY_2026-09-10.md)
+did not move, and neither did the ledger. It stands at **50 trials**, hurdle
+|t| > 2.2763.
+
+The run reported against §13's own hurdle of |t| > 1.98 at 24 trials, which is
+what makes the two tables comparable line by line. Judged against today's 50-trial
+hurdle instead, the 63-session information coefficient (t +4.05) still clears it
+and the 21-session one (t +2.87) still clears it — and it changes nothing,
+because what killed the factor was the spread and the sign flip, neither of which
+is a hurdle question.
+
+### What is left in the re-measurement queue
+
+The four highest-exposure sections — §26, §27, §18 and now §13 — have all been
+re-run on the corrected corpus and **none of them moved**. That is now four
+independent checks on limitation (4) of §7e, covering a volatility kernel, a
+size kernel, a momentum engine and a pattern detector suite, and the double count
+changed no verdict in any of them. The sections below §13 remain formally
+un-re-run; on this evidence the prior that any of them moves is weak, and they
+are re-run on demand rather than ahead of the next measurement.
