@@ -144,9 +144,13 @@ revision history.
 
 *No longer blocked by the vendor decision.* EODHD is subscribed and supplies
 prices and corporate actions; SEC EDGAR supplies identity, filing dates and the
-delisting denominator, free. What blocks the *fundamentals* work is that nothing
-has imported them: `security_fundamental_facts` is empty and the Financial
-Statement Data Sets sit on disk unread. See
+delisting denominator, free. **The fundamentals are imported**:
+`security_fundamental_facts` is populated from the Financial Statement Data Sets
+(effectively from 2011Q3). An earlier version of this paragraph said the table
+was empty; it was corrected on 2026-09-18 against a measurement, and the count is
+deliberately not written here -- measure it. What the phase still owes is the
+*use* of them: growth, quality and balance-sheet screens and earnings surprise,
+measured as signals the way `SIGNAL_SCOREBOARD.md` measures everything else. See
 [`VENDOR_EVALUATION.md`](VENDOR_EVALUATION.md) and
 [`PHASE_06_IMPROVEMENT_PLAN.md`](PHASE_06_IMPROVEMENT_PLAN.md).
 
