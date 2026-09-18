@@ -53,11 +53,12 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
-import sqlite3
+import json
 import statistics
 import sys
 import time
 from decimal import Decimal
+from pathlib import Path
 
 sys.path.insert(0, "src")
 
@@ -69,43 +70,78 @@ from tradeit.backtesting.baselines import MovingAverageCross, build_engine
 from tradeit.backtesting.corpus import CorpusSessionData
 from tradeit.core.enums import ArtifactKind
 from tradeit.reproducibility.versioning import ArtifactVersion, RunManifest
+from tradeit.research01.series import price_series
 from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.strategy.config import StrategyConfig
 
 
-def _liquid(db: str, ids: list[int], year_end: str, floor: float) -> set[int]:
-    """Securities whose median dollar volume in the year BEFORE the window clears.
+def _liquid(
+    session: Session, ids: list[int], year_end: str, floor: float, *, cache: Path | None
+) -> set[int]:
+    """Securities whose median dollar volume before the window clears ``floor``.
 
-    Causal by construction: the admission year ends the day the test window
-    opens, so nothing the universe knows comes from inside the test. A security
-    with fewer than 100 sessions in that year is refused rather than guessed at.
+    Causal by construction: the admission window ends the day before the test
+    window opens, so nothing the universe knows comes from inside the test. A
+    security with fewer than 100 traded sessions in it is refused rather than
+    guessed at.
+
+    **Read through ``price_series`` since 2026-09-18**, so each session's dollar
+    volume is the money that traded (DATA_DICTIONARY §0.9). The first version
+    multiplied the stored close by the stored volume in SQL -- a raw price times
+    a volume the vendor had already restated for every later split -- so a
+    company that later split forward was admitted on turnover it never had, and
+    one that later reverse-split was refused on turnover it did have. §28 was
+    measured through that read.
+
+    **The window is two years, not the one the name suggests**: it runs from
+    January of ``year_end``'s previous year. That is what §28 measured, so the
+    re-run keeps it and changes only the volume read; the discrepancy is recorded
+    here and in §36 rather than fixed alongside and confounded with it.
     """
     if floor <= 0:
         return set(ids)
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    con.execute("PRAGMA busy_timeout=300000")
-    start = f"{int(year_end[:4]) - 1}-01-01"
+    if cache is not None and cache.exists():
+        return set(json.loads(cache.read_text()))
+    end = dt.date.fromisoformat(year_end)
+    start = dt.date(end.year - 1, 1, 1)
+    as_of = dt.datetime.combine(end, dt.time(21), tzinfo=dt.UTC)
     keep: set[int] = set()
-    for sid in ids:
-        rows = con.execute(
-            "select close*volume from security_price_facts where security_id=? and "
-            "adjustment_basis='raw' and volume>0 and close>0 and session_date between ? and ?",
-            (sid, start, year_end),
-        ).fetchall()
-        if len(rows) >= 100 and statistics.median(r[0] for r in rows) >= floor:
+    for n, sid in enumerate(ids, 1):
+        bars = price_series(session, sid, as_of=as_of, start=start, end=end)
+        traded = [float(b.close * b.volume) for b in bars if b.volume > 0]
+        if len(traded) >= 100 and statistics.median(traded) >= floor:
             keep.add(sid)
+        if n % 500 == 0:
+            print(f"  admission: {n:,}/{len(ids):,} read, {len(keep):,} clear", flush=True)
+    if cache is not None:
+        cache.write_text(json.dumps(sorted(keep)))
     return keep
 
 
 def _universe(
-    path: str, start: str, end: str, min_bars: int, cap: int, *, db: str, floor: float, offset: int
+    path: str,
+    start: str,
+    end: str,
+    min_bars: int,
+    cap: int,
+    *,
+    session: Session,
+    floor: float,
+    offset: int,
+    cache: Path | None,
 ) -> list[int]:
     with open(path) as handle:
         spans = [
             (int(sid), first, last, int(count)) for sid, first, last, count in csv.reader(handle)
         ]
     alive = [row for row in spans if row[1] <= start <= row[2] and row[3] >= min_bars]
-    liquid = _liquid(db, sorted(row[0] for row in alive), f"{int(start[:4]) - 1}-12-31", floor)
+    liquid = _liquid(
+        session,
+        sorted(row[0] for row in alive),
+        f"{int(start[:4]) - 1}-12-31",
+        floor,
+        cache=cache,
+    )
     alive = [row for row in alive if row[0] in liquid]
     died = sorted(row[0] for row in alive if row[2] < end)
     survived = sorted(row[0] for row in alive if row[2] >= end)
@@ -220,6 +256,11 @@ def main() -> int:
     ap.add_argument(
         "--offset", type=int, default=0, help="which disjoint block of the universe to use"
     )
+    ap.add_argument(
+        "--liquid-cache",
+        default=None,
+        help="JSON file holding the admitted set, so disjoint samples read it once",
+    )
     args = ap.parse_args()
 
     session: Session = sessionmaker(
@@ -233,9 +274,10 @@ def main() -> int:
         args.end,
         args.min_bars,
         args.cap,
-        db=args.db.replace("sqlite:///", ""),
+        session=session,
         floor=args.min_dollar_volume,
         offset=args.offset,
+        cache=Path(args.liquid_cache) if args.liquid_cache else None,
     )
 
     shared = {
