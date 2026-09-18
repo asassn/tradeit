@@ -2723,3 +2723,79 @@ before it informs any strategy built on this.
 **Ledger: 100 → 101 trials**, hurdle 2.5341. `atr_percent_14` — the same effect,
 rank correlation +0.91 — was not separately tested: one signal was registered to
 spend one trial. **Forty-three signals measured; one survives.**
+
+---
+
+## §36 — §28 re-run with corrected volume: the drawdown half of its verdict does not survive — 2026-09-18
+
+§28 was measured through the volume defect of DATA_DICTIONARY §0.9: its
+admission rule multiplied the stored close by the stored volume in SQL, a raw
+price times a volume already restated for every later split. §35 put §28 on the
+list of results that must be re-run before anything is built on them. This is
+that re-run.
+
+**Strict: one change.** Same universe file, same 2010–2019 window, same four
+disjoint samples of 149 + 149, same entry rule, costs, recovery and both arms.
+Only the admission read moved, to `price_series`, so each session's dollar
+volume is the money that traded. The admission window is kept at **two years**
+(2008–2009) — that is what §28 measured, though its docstring says one; the
+discrepancy is recorded, not fixed alongside.
+
+### The universe it admitted
+
+| clearing $1M/day | survived | died |
+|---|---|---|
+| §28 as recorded | 1,321 | 635 |
+| corrected | **1,419** | **695** |
+
+More of both, and proportionally more dead companies (+9.4% against +7.4%) —
+the direction §0.9 predicted, since the old read excluded companies whose later
+reverse splits deflated their stored volume.
+
+### The result
+
+| paired, equal-risk (B) minus equal-dollar (A) | as recorded | corrected |
+|---|---|---|
+| CAGR | +1.49 pp, sd 1.22, B better 3/4 | **+1.32 pp, sd 0.24, B better 4/4** |
+| Sharpe | +0.11, sd 0.17, B better 3/4 | **+0.09, sd 0.04, B better 4/4** |
+| max drawdown | **+4.04 pp worse, sd 2.59, 4 of 4** | **+0.59 pp, sd 5.23, 3 of 4** |
+
+Per sample, corrected:
+
+| sample | CAGR A → B | Sharpe A → B | max drawdown A → B |
+|---|---|---|---|
+| 0 | 4.02% → 5.09% | 0.17 → 0.25 | 11.50% → 13.61% |
+| 1 | 5.15% → 6.34% | 0.32 → 0.38 | 12.68% → 17.63% |
+| 2 | 5.24% → 6.66% | 0.34 → 0.41 | 10.32% → 12.62% |
+| 3 | 3.16% → 4.77% | 0.06 → 0.22 | **20.74% → 13.73%** |
+
+### What changes
+
+**§28's headline does not survive.** It said equal-risk sizing *"worsened drawdown
+in all four"* samples and that the drawdown effect was *"the more consistent of
+the two"*. Corrected, drawdown is worse in three of four and the mean difference
+is indistinguishable from zero (t +0.22); sample 3 reverses outright. The return
+side, by contrast, becomes *more* consistent — four of four, with a paired
+standard deviation a fifth of what §28 measured.
+
+**Under §7's own criterion — Sharpe up and drawdown not worse — one sample of four
+is now a capture** (sample 3), where §28 recorded none.
+
+### What it must not be read as
+
+**Still descriptive, unregistered, and on reused data.** A paired t of +10.96 on
+CAGR is no more a finding than §28's +2.44 was; the discipline that refused that
+number refuses this one. And a standard deviation estimated from four points is
+itself noisy, so §28's power table — *"a registered test is feasible only for an
+effect of about 1.5 pp/yr"* — cannot now be trusted in either direction.
+
+**The baseline underneath it has a second, unrelated defect.**
+`MovingAverageCross` keeps raw closes and never restates them at a split, so its
+crossover signal, and arm B's 2 × ATR stop, are distorted in any window that
+spans an ex-date. This strict re-run changed only the volume read, so that defect
+is still in both columns. The new `FactorTilt` restates its history at splits and
+was tested failing without it; the baseline should be brought to the same
+standard before §28's comparison informs any sizing decision.
+
+**No trials added; ledger unchanged at 102** (the §37 registration's trial is
+already counted).
