@@ -131,3 +131,50 @@ STOP RULE -- either way, declared now
 
 TRIALS  2 (adx_14, the positive control). Ledger 98 -> 100.
 ```
+
+```
+AMENDMENT 1 -- 2026-09-18, BEFORE THE SCAN. No statistic of adx_14 has
+been computed on any session after 2009-12-31.
+
+WHAT WAS SEEN WHEN THIS WAS WRITTEN
+  An 8-security pilot of the scan wrote adx_14 for those securities and
+  two of its rows were displayed, to check the columns. No outcome, IC
+  or spread was computed or looked at. That pilot is what exposed the
+  defect below: security 1's 20-session dollar volume read $102bn a day.
+
+WHY THE REGISTERED FLOOR COULD NOT HAVE MEANT WHAT IT SAID
+  DATA_DICTIONARY §0.9. Stored raw volume is usually already restated for
+  every split the vendor knew on delivery, and the read multiplied it
+  again, so dollar volume carried every LATER split -- forward splits in,
+  reverse splits out. On §26's panel, as an upper bound, up to 7.1% of
+  $1M-floor decisions were wrong, and both errors tilted the floored
+  sample toward survivors: future winners admitted (median 63-session
+  return +3.34%), future distressed names excluded (-6.25%).
+
+  Fixed at 67894dd in both read paths: served price times served volume
+  is now the money that traded. On AAPL 2010-01-04 the read now serves
+  the actual 17,633,200 shares and $3.77bn, where it served $105.7bn.
+
+  The registered floor -- "20-session average dollar volume >= $1M" --
+  was always meant as the money that traded. It now IS that. The
+  specification does not change; the measurement under it was repaired.
+
+THE ONE NEW DECISION, TAKEN NOW
+  Where a security has splits and its volume basis cannot be
+  established, the read serves the old number and marks the bar
+  UNDETERMINED. For the adx_14 floor such bars are EXCLUDED and counted,
+  because a floor resting on a number known to be possibly wrong in a
+  survivor-favouring direction is the defect this amendment exists to
+  remove.
+
+  Excluding them is itself a choice that could bias, so it is bounded in
+  advance: IF UNDETERMINED BARS ARE MORE THAN 5% OF THE OBSERVATIONS THAT
+  WOULD OTHERWISE PASS THE FLOOR, the verdict reports adx_14 computed both
+  ways -- excluded and included -- and a confirmation requires all four
+  criteria to hold under BOTH. Below 5%, the count is reported and the
+  exclusion stands.
+
+  The positive control is measured without a floor and is unaffected.
+
+TRIALS  Unchanged at 2.
+```
