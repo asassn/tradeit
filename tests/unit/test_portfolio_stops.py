@@ -248,3 +248,39 @@ class TestExitPrecedence:
     def test_a_disabled_time_stop_is_not_an_immediate_one(self) -> None:
         ladder = StopLadder(config=ExitConfig(time_stop_sessions=None))
         assert ladder.evaluate_exit(_position(), _context("105", sessions=9999)) is None
+
+
+class TestHoldingToTheClock:
+    """``price_exits=False``: the arm the stop-ladder registration compares with.
+
+    Only the time stop may close the position; the stop still exists because it
+    sized the position, so the two arms own the same amounts.
+    """
+
+    HOLD = StopLadder(config=ExitConfig(price_exits=False, time_stop_sessions=63))
+
+    def test_a_breached_stop_does_not_close_it(self) -> None:
+        assert self.HOLD.evaluate_exit(_position(), _context("50")) is None
+
+    def test_a_breached_trailed_stop_does_not_close_it(self) -> None:
+        assert self.HOLD.evaluate_exit(_position(stop=Decimal(116)), _context("115")) is None
+
+    def test_a_target_does_not_close_it(self) -> None:
+        position = _position(target=Decimal(130))
+        assert self.HOLD.evaluate_exit(position, _context("131")) is None
+
+    def test_a_partial_profit_does_not_fire(self) -> None:
+        assert self.HOLD.evaluate_exit(_position(), _context("120")) is None
+
+    def test_the_clock_still_closes_it_whatever_the_price(self) -> None:
+        for price in ("50", "100", "150"):
+            signal = self.HOLD.evaluate_exit(_position(), _context(price, sessions=63))
+            assert signal is not None
+            assert signal.reason is ExitReason.TIME_STOP
+            assert signal.fraction == Decimal(1)
+
+    def test_the_default_is_unchanged(self) -> None:
+        """Every existing run must behave exactly as before the switch existed."""
+        assert ExitConfig().price_exits is True
+        signal = LADDER.evaluate_exit(_position(), _context("89"))
+        assert signal is not None and signal.reason is ExitReason.STOP_LOSS

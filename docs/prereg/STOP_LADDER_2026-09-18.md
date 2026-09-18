@@ -110,3 +110,48 @@ RESOLUTION
 
 TRIALS  2 (two-sided). Ledger 102 -> 104.
 ```
+
+```
+AMENDMENT 1 -- 2026-09-18, BEFORE ANY REGISTERED RUN. No return of either
+arm has been computed on either window.
+
+WHAT WAS SEEN WHEN THIS WAS WRITTEN
+  A mechanics-only pilot of the runner on 60 securities of the 2020-2025
+  diagnostic window, printing trade and exit counts and nothing else:
+    LADDER  291 trades: stop-loss 99, trailing 0, partial profit 66,
+            time stop 125, delisted 1
+    HOLD    225 trades: time stop 224, delisted 1
+  HOLD behaved as registered: nothing closed it but the clock.
+
+THE DEFECT THE PILOT EXPOSED
+  Sixty-six partial profits at 2R and not one trailing exit is not a
+  shape the registered ladder can produce: a position that reaches 2R has
+  passed 1R, where its stop moves to breakeven, so any later stop-out is a
+  trailing exit. The cause is in the engine, not the ladder.
+  EventDrivenEngine built every position with stop_price = the INITIAL
+  stop and discarded the CyclePlan's stop_updates, so the ladder's
+  breakeven and trailing moves were computed and thrown away. Every
+  backtest this platform has run held its initial stop for the life of
+  the position.
+
+  Fixed in the engine: each lot carries a current stop, the plan's stop
+  moves are applied after each session's decision (upward only), and it
+  is restated at splits. A test runs a winner past 1R and back through its
+  entry and requires a trailing exit above the initial stop; it FAILS
+  with the updates discarded.
+
+WHAT THIS CHANGES
+  The registered LADDER -- stop-loss, breakeven at 1R, trailing from
+  1.5R, partial profit at 2R, time stop -- is now what the engine runs.
+  Before the fix the engine ran only three of its five parts. The
+  specification does not change; the machine under it was made to do
+  what the specification said.
+
+  EVERY EARLIER ENGINE RESULT ran without breakeven and trailing: §7, §28,
+  §36 and §37. §37 is the current verdict on low volatility as a strategy,
+  so it is re-run on the fixed engine under its own registration, which
+  named "the platform's own stop ladder", and both are reported. The
+  others are recorded as due.
+
+TRIALS  Unchanged at 2.
+```

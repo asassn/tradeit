@@ -548,3 +548,33 @@ class TestGuardsRealDataForced:
         assert str(ExitReason.DELISTED_EXIT) in reasons
         delisted = next(t for t in result.trades if t.exit_reason == str(ExitReason.DELISTED_EXIT))
         assert delisted.exit_price == Decimal(45)  # 90 x 0.5
+
+
+class TestTheLadderMovesTheStop:
+    """The engine must apply the ladder's stop moves, not only its exit signals.
+
+    Until 2026-09-18 it discarded them: every backtest held the initial stop for
+    the life of the position, so breakeven and trailing -- both in the default
+    ladder -- never happened. A test of the ladder itself (docs/prereg/
+    STOP_LADDER_2026-09-18.md) found it by recording 66 partial profits and no
+    trailing exit at all.
+    """
+
+    def test_a_winner_that_reverses_leaves_near_breakeven_not_at_the_initial_stop(
+        self,
+    ) -> None:
+        # Entry 100, stop 92: 1R = 8. It runs to 110 (past the 1R breakeven
+        # trigger), then falls back through 100 on its way to 90.
+        days = _days(8)
+        closes = ["100", "100", "110", "110", "98", "95", "90", "90"]
+        bars = {
+            day: {7: _bar(7, day, open_=close, close=close)}
+            for day, close in zip(days, closes, strict=True)
+        }
+        data = _Script(bars, {days[0]: [_candidate(7, "100", "92")]})
+        result = _engine(data, exits=ExitConfig(take_partial_profit_at_r=None)).run(_spec(days=9))
+        first_exit = min(result.trades, key=lambda t: t.exit_date)
+        # The stop sat at breakeven, so the break came at 98 -- a trailing-stop
+        # exit -- not at the initial 92 two sessions later.
+        assert first_exit.exit_reason == str(ExitReason.TRAILING_STOP)
+        assert first_exit.exit_price > Decimal(92)

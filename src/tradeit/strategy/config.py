@@ -650,6 +650,13 @@ class ExitConfig(Section):
     activate_trailing_at_r: float = Field(default=1.5, gt=0)
     move_stop_to_breakeven_at_r: float = Field(default=1.0, gt=0)
     time_stop_sessions: int | None = Field(default=40, ge=1)
+    #: Whether the ladder may close a position on PRICE -- stop-loss, trailing
+    #: stop, target, partial profit. ``False`` leaves only the time stop, and
+    #: the initial stop still sizes the position, so a comparison holding the
+    #: same amounts to the same date isolates what the price exits do. Added
+    #: for the owner-requested test in docs/prereg/STOP_LADDER_2026-09-18.md;
+    #: the default keeps every existing run exactly as it was.
+    price_exits: bool = True
     take_partial_profit_at_r: float | None = Field(default=2.0, gt=0)
     partial_profit_fraction: float = Field(default=0.33, gt=0, lt=1)
     #: Sessions before a scheduled earnings date at which a position is exited

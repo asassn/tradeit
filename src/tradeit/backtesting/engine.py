@@ -118,6 +118,10 @@ class _OpenLot:
     entry_costs: Decimal
     quantity: Decimal
     initial_stop: Decimal
+    #: Where the stop sits now. Starts at the initial stop and only ever rises,
+    #: as the ladder moves it to breakeven and trails it. Carried separately
+    #: because ``initial_stop`` must stay fixed -- it defines R.
+    current_stop: Decimal
     highest: Decimal
     lowest: Decimal
     sessions_held: int = 0
@@ -259,6 +263,7 @@ class EventDrivenEngine:
                 lot.quantity *= ratio
                 lot.entry_price /= ratio
                 lot.initial_stop /= ratio
+                lot.current_stop /= ratio
                 lot.highest /= ratio
                 lot.lowest /= ratio
             for item in state.pending:
@@ -351,6 +356,17 @@ class EventDrivenEngine:
             candidates,
             {k: v for k, v in contexts.items() if v is not None},
         )
+        # The ladder's stop moves take effect from here: breakeven and trailing
+        # were computed at this close and govern the next session's exit test.
+        # Until 2026-09-18 these updates were discarded, so every backtest ran
+        # with the initial stop only -- no breakeven, no trailing -- while the
+        # platform's declared ladder included both. Found by the stop-ladder
+        # registration's pilot, which recorded 66 partial profits and zero
+        # trailing exits; see SIGNAL_SCOREBOARD §38.
+        for update in plan.stop_updates:
+            lot = state.lots.get(update.instrument_id)
+            if lot is not None and update.stop_price > lot.current_stop:
+                lot.current_stop = update.stop_price
         for signal in plan.exits:
             if signal.instrument_id not in bars:
                 # The stop was evaluated against a stale mark, and there is no
@@ -517,7 +533,7 @@ class _RunState:
                     status=PositionStatus.OPEN,
                     quantity=lot.quantity,
                     average_entry_price=lot.entry_price,
-                    stop_price=lot.initial_stop,
+                    stop_price=lot.current_stop,
                     opened_on=lot.entry_date,
                     initial_stop_price=lot.initial_stop,
                 )
@@ -552,6 +568,7 @@ class _RunState:
                 entry_costs=fill.commission,
                 quantity=fill.quantity,
                 initial_stop=candidate.stop_price,
+                current_stop=candidate.stop_price,
                 highest=fill.price,
                 lowest=fill.price,
                 score_at_entry=candidate.score.total,

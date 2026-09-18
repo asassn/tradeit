@@ -224,7 +224,14 @@ class StopLadder:
             # Checked before the stop requirement: a closed position is allowed
             # to have no stop, and asking it for one would raise.
             return None
+
         current_stop, initial_stop = self._require_long_with_stops(position)
+
+        if not self.config.price_exits:
+            # Only the clock may close the position. The stop was still used
+            # to size it, and is still carried, so the two arms of a
+            # ladder-versus-hold comparison own the same amounts.
+            return self._time_stop(position, context)
 
         if context.last_price <= current_stop:
             trailed = current_stop > initial_stop
@@ -245,18 +252,9 @@ class StopLadder:
                 detail=f"price {context.last_price} reached target {position.target_price}",
             )
 
-        if self.config.time_stop_sessions is not None and (
-            context.sessions_held >= self.config.time_stop_sessions
-        ):
-            return ExitSignal(
-                instrument_id=position.instrument_id,
-                reason=ExitReason.TIME_STOP,
-                fraction=Decimal(1),
-                detail=(
-                    f"held {context.sessions_held} sessions, at the "
-                    f"{self.config.time_stop_sessions} limit, at {r:.2f}R"
-                ),
-            )
+        time_stop = self._time_stop(position, context)
+        if time_stop is not None:
+            return time_stop
 
         target = self.config.take_partial_profit_at_r
         if target is not None and not context.partial_profit_taken and r >= Decimal(str(target)):
@@ -268,3 +266,19 @@ class StopLadder:
             )
 
         return None
+
+    def _time_stop(self, position: PositionState, context: StopContext) -> ExitSignal | None:
+        if self.config.time_stop_sessions is None or (
+            context.sessions_held < self.config.time_stop_sessions
+        ):
+            return None
+        r = self.r_multiple(position, context.last_price)
+        return ExitSignal(
+            instrument_id=position.instrument_id,
+            reason=ExitReason.TIME_STOP,
+            fraction=Decimal(1),
+            detail=(
+                f"held {context.sessions_held} sessions, at the "
+                f"{self.config.time_stop_sessions} limit, at {r:.2f}R"
+            ),
+        )
