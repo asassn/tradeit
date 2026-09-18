@@ -84,7 +84,17 @@ from sqlalchemy.orm import Session
 from tradeit.core.enums import Bartimeframe, KnowledgeTimeSource
 from tradeit.core.models import OhlcvBar
 from tradeit.portfolio.cycle import EntryCandidate
-from tradeit.research01.series import PrintRow, adjudicated_window, admit_prints, split_reading
+from tradeit.research01.series import (
+    PrintRow,
+    VolumeBasis,
+    adjudicated_window,
+    admit_prints,
+    basis_of,
+    classified_splits,
+    recorded_splits,
+    volume_basis,
+    volume_on_price_basis,
+)
 from tradeit.storage.tables import SecurityPriceFact
 
 __all__ = ["CandidateSource", "CorpusSessionData", "SessionBars"]
@@ -138,6 +148,11 @@ class CorpusSessionData:
     #: Prints before a split whose record contradicts the prices themselves --
     #: see :class:`tradeit.research01.series.SplitEvidence`.
     excluded_contradicted_split: int = field(default=0, init=False)
+    #: Bars whose volume basis could not be established -- DATA_DICTIONARY §0.9.
+    #: Served, because a price is still a price, but counted: any rule resting
+    #: on a volume LEVEL (a participation limit, a liquidity floor) is resting
+    #: on the number the read used before §0.9 was found.
+    volume_undetermined: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         if not self.universe:
@@ -214,9 +229,12 @@ class CorpusSessionData:
         found: set[dt.date] = set()
         for security_id in self.universe:
             window_start, window_end = adjudicated_window(self.session, security_id)
-            splits, split_floor = split_reading(self.session, security_id, as_of=as_of)
+            splits, baked, split_floor = classified_splits(self.session, security_id, as_of=as_of)
+            recorded = recorded_splits(self.session, security_id)
+            bases = volume_basis(self.session, security_id, recorded)
+            rows, supplier = self._rows(security_id)
             admitted: list[PrintRow] = []
-            for row in self._rows(security_id):
+            for row in rows:
                 day, open_, high, low, close, volume = row
                 if min(open_, high, low, close) <= 0:
                     # A bar priced at zero is not a price. Measured: 11,580 of
@@ -246,8 +264,24 @@ class CorpusSessionData:
             admitted, untraded = admit_prints(admitted, (split.ex_date for split in splits))
             self.excluded_untraded += untraded
             for day, open_, high, low, close, volume in admitted:
+                # These are raw prints, served unadjusted (the engine applies
+                # splits to holdings), so the price factor is 1 -- but the
+                # volume must still be the shares that traded at this price,
+                # not a number restated for splits years later. §0.9 measured
+                # the stored volume restated at 82% of EODHD splits.
+                basis = basis_of(supplier[day], bases, bool(recorded))
+                if basis is VolumeBasis.UNDETERMINED:
+                    self.volume_undetermined += 1
+                traded = volume_on_price_basis(
+                    volume,
+                    day,
+                    basis,
+                    recorded=recorded,
+                    baked=baked,
+                    price_factor=Decimal(1),
+                )
                 self._bars.setdefault(day, []).append(
-                    (security_id, open_, high, low, close, volume)
+                    (security_id, open_, high, low, close, traded)
                 )
                 found.add(day)
             for split in splits:
@@ -257,9 +291,7 @@ class CorpusSessionData:
                     self._splits.setdefault(split.ex_date, {})[security_id] = split.ratio
         self._sessions = sorted(found)
 
-    def _rows(
-        self, security_id: int
-    ) -> list[tuple[dt.date, Decimal, Decimal, Decimal, Decimal, Decimal]]:
+    def _rows(self, security_id: int) -> tuple[list[PrintRow], dict[dt.date, str]]:
         """One security's raw prints, latest revision knowable at each session.
 
         The revision bound is per session rather than global: a correction
@@ -276,6 +308,7 @@ class CorpusSessionData:
                 fact.close,
                 fact.volume,
                 fact.knowledge_time,
+                fact.source,
             )
             .where(
                 fact.security_id == security_id,
@@ -285,11 +318,13 @@ class CorpusSessionData:
             )
             .order_by(fact.session_date, fact.knowledge_time)
         ).all()
-        latest: dict[dt.date, tuple[dt.date, Decimal, Decimal, Decimal, Decimal, Decimal]] = {}
-        for day, open_, high, low, close, volume, knowledge_time in rows:
+        latest: dict[dt.date, PrintRow] = {}
+        supplier: dict[dt.date, str] = {}
+        for day, open_, high, low, close, volume, knowledge_time, source in rows:
             if knowledge_time > _session_close(day):
                 # Learned after the session it describes. Real, and not
                 # knowable then -- this is the point-in-time bound.
                 continue
             latest[day] = (day, open_, high, low, close, volume)
-        return list(latest.values())
+            supplier[day] = source
+        return list(latest.values()), supplier

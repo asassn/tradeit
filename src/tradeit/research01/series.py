@@ -78,6 +78,53 @@ class SplitAdjustment:
     knowledge_time: dt.datetime
 
 
+class VolumeBasis(StrEnum):
+    """Which share count a security's stored ``raw`` **volume** is counted in.
+
+    ``RESEARCH_01_DATA_DICTIONARY.md`` §0.9. The stored close is usually the
+    print, but the stored volume is usually already restated for every split the
+    vendor knew of on delivery -- AAPL's 2010 volume carries its 2014 7:1 **and**
+    its 2020 4:1, twenty-eight times the shares that traded. Measured across every
+    recorded split: EODHD volume runs straight through the ex-date at 4,706 and
+    steps with it at 797. Not uniform within a vendor, so it is established per
+    security and source, from that security's own splits.
+
+    **Why per security, not per split.** A vendor that restates volume restates
+    it for every split at once -- it is one cumulative factor -- so a security's
+    splits are several readings of one fact. Pooling them is what lets a noisy
+    2-for-1, whose expected step is small against ordinary swings in activity,
+    be decided by the security's other splits rather than on its own.
+
+    The stored ``volume_adjusted`` column cannot answer this: every one of the
+    corpus's 41 million raw rows carries ``False``, written by the importers as
+    a default, not measured.
+    """
+
+    #: Volume steps with each split: it is the shares that traded.
+    RAW = "raw"
+    #: Volume runs through each split: it is already restated, for every
+    #: recorded split, including ones after the read's as-of.
+    ADJUSTED = "adjusted"
+    #: The security has splits and its prints cannot say which. Served as
+    #: before this rule existed, and marked, so that anything resting on a
+    #: volume *level* -- a liquidity floor -- can refuse it.
+    UNDETERMINED = "undetermined"
+    #: No recorded split, so the question does not arise.
+    NOT_NEEDED = "not_needed"
+
+
+#: Sessions of volume read either side of an ex-date, and the fewest per side.
+VOLUME_TEST_SESSIONS = 20
+VOLUME_MIN_SESSIONS = 10
+#: Splits smaller than this are not read: a 5-for-4's expected volume step is
+#: smaller than an ordinary month's change in how much a stock trades.
+VOLUME_TEST_MIN_RATIO = 1.5
+#: Pooled step, as a fraction of the pooled split size, at or above which the
+#: volume is the print, and at or below which it is already restated.
+VOLUME_RAW_AT_LEAST = 0.6
+VOLUME_ADJUSTED_AT_MOST = 0.4
+
+
 #: One raw bar as the read paths carry it: session, open, high, low, close, volume.
 PrintRow = tuple[dt.date, Decimal, Decimal, Decimal, Decimal, Decimal]
 
@@ -163,6 +210,10 @@ class AdjustedBar:
     volume: Decimal
     split_factor: Decimal
     raw_close: Decimal
+    #: How ``volume`` was put on this bar's price basis. ``UNDETERMINED`` means
+    #: it was not: the stored number, scaled as the read did before §0.9 was
+    #: found. A caller resting anything on a volume *level* must refuse it.
+    volume_basis: VolumeBasis = VolumeBasis.NOT_NEEDED
 
     @property
     def is_adjusted(self) -> bool:
@@ -383,7 +434,26 @@ def split_reading(
     factor nobody can state. Withheld before rather than after, so a series keeps
     its ending -- which is where a survivorship study looks.
     """
+    applied, _baked, floor = classified_splits(session, security_id, as_of=as_of)
+    return applied, floor
+
+
+def classified_splits(
+    session: Session, security_id: int, *, as_of: dt.datetime
+) -> tuple[list[SplitAdjustment], list[SplitAdjustment], dt.date | None]:
+    """``(applied, baked, floor)``: :func:`split_reading` plus the splits already
+    inside the stored prices.
+
+    ``baked`` is what :func:`split_reading` discards -- splits whose evidence is
+    :attr:`SplitEvidence.ALREADY_ADJUSTED`. A price read does not need them,
+    because they are already in the number. A **volume** read does: a close the
+    vendor restated for a split is on the post-split share count, and a volume
+    served beside it must be counted in the same shares or their product is not
+    the money that traded. Classified once, here, so no read pays for the
+    evidence twice.
+    """
     applied: list[SplitAdjustment] = []
+    baked: list[SplitAdjustment] = []
     floor: dt.date | None = None
     for split in known_splits(session, security_id, as_of=as_of, include_disputed=True):
         if not _within_adjudication(session, security_id, split.ex_date):
@@ -391,9 +461,164 @@ def split_reading(
         evidence = split_evidence(session, security_id, split.ex_date, split.ratio)
         if evidence in _APPLIED:
             applied.append(split)
+        elif evidence is SplitEvidence.ALREADY_ADJUSTED:
+            baked.append(split)
         elif evidence is SplitEvidence.CONTRADICTED:
             floor = split.ex_date if floor is None else max(floor, split.ex_date)
-    return applied, floor
+    return applied, baked, floor
+
+
+#: Far enough ahead that every recorded split is knowable. Used only to ask what
+#: the vendor had folded into a stored number -- see :func:`recorded_splits`.
+_EVERYTHING = dt.datetime(9999, 12, 31, tzinfo=dt.UTC)
+
+
+def recorded_splits(session: Session, security_id: int) -> list[SplitAdjustment]:
+    """Every recorded split inside the adjudicated interval, **whatever its
+    knowledge_time**.
+
+    This is not a look-ahead, and the distinction matters. A vendor that restated
+    volume did so for every split it knew on delivery, so a 2010 volume in this
+    corpus already contains the 2020 split. Knowing that split is the only way to
+    take it back **out**. Using it to undo information the stored number should
+    never have held is a repair; using it to inform a signal would be the leak.
+    """
+    return [
+        split
+        for split in known_splits(session, security_id, as_of=_EVERYTHING, include_disputed=True)
+        if _within_adjudication(session, security_id, split.ex_date)
+    ]
+
+
+def _volume_levels(
+    session: Session, security_id: int, ex_date: dt.date, *, before: bool
+) -> dict[str, tuple[float, int]]:
+    """Median traded volume on one side of an ex-date, per source, with its count."""
+    fact = SecurityPriceFact
+    date_rule = fact.session_date < ex_date if before else fact.session_date >= ex_date
+    rows = session.execute(
+        select(fact.source, fact.volume)
+        .where(
+            fact.security_id == security_id,
+            fact.adjustment_basis == "raw",
+            fact.volume > 0,
+            fact.close > 0,
+            date_rule,
+        )
+        .order_by(fact.session_date.desc() if before else fact.session_date)
+        .limit(VOLUME_TEST_SESSIONS)
+    ).all()
+    by_source: dict[str, list[float]] = {}
+    for source, volume in rows:
+        by_source.setdefault(source, []).append(float(volume))
+    out: dict[str, tuple[float, int]] = {}
+    for source, values in by_source.items():
+        values.sort()
+        out[source] = (values[len(values) // 2], len(values))
+    return out
+
+
+def volume_basis(
+    session: Session,
+    security_id: int,
+    splits: Sequence[SplitAdjustment] | None = None,
+) -> dict[str, VolumeBasis]:
+    """The stored volume's basis for each source, from this security's splits.
+
+    Only sources with evidence appear. A caller asking about a source that is
+    absent, on a security that has splits, should read ``UNDETERMINED`` -- see
+    :func:`basis_of`.
+
+    **The test.** Either side of each split of at least
+    :data:`VOLUME_TEST_MIN_RATIO`, the median traded volume over up to
+    :data:`VOLUME_TEST_SESSIONS` sessions, per source, from one source on both
+    sides so two vendors' bases are never compared with each other. The log of
+    the step, as a fraction of the log of the split, is ~1 if volume is the print
+    and ~0 if it is already restated. Pooled across the security's splits,
+    weighted by each split's size, so a 7-for-1 counts for more than a 2-for-1 --
+    the larger step is the one ordinary activity cannot fake.
+    """
+    usable = [
+        split
+        for split in (recorded_splits(session, security_id) if splits is None else splits)
+        if abs(math.log(float(split.ratio))) >= math.log(VOLUME_TEST_MIN_RATIO)
+    ]
+    weighted: dict[str, float] = {}
+    size: dict[str, float] = {}
+    for split in usable:
+        log_ratio = math.log(float(split.ratio))
+        before = _volume_levels(session, security_id, split.ex_date, before=True)
+        after = _volume_levels(session, security_id, split.ex_date, before=False)
+        for source in before.keys() & after.keys():
+            (low, n_low), (high, n_high) = before[source], after[source]
+            if min(n_low, n_high) < VOLUME_MIN_SESSIONS or low <= 0 or high <= 0:
+                continue
+            # step / log_ratio, weighted by |log_ratio|: the sign keeps a reverse
+            # split's fall in volume reading as the print, like a forward split's rise.
+            step = math.log(high / low)
+            weighted[source] = weighted.get(source, 0.0) + math.copysign(step, log_ratio)
+            size[source] = size.get(source, 0.0) + abs(log_ratio)
+    out: dict[str, VolumeBasis] = {}
+    for source, total in size.items():
+        fraction = weighted[source] / total
+        if fraction >= VOLUME_RAW_AT_LEAST:
+            out[source] = VolumeBasis.RAW
+        elif fraction <= VOLUME_ADJUSTED_AT_MOST:
+            out[source] = VolumeBasis.ADJUSTED
+        else:
+            out[source] = VolumeBasis.UNDETERMINED
+    return out
+
+
+def basis_of(source: str, bases: dict[str, VolumeBasis], has_splits: bool) -> VolumeBasis:
+    """The basis of one bar's volume, from its supplier and the security's evidence.
+
+    Shared by both read paths so ``price_series`` and ``CorpusSessionData`` cannot
+    disagree about which bars' volume can be trusted as a level.
+    """
+    if not has_splits:
+        return VolumeBasis.NOT_NEEDED
+    return bases.get(source, VolumeBasis.UNDETERMINED)
+
+
+def volume_on_price_basis(
+    stored: Decimal,
+    session_date: dt.date,
+    basis: VolumeBasis,
+    *,
+    recorded: Sequence[SplitAdjustment],
+    baked: Sequence[SplitAdjustment],
+    price_factor: Decimal,
+) -> Decimal:
+    """Stored volume, restated so that served price times it is the money that traded.
+
+    ``price_factor`` is what the read divides the stored price by. Three factors,
+    each counting only splits **after** the bar:
+
+    * ``V`` -- the splits the vendor folded into the stored volume: every
+      recorded split if ``ADJUSTED``, none if ``RAW``. Dividing it out gives the
+      shares that traded.
+    * ``A`` -- the ``baked`` splits the vendor folded into the stored **price**.
+      That price is on the post-split share count, so the volume is too.
+    * ``price_factor`` -- the read's own adjustment, applied to volume the way it
+      is applied to price, inverted.
+
+    ``UNDETERMINED`` is served exactly as the read did before §0.9 was found --
+    stored times ``price_factor`` -- because no better number can be stated. The
+    bar carries the basis so a level-based caller can refuse it.
+    """
+    if basis is VolumeBasis.UNDETERMINED:
+        return stored * price_factor
+    folded = Decimal(1)
+    if basis is VolumeBasis.ADJUSTED:
+        for split in recorded:
+            if split.ex_date > session_date:
+                folded *= split.ratio
+    in_price = Decimal(1)
+    for split in baked:
+        if split.ex_date > session_date:
+            in_price *= split.ratio
+    return stored / folded * in_price * price_factor
 
 
 def _within_adjudication(session: Session, security_id: int, ex_date: dt.date) -> bool:
@@ -532,6 +757,7 @@ def price_series(
             SecurityPriceFact.close,
             SecurityPriceFact.volume,
             SecurityPriceFact.knowledge_time,
+            SecurityPriceFact.source,
         )
         .where(*conditions)
         .order_by(SecurityPriceFact.session_date, SecurityPriceFact.knowledge_time)
@@ -540,8 +766,11 @@ def price_series(
     # Latest revision per session, by iterating in knowledge_time order and
     # letting later rows overwrite earlier ones for the same date.
     latest: dict[dt.date, tuple[Decimal, Decimal, Decimal, Decimal, Decimal]] = {}
+    #: The source of the revision that won each session: volume's basis is a
+    #: property of who supplied it, and one security can hold two vendors.
+    supplier: dict[dt.date, str] = {}
     sessions = calendar or TradingCalendar()
-    for session_date, o, h, low, c, v, _kt in rows:
+    for session_date, o, h, low, c, v, _kt, source in rows:
         if not include_disputed and not sessions.is_session(session_date):
             # A day with no trading has no price. Filtered here rather than in
             # SQL because the exchange calendar is not a column.
@@ -559,12 +788,18 @@ def price_series(
             # exactly where a survivorship study is most sensitive.
             continue
         latest[session_date] = (o, h, low, c, v)
+        supplier[session_date] = source
 
+    baked: list[SplitAdjustment] = []
+    recorded: list[SplitAdjustment] = []
+    bases: dict[str, VolumeBasis] = {}
     if include_disputed:
         splits = known_splits(session, security_id, as_of=as_of, include_disputed=True)
         floor = None
     else:
-        splits, floor = split_reading(session, security_id, as_of=as_of)
+        splits, baked, floor = classified_splits(session, security_id, as_of=as_of)
+        recorded = recorded_splits(session, security_id)
+        bases = volume_basis(session, security_id, recorded)
 
     ordered: list[PrintRow] = [
         (day, *latest[day]) for day in sorted(latest) if floor is None or day >= floor
@@ -584,6 +819,11 @@ def price_series(
         for split in splits:
             if split.ex_date > session_date:
                 factor *= split.ratio
+        if include_disputed:
+            # The audit path reads as it always has; the basis says so.
+            basis = VolumeBasis.UNDETERMINED if splits else VolumeBasis.NOT_NEEDED
+        else:
+            basis = basis_of(supplier[session_date], bases, bool(recorded))
         out.append(
             AdjustedBar(
                 session_date=session_date,
@@ -591,12 +831,22 @@ def price_series(
                 high=h / factor,
                 low=low / factor,
                 close=c / factor,
-                # A split multiplies the share count, so historical volume is
-                # multiplied where price is divided. Adjusting one without the
-                # other silently breaks every turnover and liquidity measure.
-                volume=v * factor,
+                # Volume is put on the same share count as the price just
+                # served, so their product is the money that traded -- see
+                # volume_on_price_basis and DATA_DICTIONARY §0.9. Multiplying
+                # stored volume by the price factor, as this did before, double
+                # counted every vendor that had already restated it.
+                volume=volume_on_price_basis(
+                    v,
+                    session_date,
+                    basis,
+                    recorded=recorded,
+                    baked=baked,
+                    price_factor=factor,
+                ),
                 split_factor=factor,
                 raw_close=c,
+                volume_basis=basis,
             )
         )
     return out
