@@ -23,7 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 
-from tradeit.core.enums import RiskDecision, RiskLimitType
+from tradeit.core.enums import OrderSide, RiskDecision, RiskLimitType
+from tradeit.execution.simulation import ParticipationCostModel
 from tradeit.portfolio.base import PortfolioState, SizingDecision
 from tradeit.risk.base import RiskAssessment
 from tradeit.strategy.config import RiskConfig, SizingConfig
@@ -34,6 +35,7 @@ __all__ = [
     "PortfolioHeatRule",
     "PositionSizeRule",
     "PyramidRule",
+    "TransactionCostRule",
     "verdict_for_headroom",
 ]
 
@@ -374,3 +376,95 @@ class PyramidRule:
                 "would increase risk rather than redeploy it"
             )
         return self._allow(f"{gain:.2%} gain with the stop raised; add permitted")
+
+
+@dataclass(frozen=True, slots=True)
+class TransactionCostRule:
+    """An entry's estimated round-trip cost against a fraction of its notional.
+
+    Neither the sizer nor any other rule looks at cost. ``min_position_notional``
+    bounds how *small* a position may be in dollars, which is not the same
+    thing, and risk-based sizing makes it worse: an 8% stop on a $0.0001 print
+    puts half a percent of equity at risk with 62.4 million shares, and a
+    per-share commission of $0.005 on those is $311,853 -- fifty times the
+    $6,241 position. The platform bought exactly that, in a registered
+    backtest, and the account went to minus $520,343.
+
+    **The estimate is the cost model's own**, not a second formula kept in step
+    with it by hand: ``ParticipationCostModel.estimate_at`` for a buy and a sell
+    of the proposed quantity, both at the entry price. The sell is priced at
+    entry because the exit price is unknown and pricing it anywhere else would
+    be a forecast.
+
+    **Market impact is not in it.** A ``SizingDecision`` carries no dollar
+    volume, so the impact term is zero and the estimate is a floor on cost,
+    not a ceiling. The sizer's liquidity cap already bounds participation; the
+    pathology this rule exists for is commission, which needs no volume to
+    price.
+
+    **Refuses; never reduces.** Per-share commission and spread are the same
+    fraction of notional at any quantity, and the commission minimum is a
+    *larger* fraction of a smaller order, so no reduction ever brings a
+    refused entry under the limit.
+
+    **Adds are priced like first entries.** Only the increment trades, so only
+    the increment's cost is measured.
+    """
+
+    max_round_trip_cost_pct: float
+    costs: ParticipationCostModel
+    name: str = "transaction_cost"
+    limit_type: RiskLimitType = RiskLimitType.TRANSACTION_COST
+
+    @property
+    def parameters(self) -> dict[str, object]:
+        return {
+            "max_round_trip_cost_pct": self.max_round_trip_cost_pct,
+            **{f"costs.{k}": v for k, v in self.costs.parameters.items()},
+        }
+
+    def round_trip_cost(self, proposal: SizingDecision) -> Decimal:
+        """Commission, spread and slippage to buy the proposal and sell it again."""
+        return sum(
+            (
+                self.costs.estimate_at(
+                    side=side, quantity=proposal.quantity, reference=proposal.entry_price
+                ).total
+                for side in (OrderSide.BUY, OrderSide.SELL)
+            ),
+            Decimal(0),
+        )
+
+    def evaluate(self, proposal: SizingDecision, portfolio: PortfolioState) -> RiskAssessment:
+        limit = Decimal(str(self.max_round_trip_cost_pct))
+        if proposal.quantity <= 0 or proposal.entry_price <= 0:
+            return RiskAssessment(
+                rule_name=self.name,
+                limit_type=self.limit_type,
+                decision=RiskDecision.REJECT,
+                reason="quantity or entry price is not positive; cost as a fraction is undefined",
+                limit=float(limit),
+            )
+        notional = proposal.quantity * proposal.entry_price
+        cost = self.round_trip_cost(proposal)
+        fraction = cost / notional
+        if fraction > limit:
+            return RiskAssessment(
+                rule_name=self.name,
+                limit_type=self.limit_type,
+                decision=RiskDecision.REJECT,
+                reason=(
+                    f"estimated round-trip cost {cost:.2f} is {fraction:.2%} of the "
+                    f"{notional:.2f} notional, above the {limit:.2%} limit"
+                ),
+                measured=float(fraction),
+                limit=float(limit),
+            )
+        return RiskAssessment(
+            rule_name=self.name,
+            limit_type=self.limit_type,
+            decision=RiskDecision.ALLOW,
+            reason="within limit",
+            measured=float(fraction),
+            limit=float(limit),
+        )

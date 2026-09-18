@@ -310,6 +310,7 @@ class RiskLimitType(StrEnum):
     GROSS_EXPOSURE = "gross_exposure"
     LIQUIDITY_PARTICIPATION = "liquidity_participation"
     PYRAMID_ENTRIES = "pyramid_entries"
+    TRANSACTION_COST = "transaction_cost"
 
 
 class RiskDecision(StrEnum):

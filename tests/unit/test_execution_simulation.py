@@ -117,6 +117,18 @@ class TestCostModel:
         estimate = COSTS.estimate(_order(quantity="1000"), _bar())
         assert estimate.commission == Decimal("5.000")
 
+    @pytest.mark.parametrize("side", [OrderSide.BUY, OrderSide.SELL])
+    @pytest.mark.parametrize("adv", [None, Decimal(50_000)])
+    def test_pricing_from_a_price_is_pricing_from_the_bar(
+        self, side: OrderSide, adv: Decimal | None
+    ) -> None:
+        """``estimate_at`` is what ``estimate`` does, so a caller holding only a
+        price -- the transaction-cost rule -- prices exactly what will be charged."""
+        bar = _bar()
+        assert COSTS.estimate_at(
+            side=side, quantity=Decimal(300), reference=bar.close, average_dollar_volume=adv
+        ) == COSTS.estimate(_order(side=side, quantity="300"), bar, adv)
+
 
 class TestGapsAreRespected:
     def test_a_sell_stop_that_gaps_through_fills_at_the_open(self) -> None:

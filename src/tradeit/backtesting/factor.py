@@ -70,7 +70,7 @@ class FactorTilt:
     min_history: int
     #: The cheapest a security may close at on the rebalance date. Required:
     #: without it a stock collapsing to a $0.0001 placeholder print kept the
-    #: turnover of its last normal weeks, read as calm, and was bought -- 20.6
+    #: turnover of its last normal weeks, read as calm, and was bought -- 62.4
     #: million shares whose per-share commission sank a registered backtest.
     min_price: Decimal
     min_dollar_volume: Decimal

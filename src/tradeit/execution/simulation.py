@@ -83,11 +83,31 @@ class ParticipationCostModel:
         reference_bar: OhlcvBar,
         average_dollar_volume: Decimal | None = None,
     ) -> CostEstimate:
-        reference = reference_bar.close
-        notional = reference * order.quantity
+        return self.estimate_at(
+            side=order.side,
+            quantity=order.quantity,
+            reference=reference_bar.close,
+            average_dollar_volume=average_dollar_volume,
+        )
+
+    def estimate_at(
+        self,
+        *,
+        side: OrderSide,
+        quantity: Decimal,
+        reference: Decimal,
+        average_dollar_volume: Decimal | None = None,
+    ) -> CostEstimate:
+        """The same estimate from a price rather than a bar.
+
+        For a caller that has a proposal but no order and no bar yet -- the
+        transaction-cost risk rule, which must price a trade before it exists
+        and must price it with exactly the arithmetic that will charge it.
+        """
+        notional = reference * quantity
 
         commission = max(
-            Decimal(str(self.config.commission_per_share)) * order.quantity,
+            Decimal(str(self.config.commission_per_share)) * quantity,
             Decimal(str(self.config.commission_minimum)),
         )
 
@@ -110,8 +130,8 @@ class ParticipationCostModel:
                 * Decimal(str(participation))
             )
 
-        per_share = (spread_cost + impact) / order.quantity
-        direction = 1 if order.side in BUY_SIDES else -1
+        per_share = (spread_cost + impact) / quantity
+        direction = 1 if side in BUY_SIDES else -1
         return CostEstimate(
             commission=commission,
             spread_cost=spread_cost,

@@ -45,6 +45,7 @@ from tradeit.risk.rules import (
     MaxPositionsRule,
     PortfolioHeatRule,
     PositionSizeRule,
+    TransactionCostRule,
 )
 from tradeit.strategy.base import OpportunityScore, ScoreComponent
 from tradeit.strategy.config import StrategyConfig
@@ -244,12 +245,20 @@ def build_engine(
     participation, the risk-free rate and both delisting assumptions each change
     the answer, and none of them should be inherited by accident.
     """
+    costs = ParticipationCostModel(config=config.costs)
     rules: tuple[RiskRule, ...] = (
         PortfolioHeatRule(config=config.risk),
         MaxPositionsRule(config=config.risk),
         PositionSizeRule(max_position_pct_of_equity=config.sizing.max_position_pct_of_equity),
         GrossExposureRule(config=config.risk),
     )
+    if config.risk.max_round_trip_cost_pct is not None:
+        # Off unless the config sets it; see RiskConfig.max_round_trip_cost_pct.
+        rules += (
+            TransactionCostRule(
+                max_round_trip_cost_pct=config.risk.max_round_trip_cost_pct, costs=costs
+            ),
+        )
     return EventDrivenEngine(
         cycle=PortfolioCycle(
             sizer=RiskBasedSizer(
@@ -261,7 +270,7 @@ def build_engine(
             ),
             ladder=StopLadder(config=config.exits),
         ),
-        costs=ParticipationCostModel(config=config.costs),
+        costs=costs,
         fills=BarFillModel(max_participation=participation),
         data=data,
         analyzer=StandardPerformanceAnalyzer(
