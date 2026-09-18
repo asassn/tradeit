@@ -44,8 +44,8 @@ same way in all four in-sample specifications.
 
 | signal | scoring factor | hypothesis | best in-sample | sign held? | out-of-sample | status |
 |---|---|---|---|---|---|---|
-| `realized_vol_60` | *(none — unweighted)* | low volatility outperforms | **IC −0.060, t −10.01** | **yes, 4/4** | **IC −0.0790, t −38.25, 4/4** | **passed its criteria (§26) and was then explained away (§27): the effect is illiquidity, and vanishes above $1M/day.** Build nothing on it |
-| `atr_percent_14` | *(none — unweighted)* | low volatility outperforms | **IC −0.078, t −7.46** | **yes, 4/4** | **IC −0.0790, t −38.27, 4/4** | same effect as the row above (rank correlation +0.91), same explanation — see §26, §27 |
+| `realized_vol_60` | *(none — unweighted)* | low volatility outperforms | **IC −0.060, t −10.01** | **yes, 4/4** | **IC −0.0790, t −38.25, 4/4** | **PASSES a registered out-of-sample test on tradeable securities (§35: 2020–2025, above $1M/day, IC −0.137, t −3.32).** §27's "vanishes above $1M/day" rested on the §0.9 volume defect (§34). Concentrated in lower-priced stocks. A candidate factor for a scoped proposition — not yet a strategy |
+| `atr_percent_14` | *(none — unweighted)* | low volatility outperforms | **IC −0.078, t −7.46** | **yes, 4/4** | **IC −0.0790, t −38.27, 4/4** | same effect as the row above (rank correlation +0.91); not separately re-tested in §35, which registered one signal to spend one trial |
 | `relative_volume_20` | volume_accumulation 0.25 | *derived* | IC −0.069, t −4.54 | no — flipped | **IC +0.009, t +0.93** | **REJECTED.** Sign flipped, net +32.7%/yr → −0.2%/yr |
 | `momentum_21` | relative_strength 0.25 | one-month reversal | IC −0.016, t −2.15 | yes, 4/4 | not run | weak but consistent; never economically useful |
 | `momentum_126` | relative_strength 0.25 | 6-month momentum | IC +0.021, t +3.00 | yes, 4/4 | not run | weak but consistent; never economically useful |
@@ -2640,3 +2640,86 @@ volatility study has read.
 **Ledger: 98 → 100 trials**, hurdle 2.5306. `adx_14` and its positive control.
 The §33 re-read is a diagnostic and adds none. Forty-two signals measured; none
 survives as a registered, out-of-sample, tradeable result.
+
+---
+
+## §35 — low volatility, out of sample among tradeable securities: it passes — 2026-09-18
+
+**Re-opened by the owner's decision of 2026-09-18**, reversing §27's written
+closure for this one test. **Registered in
+[`prereg/LOW_VOLATILITY_2020_2025_2026-09-18.md`](prereg/LOW_VOLATILITY_2020_2025_2026-09-18.md)
+at `e12ec7e`**, scan and verdict code committed at `900531f` — all before
+`realized_volatility_60` had been computed on any session after 2019.
+
+**2020–2025 — a window no volatility study had read.** 1,455,128 observations,
+7,947 securities, the common calendar grid (289 dates), horizon 63, the corpus's
+current universe with point-in-time history only. **One signal, one horizon, one
+floor: one trial.**
+
+### Result: all four criteria pass
+
+| check | reading | |
+|---|---|---|
+| calibration — shuffled within date ×200 | 95th percentile \|t\| **1.76** (limit 2.3) | calibrated |
+| undetermined volume in the floored sample | **1.2%** (bound 5%) | judged once |
+| **1** — block t < −2.5341 | **IC −0.1368, t −3.32**, 24 blocks, median breadth 3,154 | **pass** |
+| **2** — least-volatile quintile compounds ahead of its date's universe | **+3.32% a hold (+13.96%/yr)**, median across dates **+4.36%** | **pass** |
+| **3** — negative in both halves | 2020–22 **−0.1319** (t −1.81); 2023–25 **−0.1224** (t −3.35) | **pass** |
+| **4** — negative in ≥ 4 of 5 within-date **price** bands | **5 of 5** | **pass** |
+
+**This is the first signal in forty-three to pass a registered, out-of-sample
+test on a tradeable universe at an honest standard error.** It was re-opened
+because §34 found the floor that closed it biased; it passed on data it had
+never touched.
+
+### Four things the pass does not hide
+
+**1. It fades as the share price rises.** Criterion 4 asked for the sign in each
+within-date price band, and it holds in all five — but the size does not:
+
+| price quintile, within date | cheapest | 2 | 3 | 4 | priciest |
+|---|---|---|---|---|---|
+| IC | **−0.2103** | −0.0943 | −0.0547 | −0.0128 | −0.0085 |
+
+In the dearest two-fifths of the tradeable universe the effect is **close to
+nothing**. §27's reading — *"mostly a price effect"* — had substance: price does
+not explain the effect away, but it is where most of it lives. That matters
+directly for cost, because cheap stocks carry the widest spreads.
+
+**2. The first half alone is not significant** (t −1.81). The registration asked
+for the sign in each half, not significance, and it holds; but 2020–2022 on its
+own would not have cleared the hurdle.
+
+**3. Resolution came in worse than predicted** — smallest detectable IC **0.104**,
+against a registered forecast of 0.063. 2020–2025's cross-sections were noisier
+than 2010–2019's. The effect cleared it because it was larger (0.137) than
+§34's reading (0.084), not because the test was sharper.
+
+**4. Among the most liquid names it is weaker** — above $10M/day, IC −0.0973,
+t −2.30, below the hurdle. A declared diagnostic; it decides nothing, and it is
+recorded so a strategy built on this does not assume the effect holds equally
+where it would be cheapest to trade.
+
+**One bias runs against the finding, not for it.** Where the corpus is missing
+dead companies, the missing ones are disproportionately volatile names that fell
+— so survivorship gaps would *hide* this effect rather than manufacture it.
+
+### What it licenses
+
+**A scoped proposition, and nothing else.** No weight, gate or strategy parameter
+moves because of a measurement. The proposition would have to face what a signal
+test does not: **trading cost in exactly the cheap, wide-spread stocks where the
+effect concentrates**, turnover at a 63-session rebalance, capacity, and a
+walk-forward backtest on the corrected read. *"Lifting the rule is not evidence of
+profitability"* applies with full force: a factor that predicts is not yet a
+trade that pays.
+
+**One re-measurement becomes due.** §28 (equal-risk sizing on a tradeable
+universe) conditioned on dollar volume through the §0.9 defect. It must be re-run
+before it informs any strategy built on this.
+
+### Registered and spent
+
+**Ledger: 100 → 101 trials**, hurdle 2.5341. `atr_percent_14` — the same effect,
+rank correlation +0.91 — was not separately tested: one signal was registered to
+spend one trial. **Forty-three signals measured; one survives.**
