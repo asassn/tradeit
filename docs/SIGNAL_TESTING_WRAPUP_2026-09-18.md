@@ -1,7 +1,7 @@
 # Signal testing — where it ended, and what it leaves — 2026-09-18
 
 A plain summary for deciding whether to move on. The detail, every number and
-every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§39 and
+every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§40 and
 the registrations in [`prereg/`](prereg/). This document repeats only what a
 decision needs.
 
@@ -12,9 +12,11 @@ survives as a *signal*: low volatility predicts which tradeable stocks do better
 over the next quarter, out of sample (§35). It does **not** survive as a
 *strategy*: a portfolio built on it lost to a randomly chosen one in every
 sample, under every version of the engine (§37, three runs). Everything else —
-forty-four other measurements across price, volume, momentum, patterns, size,
-twenty-four classical indicators, a trend-strength lead and two sizing rules —
-is null, failed out of sample, or inconclusive. Along the way the corpus, the
+forty-eight other measurements across price, volume, momentum, patterns, size,
+twenty-four classical indicators, a trend-strength lead, two sizing rules and
+four point-in-time fundamental signals — is null, failed out of sample, or
+inconclusive. The closest miss is earnings surprise (§40): three of four
+criteria, short only on significance. Along the way the corpus, the
 statistics and the backtest engine were each found to be wrong in ways that
 flattered results, and each was fixed.
 
@@ -85,10 +87,11 @@ looking for a good number; each was found by a check that failed.
 1. **The sizer will open a position whose commission is fifty times its value.**
    Trading logic, so it needs the owner's approval; a task to prepare the
    proposition is queued.
-2. **Fundamentals are imported but unused.** The fundamentals table is populated
-   from the SEC's Financial Statement Data Sets, yet only one fundamental factor
-   (`fundamental_quality`, §10) has ever been measured. Every other line tested
-   so far reads price and volume.
+2. **Four fundamental signals have now been measured (§40), at the 63-session
+   Swing horizon, and none passes.** The literature measures most of them over
+   twelve months -- the Retirement mandate's horizon -- which this corpus has not
+   been asked. A registration there would be a new question, would have to
+   disclose §40, and is not yet taken.
 3. Sections below §13 of the scoreboard have not been re-run on the corrected
    corpus. The four highest-exposure ones were, and none moved; the rest are
    re-run on demand.
@@ -102,10 +105,13 @@ survivor has been carried all the way to a portfolio test and failed there.
 Another price-based indicator would be the twenty-sixth attempt at a question
 twenty-five have answered.
 
-**For the information the platform has not yet read: no.** The roadmap's current
-phase is Phase 6 — *fundamentals and earnings quality* — and its data is on disk.
-That is the natural next milestone: it is the next phase in order, it is free,
-and it asks a different question from everything above rather than a variation
-of it. Every discipline built here — pre-registration, per-date estimation, the
-common grid, the random-portfolio benchmark, a faithful engine — carries straight
-over.
+**For fundamentals at the Swing horizon: yes, as of §40.** The four classic
+anomalies were measured point-in-time on 2013–2025 and none passes; earnings
+surprise came closest and is closed by the stop rule all the same.
+
+**What is left is not more of the same.** Every free, single-signal question this
+corpus can answer at the 21- and 63-session horizons has now been asked with
+honest methods. The remaining routes each ask something different -- a different
+horizon (Retirement, twelve months), different information (analyst
+expectations, which the corpus does not hold), or combining signals rather than
+testing them one at a time -- and each needs a decision, not a continuation.
