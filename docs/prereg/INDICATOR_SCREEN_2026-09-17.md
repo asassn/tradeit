@@ -310,3 +310,86 @@ WHAT IS NOT CLAIMED
 
 TRIALS  Unchanged at 24. No signal specification moved.
 ```
+
+```
+AMENDMENT 3 -- 2026-09-17. THE SCREEN AS REGISTERED IS VOID BY ITS OWN
+CONTROL RULE. Written after the 24-arm table was read and after five
+arms had been recomputed cross-sectionally; what was seen is listed
+below.
+
+WHAT THE CONTROL DID
+  The registration said, of rate_of_change_252: "If this screen cannot
+  reproduce something in that region, the MACHINERY is broken and no
+  null it reports may be believed. This is a test of the test."
+
+  It did not reproduce it. It came out INVERTED:
+      §18 diagnostic, 250-session rank, 63 sessions : +0.0189 (t +8.49)
+      this screen, rate_of_change_252               : -0.0249 (t -5.47)
+  Declared POSITIVE, measured significantly NEGATIVE, sign holding in
+  0 of 2 halves and 0 of 5 volatility bands.
+
+  The rule is therefore binding and is applied: NO NULL IN THE 24-ARM
+  TABLE MAY BE BELIEVED. The table is not evidence that these indicators
+  do not work. It is evidence that the screen measured the wrong thing.
+
+THE CAUSE, FOUND AND CONFIRMED BEFORE THIS WAS WRITTEN
+  §18's number is a CROSS-SECTIONAL RANK -- each security's 250-session
+  return ranked against the rest of the universe ON THAT DATE. This
+  screen pooled raw indicator LEVELS across all 208 sample dates and
+  took one Spearman correlation over all 144,766 observations.
+
+  Those are different questions. Pooling across dates lets an indicator
+  be rewarded for describing WHEN the market was cheap rather than WHICH
+  security was worth holding. Over 2000-2009 -- two crashes and two
+  rebounds -- twelve-month return is strongly negatively related to the
+  next quarter POOLED, because the whole market fell and then rebounded
+  together, while the cross-sectional question has the opposite sign.
+
+  Measured, before this amendment was written, on five arms:
+      arm                     pooled IC     cross-sectional IC (t)
+      rate_of_change_252        -0.0249       +0.0141  (+0.54)
+      rate_of_change_21         +0.0155       +0.0147  (+0.70)
+      atr_percent_14            -0.0565       -0.0298  (-0.99)
+      ulcer_index_14            -0.0434       -0.0281  (-1.14)
+      chaikin_money_flow_20     +0.0150       +0.0291  (+1.45)
+  The positive control's sign RECOVERS. The negative control's
+  significance COLLAPSES. Both are what a correct method should do.
+
+THE SECOND DEFECT, WHICH IS LARGER THAN THIS SCREEN
+  The pooled t-statistic is not merely pointed at the wrong question, it
+  is overstated. It treats 144,766 observations as independent after
+  dividing only by the horizon overlap (63/21 = 3). It does not account
+  for the fact that ~648 securities share EACH sample date and therefore
+  share that date's market move. The independent unit is nearer the date
+  than the observation: 208 dates, ~69 after overlap correction, not
+  48,255.
+
+  That is why atr_percent_14 reads t -12.42 pooled and t -0.99
+  cross-sectionally. The pooled figure is inflated by roughly twelvefold.
+
+  ** This applies to every pooled information coefficient in
+  SIGNAL_SCOREBOARD.md, not only to this screen. ** It does not overturn
+  any verdict that was NEGATIVE -- a signal that failed on an inflated
+  t-statistic fails harder on an honest one -- but every t quoted as
+  evidence FOR something must be re-read. This is recorded as an
+  obligation, not discharged here.
+
+WHAT IS RE-RUN, AND WHAT IT COSTS
+  The same 24 arms, same data, same four criteria, with the information
+  coefficient computed the Fama-MacBeth way: one IC per sample date,
+  averaged, with the t-statistic taken from the TIME SERIES of those
+  ICs and the same 3x overlap correction. Criteria 3 and 4 are applied
+  to the sign of the same per-date average within each half and band.
+
+  This is a SECOND LOOK at data already seen, and it is charged as one:
+  24 further trials. Ledger 74 -> 98, hurdle |t| > 2.5235
+  (expected_max_of_normals(98), measured).
+
+  Charging it is the point. The cheaper move -- calling the first pass a
+  "bug" and the second pass the "real" run at the old hurdle -- is how a
+  screen gets two looks for the price of one.
+
+WHAT WOULD COUNT, UNCHANGED
+  All four criteria, in the declared direction, at |t| > 2.5235. The
+  stop rule stands as written.
+```
