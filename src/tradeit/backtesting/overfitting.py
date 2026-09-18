@@ -116,6 +116,78 @@ def expected_max_of_normals(trials: int) -> float:
     )
 
 
+def student_t_within(t: float, df: int) -> float:
+    """P(|T| < t) for Student's t with a whole number of degrees of freedom.
+
+    The closed forms of Abramowitz & Stegun 26.7.3-4, exact for integer ``df``,
+    which is the only kind a block count produces. Written out rather than
+    imported because the project carries no statistics library, and one would
+    be a dependency for a dozen lines.
+    """
+    if df < 1:
+        raise ValueError("degrees of freedom must be >= 1")
+    if t <= 0.0:
+        return 0.0
+    theta = math.atan(t / math.sqrt(df))
+    c2 = math.cos(theta) ** 2
+    if df % 2 == 1:
+        # Odd: 2/pi * (theta + sin cos * (1 + 2/3 c^2 + 2*4/(3*5) c^4 + ...)).
+        series, term = 0.0, 1.0
+        for k in range(1, (df - 1) // 2 + 1):
+            if k > 1:
+                term *= (2 * (k - 1)) / (2 * (k - 1) + 1) * c2
+            series += term
+        if df == 1:
+            series = 0.0
+        return 2.0 / math.pi * (theta + math.sin(theta) * math.cos(theta) * series)
+    # Even: sin * (1 + 1/2 c^2 + 1*3/(2*4) c^4 + ...), df/2 terms.
+    series, term = 0.0, 1.0
+    for k in range(df // 2):
+        if k > 0:
+            term *= (2 * k - 1) / (2 * k) * c2
+        series += term
+    return math.sin(theta) * series
+
+
+def small_sample_hurdle(trials: int, blocks: int) -> float:
+    """The multiple-testing hurdle, restated for a t built from few blocks.
+
+    :func:`expected_max_of_normals` gives a threshold on a *normal* scale. A
+    t-statistic from ``blocks`` block means has ``blocks - 1`` degrees of
+    freedom and fatter tails, so the same number is cleared by chance more
+    often: at 12 blocks, |t| > 2.56 happens about 2.6% of the time under the
+    null against 1.0% for a normal. This returns the Student-t threshold with
+    the **same two-sided tail probability** the normal hurdle has, so a result
+    from twelve yearly blocks faces the same false-positive rate as one from
+    fifty quarterly blocks.
+
+    Rejected: keeping the normal hurdle. It is what every 63-session test here
+    used, and at 52 blocks the difference is a few hundredths. At 12 it is
+    half a point of t, all of it in the direction of passing by chance.
+    """
+    hurdle = expected_max_of_normals(trials)
+    if blocks < 2:
+        raise ValueError("a t-statistic needs at least two blocks")
+    tail = 2.0 * (1.0 - statistics.NormalDist().cdf(hurdle))
+    return student_t_quantile(1.0 - tail, blocks - 1)
+
+
+def student_t_quantile(within: float, df: int) -> float:
+    """The t with P(|T| < t) = ``within``, by bisection on :func:`student_t_within`."""
+    if not 0.0 < within < 1.0:
+        raise ValueError("within must lie strictly between 0 and 1")
+    low, high = 0.0, 1.0
+    while student_t_within(high, df) < within:
+        high *= 2.0
+    for _ in range(200):
+        mid = (low + high) / 2.0
+        if student_t_within(mid, df) < within:
+            low = mid
+        else:
+            high = mid
+    return high
+
+
 def sharpe_hurdle(trials: int, years: float) -> float | None:
     """The annualised Sharpe a no-skill search would be expected to produce.
 

@@ -25,6 +25,9 @@ from tradeit.backtesting.overfitting import (
     TrialVerdict,
     expected_max_of_normals,
     sharpe_hurdle,
+    small_sample_hurdle,
+    student_t_quantile,
+    student_t_within,
     trial_key,
 )
 from tradeit.core.enums import ArtifactKind
@@ -228,3 +231,57 @@ class TestAssessment:
         ledger.record_all((_spec(strategy_config_digest=f"cfg-{i}") for i in range(25)), at=NOW)
         assert ledger.count == 25
         assert ledger.hurdle(10.0) == pytest.approx(sharpe_hurdle(25, 10.0))
+
+
+class TestSmallSampleHurdle:
+    """The hurdle restated for a t from few blocks, and the t distribution under it."""
+
+    @pytest.mark.parametrize(
+        ("t", "df", "within"),
+        [
+            # Textbook two-sided quantiles, both parities and the two edge df.
+            (12.706, 1, 0.95),
+            (4.303, 2, 0.95),
+            (3.182, 3, 0.95),
+            (2.228, 10, 0.95),
+            (3.106, 11, 0.99),
+            (2.042, 30, 0.95),
+        ],
+    )
+    def test_the_distribution_matches_published_quantiles(
+        self, t: float, df: int, within: float
+    ) -> None:
+        assert student_t_within(t, df) == pytest.approx(within, abs=1e-4)
+
+    def test_the_distribution_approaches_the_normal(self) -> None:
+        normal = statistics.NormalDist()
+        assert student_t_within(1.96, 5000) == pytest.approx(
+            normal.cdf(1.96) - normal.cdf(-1.96), abs=1e-4
+        )
+
+    def test_the_hurdle_keeps_the_normal_tail_probability(self) -> None:
+        """The invariant: same false-positive rate, whatever the block count."""
+        normal = statistics.NormalDist()
+        tail = 2 * (1 - normal.cdf(expected_max_of_normals(112)))
+        for blocks in (4, 12, 52):
+            hurdle = small_sample_hurdle(112, blocks)
+            assert 1 - student_t_within(hurdle, blocks - 1) == pytest.approx(tail, rel=1e-6)
+
+    def test_fewer_blocks_face_a_higher_hurdle(self) -> None:
+        """Twelve yearly blocks must clear more than the normal 2.57 -- by ~half a point."""
+        few, many = small_sample_hurdle(112, 12), small_sample_hurdle(112, 52)
+        assert few > many > expected_max_of_normals(112)
+        assert few == pytest.approx(3.097, abs=0.002)
+        assert small_sample_hurdle(112, 100_000) == pytest.approx(
+            expected_max_of_normals(112), abs=1e-3
+        )
+
+    def test_one_block_is_refused(self) -> None:
+        with pytest.raises(ValueError):
+            small_sample_hurdle(112, 1)
+
+    def test_the_quantile_inverts_the_distribution(self) -> None:
+        assert student_t_quantile(0.95, 11) == pytest.approx(2.201, abs=1e-3)
+        assert student_t_quantile(0.95, 10) == pytest.approx(2.228, abs=1e-3)
+        for df in (1, 2, 7, 12):
+            assert student_t_within(student_t_quantile(0.9, df), df) == pytest.approx(0.9)
