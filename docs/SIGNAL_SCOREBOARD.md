@@ -2552,3 +2552,91 @@ registration pursues it pays. **Ledger stands at 98 trials, hurdle 2.5235.**
 **The obligation §32 recorded is discharged for the one section it could change.**
 Every other section's verdict was negative, and a negative verdict cannot be
 rescued by a smaller t.
+
+---
+
+## §34 — `adx_14` out of sample: closed, clearly; and the floor that closed §27 was biased — 2026-09-18
+
+**Registered in [`prereg/ADX_CONFIRMATION_2026-09-18.md`](prereg/ADX_CONFIRMATION_2026-09-18.md)
+at `324e26b`**, Amendment 1 at `f87a15c`, verdict code committed at `9b790e1` —
+all before any `adx_14` statistic on 2010–2019 existed. The lead came from the
+indicator screen's Amendment 4: t +2.55 against 2.5235 on the fourth reading of
+2000–2009, ruled not a result and granted only a name here.
+
+2,176,880 observations, 8,377 securities, 2010–2019, **on the common calendar
+grid** (`0c7a521`) — every security sampled on the same 491 exchange sessions,
+every outcome on a date measured to the same session 63 later. Universe from the
+corpus as it now stands, **793 more dead companies** than the 2026-09-11 file,
+and no whole-life bar filter.
+
+### The machinery passed before `adx_14` was looked at
+
+| check | reading | verdict |
+|---|---|---|
+| positive control — `realized_volatility_60`, no floor | IC −0.1325, t −8.89, median breadth **4,453** | passes |
+| calibration — `adx_14` shuffled within date ×200 | 95th percentile \|t\| **1.90** (limit 2.3) | calibrated |
+| Amendment 1 — undetermined volume in the floored sample | **3.6%** (bound 5%) | judged once |
+
+Breadth **4,453** securities on a median date — against **50** under the old
+per-security grids. That is the design fix doing what it was built for.
+
+### `adx_14`: not confirmed, and not inconclusive
+
+| criterion | reading | |
+|---|---|---|
+| 1 — block t > 2.5306, IC positive | IC **−0.0132**, t **−3.30** | fail |
+| 2 — quintile spread positive by block mean and median | −1.94% / −0.45% | fail |
+| 3 — positive in both halves | −0.0146 / −0.0109 | fail |
+| 4 — positive in ≥4 of 5 within-date volatility bands | 2 of 5 | fail |
+
+**Smallest detectable IC: 0.0102.** The registration predicted ~0.046 at stride 21
+and warned that a null might not resolve the lead's +0.026. It resolved it
+comfortably, and found the opposite sign. **The lead is closed by the stop rule.**
+
+The significant *negative* reading is **not** a short-ADX finding. Direction was
+declared positive before the data; reading the reverse off the result would be
+deriving it, which costs two trials and makes the prior unfalsifiable. It is
+recorded as what it is: the screen's crossing was noise, on a dataset read four
+ways.
+
+### The finding that matters more: §33's floor result does not survive the volume fix
+
+The adx scan carried `realized_volatility_60` and **corrected** dollar volume
+(`67894dd`, DATA_DICTIONARY §0.9) on the same years as §26 and §33. §33 had said
+the low-volatility effect is *"not distinguishable from zero"* above $1M/day, and
+called that an independent confirmation of §27's closure. Re-read:
+
+| low-volatility effect, 63 sessions, 2010–2019 | IC | t |
+|---|---|---|
+| §33, old read, broad dates above $1M/day | −0.0403 | −1.89 |
+| **now, above $1M/day** | **−0.0840** | **−4.34** |
+| **now, above $10M/day** | **−0.0700** | **−3.31** |
+| now, below $1M/day | −0.1690 | −12.74 |
+
+Above both floors it clears the hurdle §33 was judged at (2.2442) and today's
+(2.5306). **§33's conclusion is withdrawn**, and so is its claim to confirm §27.
+
+**One attribution check, and only one** — every further slice of a closed line is
+another chance to fool ourselves. Restricted to the securities the old universe
+already held, above $1M/day: **−0.0794, t −4.05**. So the added dead companies are
+not what moved it (they read stronger still, −0.1098, but the old set carries the
+effect alone). The change comes from the **corrected volume floor, the common
+grid, or both**; separating them would mean rebuilding the broken read, and it is
+not done.
+
+**What this is and is not.** It is a diagnostic on the ninth reading of 2010–2019
+for volatility, unregistered, and it confers nothing. It is evidence that §27's
+closure rested on a floor that — measured in §0.9 — let future winners in and kept
+future distressed names out, which is exactly the tilt that would hide this
+effect among liquid names. Whether to re-open the line is a reversal of §27's
+written decision and is put to the owner rather than taken here.
+
+**If re-opened, the data exists to do it honestly.** The corpus reaches 2026-09-14:
+8,688 securities print in 2020–2025, 2,730 of them dying in it — a window no
+volatility study has read.
+
+### Registered and spent
+
+**Ledger: 98 → 100 trials**, hurdle 2.5306. `adx_14` and its positive control.
+The §33 re-read is a diagnostic and adds none. Forty-two signals measured; none
+survives as a registered, out-of-sample, tradeable result.
