@@ -2900,3 +2900,120 @@ claims, it must beat *that*, not beat cash.
 
 **Ledger: 101 → 102 trials.** Forty-four measurements; one signal survives as a
 signal, none as a strategy.
+
+---
+
+## §38 — the stop ladder against holding: inconclusive, and a trade of return for drawdown — 2026-09-18
+
+**Registered in [`prereg/STOP_LADDER_2026-09-18.md`](prereg/STOP_LADDER_2026-09-18.md)
+at `dc3499a`**, two-sided, on **2010–2019** because the question came from
+2020–2025. Amendment 1 (engine fix) and Amendment 2 (a minimum price) were both
+written before any verdict was read.
+
+**Two defects surfaced first, and both are bigger than this test.**
+
+### 1. The backtest engine never moved a stop
+
+`EventDrivenEngine` built every position with its **initial** stop and discarded
+`CyclePlan.stop_updates`. The ladder computed breakeven at 1R and a trailing stop
+from 1.5R, and the engine threw both away. The pilot's exit mix exposed it —
+66 partial profits at 2R, not one trailing exit, a shape the ladder cannot
+produce. **Every backtest this platform has run held its initial stop for the life
+of the position:** §7, §28, §36, §37. Fixed at `485a613`; trailing exits went from
+0 to about 70 per sample on real data. §7, §28 and §36 are due to be re-run.
+
+### 2. A $0.0001 stock could be bought
+
+Two of the four registered samples went to **negative equity**. Securities
+printing at $0.0001–$0.0002 passed eligibility — no minimum price, a 20-session
+turnover window still holding their last normal weeks, a flat sub-penny window
+reading as calm — and equal-dollar sizing bought **20.6 and 77.6 million shares**.
+At $0.005 a share the commission was **$102,911 and $388,007** on ~$2,000
+positions; equity reached −$520,343 and −$650,233. FactorTilt now requires
+`LiquidityConfig.min_price` ($5), the platform's own declared minimum, which both
+registrations' "every other value at its default" clause already included but the
+strategy never read (`29111dc`). **The platform's sizer will still open a position
+whose commission is fifty times its value** — that is trading logic, raised with
+the owner separately.
+
+### §37 holds through all three runs
+
+| §37 run | CALM − RANDOM | t | criteria failed |
+|---|---|---|---|
+| original engine | −4.46 pp/yr | −7.79 | 4 of 5 |
+| stop moves applied | −4.14 pp/yr | −3.68 | 4 of 5 |
+| stop moves + $5 minimum | **−4.35 pp/yr** | **−3.04** | **4 of 5** |
+
+Low volatility is not profitable as a portfolio on this corpus, under any version
+of the machinery. The verdict never came close to moving.
+
+### The registered result: INCONCLUSIVE
+
+2010–2019, four disjoint samples of 500 from the 2,393 securities alive and liquid
+on 2010-01-04, identical RANDOM selections, one change between the arms.
+
+| sample | LADDER CAGR | HOLD CAGR | paired |
+|---|---|---|---|
+| 0 | 4.82% | 5.65% | −0.83 pp |
+| 1 | 5.26% | 9.81% | −4.54 pp |
+| 2 | 2.83% | 4.33% | −1.50 pp |
+| 3 | 5.20% | 5.95% | −0.75 pp |
+
+| criterion, "the ladder costs money" direction | reading | |
+|---|---|---|
+| 1 — HOLD ahead in all four | **4 of 4** | met |
+| 2 — paired t below −2.5444 | mean **−1.90 pp**, t **−2.13** | **not met** |
+| 3 — HOLD's Sharpe ahead in ≥ 3 of 4 | 3 of 4 | met |
+| 4 — negative in both halves | −1.48 pp / −2.32 pp | met |
+| 5 — HOLD ahead in all four at 5× costs | 4 of 4 | met |
+
+**Four of five, short on significance.** By the rule fixed in advance that is
+**inconclusive**, and nothing moves: the default exits stand, and there is no
+licence to revisit them. The direction is consistent — every sample, both
+halves, both cost settings — but a paired t of −2.13 across four samples is not
+past a two-sided hurdle of 2.5444, and the registration does not bend for a
+result that is consistent without being significant.
+
+### What the ladder does, as diagnostics that decide nothing
+
+| 2010–2019, base costs, recovery 1.0 | LADDER | HOLD |
+|---|---|---|
+| CAGR | +4.53% | +6.43% |
+| **maximum drawdown** | **13.17%** | **23.66%** |
+| Sharpe | 0.21 | 0.29 |
+| exits: stop-loss / trailing / partial | 172 / 70 / 104 | — |
+
+**The ladder trades return for drawdown.** It gave up about 1.9 points a year and
+cut the worst drawdown by more than ten points. It is a risk control doing what a
+risk control does, and on this decade its cost was larger than its protection in
+Sharpe terms.
+
+**On the years that suggested the question, the picture inverts.**
+
+| 2020–2025 — the data that prompted this test | LADDER | HOLD |
+|---|---|---|
+| CAGR | **+7.71%** | +3.67% |
+| maximum drawdown | 16.97% | **34.82%** |
+
+A decade of steady rises (2010–2019) against one containing the 2020 crash and
+the 2022 bear market: stops paid for themselves only where the market fell hard.
+**That is why the question could not be tested on 2020–2025** — the observation
+that prompted it was a property of that regime, and on the decade it had not seen
+it did not hold. This is recorded as a regime contrast, not a finding: one
+decade each, unregistered on the second.
+
+### What stands
+
+- **The default exits stand**, unconfirmed and unrefuted.
+- **Every engine result before `485a613` ran a different stop ladder** from the
+  one the platform declares; §7, §28 and §36 are due to be re-run.
+- **Any strategy's benchmark is now two numbers, not one:** a random selection
+  through the ladder earned +4.53% on 2010–2019 and +7.71% on 2020–2025, and held
+  to the clock +6.43% and +3.67%. A signal worth building must beat the better of
+  the two in its own window.
+
+### Registered and spent
+
+**Ledger: 102 → 104 trials** (two-sided), hurdle 2.5444. Forty-five measurements;
+one signal survives as a signal, none as a strategy, and the platform's own risk
+control is neither confirmed nor refuted.
