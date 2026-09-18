@@ -32,6 +32,7 @@ sys.path.insert(0, "scripts")
 
 from signal_screen_indicators import CONTROLS, DECLARED, HORIZON
 from tradeit.backtesting.overfitting import expected_max_of_normals
+from tradeit.signals.cross_section import cross_sectional_ic
 from tradeit.signals.study import (
     Observation,
     Orientation,
@@ -75,45 +76,23 @@ def _fama_macbeth(
     horizon: int = HORIZON,
     min_per_date: int = MIN_PER_DATE,
 ) -> tuple[float | None, float | None, int]:
-    """One IC per sample date, averaged, with the t from their time series.
+    """Per-date IC with the calendar-block standard error.
 
-    **Amendment 3's correction, and the reason it was needed.** A pooled
-    correlation over every observation asks whether the indicator was high when
-    the market was about to rise -- a question about *dates*, which a portfolio
-    cannot trade, because it must choose among the securities available today.
-    Ranking within a date asks which security, which is the question the product
-    is organised around.
-
-    It also fixes the standard error. Roughly 648 securities share each sample
-    date and therefore share that date's market move, so they are nothing like
-    648 independent observations. The independent unit is the date: the pooled
-    reading divided 144,766 by the horizon overlap alone and called the result
-    independent, which is how an information coefficient of -0.03 came to carry
-    a t-statistic of -12.
-
-    Overlap is corrected the same way it is everywhere else here -- a
-    63-session horizon sampled every 21 sessions means three consecutive dates
-    share a window, so the count of dates is divided by three rather than the
-    count of rows.
+    Delegates to :func:`tradeit.signals.cross_section.cross_sectional_ic`. The
+    first version of this function divided the count of dates by horizon/stride,
+    which is only right when every sample date sits a full stride from the next.
+    Here they do not -- each security samples on its own grid from its own first
+    bar, so 208 usable dates were far closer together than 21 sessions and
+    shared most of their outcome windows. That overstated independence and made
+    every t in the first corrected table too LARGE, which cannot have hidden a
+    pass but did overstate the resolution. ``stride`` is kept in the signature
+    only so the call sites read the same; calendar time now sets the count.
     """
-    ics: list[float] = []
-    for date in np.unique(dates):
-        mask = dates == date
-        if int(mask.sum()) < min_per_date:
-            continue
-        x, y = signal[mask], outcome[mask]
-        if len(set(x.tolist())) < 2 or len(set(y.tolist())) < 2:
-            continue
-        ics.append(_spearman(x, y))
-    if len(ics) < 6:
-        return None, None, len(ics)
-    values = np.array(ics)
-    mean = float(values.mean())
-    spread = float(values.std(ddof=1))
-    if spread == 0.0:
-        return mean, None, len(ics)
-    effective = len(values) / max(1.0, horizon / stride)
-    return mean, mean / (spread / float(np.sqrt(effective))), len(ics)
+    del stride
+    result = cross_sectional_ic(signal, outcome, list(dates), horizon, min_per_date=min_per_date)
+    if result is None:
+        return None, None, 0
+    return result.ic, result.t, result.dates
 
 
 def _study(
@@ -359,15 +338,15 @@ def main() -> int:
     # established -- the same error as quoting a pooled t-statistic without
     # saying how many independent periods it rests on.
     usable_dates = [d for d, n in collections.Counter(dates).items() if n >= MIN_PER_DATE]
-    effective_periods = len(usable_dates) / max(1.0, HORIZON / args.stride)
-    dispersions = []
-    for name in DECLARED:
-        per_date = [
-            _spearman(panel[name][date_keys == d], outcome[date_keys == d]) for d in usable_dates
-        ]
-        dispersions.append(float(np.std(per_date, ddof=1)))
-    typical = float(np.median(dispersions))
-    detectable = hurdle * typical / float(np.sqrt(effective_periods))
+    readings = [
+        cross_sectional_ic(panel[name], outcome, list(date_keys), HORIZON) for name in DECLARED
+    ]
+    detectables = [r.detectable(hurdle) for r in readings if r is not None]
+    finite = [v for v in detectables if v is not None]
+    detectable = float(np.median(finite)) if finite else float("nan")
+    blocks = next((r.blocks for r in readings if r is not None), 0)
+    breadth = next((r.median_breadth for r in readings if r is not None), 0.0)
+    effective_periods = float(blocks)
     best = max(
         ((abs(float(v["ic"])), k) for k, v in summary.items() if v["ic"] is not None),  # type: ignore[arg-type]
         default=(0.0, "none"),
@@ -377,9 +356,11 @@ def main() -> int:
         f"  usable sample dates (>= {MIN_PER_DATE} securities): {len(usable_dates):,} of "
         f"{len(set(dates)):,}, carrying "
         f"{sum(1 for d in dates if d in set(usable_dates)) / len(dates):.1%} of observations\n"
-        f"  effective independent periods after {HORIZON // args.stride}x overlap: "
+        f"  non-overlapping {HORIZON}-session calendar blocks -- the sample size: "
         f"{effective_periods:.0f}\n"
-        f"  typical per-date IC dispersion: {typical:.4f}\n"
+        f"  median securities per usable date: {breadth:.0f}  (read before any IC: "
+        f"the estimate\n     is an unweighted mean over dates, so thin dates outvote "
+        f"broad ones)\n"
         f"  SMALLEST cross-sectional IC this design could have detected: "
         f"{detectable:+.4f}\n"
         f"  largest any arm produced: {best[0]:+.4f} ({best[1]})\n"

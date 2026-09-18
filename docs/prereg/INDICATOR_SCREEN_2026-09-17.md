@@ -393,3 +393,51 @@ WHAT WOULD COUNT, UNCHANGED
   All four criteria, in the declared direction, at |t| > 2.5235. The
   stop rule stands as written.
 ```
+
+```
+AMENDMENT 4 -- 2026-09-18. A FOURTH READING OF THE SAME DATA, WHAT IT
+SHOWED, AND WHY IT CHANGES NOTHING THAT BINDS.
+
+THE BINDING VERDICT IS UNCHANGED
+  Under Amendment 3's method AS WRITTEN -- per-date ICs, t from their
+  time series, "the same 3x overlap correction" -- nothing was flagged.
+  That is the registered result of this screen and it stands.
+
+WHAT WAS FOUND AFTERWARDS
+  The "3x overlap correction" assumes sample dates sit a full stride
+  apart. They do not: each security samples on its own grid from its own
+  first bar, so the 208 usable dates crowd far closer than 21 sessions
+  and share most of their outcome windows. The count of independent
+  periods was overstated. It was replaced in tradeit.signals.cross_section
+  by non-overlapping calendar blocks one horizon wide, Newey-West lag 1.
+
+  A first version of that module reported the estimate as the mean over
+  DATES and built its t on the mean over BLOCKS. On uneven sampling those
+  are different numbers: it produced a positive control reading IC
+  +0.0141 with t -0.01 -- opposite signs -- and carried adx_14 from
+  t +1.33 to +2.55 on the mismatch. Fixed before anything was recorded;
+  the test that now guards it was shown to FAIL against the broken code.
+
+THE ONE ARM THAT CROSSES UNDER THE CORRECTED ESTIMATOR
+  adx_14, declared POSITIVE: IC +0.0264, t +2.55 against a hurdle of
+  2.5235, sign holding in both halves and 5 of 5 volatility bands.
+
+  IT IS NOT A RESULT, for three reasons, any one sufficient:
+  1 It appears only under a method adopted AFTER the registered verdict
+    was read. A pass that exists on the fourth reading of the data and
+    not on the registered one is precisely what pre-registration is for.
+  2 The margin is 0.03 of a t-statistic. Four readings of one dataset
+    make a marginal crossing on one of them likely by chance alone.
+  3 The design's median date carries 50 securities, and the estimate
+    weights dates, not securities. The positive control reads -0.0004
+    (t -0.01) under the same estimator -- the machinery that produced
+    adx_14's pass cannot see the one effect it was built to find.
+
+  WHAT IT EARNS: the right to be NAMED in a future registration, on data
+  this screen never read (2010-2019), on a common calendar grid, with the
+  estimator fixed in advance. That registration would charge its own
+  trials. Nothing about adx_14 may be promoted on 2000-2009 data.
+
+TRIALS  None added. A reading that cannot confer a result has nothing to
+        charge; the cost is paid by whatever registration pursues it.
+```

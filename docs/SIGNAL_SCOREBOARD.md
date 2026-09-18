@@ -2441,3 +2441,114 @@ clears a liquidity floor, and is still a bad print — security 79 round-trips
 39.50 → 2,420 → 40.00, 119 times, and the $1M floor is *defeated* by it because
 the defect creates the turnover. And the registration's own Amendment 2 records
 that six such rows moved a sample's mean forward return from **+408.6% to +3.2%**.
+
+---
+
+## §33 — §26 re-read with honest standard errors: it survives, and §27 still closes it — 2026-09-18
+
+§32 found that every pooled information coefficient in this document carries an
+inflated t-statistic, and recorded an obligation: *every t quoted as evidence
+**for** something must be re-read.* §26 is the only section where that obligation
+bites, because it is the only section whose verdict was a pass —
+`realized_volatility_60` and `atr_percent` **SURVIVE** at both horizons, at t −26
+to −38. If any verdict on this scoreboard was a pooled-t artefact, it was this
+one. So it was re-read first.
+
+### The estimator, now in `src` rather than in a script
+
+[`tradeit.signals.cross_section`](../src/tradeit/signals/cross_section.py) — one
+IC per sample date, averaged over **non-overlapping calendar blocks one horizon
+wide**, t from those block means with a Newey-West lag-1 correction. Three
+failures shaped it, and each is a test:
+
+| defect | what it did | the test that now guards it |
+|---|---|---|
+| pooling across dates | rewarded *when* over *which*; §32's positive control came back inverted | a pure market-timing panel reads large pooled, ~0 cross-sectional |
+| dividing dates by horizon/stride | assumed dates sit a stride apart; they don't — each security samples on its own grid, so §26's panel has **1,770 usable dates in a decade holding ~40 non-overlapping 63-session windows** | the same decade sampled daily vs quarterly yields the same block count |
+| estimate over dates, t over blocks | reported two different numbers as one — a positive control read **IC +0.0141 with t −0.01**, and the mismatch alone lifted `adx_14` from t +1.33 to +2.55 | a panel built to separate the two averages; **shown to fail against the broken code** before it was trusted |
+
+The last row is worth its own sentence. The first test written for that defect
+used evenly spaced dates — where the two averages are identical — and passed
+against the broken code, 0 disagreements in 58 panels. A test written after a fix
+proves nothing until it has been seen to fail without it.
+
+### §26 under honest standard errors: every criterion still passes
+
+Same corrected-corpus panel §29 used (232,830 observations), same four samples,
+same halves, **same registered hurdle** (2.2442 at the 46 trials §26 was judged
+at — a later hurdle would change two things at once). Only the standard errors
+change. Criterion 1's interval now resamples whole calendar blocks instead of
+single observations.
+
+| | 21s, `rv60` | 63s, `rv60` | 21s, `atr%` | 63s, `atr%` |
+|---|---|---|---|---|
+| pooled t (§29) | −36.93 | −26.37 | −36.82 | −28.24 |
+| **cross-sectional t** | **−15.19** | **−12.20** | **−14.41** | **−12.14** |
+| C1, both halves, block CI | holds | holds | holds | holds |
+| C3, samples negative | 4/4 | 4/4 | 4/4 | 4/4 |
+| verdict | **SURVIVES** | **SURVIVES** | **SURVIVES** | **SURVIVES** |
+
+The inflation was real but modest here — about 2.4×, not the twelvefold §32
+measured on the screen — and the effect is far past it. **The prediction that
+§26 would not survive, made in this project's last checkpoint, was wrong.**
+Measure, do not predict.
+
+### But the headline magnitude is not the typical one
+
+The estimate weights *dates*, and the dates are wildly uneven: a few broad dates
+where the common grid puts ~2,000 securities, and many thin dates of 20–30 recent
+listings on their own grids. The thin ones win by count.
+
+| cross-section | `rv60` 21s | `rv60` 63s | `atr%` 21s | `atr%` 63s |
+|---|---|---|---|---|
+| all usable dates | −0.1235 (t −15.19) | −0.1647 (−12.20) | −0.1227 (−14.41) | −0.1764 (−12.14) |
+| thin, 20–199 names (**22%** of obs) | −0.1290 | −0.1713 | −0.1281 | −0.1836 |
+| **broad, ≥200 names (73% of obs)** | **−0.0562 (−4.29)** | **−0.0806 (−4.44)** | **−0.0553 (−3.97)** | **−0.0836 (−4.50)** |
+| broad, **above $1M/day** | −0.0214 (−1.28) | −0.0403 (−1.89) | −0.0198 (−1.11) | −0.0421 (−1.95) |
+
+On the dates that hold three-quarters of the data, the effect is **less than half
+the headline** — and still clears its hurdle. The module now reports
+`median_breadth` beside every estimate so this cannot be missed again.
+
+### What this settles
+
+**§26 was not a pooled-t artefact.** Its criteria pass under an estimator that
+removes both defects §32 found, on the broad cross-sections alone as well as on
+all of them.
+
+**§27's closure stands, and now has an independent confirmation.** Among
+securities trading above $1M/day the effect is **not distinguishable from zero at
+either horizon, for either signal** — t between −1.11 and −1.95 against a hurdle
+of 2.24. §27 reached that conclusion by conditioning on price and market cap;
+this reaches it by a different route. The low-volatility effect in this corpus is
+real, and it lives in the securities a portfolio of any size could not trade.
+**Nothing is built on it.**
+
+### §32 corrected, and one lead recorded without being promoted
+
+§32's resolution and best-arm figures came from the date-stride method this
+section replaces. Re-run on the module: **35 calendar blocks, not 69 periods**;
+smallest detectable cross-sectional IC **+0.0347**, not +0.0510. §32 stands as a
+record of what was measured then.
+
+**Its registered verdict is unchanged — nothing flagged.** One arm crosses the
+line under the corrected estimator: `adx_14`, IC +0.0264, **t +2.55 against
+2.5235**, sign holding in both halves and all five volatility bands. It is **not
+a result**. It exists only on the fourth reading of one dataset, the margin is
+0.03, and the same estimator reads the positive control at −0.0004 (t −0.01) — so
+the machinery that produced the pass cannot see the one effect it was built to
+find. Recorded in the screen registration's Amendment 4 with what it earns: the
+right to be *named* in a future registration on 2010–2019 data, on a common
+calendar grid, with the estimator fixed in advance. **Nothing about `adx_14` may
+be promoted on 2000–2009 data.**
+
+### Registered and spent
+
+**No trials added.** The §26 re-read can only withdraw a pass, never confer one —
+an honest standard error widens intervals and shrinks t-statistics — so it is an
+audit, not a trial. The `adx_14` reading cannot confer a result either; whatever
+registration pursues it pays. **Ledger stands at 98 trials, hurdle 2.5235.**
+
+**The obligation §32 recorded is discharged for the one section it could change.**
+Every other section's verdict was negative, and a negative verdict cannot be
+rescued by a smaller t.
