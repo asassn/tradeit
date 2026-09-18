@@ -204,4 +204,29 @@ STOP RULE -- declared before the result, as §27's was
   screening does not work on this corpus at this horizon, and the honest
   next step is combination, regime conditioning, or the corpus itself --
   not a twenty-fifth indicator.
+
+--------------------------------------------------------------------
+AMENDMENT 1 -- 2026-09-17, before the screen was run and before any
+signal above had been computed on any session.
+
+WHAT IS ADDED
+  A scan point is used only if BOTH endpoint bars -- session T and
+  session T+63 -- have volume > 0.
+
+WHY IT WAS MISSING AND WHY IT IS NOT OUTCOME-DRIVEN
+  The $1M/day floor was assumed to imply it and does not: the floor is a
+  TRAILING 20-session average, so a security can satisfy it on a session
+  that itself never traded, and nothing in the floor constrains the
+  outcome bar 63 sessions later at all. The corpus carries 2,245,866
+  volume-0 bars (6.339%) across 7,582 securities for the reason
+  PATTERN_QUALITY_2026-09-10 Amendment 2 records -- the vendor keeps
+  emitting placeholder rows after a security stops trading.
+
+  This is a statement about whether a return EXISTS, not about whether
+  indicators work. You cannot buy at a price nobody transacted and sell
+  at another price nobody transacted. It applies identically to all 24
+  arms, it is written here before any of them has been computed, and it
+  would have been the right rule had the result been spectacular.
+
+TRIALS  Unchanged at 24. No signal specification moved.
 ```
