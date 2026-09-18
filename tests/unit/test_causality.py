@@ -87,6 +87,21 @@ def _kernels() -> dict[str, Callable[[dict[str, np.ndarray]], np.ndarray]]:
         "volume_contraction": lambda b: k.contraction_ratio(b["volume"], 10, 50),
         "percent_rank_60": lambda b: k.percent_rank(b["close"], 60),
         "gap_frequency_20": lambda b: k.gap_frequency(b["open"], b["close"], 20, 0.02),
+        # Added for the 24-indicator screening pass. A kernel absent from this
+        # dict is not merely untested for causality, it is exempt from every
+        # check below -- which is the same blindness the ORM drift guard had
+        # when a table was missing from its list.
+        "tema_20": lambda b: k.tema(b["close"], 20),
+        "aroon_oscillator_25": lambda b: k.aroon_oscillator(b["high"], b["low"], 25),
+        "cci_20": lambda b: k.commodity_channel_index(b["high"], b["low"], b["close"], 20),
+        "ulcer_index_14": lambda b: k.ulcer_index(b["close"], 14),
+        "money_flow_index_14": lambda b: k.money_flow_index(
+            b["high"], b["low"], b["close"], b["volume"], 14
+        ),
+        "chaikin_money_flow_20": lambda b: k.chaikin_money_flow(
+            b["high"], b["low"], b["close"], b["volume"], 20
+        ),
+        "td_setup_count": lambda b: k.td_setup_count(b["close"]),
     }
 
 

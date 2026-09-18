@@ -680,3 +680,225 @@ def gap_frequency(open_: Floats, close: Floats, period: int, threshold: float) -
     exceeded[np.isnan(gaps)] = np.nan
     out[period:] = sma(exceeded, period)[period - 1 :]
     return out
+
+
+def tema(values: Floats, period: int) -> Floats:
+    """Triple exponential moving average: ``3*e1 - 3*e2 + e3``.
+
+    Not an EMA applied three times -- that is ``e3`` alone and lags *more*, not
+    less. The triple form is a linear combination chosen so that the lag terms
+    cancel to second order, which is the whole reason the indicator exists.
+    Getting this wrong produces a curve that looks plausible and is slower than
+    the plain EMA it was meant to improve on.
+
+    Warm-up is ``3 * (period - 1)``, because each stage consumes another
+    ``period - 1`` observations, and the composition is emitted only where all
+    three stages are defined rather than where the outermost one is.
+    """
+    values = _as_float(values)
+    e1 = ema(values, period)
+    warm = period - 1
+    out = _empty_like(values)
+    if values.shape[0] < 3 * warm + 1:
+        return out
+    # Each stage is fed only the region where its input is defined, then written
+    # back at the right offset; feeding NaNs into the recursion would poison it.
+    e2 = _empty_like(values)
+    e2[warm:] = ema(e1[warm:], period)
+    e3 = _empty_like(values)
+    e3[2 * warm :] = ema(e2[2 * warm :], period)
+    out[3 * warm :] = 3.0 * e1[3 * warm :] - 3.0 * e2[3 * warm :] + e3[3 * warm :]
+    return out
+
+
+def aroon_oscillator(high: Floats, low: Floats, period: int = 25) -> Floats:
+    """Aroon up minus Aroon down, in [-100, 100]. Warm-up ``period``.
+
+    Measures *how recently* the window's extremes occurred rather than how far
+    price has travelled, which is what makes it a different reading from every
+    other trend measure here: a security grinding sideways after a high prints
+    a falling Aroon while its return-based momentum is unchanged.
+
+    ``argmax`` takes the **first** maximum on a tie; this uses the last, because
+    the indicator asks how many bars have passed since the extreme was *most
+    recently* touched, and a series that keeps equalling its high has not aged.
+    """
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    high, low = _as_float(high), _as_float(low)
+    out = _empty_like(high)
+    n = high.shape[0]
+    window = period + 1
+    if n < window:
+        return out
+    highs = np.lib.stride_tricks.sliding_window_view(high, window)
+    lows = np.lib.stride_tricks.sliding_window_view(low, window)
+    # Reverse, argmax, and convert back: argmax on the reversed window returns
+    # the distance from the newest bar, which is exactly "periods since".
+    since_high = np.argmax(highs[:, ::-1], axis=1).astype(np.float64)
+    since_low = np.argmin(lows[:, ::-1], axis=1).astype(np.float64)
+    up = 100.0 * (period - since_high) / period
+    down = 100.0 * (period - since_low) / period
+    out[period:] = up - down
+    return out
+
+
+def commodity_channel_index(high: Floats, low: Floats, close: Floats, period: int = 20) -> Floats:
+    """CCI on typical price. Warm-up ``period - 1``.
+
+    The 0.015 constant is Lambert's, chosen so roughly 70-80% of readings fall
+    within ±100; it is a scaling convention, not a parameter to tune, and is
+    written as a literal for that reason.
+
+    The denominator is the **mean absolute deviation**, not the standard
+    deviation. They differ by about 25% on normal data and the indicator is
+    defined with the former; substituting the latter is a different indicator
+    wearing the same name and the same thresholds.
+    """
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    tp = typical_price(high, low, close)
+    out = _empty_like(tp)
+    n = tp.shape[0]
+    if n < period:
+        return out
+    windows = np.lib.stride_tricks.sliding_window_view(tp, period)
+    mean = windows.mean(axis=1)
+    deviation = np.abs(windows - mean[:, None]).mean(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out[period - 1 :] = np.where(
+            deviation > 0, (tp[period - 1 :] - mean) / (0.015 * deviation), np.nan
+        )
+    return out
+
+
+def ulcer_index(close: Floats, period: int = 14) -> Floats:
+    """Root-mean-square drawdown from the trailing high, in percent.
+
+    A downside-only volatility measure: a security that rises in a straight line
+    scores zero however fast it moves, while one that keeps giving back gains
+    scores high. That asymmetry is the point -- every other volatility kernel
+    here punishes upside and downside identically.
+    """
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    close = _as_float(close)
+    out = _empty_like(close)
+    n = close.shape[0]
+    if n < period:
+        return out
+    windows = np.lib.stride_tricks.sliding_window_view(close, period)
+    running_peak = np.maximum.accumulate(windows, axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        drawdown = np.where(
+            running_peak > 0, 100.0 * (windows - running_peak) / running_peak, np.nan
+        )
+    out[period - 1 :] = np.sqrt(np.mean(np.square(drawdown), axis=1))
+    return out
+
+
+def money_flow_index(
+    high: Floats, low: Floats, close: Floats, volume: Floats, period: int = 14
+) -> Floats:
+    """Volume-weighted RSI on typical price, in [0, 100]. Warm-up ``period``.
+
+    The distinction from RSI that justifies spending a separate measurement on
+    it: RSI counts the *size* of up and down moves, this counts the *money* that
+    moved, so a 3% rise on a quiet day and a 3% rise on five times normal volume
+    are the same to RSI and different here.
+
+    A bar whose typical price is unchanged is counted as neither inflow nor
+    outflow, which is the standard treatment and matters on thin names where
+    flat bars are common.
+    """
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    tp = typical_price(high, low, close)
+    volume = _as_float(volume)
+    out = _empty_like(tp)
+    n = tp.shape[0]
+    if n <= period:
+        return out
+    flow = tp * volume
+    change = np.diff(tp)
+    tolerance = tie_tolerance(np.maximum(np.abs(tp[1:]), np.abs(tp[:-1])))
+    positive = np.where(change > tolerance, flow[1:], 0.0)
+    negative = np.where(change < -tolerance, flow[1:], 0.0)
+    gains, losses = sma(positive, period), sma(negative, period)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = np.where(losses > 0, gains / losses, np.inf)
+        values = np.where(np.isinf(ratio), 100.0, 100.0 - 100.0 / (1.0 + ratio))
+    out[1:] = np.where(np.isnan(gains), np.nan, values)
+    return out
+
+
+def chaikin_money_flow(
+    high: Floats, low: Floats, close: Floats, volume: Floats, period: int = 20
+) -> Floats:
+    """Volume weighted by where each bar closed within its own range, in [-1, 1].
+
+    +1 means every bar in the window closed on its high, -1 on its low. Unlike
+    :func:`obv_trend`, which signs a bar by its change from the *previous*
+    close, this signs it by its position within its *own* range -- so a gap down
+    that then rallies all day reads negative to OBV and positive here. They are
+    different claims about the same bars and are measured separately for that
+    reason.
+
+    An inside bar with ``high == low`` contributes zero rather than dividing by
+    zero: nothing about where it closed is knowable.
+    """
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    high, low, close = _as_float(high), _as_float(low), _as_float(close)
+    volume = _as_float(volume)
+    span = high - low
+    with np.errstate(divide="ignore", invalid="ignore"):
+        multiplier = np.where(span > 0, ((close - low) - (high - close)) / span, 0.0)
+    flow = sma(multiplier * volume, period)
+    traded = sma(volume, period)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(traded > 0, flow / traded, np.nan)
+
+
+def td_setup_count(close: Floats, lookback: int = 4) -> Floats:
+    """DeMark setup count, signed. Warm-up ``lookback``.
+
+    **Positive is a buy setup**: consecutive bars closing *below* the close
+    ``lookback`` bars earlier, which DeMark reads as building downside
+    exhaustion. Negative is the sell setup, the mirror. The magnitude is the run
+    length; a broken run resets it to zero.
+
+    **The count is not capped at 9.** The classical indicator stops there and
+    calls the ninth bar the signal, but a cap would make a run of nine and a run
+    of twenty the same number, and the screen this was written for ranks on the
+    value. Where the classical reading is wanted, threshold at 9.
+
+    The comparison carries a tie tolerance for the reason
+    :data:`TIE_EPSILON_FACTOR` records: this is a discrete decision between
+    two float prices, and an unchanged close that differs by one ulp would
+    otherwise extend or break a run arbitrarily.
+    """
+    if lookback < 1:
+        raise ValueError("lookback must be >= 1")
+    close = _as_float(close)
+    out = _empty_like(close)
+    n = close.shape[0]
+    if n <= lookback:
+        return out
+    current, reference = close[lookback:], close[:-lookback]
+    tolerance = tie_tolerance(np.maximum(np.abs(current), np.abs(reference)))
+    direction = np.where(
+        current < reference - tolerance, 1.0, np.where(current > reference + tolerance, -1.0, 0.0)
+    )
+    run = 0.0
+    counts = np.empty(direction.shape[0], dtype=np.float64)
+    for i, step in enumerate(direction):
+        if step == 0.0:
+            run = 0.0
+        elif run * step > 0.0:
+            run += step
+        else:
+            run = step
+        counts[i] = run
+    out[lookback:] = counts
+    return out

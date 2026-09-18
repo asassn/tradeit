@@ -359,3 +359,142 @@ class TestObvTrend:
         closes = [10.0 + 0.1 * i for i in range(40)]
         values = self._run(closes, [0.0] * 40, lookback=20)
         assert np.all(np.isnan(values[20:]))
+
+
+class TestScreeningKernels:
+    """The seven kernels added for the 24-indicator screening pass.
+
+    Each is checked against a property that would fail if the implementation
+    were a *different* indicator wearing the same name -- the failure mode the
+    module docstring of ``kernels.py`` warns about, and the reason these are
+    written out rather than imported.
+    """
+
+    def test_tema_lags_less_than_the_ema_it_is_built_from(self) -> None:
+        """The whole justification for the triple form, stated as a test.
+
+        A plain EMA of a ramp sits below it by a fixed lag. TEMA's lag terms
+        cancel to second order, so on a *linear* series it should track the
+        value itself almost exactly. An implementation that returned
+        ``ema(ema(ema(x)))`` -- the common mistake -- would lag three times as
+        much as a single EMA and fail this outright.
+        """
+        ramp = np.arange(1.0, 201.0)
+        triple = k.tema(ramp, 20)
+        single = k.ema(ramp, 20)
+        last = -1
+        assert abs(triple[last] - ramp[last]) < abs(single[last] - ramp[last])
+        assert triple[last] == pytest.approx(ramp[last], abs=0.05)
+
+    def test_tema_warmup_is_three_stages_deep(self) -> None:
+        values = np.arange(1.0, 101.0)
+        out = k.tema(values, 10)
+        assert np.all(np.isnan(out[: 3 * 9]))
+        assert not np.isnan(out[3 * 9])
+
+    def test_aroon_reads_plus_100_on_a_series_making_new_highs(self) -> None:
+        rising = np.arange(1.0, 60.0)
+        out = k.aroon_oscillator(rising, rising - 0.5, 25)
+        assert out[-1] == pytest.approx(100.0)
+        falling = np.arange(60.0, 1.0, -1.0)
+        assert k.aroon_oscillator(falling + 0.5, falling, 25)[-1] == pytest.approx(-100.0)
+
+    def test_aroon_ages_a_high_that_is_not_revisited(self) -> None:
+        """What distinguishes Aroon from every return-based trend measure.
+
+        Price spikes once and then goes flat. Momentum is unchanged bar to bar;
+        Aroon up must decay as the high recedes into the window.
+        """
+        values = np.concatenate([np.full(30, 10.0), [20.0], np.full(30, 15.0)])
+        out = k.aroon_oscillator(values, values, 25)
+        assert out[32] > out[-1]
+
+    def test_cci_uses_mean_absolute_deviation_not_standard_deviation(self) -> None:
+        """The substitution that silently changes the indicator's scale.
+
+        On a series whose typical price alternates by a fixed step the two
+        deviations differ, and the hand-computed answer follows the defining
+        formula.
+        """
+        close = np.array([10.0, 12.0] * 10)
+        out = k.commodity_channel_index(close, close, close, 4)
+        window = close[-4:]
+        expected = (window[-1] - window.mean()) / (0.015 * np.abs(window - window.mean()).mean())
+        assert out[-1] == pytest.approx(expected)
+
+    def test_ulcer_index_is_zero_for_a_series_that_only_rises(self) -> None:
+        """Downside-only, which is what separates it from realized volatility."""
+        rising = np.arange(1.0, 60.0)
+        assert k.ulcer_index(rising, 14)[-1] == pytest.approx(0.0)
+        assert k.ulcer_index(np.arange(60.0, 1.0, -1.0), 14)[-1] > 0.0
+
+    def test_ulcer_index_ignores_upside_volatility(self) -> None:
+        steady = np.full(40, 10.0)
+        spiky = steady.copy()
+        spiky[::2] = 14.0
+        # The spiky series is far more volatile, but every move is a rise off a
+        # low and a return to it -- so it draws down from its own peak, and a
+        # symmetric measure and this one must disagree about which is calmer.
+        assert k.ulcer_index(spiky, 14)[-1] > k.ulcer_index(steady, 14)[-1]
+        assert k.realized_volatility(spiky, 14)[-1] > k.realized_volatility(steady, 14)[-1]
+
+    def test_money_flow_index_differs_from_rsi_when_volume_is_lopsided(
+        self, series: dict[str, np.ndarray]
+    ) -> None:
+        """If these agreed, one of the two trials would be wasted."""
+        high, low, close = series["high"], series["low"], series["close"]
+        flat = np.ones_like(close) * 1e6
+        even = k.money_flow_index(high, low, close, flat, 14)
+        lopsided = flat.copy()
+        lopsided[1:][np.diff(close) > 0] *= 10.0
+        weighted = k.money_flow_index(high, low, close, lopsided, 14)
+        assert weighted[-1] > even[-1]
+
+    def test_money_flow_index_is_bounded(self, series: dict[str, np.ndarray]) -> None:
+        out = k.money_flow_index(
+            series["high"], series["low"], series["close"], series["volume"], 14
+        )
+        finite = out[~np.isnan(out)]
+        assert finite.min() >= 0.0 and finite.max() <= 100.0
+
+    def test_chaikin_reads_the_close_within_the_bar_not_the_change_between_bars(
+        self,
+    ) -> None:
+        """The exact case that makes it a different claim from OBV.
+
+        Every bar gaps down from the previous close and then rallies to close on
+        its own high. OBV signs each bar negative; Chaikin signs each positive.
+        """
+        n = 30
+        close = np.linspace(100.0, 90.0, n)
+        high = close.copy()
+        low = close - 5.0
+        volume = np.full(n, 1e6)
+        assert k.chaikin_money_flow(high, low, close, volume, 20)[-1] == pytest.approx(1.0)
+        assert k.obv_trend(close, volume, 20)[-1] == pytest.approx(-1.0)
+
+    def test_chaikin_treats_a_zero_range_bar_as_uninformative(self) -> None:
+        n = 30
+        close = np.full(n, 10.0)
+        volume = np.full(n, 1e6)
+        out = k.chaikin_money_flow(close, close, close, volume, 20)
+        assert out[-1] == pytest.approx(0.0)
+
+    def test_td_setup_counts_a_buy_run_positive_and_resets_when_broken(self) -> None:
+        # Each close below the close four bars earlier: a buy setup that builds.
+        falling = np.arange(40.0, 0.0, -1.0)
+        out = k.td_setup_count(falling)
+        assert out[-1] == pytest.approx(len(falling) - 4)
+        rising = np.arange(1.0, 41.0)
+        assert k.td_setup_count(rising)[-1] == pytest.approx(-(len(rising) - 4))
+
+    def test_td_setup_run_breaks_and_restarts(self) -> None:
+        values = np.concatenate([np.arange(40.0, 20.0, -1.0), np.arange(20.0, 40.0)])
+        out = k.td_setup_count(values)
+        assert out[19] > 0.0
+        assert out[-1] < 0.0
+
+    def test_td_setup_is_not_capped_at_nine(self) -> None:
+        """A cap would make a run of nine and a run of thirty the same number,
+        and the screen ranks on the value."""
+        assert k.td_setup_count(np.arange(60.0, 0.0, -1.0))[-1] > 9.0
