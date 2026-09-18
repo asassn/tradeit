@@ -882,6 +882,20 @@ for `intraday-01`** and should be evaluated on item H alongside Kibot.
 - **FMP: excluded by standing project rule** for fundamentals, ratios, earnings,
   estimates, statements, OHLCV, insider and institutional data. Permitted role is
   corporate-action and symbol-change corroboration only.
+  - **Measured 2026-09-18, read-only, on the plan held** — asked whether analyst
+    consensus could reopen §40's earnings-surprise line
+    (`scripts/research01_probe_fmp_earnings.py`). The rule was not relaxed;
+    the probe shows that even if it were, the data would fail the corpus rules.
+    `/stable/earnings` answers only for a **fixed list of symbols**: 17 of 31
+    tried (large caps plus TWTR, ATVI, WBA). The plan refuses
+    CROX, GME, AMC, IRBT, FIVE, SAM, BOOT, CAKE, and the dead CELG, XLNX, BBBY,
+    LEH, SIVB, FRC. `limit` is capped at 5, but omitting it returns full history,
+    with estimates back to 1993. Every row's `lastUpdated` falls in 2025–2026,
+    so nothing shows that the estimate is what was known before the report.
+    The legacy `/api/v3/earnings-surprises` and `historical/earning_calendar`
+    endpoints return 403 (only accounts that subscribed before 2025-08-31 can use
+    them). **Result: selection-biased toward survivors, and not shown to be
+    point-in-time. It does not qualify, whatever the rule says.**
 - **SEC EDGAR: adopted, and now built.** Free, public domain, and the only source
   that can independently *verify* or *enumerate* what a price vendor claims.
   Milestone 0a has run against a real archive, which changes what we have to ask
