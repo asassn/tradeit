@@ -153,13 +153,15 @@ def _run(
     start = dt.date.fromisoformat(args.start)
     end = dt.date.fromisoformat(args.end)
     t0 = time.time()
+    rule = MovingAverageCross(fast=args.fast, slow=args.slow, stop_pct=args.stop_pct)
     data = CorpusSessionData(
         session=session,
         universe=tuple(universe),
         start=start,
         end=end,
-        candidate_source=MovingAverageCross(fast=args.fast, slow=args.slow, stop_pct=args.stop_pct),
+        candidate_source=rule,
     )
+    rule.splits_on = data.splits_on
     print(
         f"  {label:<10} {len(universe):>5,} securities  {data.bar_count:>9,} bars  "
         f"{data.session_count:>5,} sessions  loaded in {time.time() - t0:>5.1f}s"

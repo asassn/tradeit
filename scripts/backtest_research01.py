@@ -190,6 +190,7 @@ def main() -> int:
         end=end,
         candidate_source=rule,
     )
+    rule.splits_on = data.splits_on
     loaded = data.bar_count
     print(f"  {loaded:,} raw bars over {data.session_count:,} sessions in {time.time() - t0:.1f}s")
     print(f"  {data.excluded_out_of_window:,} bars excluded as outside a ticker's own interval")

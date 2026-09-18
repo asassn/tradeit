@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -88,6 +88,12 @@ class MovingAverageCross:
     min_price: Decimal | None = None
     min_dollar_volume: Decimal | None = None
     dollar_volume_lookback: int = 20
+    #: The same split source the engine uses (``CorpusSessionData.splits_on``).
+    #: Must be set before the first session -- see ``__call__``. The engine hands
+    #: strategies RAW bars, so history this rule keeps must be restated at each
+    #: ex-date or a 2-for-1 reads as a 50% fall inside every window spanning it,
+    #: distorting both the crossover and the ATR stop that sizes arm B.
+    splits_on: Callable[[dt.date], Mapping[int, Decimal]] | None = None
     closes: dict[int, deque[Decimal]] = field(default_factory=dict)
     _highs: dict[int, deque[Decimal]] = field(default_factory=dict)
     _lows: dict[int, deque[Decimal]] = field(default_factory=dict)
@@ -137,9 +143,31 @@ class MovingAverageCross:
             return None
         return bar.close * (Decimal(1) - self.stop_atr_multiple * Decimal(str(atr_pct)))
 
+    def _restate_for_splits(self, session_date: dt.date) -> None:
+        """Put stored history on the post-split share count, as the engine does."""
+        assert self.splits_on is not None
+        for instrument_id, ratio in self.splits_on(session_date).items():
+            if ratio <= 0 or instrument_id not in self.closes:
+                continue
+            for store in (self.closes, self._highs, self._lows):
+                store[instrument_id] = deque(
+                    (v / ratio for v in store[instrument_id]), maxlen=self.slow
+                )
+            self._volumes[instrument_id] = deque(
+                (v * ratio for v in self._volumes[instrument_id]), maxlen=self.slow
+            )
+
     def __call__(
         self, session_date: dt.date, bars: Mapping[int, OhlcvBar]
     ) -> Sequence[EntryCandidate]:
+        if self.splits_on is None:
+            # Fail closed. Until 2026-09-18 this rule kept raw history and never
+            # restated it, and a run that silently skipped the restatement would
+            # reproduce that defect with nothing to say so.
+            raise ValueError(
+                "splits_on is not set: assign CorpusSessionData.splits_on before running"
+            )
+        self._restate_for_splits(session_date)
         out: list[EntryCandidate] = []
         for instrument_id, bar in bars.items():
             history = self.closes.setdefault(instrument_id, deque(maxlen=self.slow))

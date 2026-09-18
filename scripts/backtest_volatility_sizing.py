@@ -195,6 +195,7 @@ def _run(
         end=end,
         candidate_source=rule,
     )
+    rule.splits_on = data.splits_on
     print(f"  {arm:<20} {data.bar_count:>9,} bars loaded in {time.time() - t0:>5.1f}s")
     spec = BacktestSpec(
         name=f"vol_sizing/{arm}",

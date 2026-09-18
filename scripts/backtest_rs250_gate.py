@@ -130,6 +130,7 @@ def _run(
         end=end,
         candidate_source=source,
     )
+    inner.splits_on = data.splits_on
     spec = BacktestSpec(
         name=f"ma_cross/{label}",
         start=start,
