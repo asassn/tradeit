@@ -155,3 +155,64 @@ WHAT THIS CHANGES
 
 TRIALS  Unchanged at 2.
 ```
+
+```
+AMENDMENT 2 -- 2026-09-18, AFTER TWO SAMPLES CRASHED, BEFORE ANY VERDICT
+WAS READ.
+
+WHAT WAS SEEN WHEN THIS WAS WRITTEN
+  The four registered 2010-2019 samples were run. Samples 0 and 1 wrote
+  result files; NOTHING IN THEM HAS BEEN READ. Samples 2 and 3 crashed
+  while computing their half-period returns, because their LADDER arm's
+  equity had gone NEGATIVE -- a long-only portfolio losing more than it
+  held. A diagnostic run of those two LADDER arms (base costs, recovery
+  1.0) was then examined to find the cause: its minimum equity, and the
+  trades with the largest P&L swing and the lowest entry prices. No HOLD
+  arm, no paired comparison and no criterion was computed.
+
+THE CAUSE
+  Security 9106 entered 2010-07-07 at $0.000100065: 20,582,325 shares
+  for about $2,000 of notional. At CostConfig's $0.005 per share the
+  entry cost $102,911 in commission. Sample 3: security 6792 at $0.0002,
+  77,601,411 shares, $388,007 of commission. Cash went negative on the
+  entry date; equity reached -$520,343 and -$650,233. Several other
+  entries below $1 were admitted too.
+
+  They passed eligibility because the registered rule -- 100 sessions of
+  history, $1M/day of 20-session turnover, atr_percent <= 1.0, a close
+  above zero -- has no minimum PRICE. A security collapsing to a
+  placeholder print keeps the turnover of its last normal weeks in a
+  20-session window, and a flat sub-penny window reads as calm, not as a
+  bad print.
+
+THE RULE ADDED
+  A security is eligible only if its close on the rebalance date is at
+  least $5 -- LiquidityConfig.min_price, the platform's own declared
+  minimum tradeable price, read from the config default rather than
+  typed here. Point-in-time, applied identically to both arms.
+
+WHY THIS IS NOT OUTCOME-DRIVEN
+  1 It is the platform's figure, fixed before this test existed. The
+    registration adopted "every other StrategyConfig value at its
+    default"; the strategy never read LiquidityConfig, so that default
+    was silently absent. The amendment makes the strategy honour what the
+    registration already said it would.
+  2 It is signal-side and point-in-time: the close on the day of the
+    decision, which a live system has.
+  3 The alternative -- judging on samples 2 and 3 as they stand -- is
+    judging a test decided by one $0.0001 trade's commission, which is
+    a property of the cost model, not of stops.
+  4 No result has been read. Samples 0 and 1 are re-run too, from
+    scratch, so all four samples are judged under one rule.
+
+ALSO RECORDED, NOT FIXED HERE
+  The platform's sizer will open a position whose commission is fifty
+  times its value. That is trading logic and is raised with the owner
+  separately; this test does not depend on it once sub-$5 names are
+  ineligible.
+
+  The same eligibility gap was in §37's run, whose registration carries
+  the same defaults clause; §37 is re-run with the $5 rule alongside.
+
+TRIALS  Unchanged at 2.
+```

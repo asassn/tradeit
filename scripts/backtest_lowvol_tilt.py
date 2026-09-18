@@ -54,6 +54,9 @@ HORIZON = 63
 SEED = 20260918
 SAMPLE_CAP = 500
 FLOOR = Decimal(1_000_000)
+#: LiquidityConfig.min_price -- the platform's declared minimum tradeable price,
+#: read from the default rather than typed. Amendment 1 to the registration.
+MIN_PRICE = Decimal(str(StrategyConfig(name="defaults").liquidity.min_price))
 CAPITAL = Decimal(100_000)
 PARTICIPATION = Decimal("0.02")
 RISK_FREE = 0.03
@@ -201,6 +204,7 @@ def main() -> int:
                         volatility_lookback=60,
                         fraction=0.2,
                         min_history=100,
+                        min_price=MIN_PRICE,
                         min_dollar_volume=FLOOR,
                         dollar_volume_lookback=20,
                         max_atr_percent=1.0,

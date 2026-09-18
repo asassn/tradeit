@@ -68,6 +68,11 @@ class FactorTilt:
     volatility_lookback: int
     fraction: float
     min_history: int
+    #: The cheapest a security may close at on the rebalance date. Required:
+    #: without it a stock collapsing to a $0.0001 placeholder print kept the
+    #: turnover of its last normal weeks, read as calm, and was bought -- 20.6
+    #: million shares whose per-share commission sank a registered backtest.
+    min_price: Decimal
     min_dollar_volume: Decimal
     dollar_volume_lookback: int
     max_atr_percent: float
@@ -87,6 +92,8 @@ class FactorTilt:
             raise ValueError("fraction must be in (0, 1]")
         if not 0 < self.stop_pct < 1:
             raise ValueError("stop_pct must be a fraction between 0 and 1")
+        if self.min_price <= 0:
+            raise ValueError("min_price must be positive")
         if self.min_history < max(self.volatility_lookback, self.dollar_volume_lookback) + 1:
             raise ValueError("min_history must cover the longest lookback")
 
@@ -129,7 +136,7 @@ class FactorTilt:
 
     def _eligible(self, instrument_id: int, bar: OhlcvBar) -> float | None:
         """The security's volatility if it may be nominated today, else ``None``."""
-        if self._seen.get(instrument_id, 0) < self.min_history or bar.close <= 0:
+        if self._seen.get(instrument_id, 0) < self.min_history or bar.close < self.min_price:
             return None
         turnover = list(self._turnover[instrument_id])[-self.dollar_volume_lookback :]
         if float(np.mean(turnover)) < float(self.min_dollar_volume):

@@ -59,6 +59,7 @@ def _tilt(
         "volatility_lookback": 60,
         "fraction": 0.2,
         "min_history": 100,
+        "min_price": Decimal(5),
         "min_dollar_volume": Decimal(1_000_000),
         "dollar_volume_lookback": 20,
         "max_atr_percent": 1.0,
@@ -161,6 +162,28 @@ class TestEligibility:
         assert 0 not in [c.instrument_id for c in last]
 
 
+class TestMinimumPrice:
+    def test_a_sub_penny_placeholder_is_not_nominated(self) -> None:
+        """The case that sank two registered backtests: a security collapsing to
+        $0.0001 keeps its last normal weeks of turnover in the 20-session window
+        and, flat, reads as the calmest name there is."""
+        panel = _panel(20, 130)
+        tilt = _tilt(Selection.CALM, {_day(120)})
+        for n in range(130):
+            day = _day(n)
+            bars = {
+                i: _bar(i, day, 0.0001 if i == 0 and n > 110 else closes[n])
+                for i, closes in panel.items()
+            }
+            last = tilt(day, bars)
+        assert 0 not in [c.instrument_id for c in last]
+
+    def test_a_name_just_above_the_floor_is_eligible(self) -> None:
+        panel = {i: [5.5 * c / 100 for c in closes] for i, closes in _panel(20, 130).items()}
+        chosen = _run(_tilt(Selection.CALM, {_day(120)}), panel, 130)[_day(120)]
+        assert chosen
+
+
 class TestSplits:
     def test_a_split_is_not_read_as_a_crash(self) -> None:
         """A steady security splits 2-for-1 mid-window. Raw bars halve overnight.
@@ -192,7 +215,12 @@ class TestSplits:
 class TestArguments:
     @pytest.mark.parametrize(
         "overrides",
-        [{"fraction": 0.0}, {"stop_pct": Decimal(1)}, {"min_history": 30}],
+        [
+            {"fraction": 0.0},
+            {"stop_pct": Decimal(1)},
+            {"min_history": 30},
+            {"min_price": Decimal(0)},
+        ],
     )
     def test_bad_parameters_are_refused(self, overrides: dict[str, object]) -> None:
         with pytest.raises(ValueError):

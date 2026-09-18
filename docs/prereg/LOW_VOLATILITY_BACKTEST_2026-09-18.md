@@ -131,3 +131,34 @@ STOP RULE -- declared now
 
 TRIALS  1. Ledger 101 -> 102.
 ```
+
+```
+AMENDMENT 1 -- 2026-09-18, after §37 was reported, recorded as such.
+
+TWO THINGS UNDER §37'S RESULT WERE NOT WHAT THIS REGISTRATION DESCRIBED
+
+  1 THE STOP LADDER WAS INCOMPLETE. The engine discarded the ladder's stop
+    moves, so breakeven and trailing never happened (found by the
+    stop-ladder registration's pilot; STOP_LADDER Amendment 1). Re-run on
+    the fixed engine, §37's verdict held: CALM -4.14 pp a year against
+    RANDOM, t -3.68, the same four criteria failing.
+
+  2 THERE WAS NO MINIMUM PRICE. This registration adopted "every other
+    StrategyConfig value at its default", and LiquidityConfig.min_price
+    defaults to $5, but the strategy never read it. In the stop-ladder
+    test that let $0.0001 securities in, and per-share commission on tens
+    of millions of shares drove two portfolios to negative equity
+    (STOP_LADDER Amendment 2). §37's runs did not crash, but the same
+    rule admitted sub-$5 names to both arms.
+
+WHAT IS DONE
+  §37 is re-run a third time, on the fixed engine and with the $5 minimum
+  price, under this registration's unchanged criteria, and all three
+  runs are reported. This amendment is written AFTER §37's first two
+  results were read, and says so: it cannot claim to be blind to them.
+  What protects it is that the rule is the platform's own fixed default,
+  applied to both arms, and that the verdict it could change was already
+  a clear failure -- the amendment can only confirm it or narrow it.
+
+TRIALS  Unchanged.
+```
