@@ -19,6 +19,7 @@ cannot disagree about what was promised.
 from __future__ import annotations
 
 import argparse
+import collections
 import csv
 import datetime as dt
 import sys
@@ -55,6 +56,64 @@ MIN_CELL = 200
 #: 39.50 -> 2,420 -> 40.00 in single sessions, 119 times. Signal-side and
 #: computed from the trailing window only, so it is point-in-time.
 MAX_ATR_PERCENT = 1.0
+#: A sample date carrying fewer than this many securities is not a usable
+#: cross-section; its IC would be an artefact of a handful of names.
+MIN_PER_DATE = 20
+
+
+def _spearman(a: np.ndarray, b: np.ndarray) -> float:
+    ranked_a = np.argsort(np.argsort(a)).astype(float)
+    ranked_b = np.argsort(np.argsort(b)).astype(float)
+    return float(np.corrcoef(ranked_a, ranked_b)[0, 1])
+
+
+def _fama_macbeth(
+    signal: np.ndarray,
+    outcome: np.ndarray,
+    dates: np.ndarray,
+    stride: int,
+    horizon: int = HORIZON,
+    min_per_date: int = MIN_PER_DATE,
+) -> tuple[float | None, float | None, int]:
+    """One IC per sample date, averaged, with the t from their time series.
+
+    **Amendment 3's correction, and the reason it was needed.** A pooled
+    correlation over every observation asks whether the indicator was high when
+    the market was about to rise -- a question about *dates*, which a portfolio
+    cannot trade, because it must choose among the securities available today.
+    Ranking within a date asks which security, which is the question the product
+    is organised around.
+
+    It also fixes the standard error. Roughly 648 securities share each sample
+    date and therefore share that date's market move, so they are nothing like
+    648 independent observations. The independent unit is the date: the pooled
+    reading divided 144,766 by the horizon overlap alone and called the result
+    independent, which is how an information coefficient of -0.03 came to carry
+    a t-statistic of -12.
+
+    Overlap is corrected the same way it is everywhere else here -- a
+    63-session horizon sampled every 21 sessions means three consecutive dates
+    share a window, so the count of dates is divided by three rather than the
+    count of rows.
+    """
+    ics: list[float] = []
+    for date in np.unique(dates):
+        mask = dates == date
+        if int(mask.sum()) < min_per_date:
+            continue
+        x, y = signal[mask], outcome[mask]
+        if len(set(x.tolist())) < 2 or len(set(y.tolist())) < 2:
+            continue
+        ics.append(_spearman(x, y))
+    if len(ics) < 6:
+        return None, None, len(ics)
+    values = np.array(ics)
+    mean = float(values.mean())
+    spread = float(values.std(ddof=1))
+    if spread == 0.0:
+        return mean, None, len(ics)
+    effective = len(values) / max(1.0, horizon / stride)
+    return mean, mean / (spread / float(np.sqrt(effective))), len(ics)
 
 
 def _study(
@@ -162,14 +221,18 @@ def main() -> int:
     )
     price = 12.0  # median of per-security medians, as every prior run used
 
+    date_keys = np.array(dates)
     print(
         f"{len(rows):,} observations, {len(set(ids)):,} securities, "
-        f"horizon {HORIZON}, stride {args.stride}\n"
+        f"{len(set(dates)):,} sample dates, horizon {HORIZON}, stride {args.stride}\n"
         f"multiple-testing hurdle at {args.trials} trials: |t| > {hurdle:.4f}\n"
+        f"criterion 1 is judged on the Fama-MacBeth columns (per-date IC, t from\n"
+        f"their time series). The pooled columns are printed beside them because\n"
+        f"the gap between the two is what voided the first pass -- see Amendment 3.\n"
     )
     header = (
-        f"{'arm':<26}{'dir':>4}{'IC':>9}{'t':>8}{'mean sp':>10}{'med sp':>9}"
-        f"{'halves':>8}{'vol bands':>11}  criteria  verdict"
+        f"{'arm':<26}{'dir':>4}{'FM IC':>9}{'FM t':>7}{'pooled':>9}{'pool t':>8}"
+        f"{'mean sp':>9}{'med sp':>8}{'halves':>8}{'bands':>7}  crit verdict"
     )
     print(header)
     print("-" * len(header))
@@ -185,8 +248,17 @@ def main() -> int:
         median_spread = study.robust_quantile_spread(args.quantile)
         verdict, _ = study.verdict(rule, costs, average_price=price)
 
-        # -- criterion 1: hurdle cleared IN THE DECLARED DIRECTION -----------
-        c1 = ic is not None and t is not None and abs(t) > hurdle and np.sign(ic) == declared
+        # -- criterion 1, as Amendment 3 restates it: the hurdle is cleared by
+        #    the FAMA-MACBETH reading, in the declared direction. The pooled
+        #    figure is still printed beside it, because the gap between them is
+        #    the finding that voided the first pass.
+        fm_ic, fm_t, n_dates = _fama_macbeth(signal, outcome, date_keys, args.stride)
+        c1 = (
+            fm_ic is not None
+            and fm_t is not None
+            and abs(fm_t) > hurdle
+            and np.sign(fm_ic) == declared
+        )
         # -- criterion 2: spread in the declared direction, means and medians
         #    agreeing, which is what OUTLIER_DEPENDENT grades -----------------
         c2 = (
@@ -196,15 +268,10 @@ def main() -> int:
             and np.sign(median_spread) == declared
         )
         # -- criterion 3: the declared sign holds in BOTH halves --------------
+        #    On the per-date average, per Amendment 3, so a half is judged the
+        #    same way the headline is.
         halves = [
-            _ic(
-                [d for d, m in zip(dates, mask, strict=True) if m],
-                [i for i, m in zip(ids, mask, strict=True) if m],
-                signal[mask],
-                outcome[mask],
-                declared,
-                args.stride,
-            )
+            _fama_macbeth(signal[mask], outcome[mask], date_keys[mask], args.stride)[0]
             for mask in (first, ~first)
         ]
         held = sum(1 for h in halves if h is not None and np.sign(h) == declared)
@@ -214,14 +281,7 @@ def main() -> int:
         usable = 0
         for lo, hi in zip(edges[:-1], edges[1:], strict=True):
             mask = (volatility >= lo) & (volatility <= hi)
-            band = _ic(
-                [d for d, m in zip(dates, mask, strict=True) if m],
-                [i for i, m in zip(ids, mask, strict=True) if m],
-                signal[mask],
-                outcome[mask],
-                declared,
-                args.stride,
-            )
+            band, _, _ = _fama_macbeth(signal[mask], outcome[mask], date_keys[mask], args.stride)
             if band is None:
                 continue
             usable += 1
@@ -236,12 +296,21 @@ def main() -> int:
             flagged.append(name)
         print(
             f"{name:<26}{'+' if declared > 0 else '-':>4}"
+            f"{0.0 if fm_ic is None else fm_ic:>+9.4f}{0.0 if fm_t is None else fm_t:>+7.2f}"
             f"{0.0 if ic is None else ic:>+9.4f}{0.0 if t is None else t:>+8.2f}"
-            f"{0.0 if mean_spread is None else mean_spread:>+10.2%}"
-            f"{0.0 if median_spread is None else median_spread:>+9.2%}"
-            f"{held:>5}/2{bands:>8}/{usable}  {marks:<9} {verdict}{note}"
+            f"{0.0 if mean_spread is None else mean_spread:>+9.2%}"
+            f"{0.0 if median_spread is None else median_spread:>+8.2%}"
+            f"{held:>5}/2{bands:>7}/{usable}  {marks:<5}{verdict}{note}"
         )
-        summary[name] = {"ic": ic, "t": t, "bands": bands, "halves": held}
+        summary[name] = {
+            "ic": fm_ic,
+            "t": fm_t,
+            "pooled_ic": ic,
+            "pooled_t": t,
+            "bands": bands,
+            "halves": held,
+            "dates": n_dates,
+        }
 
     print(
         "\ncriteria: 1 hurdle in the declared direction, 2 spread not outlier-dependent,\n"
@@ -253,12 +322,21 @@ def main() -> int:
     negative = summary["atr_percent_14"]
     positive = summary["rate_of_change_252"]
     print(
-        f"  negative (atr_percent_14): IC {negative['ic']:+.4f} "  # type: ignore[str-format]
-        f"(t {negative['t']:+.2f}), holds in {negative['bands']} of 5 volatility bands"  # type: ignore[str-format]
+        f"  negative (atr_percent_14):      FM {negative['ic']:+.4f} "  # type: ignore[str-format]
+        f"(t {negative['t']:+.2f})   pooled {negative['pooled_ic']:+.4f} "  # type: ignore[str-format]
+        f"(t {negative['pooled_t']:+.2f})   {negative['bands']} of 5 bands"  # type: ignore[str-format]
     )
     print(
-        f"  positive (rate_of_change_252): IC {positive['ic']:+.4f} "  # type: ignore[str-format]
-        f"(t {positive['t']:+.2f})"  # type: ignore[str-format]
+        f"  positive (rate_of_change_252): FM {positive['ic']:+.4f} "  # type: ignore[str-format]
+        f"(t {positive['t']:+.2f})   pooled {positive['pooled_ic']:+.4f} "  # type: ignore[str-format]
+        f"(t {positive['pooled_t']:+.2f})"  # type: ignore[str-format]
+    )
+    recovered = positive["ic"] is not None and np.sign(float(positive["ic"])) > 0  # type: ignore[arg-type]
+    print(
+        f"  -> the positive control's declared sign "
+        f"{'RECOVERS under Fama-MacBeth' if recovered else 'is STILL inverted'}; "
+        f"§18 measured this family at +0.0189 (t +8.49) pooled, which the second\n"
+        f"     defect in Amendment 3 says was itself inflated."
     )
 
     # -- which arms are really the same arm ----------------------------------
@@ -273,6 +351,41 @@ def main() -> int:
     print("\n-- the most collinear pairs, because 24 arms are not 24 independent claims --")
     for r, a, b in pairs[:6]:
         print(f"  |rank rho| {r:.3f}   {a} / {b}")
+
+    # -- what this design could have detected, which bounds every null above --
+    #
+    # A null is only as strong as the resolution behind it. Reporting "nothing
+    # works" without this would be claiming an absence the test could not have
+    # established -- the same error as quoting a pooled t-statistic without
+    # saying how many independent periods it rests on.
+    usable_dates = [d for d, n in collections.Counter(dates).items() if n >= MIN_PER_DATE]
+    effective_periods = len(usable_dates) / max(1.0, HORIZON / args.stride)
+    dispersions = []
+    for name in DECLARED:
+        per_date = [
+            _spearman(panel[name][date_keys == d], outcome[date_keys == d]) for d in usable_dates
+        ]
+        dispersions.append(float(np.std(per_date, ddof=1)))
+    typical = float(np.median(dispersions))
+    detectable = hurdle * typical / float(np.sqrt(effective_periods))
+    best = max(
+        ((abs(float(v["ic"])), k) for k, v in summary.items() if v["ic"] is not None),  # type: ignore[arg-type]
+        default=(0.0, "none"),
+    )
+    print(
+        f"\n-- resolution, which bounds every null above --\n"
+        f"  usable sample dates (>= {MIN_PER_DATE} securities): {len(usable_dates):,} of "
+        f"{len(set(dates)):,}, carrying "
+        f"{sum(1 for d in dates if d in set(usable_dates)) / len(dates):.1%} of observations\n"
+        f"  effective independent periods after {HORIZON // args.stride}x overlap: "
+        f"{effective_periods:.0f}\n"
+        f"  typical per-date IC dispersion: {typical:.4f}\n"
+        f"  SMALLEST cross-sectional IC this design could have detected: "
+        f"{detectable:+.4f}\n"
+        f"  largest any arm produced: {best[0]:+.4f} ({best[1]})\n"
+        f"  -> the null rules out an effect above ~{detectable:.3f}. It does NOT "
+        f"distinguish\n     zero from an effect below that, and must not be quoted as if it did."
+    )
 
     print(f"\n{'=' * 70}")
     if flagged:

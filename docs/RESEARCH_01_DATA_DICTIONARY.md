@@ -712,3 +712,49 @@ The six traps in §0 were each discovered by getting an answer wrong first. When
 the next one appears — and the rate of discovery says it will — add it to §0
 with the wrong answer it produced, because the wrong answer is what makes the
 rule memorable.
+
+### 0.8 A bar can have volume, clear a liquidity floor, and still be a bad print
+
+§0.7 records the placeholder bar with **no** volume. This is the harder case:
+bars that carry volume, pass every guard built so far, and are still arithmetic
+nonsense. Security 79 is the worked example:
+
+```
+2001-03-13   close    39.50
+2001-03-14   close 2,420.00
+2001-03-15   close    40.00
+```
+
+A sixty-fold round trip in two sessions, **119 times** in its decade, with no
+corporate action recorded on any of those dates. Later stretches hold 3,620 with
+real volume days after a 1.05 print.
+
+**Both existing guards pass it, and one is actively defeated by it:**
+
+| guard | why it fails here |
+|---|---|
+| the zero-volume rule (§0.7) | these bars carry volume |
+| both endpoints must have traded | both endpoints have volume |
+| a $1,000,000/day turnover floor | **the defect creates the turnover** — a 3,620 print times any volume clears a million dollars by itself |
+
+**The read rule that does catch it**, used by the indicator screen and available
+to anything else that needs it:
+
+> Refuse a session whose 14-period ATR exceeds the share price itself
+> (`atr_percent > 1.0`). An average true range larger than the whole price is
+> not a volatile security; it is a series whose adjacent bars differ by more
+> than the entire price with no corporate action to explain it.
+
+It is computed from the trailing window only, so it is point-in-time and a live
+system could apply it on the day.
+
+**Measured on the 2000–2009 screening universe:** 40 of 144,806 sampled sessions
+(0.03%) across 12 securities. Rare — and on a sample of 1,137 sessions from 100
+securities, six such rows moved the mean 63-session forward return from **+408.6%
+to +3.2%**. Rarity is not harmlessness; that is the same lesson §0.7 records.
+
+**What is not yet known.** The corpus-wide prevalence has not been measured —
+only its rate inside one study universe — and the cause is not established. It
+is not the double-counted split of §0.1a, because these prints round-trip rather
+than step. Establishing whether it is a vendor unit error, a splice, or an
+unrecorded action is separate work.

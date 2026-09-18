@@ -2303,3 +2303,141 @@ size kernel, a momentum engine and a pattern detector suite, and the double coun
 changed no verdict in any of them. The sections below §13 remain formally
 un-re-run; on this evidence the prior that any of them moves is weak, and they
 are re-run on demand rather than ahead of the next measurement.
+
+---
+
+## §32 — 24 classical indicators, and the control that caught the method — 2026-09-17
+
+**Registered in [`prereg/INDICATOR_SCREEN_2026-09-17.md`](prereg/INDICATOR_SCREEN_2026-09-17.md)
+at `c99ace9`**, before any of the 24 had been computed on any session. The owner
+asked whether the indicator library should widen — Bollinger bands, DeMark's TD
+counts, triple EMA, Fibonacci retracement "and others". All four are here, with
+twenty more, across trend, oscillator, volatility, volume and structure families.
+
+144,806 observations, 2,513 securities, 2000–2009, horizon 63, stride 21, a
+**$1,000,000/day liquidity floor in the specification** because §27 established
+that without one this corpus answers with its coverage gaps.
+
+### The headline is not about any indicator. It is about the method
+
+**The positive control failed, and failed inverted.** `rate_of_change_252` was
+declared POSITIVE on the strength of §18's diagnostic, which measured that family
+at **+0.0189 (t +8.49)**. The screen returned **−0.0249 (t −5.47)** — significant,
+and pointing the wrong way, in 0 of 2 halves and 0 of 5 volatility bands.
+
+The registration had already written down what that means:
+
+> If this screen cannot reproduce something in that region, the **machinery** is
+> broken and no null it reports may be believed. This is a test of the test.
+
+So the 24-arm table was **void on its own terms** before a single indicator
+verdict was read. That is the control doing precisely the job it was charged a
+trial for.
+
+### What was wrong, and it is larger than this screen
+
+§18's number is a **cross-sectional rank** — each security's 250-session return
+ranked against the universe *on that date*. This screen pooled raw indicator
+**levels** across every sample date and took one correlation over all 144,766
+rows. Those answer different questions, and over a decade containing two crashes
+and two rebounds they have **opposite signs**: pooled, twelve-month return is
+negatively related to the next quarter because the whole market fell and rebounded
+together; cross-sectionally, it is not.
+
+The second defect is worse, because it is not confined here. **The pooled
+t-statistic is inflated.** It divides by the horizon overlap (63/21 = 3) and then
+treats what remains as independent — but ~648 securities share each sample date
+and therefore share that date's market move. The independent unit is nearer the
+date than the row: **69 effective periods, not 48,255**.
+
+| arm | pooled IC (t) | Fama-MacBeth IC (t) |
+|---|---|---|
+| `atr_percent_14` | −0.0565 (**t −12.42**) | −0.0298 (**t −0.99**) |
+| `atr_contraction_10_50` | −0.0439 (t −9.64) | **+0.0171 (t +0.99)** — sign flips |
+| `ulcer_index_14` | −0.0434 (t −9.55) | −0.0281 (t −1.14) |
+| `gap_frequency_63` | −0.0360 (t −7.92) | −0.0127 (t −0.48) |
+| `rate_of_change_252` | −0.0249 (t −5.47) | **+0.0141 (t +0.54)** — sign flips |
+
+**This applies to every pooled information coefficient in this document.** It
+cannot rescue a negative verdict — a signal that failed on an inflated statistic
+fails harder on an honest one — but **every t quoted as evidence *for* something
+must be re-read**, including §26's t −27.54 and §18's t +8.49. Recorded as an
+obligation, not discharged here.
+
+### The re-run, charged as the second look it is
+
+The same 24 arms, same data, same four criteria, with the IC computed
+Fama-MacBeth: one IC per sample date, averaged, t from the time series of those
+ICs, same 3× overlap correction. **24 further trials, ledger 74 → 98, hurdle
+|t| > 2.5235.** Calling the first pass a bug and the second the real run at the
+old hurdle would have been two looks for the price of one.
+
+### Result: nothing clears, and both controls now behave
+
+| | |
+|---|---|
+| arms clearing all four criteria | **none** |
+| best arm | `percent_rank_close_252` — 52-week price position — **+0.0403 (t +1.90)** |
+| next | `chaikin_money_flow_20` +0.0291 (t +1.45), `adx_14` +0.0222 (t +1.33) |
+| the owner's four | Bollinger %b −0.0018 (t −0.09); bandwidth −0.0249 (t −1.02); TD buy setup +0.0069 (t +0.41); TD sell setup −0.0077 (t −0.43); TEMA distance −0.0121 (t −0.57); Fibonacci retracement −0.0235 (t −1.14) |
+| positive control | sign **recovers**: +0.0141 |
+| negative control | significance **collapses**: t −12.42 → −0.99, and it no longer flags |
+
+The controls now do what a correct method requires of them, which is the evidence
+that the corrected reading is the trustworthy one.
+
+**Two of the owner's four came out with the declared sign and no significance;
+two came out against it.** Fibonacci retracement is the interesting failure: it
+was declared NEGATIVE — deeper retracement, weaker security — and the folk
+reading ("buy the 61.8% level") would need a positive sign. It produced neither,
+at t −1.14.
+
+### The null is bounded, and must not be quoted as more than that
+
+| | |
+|---|---|
+| usable sample dates (≥20 securities) | 208 of 2,006, carrying 93.2% of observations |
+| effective independent periods | **69** |
+| smallest cross-sectional IC this design could detect | **+0.0510** |
+| largest any arm produced | +0.0403 |
+
+**This rules out an effect above ~0.051. It does not distinguish zero from an
+effect below it** — and the best arm sits just under the line. Saying "24
+classical indicators do not work" would be claiming an absence this test could
+not establish.
+
+The reason resolution is this poor is a design fault worth naming: each security
+was sampled on **its own** 21-session grid from its own first bar, so the grids
+do not align — the median usable date carries only **50** securities. A common
+calendar grid would put hundreds on every date and raise resolution several-fold
+at identical scanning cost.
+
+### What this licenses
+
+**The stop rule applies to what it was written for.** No further indicator
+*family* — Ichimoku, Gann, Elliott counts, more oscillator variants — is tried on
+this corpus without a new registration. Twenty-four failures do not make a
+twenty-fifth due.
+
+**It does not close the question the resolution left open.** A re-test of these
+same 24 on a common calendar grid is a *different test of the same hypothesis*,
+with a measured reason to expect it to resolve what this one could not, and the
+stop rule's own words ask for exactly that: a registration stating "what
+specifically would be different and why". It would cost another 24 trials.
+Whether that is worth spending is a decision, not a consequence, and it is not
+taken here.
+
+**No weight, no gate, no strategy parameter moves.**
+
+### Registered and spent
+
+**Ledger: 50 → 98 trials**, hurdle 2.5235 (`expected_max_of_normals(98)`,
+measured). 24 for the screen as registered, 24 for the corrected re-reading.
+Forty-one signals measured, none surviving.
+
+Two corpus findings came out of the run and are recorded where they belong rather
+than here: `RESEARCH_01_DATA_DICTIONARY.md` **§0.8**, a bar that carries volume,
+clears a liquidity floor, and is still a bad print — security 79 round-trips
+39.50 → 2,420 → 40.00, 119 times, and the $1M floor is *defeated* by it because
+the defect creates the turnover. And the registration's own Amendment 2 records
+that six such rows moved a sample's mean forward return from **+408.6% to +3.2%**.
