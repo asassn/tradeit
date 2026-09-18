@@ -758,3 +758,60 @@ only its rate inside one study universe — and the cause is not established. It
 is not the double-counted split of §0.1a, because these prints round-trip rather
 than step. Establishing whether it is a vendor unit error, a splice, or an
 unrecorded action is separate work.
+
+### 0.9 Stored `raw` **volume** is usually already split-adjusted — and to *today's* share count
+
+§0.1a found `raw` closes that were not raw. This is the same failure in the other
+column, and it is the norm rather than the exception. Security 1, 2010-01-04:
+
+```
+stored raw close   214.0096        the true print
+stored raw volume  493,729,600     the true print was ~17.6M shares -- this is x28,
+                                   the 2014 7:1 split AND the 2020 4:1 split
+```
+
+Across the 2014-06-09 7:1 ex-date the stored close falls 645.57 → 93.70 while the
+stored volume runs 349.9M → 301.7M — **continuous**. Genuinely raw volume would
+step up sevenfold with the share count.
+
+**Measured across every recorded split** with 10+ single-source bars each side,
+by whether volume steps with the split (raw) or runs through it (adjusted):
+
+| bars from | volume adjusted | volume raw | ambiguous |
+|---|---|---|---|
+| EODHD | **4,706 (82%)** | 797 (14%) | 261 |
+| Sharadar (three feeds, raw reconstructed) | 257 (26%) | 510 (60%) | 95 |
+
+**Not uniform within a vendor**, so no per-vendor rule is safe. The Sharadar
+"adjusted" share is probably mostly noise — trading activity itself shifts around
+a split, and a 2:1 split's expected step is small against it — but that is not
+established.
+
+**What it does to a read.** `price_series` multiplies volume by every split it
+applies, which is right for raw volume and **double-counts** adjusted volume. So
+for an adjusted-volume security, dollar volume comes out inflated by every later
+forward split and deflated by every later reverse split — **including splits after
+the read's `as_of`**. That is a look-ahead: a 2010 dollar-volume figure knows
+what the company did in 2020.
+
+**And it points one way.** On the §26 panel, as an upper bound (treating every
+bar as adjusted), for the $1,000,000/day floor:
+
+| floor decision | observations | median 63-session return |
+|---|---|---|
+| correct | 129,809 | +2.18% |
+| **wrongly admitted** — later forward splits inflate | 987 | **+3.34%** |
+| **wrongly excluded** — later reverse splits deflate | 8,356 | **−6.25%** |
+
+Up to **7.1%** of floor decisions are wrong, and both errors tilt the floored
+sample toward survivors: future winners in, future distressed names out. **Every
+result in `SIGNAL_SCOREBOARD.md` that conditions on dollar volume inherits this**
+— §27, §28, §32's floor, §33's floor diagnostic.
+
+A window that crosses a split also gets a spurious step in volume for an
+adjusted-volume security, which bears on every volume-ratio signal (§24, §25,
+relative volume, money flow) — but only in windows that contain an ex-date.
+
+**Status: being fixed as a read rule**, by the same shape as the price fix — the
+basis is established per security from its own splits and fails closed where the
+evidence is ambiguous.
