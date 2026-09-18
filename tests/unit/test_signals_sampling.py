@@ -12,7 +12,7 @@ import datetime as dt
 import pytest
 
 from tradeit.core.calendar import get_calendar
-from tradeit.signals.sampling import common_grid, grid_points
+from tradeit.signals.sampling import Outcome, common_grid, grid_points, outcome_or_terminal
 
 CAL = get_calendar()
 START, END = dt.date(2010, 1, 4), dt.date(2011, 12, 30)
@@ -120,3 +120,38 @@ class TestArguments:
     def test_nonpositive_arguments_are_refused(self, stride: int, horizon: int) -> None:
         with pytest.raises(ValueError):
             common_grid(CAL, START, END, stride, horizon)
+
+
+class TestOutcomeOrTerminal:
+    """A year-long outcome must keep the companies that died during the year."""
+
+    DATES = tuple(dt.date(2020, 1, d) for d in (2, 3, 6, 7, 8, 9, 10))
+
+    def test_a_traded_bar_on_the_outcome_session_is_the_outcome(self) -> None:
+        traded = [True] * 7
+        assert outcome_or_terminal(self.DATES, traded, 0, dt.date(2020, 1, 8)) == Outcome(4, False)
+
+    def test_a_company_that_stops_trading_is_kept_as_terminal(self) -> None:
+        """The case ``grid_points`` drops: no print on the outcome session, ever again."""
+        dates, traded = list(self.DATES[:4]), [True] * 4
+        assert outcome_or_terminal(dates, traded, 0, dt.date(2020, 1, 10)) == Outcome(3, True)
+
+    def test_placeholder_bars_after_death_do_not_make_it_alive(self) -> None:
+        """A vendor that carries a dead company forward with zero volume (§0.7)."""
+        traded = [True, True, True, False, False, False, False]
+        assert outcome_or_terminal(self.DATES, traded, 0, dt.date(2020, 1, 9)) == Outcome(2, True)
+
+    def test_a_gap_on_the_outcome_session_is_dropped_not_moved(self) -> None:
+        """Untraded on the day but trading after: alive, and no drift to a neighbour."""
+        traded = [True, True, True, True, False, True, True]
+        assert outcome_or_terminal(self.DATES, traded, 0, dt.date(2020, 1, 8)) is None
+        missing = [d for d in self.DATES if d != dt.date(2020, 1, 8)]
+        assert outcome_or_terminal(missing, [True] * 6, 0, dt.date(2020, 1, 8)) is None
+
+    def test_death_on_the_signal_bar_is_terminal_at_the_signal_bar(self) -> None:
+        traded = [True, True, False, False, False, False, False]
+        assert outcome_or_terminal(self.DATES, traded, 1, dt.date(2020, 1, 9)) == Outcome(1, True)
+
+    def test_an_untraded_signal_bar_is_refused(self) -> None:
+        with pytest.raises(ValueError):
+            outcome_or_terminal(self.DATES, [False] + [True] * 6, 0, dt.date(2020, 1, 8))

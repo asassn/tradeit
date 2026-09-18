@@ -142,3 +142,40 @@ STOP RULE
 
 TRIALS  4 -- one per signal, one horizon. Ledger 108 -> 112.
 ```
+
+## Amendment 1 — criterion 2 at recovery 0.0 — before any result
+
+Written while building the verdict, before the scan had run on any real
+security. **Nothing about any signal had been seen.**
+
+Criterion 2 asks for the favoured fifth's *geometric* mean return. The helper
+every earlier verdict used for it (`_geometric` in
+`signal_research_relative_strength_verdict.py`) **silently discards returns of
+−100% or worse**. At recovery 0.0 every dead company's return is exactly −100%,
+so that helper would have removed them — the survivorship this registration
+exists to prevent, done quietly inside a mean. A geometric mean that keeps them
+is −100% for any group containing one, which makes the criterion meaningless
+rather than strict.
+
+```
+AMENDMENT 1
+  Criterion 2 at R = 1.0: the geometric mean, as registered. No return can
+    be -100% there (every close is positive), and the verdict refuses one
+    if it appears rather than dropping it.
+  Criterion 2 at R = 0.0: the EQUAL-WEIGHT BUY-AND-HOLD return -- the
+    arithmetic mean of the members' twelve-month returns, which is exactly
+    what holding the fifth equally weighted for the year earns, total
+    losses included. Favoured fifth minus eligible universe, positive
+    averaged over blocks AND at the median across dates.
+  Rejected: flooring a total loss at some small positive gross return so
+    the geometric mean is defined. Any floor is an invented number, and
+    the answer would move with it.
+  Everything else is unchanged.
+```
+
+Verified on synthetic data before any real run: a planted positive effect
+(SUE) and a planted negative one (asset growth) pass at both recoveries; pure
+noise (gross profitability) fails; an effect planted **only in the first 63
+sessions** (accruals) passes criteria 1–4 and fails criterion 5 alone, which is
+the case criterion 5 exists for. Calibration on the synthetic panel: 95th
+percentile |t| between 1.80 and 2.39 against the 12-block limit of 2.583.

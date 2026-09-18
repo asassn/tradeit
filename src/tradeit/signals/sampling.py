@@ -35,6 +35,7 @@ tested.
 
 from __future__ import annotations
 
+import bisect
 import datetime as dt
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -130,3 +131,51 @@ def grid_points(
             continue
         points.append(GridPoint(date, signal_index, outcome_index))
     return points
+
+
+@dataclass(frozen=True, slots=True)
+class Outcome:
+    """The bar a sampled point is measured to."""
+
+    #: Index of that bar in the security's own bar list.
+    index: int
+    #: True when the security never traded again on or after the outcome
+    #: session, so ``index`` is its last traded bar rather than the outcome's.
+    terminal: bool
+
+
+def outcome_or_terminal(
+    bar_dates: Sequence[dt.date],
+    traded: Sequence[bool],
+    signal_index: int,
+    outcome_date: dt.date,
+) -> Outcome | None:
+    """Where a point's outcome is read, **keeping securities that died**.
+
+    :func:`grid_points` drops a point with no print on the outcome session.
+    Over a quarter that loses few; over a year it loses every company that
+    died in it, and a study of the survivors is not a study of the market. So:
+
+    * a traded bar ON the outcome session -> that bar, not terminal;
+    * no traded bar on or after it -> the last traded bar, **terminal**, for
+      the caller to price at whatever recovery its registration names;
+    * untraded on the outcome session but trading later -> ``None``. The
+      security did not die, and moving it to a neighbouring print would
+      measure a different window from everyone else's (the no-drift rule).
+
+    ``traded[n]`` is true where bar ``n`` changed hands at a positive price;
+    placeholder bars with no volume (§0.7) must be false, or a dead company
+    carried forward by its vendor would read as alive at its last price.
+    ``traded[signal_index]`` must be true.
+    """
+    if not traded[signal_index]:
+        raise ValueError("the signal bar must itself have traded")
+    last = len(traded) - 1
+    while not traded[last]:
+        last -= 1
+    if bar_dates[last] < outcome_date:
+        return Outcome(last, True)
+    n = bisect.bisect_left(bar_dates, outcome_date, lo=signal_index + 1)
+    if n < len(bar_dates) and bar_dates[n] == outcome_date and traded[n]:
+        return Outcome(n, False)
+    return None
