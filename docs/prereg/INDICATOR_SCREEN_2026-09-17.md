@@ -270,13 +270,29 @@ WHY THIS IS NOT OUTCOME-DRIVEN, ON FOUR GROUNDS
   2 It is a SIGNAL-side property. No outcome, forward return or arm's
     statistic enters it. A rule keyed on the forward return would be
     outcome-driven; this is keyed on the price history.
-  3 The threshold sits in an EMPTY gap three orders of magnitude wide.
-    Measured on the staged run: p99 of atr_percent is 0.283, p99.9 is
-    417.4, and there is NOTHING between 1.0 and 400. Any threshold in
-    that range removes the same rows, so the specific value cannot have
-    been chosen to suit an answer. The gap is to be re-measured on the
-    full sample and reported; if it is not empty there, this rule is to
-    be reconsidered in the open rather than applied quietly.
+  3 The threshold sits in an EMPTY gap, and the gap is what matters
+    rather than the number chosen inside it.
+
+    ** CORRECTED 2026-09-17, same day, before the full verdict was read.
+    The first version of this ground said "NOTHING between 1.0 and 400",
+    which was an inference from two counts rather than a measurement,
+    and it was WRONG -- four readings lie in that range. The corrected
+    measurement is below and the conclusion is unchanged, but the error
+    is left recorded rather than silently overwritten, because the whole
+    value of this document is that it says what was known when. **
+
+    Measured on the staged run, the ten largest atr_percent readings:
+        0.352  0.365  0.398  0.566 | 16.748  23.188  30.575  32.556
+        477.968  524.474
+    Every reading above 0.566 belongs to security 79. The largest
+    reading on any OTHER security is 0.398.
+
+    So the real gap is between 0.566 and 16.748 -- a factor of thirty,
+    not three orders of magnitude. Any threshold in that range removes
+    exactly the same rows, so the specific value of 1.0 cannot have been
+    chosen to suit an answer. The gap is to be re-measured on the full
+    sample and reported; if it is not empty there, this rule is to be
+    reconsidered in the open rather than applied quietly.
   4 An average true range larger than the share price is not a volatile
     security. It is a series containing adjacent bars that differ by more
     than the whole price with no corporate action recorded, which is a
