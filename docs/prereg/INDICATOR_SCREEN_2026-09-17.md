@@ -230,3 +230,67 @@ WHY IT WAS MISSING AND WHY IT IS NOT OUTCOME-DRIVEN
 
 TRIALS  Unchanged at 24. No signal specification moved.
 ```
+
+```
+AMENDMENT 2 -- 2026-09-17, written after the staged 100-security run
+and BEFORE the full screen's verdict was read.
+
+WHAT WAS SEEN WHEN THIS WAS WRITTEN, STATED SO THE AMENDMENT CANNOT BE
+MISTAKEN FOR A REACTION TO A DISAPPOINTING NUMBER
+  The staged run's full verdict table, on 1,137 observations from 23
+  securities. NOTHING was flagged; all 24 arms returned not_detectable,
+  both controls included. The amendment therefore cannot be an attempt to
+  rescue a result -- there was no result to rescue -- and it makes the
+  sample LESS extreme rather than more favourable to any arm.
+
+THE DEFECT
+  Security 79 prints single-session round trips of sixty-fold and back:
+      2001-03-13  close    39.50
+      2001-03-14  close 2,420.00
+      2001-03-15  close    40.00
+  119 such adjacent-session moves in its decade, and a later stretch
+  holding 3,620 with real volume against a 1.05 print days earlier. Six
+  of the staged run's 1,137 observations come from it, and they carry a
+  63-session "return" of +344,662%.
+
+  Neither existing guard catches it. Amendment 1's endpoint rule passes,
+  because the bars carry volume. The $1M/day floor passes, and is in fact
+  DEFEATED by the defect: a 3,620 print times any volume clears a
+  million dollars on its own.
+
+THE RULE ADDED
+  A scan point is used only if atr_percent_14 <= 1.0 at the signal
+  session -- that is, the 14-session average true range does not exceed
+  the entire share price.
+
+WHY THIS IS NOT OUTCOME-DRIVEN, ON FOUR GROUNDS
+  1 It is computed from the TRAILING window only, at the signal session.
+    It is point-in-time, it uses nothing from the holding period, and a
+    live system could have applied it on the day.
+  2 It is a SIGNAL-side property. No outcome, forward return or arm's
+    statistic enters it. A rule keyed on the forward return would be
+    outcome-driven; this is keyed on the price history.
+  3 The threshold sits in an EMPTY gap three orders of magnitude wide.
+    Measured on the staged run: p99 of atr_percent is 0.283, p99.9 is
+    417.4, and there is NOTHING between 1.0 and 400. Any threshold in
+    that range removes the same rows, so the specific value cannot have
+    been chosen to suit an answer. The gap is to be re-measured on the
+    full sample and reported; if it is not empty there, this rule is to
+    be reconsidered in the open rather than applied quietly.
+  4 An average true range larger than the share price is not a volatile
+    security. It is a series containing adjacent bars that differ by more
+    than the whole price with no corporate action recorded, which is a
+    bad print. The claim being refused is that the return EXISTS, the
+    same claim Amendment 1 and PATTERN_QUALITY Amendment 2 refuse.
+
+APPLIED IDENTICALLY to all 24 arms and to both universe arms, survived
+and died. The count removed is reported with the result.
+
+WHAT IS NOT CLAIMED
+  This does not repair the corpus and does not change what price_series
+  serves. It bounds what this screen reads. The corpus-level question is
+  recorded as a new reading rule in RESEARCH_01_DATA_DICTIONARY.md and is
+  a separate piece of work.
+
+TRIALS  Unchanged at 24. No signal specification moved.
+```
