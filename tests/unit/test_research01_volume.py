@@ -330,3 +330,25 @@ class TestBothReadPathsAgree:
             assert self._money_in_backtest(db_session, sid, BEFORE[0]) == _money(
                 research.close, research.volume
             ), shape
+
+
+class TestTheQuestionIsAskedPerBar:
+    def test_a_bar_after_the_last_split_does_not_need_a_basis(self, db_session: Session) -> None:
+        """Every volume factor counts splits AFTER the bar, so a bar past the
+        last split is the stored number whatever the basis. Asking per security
+        flagged whole series UNDETERMINED over one split before their first bar."""
+        sid = _security(db_session)
+        # Too little evidence either side to read the basis ...
+        for day in BEFORE[-3:]:
+            _bar(db_session, sid, day, "100", "1000")
+            _bar(db_session, sid, day, "50", "1000", basis="total")
+        for day in AFTER:
+            _bar(db_session, sid, day, "50", "2000")
+            _bar(db_session, sid, day, "50", "2000", basis="total")
+        _split(db_session, sid, "2")
+        db_session.flush()
+        bars = {bar.session_date: bar for bar in price_series(db_session, sid, as_of=LATE)}
+        # ... so the bar before the split is undetermined, and the bars after are not.
+        assert bars[BEFORE[-1]].volume_basis is VolumeBasis.UNDETERMINED
+        assert {bars[day].volume_basis for day in AFTER} == {VolumeBasis.NOT_NEEDED}
+        assert bars[AFTER[0]].volume == Decimal(2000)

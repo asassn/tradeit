@@ -269,7 +269,7 @@ class CorpusSessionData:
                 # volume must still be the shares that traded at this price,
                 # not a number restated for splits years later. §0.9 measured
                 # the stored volume restated at 82% of EODHD splits.
-                basis = basis_of(supplier[day], bases, bool(recorded))
+                basis = basis_of(supplier[day], bases, day, recorded)
                 if basis is VolumeBasis.UNDETERMINED:
                     self.volume_undetermined += 1
                 traded = volume_on_price_basis(

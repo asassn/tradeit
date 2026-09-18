@@ -570,13 +570,26 @@ def volume_basis(
     return out
 
 
-def basis_of(source: str, bases: dict[str, VolumeBasis], has_splits: bool) -> VolumeBasis:
+def basis_of(
+    source: str,
+    bases: dict[str, VolumeBasis],
+    session_date: dt.date,
+    recorded: Sequence[SplitAdjustment],
+) -> VolumeBasis:
     """The basis of one bar's volume, from its supplier and the security's evidence.
+
+    **Asked per bar, because it only matters for a bar with a split after it.**
+    Every factor in :func:`volume_on_price_basis` counts splits after the bar, so
+    a bar later than the security's last recorded split is served exactly as
+    stored whatever the basis is. Asking the question per security instead marked
+    a series ``UNDETERMINED`` from end to end because of one split before its
+    first bar -- measured on the adx_14 pilot, where it was a large share of the
+    rows flagged.
 
     Shared by both read paths so ``price_series`` and ``CorpusSessionData`` cannot
     disagree about which bars' volume can be trusted as a level.
     """
-    if not has_splits:
+    if not any(split.ex_date > session_date for split in recorded):
         return VolumeBasis.NOT_NEEDED
     return bases.get(source, VolumeBasis.UNDETERMINED)
 
@@ -823,7 +836,7 @@ def price_series(
             # The audit path reads as it always has; the basis says so.
             basis = VolumeBasis.UNDETERMINED if splits else VolumeBasis.NOT_NEEDED
         else:
-            basis = basis_of(supplier[session_date], bases, bool(recorded))
+            basis = basis_of(supplier[session_date], bases, session_date, recorded)
         out.append(
             AdjustedBar(
                 session_date=session_date,
