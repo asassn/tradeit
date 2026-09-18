@@ -32,8 +32,9 @@ flattered results, and each was fixed.
 | **low volatility, as a portfolio** | **not profitable** — −4.35 pp/yr against random picks | §37, §38 |
 | the platform's stop ladder against holding | **inconclusive** — trades ~2 pp/yr of return for half the drawdown on 2010–19 | §38 |
 | equal-risk against equal-dollar sizing | **not an improvement** on a faithful engine | §39 |
+| **four fundamental signals** — earnings surprise, gross profitability, asset growth, accruals — point-in-time | **none passes**; earnings surprise misses only on significance (t +2.13 vs 2.56) | §40 |
 
-Ledger: **104 trials**, current hurdle |t| > 2.5444. Every result above is
+Ledger: **108 trials**, current hurdle |t| > 2.5576. Every result above is
 judged against the hurdle in force when it was registered.
 
 ## The benchmark any future idea must beat

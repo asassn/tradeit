@@ -3080,3 +3080,65 @@ added; **ledger unchanged at 104.**
 
 **Every engine result on record now runs on the corrected engine**: §37 (three
 runs, §38), §38's registered test, and §7/§28/§36 here.
+
+---
+
+## §40 — four fundamental signals, point-in-time: none passes — 2026-09-18
+
+**Registered in [`prereg/FUNDAMENTALS_2026-09-18.md`](prereg/FUNDAMENTALS_2026-09-18.md)
+at `adc037d`**, before any signal was computed; the point-in-time module, scan and
+verdict committed at `d345110` before any result. Phase 6's first measurement on
+the fundamentals the corpus holds — every earlier line on this scoreboard read
+price and volume.
+
+Four published anomalies with directions fixed by the literature: earnings
+surprise (SUE, Bernard & Thomas), gross profitability (Novy-Marx), asset growth
+(Cooper, Gulen & Schill), accruals (Sloan). Every value **as first filed**, usable
+only if filed strictly before the session; fiscal Q4 derived from annual minus
+nine-month and known at the 10-K date. 2013–2025, common grid, above $1M/day and
+$5, the §35 inclusion rules. 2,511,378 rows scanned, 1,458,292 through the
+inclusion rules.
+
+### Result
+
+| signal | declared | IC (t) | favoured fifth vs universe, per year | halves | vol bands | verdict |
+|---|---|---|---|---|---|---|
+| **SUE** | + | **+0.0174 (+2.13)** | **+2.40%** | +0.0147 / +0.0193 | 4/5 | **fails C1 only** |
+| gross profitability | + | +0.0191 (+1.50) | −1.67% | +0.0286 / +0.0114 | 5/5 | fails |
+| asset growth | − | +0.0001 (+0.00) | −3.89% | +0.0033 / −0.0033 | 0/5 | fails |
+| accruals | − | **+0.0155 (+1.81), wrong sign** | −5.37% | wrong sign both | 2/5 | fails |
+
+Calibration 1.94–2.13 across the four (limit 2.3); undetermined volume 1.8–2.1%
+(bound 5%); median breadth 996–2,047 securities per date; 52 calendar blocks.
+
+**SUE is the near miss.** Three of four criteria pass — the high-surprise fifth
+compounds 2.4 points a year ahead of its universe, the sign holds in both halves
+and in four of five volatility bands — and the information coefficient misses
+the hurdle, t +2.13 against 2.5576. The smallest effect the test could detect was
+0.0208; SUE measured 0.0174. Consistent with post-earnings drift that exists but
+has weakened below what thirteen years of this corpus can resolve. **It is closed
+by the stop rule** all the same: no other definition, lookback, scaling or
+freshness window of it is tried on this corpus.
+
+**The other three are not near misses.** Asset growth is exactly zero. Accruals
+points the wrong way. And for all three the favoured fifth *underperforms* its
+universe compounded — low asset growth and low accruals select shrinking,
+cash-hoarding firms that lagged over a strong market.
+
+### What stands
+
+**The four are closed on this corpus**, and per the stop rule no further
+fundamental signal is tested without a registration stating what it would add
+that these did not already ask.
+
+**What the result does not rule out**, recorded so it is not mistaken for a
+licence: these were measured at the 63-session Swing horizon. The literature
+measures most of them over twelve months, which is the Retirement mandate's
+horizon, not this one's. A registration at that horizon would ask a different
+question and would have to say so, disclose §40, and pay its own trials. It is
+not taken here.
+
+### Registered and spent
+
+**Ledger: 104 → 108 trials**, hurdle 2.5576. Forty-nine measurements; one signal
+survives as a signal (§35), none as a strategy.
