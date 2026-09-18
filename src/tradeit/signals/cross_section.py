@@ -50,16 +50,21 @@ DAYS_PER_SESSION = 365.25 / 252.0
 
 
 def _ranks(values: Floats) -> Floats:
-    """Average ranks, so ties do not depend on input order."""
+    """Average ranks, so ties do not depend on input order.
+
+    Vectorised: a tie group's members all receive the mean of the positions the
+    group spans. The first version looped over tie groups in Python, which is
+    fine for one cross-section and too slow for the 200-permutation calibration
+    the adx_14 confirmation registered.
+    """
+    n = values.shape[0]
     order = np.argsort(values, kind="mergesort")
-    ranks = np.empty(values.shape[0], dtype=np.float64)
-    ranks[order] = np.arange(values.shape[0], dtype=np.float64)
-    # Collapse ties to their mean rank.
-    sorted_values = values[order]
-    boundaries = np.flatnonzero(np.diff(sorted_values)) + 1
-    for group in np.split(np.arange(values.shape[0]), boundaries):
-        if group.shape[0] > 1:
-            ranks[order[group]] = ranks[order[group]].mean()
+    ordered = values[order]
+    starts = np.concatenate(([0], np.flatnonzero(np.diff(ordered)) + 1))
+    ends = np.concatenate((starts[1:], [n]))
+    mean_position = (starts + ends - 1) / 2.0
+    ranks = np.empty(n, dtype=np.float64)
+    ranks[order] = np.repeat(mean_position, ends - starts)
     return ranks
 
 
