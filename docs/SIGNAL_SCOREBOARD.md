@@ -3017,3 +3017,66 @@ decade each, unregistered on the second.
 **Ledger: 102 → 104 trials** (two-sided), hurdle 2.5444. Forty-five measurements;
 one signal survives as a signal, none as a strategy, and the platform's own risk
 control is neither confirmed nor refuted.
+
+---
+
+## §39 — §7, §28 and §36 on a faithful engine: equal-risk sizing is not an improvement — 2026-09-18
+
+§38 recorded that every engine result before `485a613` ran without the stop
+ladder's breakeven and trailing moves, and that the moving-average baseline under
+§7, §28 and §36 never restated its history at splits. Both are now fixed —
+stop moves at `485a613`, the baseline's split restatement at `35b10f7`, which
+also makes the baseline refuse to run without a split source. This re-runs the
+three sizing results, **one correction at a time**, so each change can be
+attributed.
+
+Strict re-runs otherwise: same script (`backtest_volatility_sizing.py`), same
+universe files, same periods, samples, costs and recovery as recorded; §36's
+corrected admission read from §0.9 retained.
+
+### §7 — equal dollar (A) against equal risk (B), 800 securities
+
+| | as recorded | + stop moves | + split restatement |
+|---|---|---|---|
+| **2000–09** return A → B | −14.69% → −6.61% | +2.87% → +19.90% | **−4.41% → +9.09%** |
+| Sharpe A → B | −0.40 → −0.30 | −0.27 → −0.06 | **−0.36 → −0.16** |
+| max drawdown A → B | 35.82% → 33.25% | 22.70% → 26.46% | **26.44% → 26.18%** |
+| **2010–24** return A → B | +22.02% → +27.14% | +80.70% → +56.52% | **+71.40% → +57.58%** |
+| Sharpe A → B | −0.14 → −0.07 | 0.15 → 0.06 | **0.11 → 0.06** |
+| max drawdown A → B | 28.37% → 29.92% | 26.94% → 37.49% | **25.53% → 36.59%** |
+
+**In sample, B still captures** — return up, Sharpe up, drawdown fractionally
+better. **Out of sample it now loses on all three**: lower return, lower Sharpe,
+and eleven points more drawdown. §7 recorded *"a small, consistent, replicating
+improvement in risk-adjusted return"*; on a faithful engine it did not replicate.
+The out-of-sample reversal appeared with the stop-move fix alone.
+
+### §36 / §28 — the tradeable universe, 2010–2019, four samples
+
+| paired, B minus A | as recorded (§36) | + stop moves | + split restatement |
+|---|---|---|---|
+| CAGR | +1.32 pp, 4/4 | +0.50 pp, t +0.62 | **+0.57 pp, t +0.49, 3/4** |
+| Sharpe | +0.09, 4/4 | +0.01 | **+0.01, 2/4** |
+| max drawdown | +0.59 pp, 3/4 | +4.22 pp | **+5.37 pp worse, t +3.79, 4 of 4** |
+
+**§36's consistent return and Sharpe gain was an artefact of the missing stop
+moves**, and it is withdrawn: on a faithful engine the return difference is
+noise (t +0.49) and the Sharpe difference nothing. **§36's withdrawal of §28's
+drawdown finding is itself reversed** — drawdown is worse under equal-risk sizing
+in all four samples again, by 5.4 points. §28's original description, *"equal-risk
+sizing buys return with drawdown"*, was half right: it buys drawdown, and on a
+faithful engine it does not buy return.
+
+### What stands
+
+**Equal-risk sizing is not an improvement on this corpus.** No reliable return or
+Sharpe gain on a tradeable universe; reliably worse drawdown; and out of sample
+over 2010–2024 it is worse on every measure. The project's only prior positive
+result — §7 — does not survive a faithful engine.
+
+All three remain descriptive: §7 was registered but its criterion was graded
+before these defects were known, and §28/§36 were never registered. No trials are
+added; **ledger unchanged at 104.**
+
+**Every engine result on record now runs on the corrected engine**: §37 (three
+runs, §38), §38's registered test, and §7/§28/§36 here.
