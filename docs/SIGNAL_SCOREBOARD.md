@@ -44,7 +44,7 @@ same way in all four in-sample specifications.
 
 | signal | scoring factor | hypothesis | best in-sample | sign held? | out-of-sample | status |
 |---|---|---|---|---|---|---|
-| `realized_vol_60` | *(none — unweighted)* | low volatility outperforms | **IC −0.060, t −10.01** | **yes, 4/4** | **IC −0.0790, t −38.25, 4/4** | **PASSES a registered out-of-sample test on tradeable securities (§35: 2020–2025, above $1M/day, IC −0.137, t −3.32).** §27's "vanishes above $1M/day" rested on the §0.9 volume defect (§34). Concentrated in lower-priced stocks. A candidate factor for a scoped proposition — not yet a strategy |
+| `realized_vol_60` | *(none — unweighted)* | low volatility outperforms | **IC −0.060, t −10.01** | **yes, 4/4** | **IC −0.0790, t −38.25, 4/4** | **PASSES a registered out-of-sample test on tradeable securities (§35: 2020–2025, above $1M/day, IC −0.137, t −3.32).** §27's "vanishes above $1M/day" rested on the §0.9 volume defect (§34). Concentrated in lower-priced stocks. **As a portfolio it is NOT profitable (§37): lost to a random portfolio in 4 of 4 samples, −4.46 pp/yr.** A signal, not a strategy |
 | `atr_percent_14` | *(none — unweighted)* | low volatility outperforms | **IC −0.078, t −7.46** | **yes, 4/4** | **IC −0.0790, t −38.27, 4/4** | same effect as the row above (rank correlation +0.91); not separately re-tested in §35, which registered one signal to spend one trial |
 | `relative_volume_20` | volume_accumulation 0.25 | *derived* | IC −0.069, t −4.54 | no — flipped | **IC +0.009, t +0.93** | **REJECTED.** Sign flipped, net +32.7%/yr → −0.2%/yr |
 | `momentum_21` | relative_strength 0.25 | one-month reversal | IC −0.016, t −2.15 | yes, 4/4 | not run | weak but consistent; never economically useful |
@@ -2799,3 +2799,104 @@ standard before §28's comparison informs any sizing decision.
 
 **No trials added; ledger unchanged at 102** (the §37 registration's trial is
 already counted).
+
+---
+
+## §37 — low volatility as a portfolio: it predicts, and it does not pay — 2026-09-18
+
+**Registered in [`prereg/LOW_VOLATILITY_BACKTEST_2026-09-18.md`](prereg/LOW_VOLATILITY_BACKTEST_2026-09-18.md)
+at `452e59d`, before the strategy existed as code**; strategy, runner and verdict
+committed at `073b4f6`, before any result. §35 found low volatility to *predict*
+among tradeable securities on 2020–2025. This asked the other half — does a
+portfolio built on it, run through the platform's own sizer, risk rules, stop
+ladder, costs, fills and delisting handling, **make money**, and more than an
+identical portfolio that chooses at random?
+
+Four disjoint samples of 500, drawn in proportion from the 2,806 securities alive
+and liquid on 2020-01-02; two arms differing only in selection; equal-dollar
+sizing; a 63-session hold; 23 rebalances; delisting recovery 1.0, the assumption
+least favourable to CALM.
+
+### Verdict: not profitable
+
+| sample | CALM CAGR | RANDOM CAGR | paired |
+|---|---|---|---|
+| 0 | 2.97% | 8.30% | −5.33 pp |
+| 1 | 3.56% | 7.72% | −4.16 pp |
+| 2 | 3.53% | 6.49% | −2.96 pp |
+| 3 | 3.19% | 8.57% | −5.37 pp |
+
+| criterion | reading | |
+|---|---|---|
+| 1 — CALM beats RANDOM in all four | **0 of 4** | fail |
+| 2 — paired t > 2.5376 | mean **−4.46 pp**, t **−7.79** | fail |
+| 3 — CALM beats 3% risk-free in ≥ 3 of 4 | 3 of 4 | pass |
+| 4 — edge in both halves (walk-forward) | −4.20 pp / −4.73 pp | fail |
+| 5 — survives 5× spread and slippage | 0 of 4 beat RANDOM, 0 of 4 beat risk-free | fail |
+
+**The stop rule applies.** Low volatility stays a measured signal (§35) and does
+**not** become a candidate strategy on this corpus. No other lookback, quintile,
+holding period, position count, sizing rule or cost assumption is tried to
+rescue it.
+
+This is not a marginal miss. The random portfolio beat the calm one in every
+sample, in both halves, by a margin eight standard errors from zero.
+
+### Why a signal that predicts made a portfolio that loses — diagnostics, deciding nothing
+
+**Two measurements, and a mechanism they fit.**
+
+| sample 0, base costs, recovery 1.0 | CALM | RANDOM |
+|---|---|---|
+| positions closed because the security **stopped printing** | **25** | **2** |
+| stop-loss exits | 56 | 134 |
+| partial-profit exits | 30 | 99 |
+| distinct securities held | 92 | 207 |
+
+| CAGR by delisting assumption | recovery 1.0 | recovery 0.0 |
+|---|---|---|
+| CALM | +3.31% | **−17.57%** (max drawdown 70%) |
+| RANDOM | +7.77% | +6.43% |
+
+**1. The calmest names are disproportionately securities about to disappear.**
+CALM held twelve times as many positions that stopped printing, and valuing them
+at zero instead of their last price costs it 21 points a year against RANDOM's
+1.3. The shape — near-zero volatility, then the series ends, with the last price
+a fair value — is the shape of a **pending cash acquisition**, whose price is
+pinned to the deal until it closes. That is **consistent with** these being
+takeover targets, not established: the exits were not matched to acquisition
+records. If they are, the extreme-calm tail of any volatility screen is partly a
+merger-arbitrage book earning a thin spread, which is not what the factor means.
+
+**2. The platform's own risk management already captures what low volatility
+offered.** RANDOM's 134 stop-losses cut its falling names; its 99 partial profits
+let its rising ones run. §35's edge was measured against a universe *held through*
+its losers — much of low volatility's advantage there was that volatile losers
+drag an unmanaged average down. A stop ladder removes most of that drag from the
+random portfolio, and what remains of the calm one's edge does not cover a strong
+market in which volatile stocks also rose.
+
+**3. It is not costs.** CALM loses to RANDOM at default costs, before the stress.
+
+**4. The 70% drawdown at recovery 0.0 is a warning for any future screen** on this
+corpus: a low-volatility filter concentrates exactly the delisting assumption a
+backtest is most exposed to.
+
+### What stands
+
+**§35 stands.** Low volatility does predict the cross-section of 63-session
+returns among tradeable securities out of sample; that was measured and is not
+withdrawn. What §37 establishes is that **predicting the cross-section and paying
+as a portfolio are different claims**, and on this corpus the second fails — the
+distinction §35 itself warned about: *"a factor that predicts is not yet a trade
+that pays."*
+
+**The result a strategy should take from this is about the platform, not the
+factor:** a random selection run through the platform's stop ladder earned
++7.77% a year on 2020–2025 with a 17.7% drawdown. Whatever a future signal
+claims, it must beat *that*, not beat cash.
+
+### Registered and spent
+
+**Ledger: 101 → 102 trials.** Forty-four measurements; one signal survives as a
+signal, none as a strategy.
