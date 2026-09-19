@@ -148,9 +148,13 @@ delisting denominator, free. **The fundamentals are imported**:
 `security_fundamental_facts` is populated from the Financial Statement Data Sets
 (effectively from 2011Q3). An earlier version of this paragraph said the table
 was empty; it was corrected on 2026-09-18 against a measurement, and the count is
-deliberately not written here -- measure it. What the phase still owes is the
-*use* of them: growth, quality and balance-sheet screens and earnings surprise,
-measured as signals the way `SIGNAL_SCOREBOARD.md` measures everything else. See
+deliberately not written here -- measure it. **They have now been measured as
+signals** (`SIGNAL_SCOREBOARD.md` §40 at 63 sessions, §41 at twelve months,
+2026-09-18): earnings surprise, gross profitability, asset growth and accruals,
+point-in-time. None passes, and all four are closed on this corpus. Earnings
+surprise misses only on significance at both horizons. What the phase still
+owes needs information the corpus lacks: analyst consensus for a true earnings
+surprise and revision history, shares outstanding for value, and REIT metrics. See
 [`VENDOR_EVALUATION.md`](VENDOR_EVALUATION.md) and
 [`PHASE_06_IMPROVEMENT_PLAN.md`](PHASE_06_IMPROVEMENT_PLAN.md).
 
