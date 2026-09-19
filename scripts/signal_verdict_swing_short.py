@@ -24,6 +24,8 @@ import numpy as np
 sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 
+from signal_jump_guard import load_jumps, spans_jump
+
 from tradeit.backtesting.overfitting import small_sample_hurdle
 from tradeit.signals.cross_section import (
     DAYS_PER_SESSION,
@@ -89,6 +91,7 @@ def load(paths: list[Path]) -> dict[str, np.ndarray]:
         data[f"forward_{h}"] = floats(f"forward_{h}")
         data[f"terminal_{h}"] = np.array([v == "1" for v in columns[f"terminal_{h}"]])
     data["dates"] = np.array([dt.date.fromisoformat(v) for v in columns["session_date"]])
+    data["security_id"] = np.array([int(v) for v in columns["security_id"]])
     data["unsure"] = np.array([v == "1" for v in columns["volume_undetermined"]])
     return data
 
@@ -209,10 +212,19 @@ def panel_of(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--points", default=",".join(str(OUT / f"swing_s{k}.csv") for k in range(8)))
+    ap.add_argument(
+        "--jumps",
+        default="",
+        help="§0.10 discontinuity tables; observations whose outcome window "
+        "crosses one are excluded, because a return across one is not a return",
+    )
     args = ap.parse_args()
     data = load([Path(p.strip()) for p in args.points.split(",")])
     liquid = (np.nan_to_num(data["raw_close"]) >= MIN_PRICE) & (np.nan_to_num(data["adv"]) >= FLOOR)
     print(f"{data['dates'].shape[0]:,} scanned rows; {int(liquid.sum()):,} above the floors")
+    jumps = load_jumps(args.jumps.split(",")) if args.jumps else {}
+    if jumps:
+        print(f"§0.10 guard: {sum(len(v) for v in jumps.values()):,} flagged sessions loaded")
 
     passed: list[str] = []
     for horizon in HORIZONS:
@@ -225,6 +237,10 @@ def main() -> int:
             for r in RECOVERIES
         }
         measured = np.isfinite(data[f"forward_{horizon}"]) & np.isfinite(data[CONTROL])
+        if jumps:
+            crossed = spans_jump(data["security_id"], data["dates"], horizon, jumps)
+            measured &= ~crossed
+            print(f"  §0.10: {int((crossed & liquid).sum()):,} observations excluded")
         terminal = int((data[f"terminal_{horizon}"] & measured & liquid).sum())
         print(f"\n{'#' * 78}\nHORIZON {horizon} sessions")
         print(

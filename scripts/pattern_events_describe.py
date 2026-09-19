@@ -98,8 +98,31 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--events", required=True, help="comma-separated event CSVs")
     ap.add_argument("--min-events", type=int, default=200)
+    ap.add_argument(
+        "--jumps",
+        default="",
+        help="§0.10 discontinuity tables. An event whose 63-session path crosses "
+        "one is dropped: its excursion is arithmetic on a vendor step, not a trade.",
+    )
     args = ap.parse_args()
     rows = load([Path(p.strip()) for p in args.events.split(",")])
+    if args.jumps:
+        import sys
+
+        sys.path.insert(0, "scripts")
+        import numpy as _np
+        from signal_jump_guard import load_jumps, spans_jump
+
+        jumps = load_jumps(args.jumps.split(","))
+        crossed = spans_jump(
+            _np.array([int(r["security_id"]) for r in rows]),
+            _np.array([dt.date.fromisoformat(r["entry_date"]) for r in rows]),
+            63,
+            jumps,
+        )
+        kept = [r for r, bad in zip(rows, crossed, strict=True) if not bad]
+        print(f"§0.10 guard: {len(rows) - len(kept):,} of {len(rows):,} events dropped")
+        rows = kept
     dates = [dt.date.fromisoformat(r["entry_date"]) for r in rows]
     years = max(1e-9, (max(dates) - min(dates)).days / 365.25)
     print(

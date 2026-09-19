@@ -27,6 +27,8 @@ import numpy as np
 sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 
+from signal_jump_guard import load_jumps, spans_jump
+
 from tradeit.backtesting.overfitting import small_sample_hurdle, student_t_quantile
 from tradeit.signals.cross_section import (
     DAYS_PER_SESSION,
@@ -88,6 +90,7 @@ def _load(paths: list[Path]) -> dict[str, np.ndarray]:
     out["quarter"] = floats("quarter")
     out["terminal"] = np.array([v == "1" for v in columns["terminal"]])
     out["dates"] = np.array([dt.date.fromisoformat(v) for v in columns["session_date"]])
+    out["security_id"] = np.array([int(v) for v in columns["security_id"]])
     out["unsure"] = np.array([v == "1" for v in columns["volume_undetermined"]])
     return out
 
@@ -221,14 +224,28 @@ def judge(panel: Panel, recovery: float) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--points", default=",".join(str(OUT / f"fund12_s{k}.csv") for k in range(8)))
+    ap.add_argument(
+        "--jumps",
+        default="",
+        help="§0.10 discontinuity tables; observations whose outcome window "
+        "crosses one are excluded, because a return across one is not a return",
+    )
     args = ap.parse_args()
     data = _load([Path(p.strip()) for p in args.points.split(",")])
+    jumps = load_jumps(args.jumps.split(",")) if args.jumps else {}
     base = (
         np.isfinite(data["forward"])
         & np.isfinite(data["realized_volatility_60"])
         & (np.nan_to_num(data["raw_close"]) >= MIN_PRICE)
         & (np.nan_to_num(data["adv"]) >= FLOOR)
     )
+    if jumps:
+        crossed = spans_jump(data["security_id"], data["dates"], HORIZON, jumps)
+        print(
+            f"§0.10 guard: {sum(len(v) for v in jumps.values()):,} flagged sessions; "
+            f"{int((crossed & base).sum()):,} observations excluded"
+        )
+        base &= ~crossed
     terminal = data["terminal"] & base
     print(
         f"{data['dates'].shape[0]:,} scanned rows; {int(base.sum()):,} pass the inclusion rules; "
