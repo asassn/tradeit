@@ -3142,3 +3142,101 @@ not taken here.
 
 **Ledger: 104 → 108 trials**, hurdle 2.5576. Forty-nine measurements; one signal
 survives as a signal (§35), none as a strategy.
+
+---
+
+## §41 — the same four at twelve months, dead companies kept: none passes — 2026-09-18
+
+**Registered in [`prereg/FUNDAMENTALS_12M_2026-09-18.md`](prereg/FUNDAMENTALS_12M_2026-09-18.md)
+at `9547237`**, before any signal was computed against a twelve-month outcome;
+scan, verdict and Amendment 1 committed at `5b18006` before any result. §40's
+four signals, definitions unchanged, asked the Retirement horizon's question —
+the 252-session return, which is also the horizon the literature measured them
+at. §40's results were disclosed in the registration.
+
+Three things are new, all decided before any result:
+
+- **Dead companies are kept.** §40's sampler dropped any security with no print
+  on its outcome date. Over a year that drops every company that died in it.
+  `tradeit.signals.sampling.outcome_or_terminal` keeps a security that never
+  trades again, measured to its last traded close, and the verdict prices it at
+  recovery **1.0 and 0.0; a pass needed both**. They were 72,294 of 1,386,822
+  included observations (**5.2%**). Spot-checked: ODP and SPNS, terminal in
+  December 2025, were both taken private that month, and securities stop at a
+  steady 25–55 a month through 2025, so no gap in coverage is being read as a
+  death.
+- **A small-sample hurdle.** Twelve years hold twelve independent yearly
+  outcomes. A t from 12 block means clears the normal hurdle (2.5702) by chance
+  2.6% of the time, not 1.0%, so the hurdle was the Student-t threshold with
+  the same tail: **3.0967** (`small_sample_hurdle`).
+- **Criterion 5**: the signal must also point the declared way over the part of
+  the year after the first 63 sessions, which §40 had already seen.
+
+Amendment 1: the shared geometric-mean helper silently dropped −100% returns,
+which at recovery 0.0 would have quietly removed every dead company; criterion 2
+at 0.0 used the equal-weight buy-and-hold return instead. Synthetic check before
+the run: planted + and − effects passed, noise failed, and a first-quarter-only
+effect failed criterion 5 alone.
+
+### Result
+
+ICs in the declared direction (positive supports the registration).
+
+| signal | R | IC (t) | detectable | favoured fifth/yr | halves | vol bands | after Q1 | verdict |
+|---|---|---|---|---|---|---|---|---|
+| **SUE** | 1.0 | +0.0274 (+1.73) | 0.0490 | **+2.37%** | +0.0139 / +0.0409 | 5/5 | +0.0243 | **fails C1 only** |
+| **SUE** | 0.0 | **+0.0429 (+2.92)** | 0.0455 | **+2.80%** | +0.0336 / +0.0522 | 5/5 | +0.0344 | **fails C1 only** |
+| gross profitability | 1.0 | +0.0336 (+1.54) | 0.0675 | −1.48% | pass | 5/5 | +0.0276 | fails |
+| gross profitability | 0.0 | +0.0277 (+1.34) | 0.0638 | −0.67% | pass | 4/5 | +0.0235 | fails |
+| asset growth | 1.0 | +0.0075 (+0.28) | 0.0843 | −3.57% | fail | 0/5 | +0.0055 | fails |
+| asset growth | 0.0 | −0.0016 (−0.06) | 0.0765 | −2.49% | fail | 0/5 | +0.0004 | fails |
+| accruals | 1.0 | **−0.0291 (−1.95)** | 0.0462 | −5.06% | wrong both | 3/5 | −0.0326 | fails |
+| accruals | 0.0 | **−0.0318 (−2.42)** | 0.0407 | +0.38% (median −0.68%) | wrong both | 2/5 | −0.0349 | fails |
+
+Calibration 2.06–2.29 (limit 2.583); undetermined volume 1.9–2.1% (bound 5%);
+12 blocks; median breadth 998–2,063 securities per date.
+
+**SUE is the near miss again, and more clearly than at 63 sessions.** Criteria 2
+to 5 pass at both recoveries: the high-surprise fifth compounds about 2.4–2.8
+points a year ahead of its universe, the sign holds in both halves, in all five
+volatility bands, and after the first quarter. Only significance fails. **The
+test could not have seen it:** the smallest detectable IC is 0.049 against a
+measured 0.027 at R = 1.0. Twelve years give twelve yearly outcomes, and that is
+the ceiling on this corpus, not a defect of the test.
+
+**The recovery moves SUE more than anything else here.** Its IC rises from
+0.027 to 0.043 when dead holdings are worth nothing: low-surprise companies die
+more often, so the signal partly works by avoiding them. §16 found most of the
+dead were bought out, so R = 1.0 is the realistic reading, and on that reading
+SUE is at t +1.73.
+
+**The hurdle choice did not decide it.** At R = 0.0 SUE's t of +2.92 would have
+cleared the normal 2.5702 and fails the registered 3.0967. At R = 1.0 it fails
+either one, and a pass needed both.
+
+**Accruals points the wrong way at both horizons**: high-accrual companies did
+better, t −2.42 at R = 0.0, the opposite of Sloan (1996). It is not a finding
+either way. No test was registered in that direction, and turning one around
+after the fact is what the ledger exists to stop. Asset growth is zero again.
+Gross profitability has a positive IC while its favoured fifth lags, the same
+pattern as §40.
+
+### What stands
+
+**All four are closed at both horizons on this corpus.** Per the stop rule no third
+horizon is tried. The fundamentals held today, four as-filed metrics from 2009,
+have answered what they can. The next fundamental question needs **different
+information**: analyst consensus for a real earnings surprise, which FMP does not
+supply in usable form (PHASE_06_VENDOR_MATRIX.md, measured 2026-09-18), or
+shares outstanding for value signals, which the corpus holds for 143 securities.
+
+**Recorded, not acted on:** SUE is the one fundamental line that is consistent in
+direction on every cut at both horizons. What the corpus lacks is enough
+independent years to establish it, not evidence against it. That is a reason
+to add information, not to loosen a threshold.
+
+### Registered and spent
+
+**Ledger: 108 → 112 trials.** The normal-scale hurdle is 2.5702; tests from few
+blocks use `small_sample_hurdle`. Fifty measurements; one signal survives as a
+signal (§35), none as a strategy.
