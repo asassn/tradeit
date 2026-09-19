@@ -3328,3 +3328,40 @@ than five sessions, which needs intraday data.
 
 **Ledger: 112 → 128 trials**, normal-scale hurdle 2.6163. Fifty-one
 measurements; one signal survives as a signal (§35), none as a strategy.
+
+---
+
+## §43 — §41 and §42 re-run with the §0.10 guard: both stand — 2026-09-19
+
+**No trials.** A re-measurement can withdraw a pass, never confer one, so it is
+an audit. §0.10 — a price series stepping by a factor of thousands with nothing
+recording it — was found on 2026-09-19 *by* the pattern-event study and could
+have been inflating any mean computed since. Both recent sections were re-judged
+with the guard (`signal_jump_guard`, from the corpus-wide table:
+**9,701 flagged sessions in 2,228 securities**).
+
+| | excluded | verdict |
+|---|---|---|
+| §41, four fundamentals at twelve months | 4,179 observations (0.3%) | **unchanged: none passes** |
+| §42, eight swing indicators at 5 and 10 sessions | 141 and 242 observations | **unchanged: nothing passes** |
+
+**§42 did not move at all** — ICs identical to three decimals, the positive
+control at t +13.51 and +12.02 — because every one of its criteria is a rank
+statistic or a difference of them, and a rank cannot be moved far by an outlier
+however absurd its size.
+
+**§41 moved slightly, and only where it was always going to.** Earnings
+surprise reads IC +0.0257 against +0.0274 at recovery 1.0, and its favoured
+fifth compounds +2.07%/yr against +2.37%. One criterion-2 number changed sign —
+accruals' equal-weight edge, +0.38%/yr to −0.50% — and it was failing on both
+readings. **No verdict changes at either horizon.**
+
+### Why the correction was small here and enormous elsewhere
+
+The same guard applied to the pattern-event study moved the mean 21-session
+return from **+16.73% to +0.19%** by removing **283 of 377,936 events**. The
+difference is what the statistic is made of: §41 and §42 rank securities within
+a date and then average *those* ranks, while an excursion in units of risk is
+raw arithmetic on prices. **A defect's damage is a property of the estimator,
+not of the defect**, which is the reason to record both numbers here rather
+than only the reassuring one.
