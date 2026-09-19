@@ -1,7 +1,7 @@
 # Signal testing — where it ended, and what it leaves — 2026-09-18
 
 A plain summary for deciding whether to move on. The detail, every number and
-every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§41 and
+every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§42 and
 the registrations in [`prereg/`](prereg/). This document repeats only what a
 decision needs.
 
@@ -12,10 +12,10 @@ survives as a *signal*: low volatility predicts which tradeable stocks do better
 over the next quarter, out of sample (§35). It does **not** survive as a
 *strategy*: a portfolio built on it lost to a randomly chosen one in every
 sample, under every version of the engine (§37, three runs). Everything else —
-forty-nine other measurements across price, volume, momentum, patterns, size,
-twenty-four classical indicators, a trend-strength lead, two sizing rules and
-four point-in-time fundamental signals at two horizons — is null, failed out of sample, or
-inconclusive. The closest miss is earnings surprise, at both horizons (§40,
+fifty other measurements across price, volume, momentum, patterns, size,
+thirty-two classical indicator arms across four horizons, a trend-strength lead,
+two sizing rules and four point-in-time fundamental signals at two horizons — is
+null, failed out of sample, or inconclusive. The closest miss is earnings surprise, at both horizons (§40,
 §41): every criterion but significance passes, and twelve years of data cannot
 resolve an effect that size. Along the way the corpus, the
 statistics and the backtest engine were each found to be wrong in ways that
@@ -37,8 +37,9 @@ flattered results, and each was fixed.
 | equal-risk against equal-dollar sizing | **not an improvement** on a faithful engine | §39 |
 | **four fundamental signals** — earnings surprise, gross profitability, asset growth, accruals — point-in-time | **none passes**; earnings surprise misses only on significance (t +2.13 vs 2.56) | §40 |
 | the same four at **twelve months**, companies that died kept | **none passes**; earnings surprise again misses only on significance (t +1.73 vs 3.10), undetectable at this size | §41 |
+| **eight swing indicators at 5 and 10 sessions** — RSI, stochastic, Bollinger %b, 10-day reversal, MACD, 9/21 EMA cross, 50/200 cross, 52-week rank | **none passes**; the best edge is +0.11% a hold against a 0.20% round trip. **Costs fail before significance does** | §42 |
 
-Ledger: **112 trials**; hurdle |t| > 2.5702 on the normal scale, restated with `small_sample_hurdle` for tests built from few blocks (3.0967 at twelve). Every result above is
+Ledger: **128 trials**; hurdle |t| > 2.5702 on the normal scale, restated with `small_sample_hurdle` for tests built from few blocks (3.0967 at twelve). Every result above is
 judged against the hurdle in force when it was registered.
 
 ## The benchmark any future idea must beat
@@ -100,12 +101,11 @@ looking for a good number; each was found by a check that failed.
 
 ## Is signal testing complete?
 
-**For price and volume signals on this corpus: yes.** The method is now sound and
-tested, the obvious single-signal space has been measured with honest standard
-errors, the indicator families are closed by a registered stop rule, and the one
-survivor has been carried all the way to a portfolio test and failed there.
-Another price-based indicator would be the twenty-sixth attempt at a question
-twenty-five have answered.
+**For price and volume signals on this corpus: yes, at every horizon it can
+measure.** §42 closed the short end — 5 and 10 sessions, where swing trading
+actually happens — and with it the registered stop rule covers 5, 10, 21 and 63
+sessions. Twenty-nine indicator arms, none tradeable. Anything shorter needs
+intraday data, which this corpus does not hold.
 
 **For fundamentals: yes, at both horizons, as of §41.** The four classic
 anomalies were measured point-in-time on 2013–2025 at 63 sessions and at twelve
@@ -116,6 +116,7 @@ to establish.
 **What is left is not more of the same.** Every free, single-signal question this
 corpus can answer at the 21- and 63-session horizons has now been asked with
 honest methods. The remaining routes each ask something different -- a different
-horizon (now asked for fundamentals, §41), different information (analyst
+horizon (now asked for fundamentals in §41 and for indicators in §42), different
+information (analyst
 expectations, which the corpus does not hold), or combining signals rather than
 testing them one at a time -- and each needs a decision, not a continuation.

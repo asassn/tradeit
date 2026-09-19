@@ -3240,3 +3240,91 @@ to add information, not to loosen a threshold.
 **Ledger: 108 → 112 trials.** The normal-scale hurdle is 2.5702; tests from few
 blocks use `small_sample_hurdle`. Fifty measurements; one signal survives as a
 signal (§35), none as a strategy.
+
+---
+
+## §42 — eight swing indicators at 5 and 10 sessions: nothing passes, and costs are why — 2026-09-19
+
+**Registered in [`prereg/SWING_SHORT_HORIZON_2026-09-19.md`](prereg/SWING_SHORT_HORIZON_2026-09-19.md)
+at `88816df`**, before any signal was computed at either horizon; the stochastic
+kernel, scan and verdict at `710ee33` before any result. **2020–2025 was held out
+and not read.**
+
+The Swing mandate is *days to about three months*, and every indicator study on
+this scoreboard had measured only its slow end — 21 and 63 sessions. This asked
+the short end: **5 and 10 sessions**, on 2010–2019, on the common calendar grid,
+with the committed block estimator, dead companies kept, and **costs as a pass
+criterion**. `adx_14` was excluded, closed by §34.
+
+2,323,337 rows scanned; **1,294,778** above the $5 and $1M/day floors; median
+breadth 2,554 securities per date. Securities that never traded again: 1,432 at
+5 sessions, 2,869 at 10 — 0.1–0.2%, so the recovery assumption changes little
+here, unlike §41.
+
+### The machinery passed before any arm was read
+
+| horizon | positive control `realized_volatility_60`, no floor | calibration across the eight arms |
+|---|---|---|
+| 5 sessions | IC +0.0601, **t +13.52**, breadth 4,552 | 95th percentile \|t\| 1.76–2.19 (limit 2.3) |
+| 10 sessions | IC +0.0749, **t +12.01**, breadth 4,550 | 1.76–2.19 |
+
+Low volatility is visible at both short horizons, which is the first measurement
+of §35's effect below 21 sessions.
+
+### Result — IC in each arm's declared direction, recovery 1.0
+
+| arm | declared | 5s IC (t) | 5s detectable | 10s IC (t) | 10s detectable | best edge/hold |
+|---|---|---|---|---|---|---|
+| `rsi_14` | − | +0.0079 (+1.75) | 0.0118 | +0.0089 (+1.59) | 0.0148 | +0.02% |
+| `stochastic_k_14_3` | − | +0.0073 (+1.83) | 0.0105 | +0.0081 (+1.76) | 0.0122 | +0.02% |
+| `bollinger_percent_b_20` | − | **+0.0087 (+2.23)** | 0.0102 | +0.0096 (+2.10) | 0.0120 | +0.02% |
+| `rate_of_change_10` | − | +0.0078 (+1.80) | 0.0113 | **+0.0098 (+2.08)** | 0.0124 | −0.05% |
+| `macd_histogram_norm` | + | −0.0079 (−1.86) | 0.0111 | −0.0085 (−1.80) | 0.0124 | −0.17% |
+| `ema_9_21_distance` | + | −0.0095 (−1.96) | 0.0127 | **−0.0126 (−2.14)** | 0.0155 | −0.14% |
+| `sma_50_200_distance` | + | +0.0077 (+1.24) | 0.0163 | +0.0064 (+0.83) | 0.0203 | −0.03% |
+| `percent_rank_close_252` | + | +0.0071 (+1.19) | 0.0156 | +0.0070 (+0.88) | 0.0209 | **+0.11%** |
+
+**Nothing passes at either horizon.** Hurdle 2.6265 at 5 sessions (503 blocks)
+and 2.6362 at 10 (260 blocks).
+
+### What the pattern says, and what it does not
+
+**The four mean-reversion arms all point the declared way, everywhere.** At both
+horizons, in both halves of the decade, and in **5 of 5** volatility bands —
+which is the consistency a real effect shows. Their ICs are +0.007 to +0.010
+against detectable floors of 0.010–0.015: **the test cannot resolve them**, and
+they are quoted here as unresolved, not as found.
+
+**The two trend arms point the wrong way, just as consistently** — MACD and the
+9/21 EMA crossover read negative at both horizons, in both halves, in 0 of 5
+bands in their declared direction. That is not a separate discovery: a stretched
+price reads high on the oscillators and positive on the trend measures, so the
+two families are one weak tendency seen from opposite ends. Over one to two
+weeks, stocks that have run up did *slightly* worse. **No test was registered in
+that direction and none is claimed.**
+
+**Costs are what closes this, not significance.** Even taking every reading at
+face value, the best favoured-fifth edge in the table is **+0.11% per hold**
+against a **0.20%** round trip at 10 bps a side — and a 5-session portfolio pays
+that about fifty times a year. Seven of the eight arms do not clear a tenth of a
+percent. **This is the first section where a signal's economics fail before its
+statistics do**, and at this horizon that is the ordinary case rather than the
+exception.
+
+### What stands
+
+**Per the stop rule: single classical technical indicators are CLOSED on this
+corpus at every horizon it can measure — 5, 10, 21 and 63 sessions.** No further
+indicator, lookback, smoothing or oscillator variant is tried without new
+information, meaning data this corpus does not hold: intraday bars, or a
+different market. Twenty-nine distinct indicator arms have now been measured
+across §1–§25, §32 and this section, and none has produced a tradeable edge.
+
+**What this does not rule out:** an effect below each arm's detectable floor,
+combinations rather than single indicators, and anything at a horizon shorter
+than five sessions, which needs intraday data.
+
+### Registered and spent
+
+**Ledger: 112 → 128 trials**, normal-scale hurdle 2.6163. Fifty-one
+measurements; one signal survives as a signal (§35), none as a strategy.
