@@ -2465,7 +2465,7 @@ failures shaped it, and each is a test:
 |---|---|---|
 | pooling across dates | rewarded *when* over *which*; §32's positive control came back inverted | a pure market-timing panel reads large pooled, ~0 cross-sectional |
 | dividing dates by horizon/stride | assumed dates sit a stride apart; they don't — each security samples on its own grid, so §26's panel has **1,770 usable dates in a decade holding ~40 non-overlapping 63-session windows** | the same decade sampled daily vs quarterly yields the same block count |
-| estimate over dates, t over blocks | reported two different numbers as one — a positive control read **IC +0.0141 with t −0.01**, and the mismatch alone lifted `adx_14` from t +1.33 to +2.55 | a panel built to separate the two averages; **shown to fail against the broken code** before it was trusted |
+| estimate over dates, t over blocks | reported two different numbers as one — a positive control read **IC +0.0141 with t −0.01**, and — as first written here — the mismatch alone lifted `adx_14` from t +1.33 to +2.55. **Withdrawn 2026-09-19:** re-running the committed estimator on the §32 scan reads `adx_14` at **t +2.55**, the same as this section's own verdict below, so the fixed estimator is what gives +2.55. +1.33 was §32's date-stride reading; what moved it is not established here | a panel built to separate the two averages; **shown to fail against the broken code** before it was trusted |
 
 The last row is worth its own sentence. The first test written for that defect
 used evenly spaced dates — where the two averages are identical — and passed
