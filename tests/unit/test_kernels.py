@@ -498,3 +498,61 @@ class TestScreeningKernels:
         """A cap would make a run of nine and a run of thirty the same number,
         and the screen ranks on the value."""
         assert k.td_setup_count(np.arange(60.0, 0.0, -1.0))[-1] > 9.0
+
+
+class TestStochastic:
+    """`stochastic_k`, registered in SWING_SHORT_HORIZON_2026-09-19.
+
+    The tests are the two ways this is implemented wrongly: on the close range
+    instead of the high/low range, and with the smoothing dropped.
+    """
+
+    def test_a_close_at_the_window_high_reads_one_hundred(self) -> None:
+        high = np.array([10.0, 11, 12, 13, 14])
+        low = np.array([9.0, 10, 11, 12, 13])
+        close = np.array([9.5, 10.5, 11.5, 12.5, 14.0])
+        assert k.stochastic_k(high, low, close, period=3, smooth=1)[4] == pytest.approx(100.0)
+
+    def test_a_close_at_the_window_low_reads_zero(self) -> None:
+        high = np.array([14.0, 13, 12, 11, 10])
+        low = np.array([13.0, 12, 11, 10, 9])
+        close = np.array([13.5, 12.5, 11.5, 10.5, 9.0])
+        assert k.stochastic_k(high, low, close, period=3, smooth=1)[4] == pytest.approx(0.0)
+
+    def test_the_range_is_the_high_low_range_not_the_close_range(self) -> None:
+        """A session that spiked and closed mid-range is mid-range, not at the top.
+
+        Closes rise every day, so a close-only construction reads 100 on the
+        last bar. The high of bar 2 is far above every close, so Lane's
+        indicator reads well below it.
+        """
+        high = np.array([10.0, 20.0, 11.0, 11.5])
+        low = np.array([9.0, 9.5, 10.0, 10.5])
+        close = np.array([9.5, 10.0, 10.5, 11.0])
+        value = k.stochastic_k(high, low, close, period=3, smooth=1)[3]
+        assert value == pytest.approx(100.0 * (11.0 - 9.5) / (20.0 - 9.5))
+        assert value < 50.0
+
+    def test_smoothing_is_a_mean_of_the_last_three_raw_readings(self) -> None:
+        rng = np.random.default_rng(19)
+        high = 100 + rng.random(40) * 5
+        low = high - 1 - rng.random(40)
+        close = low + (high - low) * rng.random(40)
+        raw = k.stochastic_k(high, low, close, period=14, smooth=1)
+        slow = k.stochastic_k(high, low, close, period=14, smooth=3)
+        assert slow[20] == pytest.approx(np.mean(raw[18:21]))
+        assert np.isnan(slow[14])  # warm-up is period + smooth - 2
+
+    def test_a_flat_range_is_undefined_not_a_number(self) -> None:
+        flat = np.full(6, 5.0)
+        assert np.isnan(k.stochastic_k(flat, flat, flat, period=3, smooth=1)).all()
+
+    def test_it_stays_within_zero_and_one_hundred(self) -> None:
+        rng = np.random.default_rng(20)
+        high = 50 + np.cumsum(rng.normal(0, 1, 300))
+        low = high - 1 - rng.random(300)
+        close = low + (high - low) * rng.random(300)
+        values = k.stochastic_k(high, low, close)
+        finite = values[np.isfinite(values)]
+        assert finite.size > 250
+        assert finite.min() >= 0.0 and finite.max() <= 100.0

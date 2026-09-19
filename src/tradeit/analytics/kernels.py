@@ -902,3 +902,45 @@ def td_setup_count(close: Floats, lookback: int = 4) -> Floats:
         counts[i] = run
     out[lookback:] = counts
     return out
+
+
+def stochastic_k(
+    high: Floats,
+    low: Floats,
+    close: Floats,
+    period: int = 14,
+    smooth: int = 3,
+) -> Floats:
+    """Slow %K: where the close sits in the ``period``-bar range, smoothed.
+
+    ``100 * (close - min low) / (max high - min low)``, then a ``smooth``-bar
+    mean. Warm-up ``period + smooth - 2``. ``smooth = 1`` gives fast %K.
+
+    **The range is the HIGH/LOW range, not the close range**, which is what
+    separates this from ``percent_rank`` of the close: a session that traded
+    through the window's high but closed mid-range reads 50 here and near 100
+    on a close-only construction. Lane's indicator is defined on the former.
+
+    A flat range (high == low across the window, which happens in a halt or on
+    a placeholder series) leaves the reading undefined rather than 0 or 50:
+    nothing about position can be true when there is no range to have a
+    position in.
+    """
+    if period < 1 or smooth < 1:
+        raise ValueError("period and smooth must be >= 1")
+    close = _as_float(close)
+    highest = rolling_max(_as_float(high), period)
+    lowest = rolling_min(_as_float(low), period)
+    span = highest - lowest
+    with np.errstate(divide="ignore", invalid="ignore"):
+        raw = np.where(span > 0, 100.0 * (close - lowest) / span, np.nan)
+    if smooth == 1:
+        return raw
+    # NOT sma(): that helper sums with nancumsum, which reads the warm-up NaNs
+    # as zeros and would return a deflated number for the first smooth - 1
+    # positions instead of nothing. A window mean propagates the gap, which is
+    # also what an undefined flat range mid-series must do.
+    out = _empty_like(raw)
+    if raw.shape[0] >= smooth:
+        out[smooth - 1 :] = np.lib.stride_tricks.sliding_window_view(raw, smooth).mean(axis=1)
+    return out
