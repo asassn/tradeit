@@ -15,10 +15,11 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+import pytest
 from sqlalchemy.orm import Session
 
 from tradeit.core.calendar import get_calendar
-from tradeit.research01 import price_series
+from tradeit.research01 import price_series, series
 from tradeit.research01.series import VolumeBasis, volume_basis
 from tradeit.storage.tables import (
     Issuer,
@@ -352,3 +353,70 @@ class TestTheQuestionIsAskedPerBar:
         assert bars[BEFORE[-1]].volume_basis is VolumeBasis.UNDETERMINED
         assert {bars[day].volume_basis for day in AFTER} == {VolumeBasis.NOT_NEEDED}
         assert bars[AFTER[0]].volume == Decimal(2000)
+
+
+class TestUnexplainedMoves:
+    """The vendor discontinuity guard, §0.10.
+
+    Each test is a way the guard is implemented wrongly: blind to the defect,
+    or so eager it reports every split as one.
+    """
+
+    @staticmethod
+    def _bars(closes: list[float]) -> list[series.AdjustedBar]:
+        day = dt.date(2003, 12, 15)
+        out = []
+        for n, close in enumerate(closes):
+            price = Decimal(str(close))
+            out.append(
+                series.AdjustedBar(
+                    session_date=day + dt.timedelta(days=n),
+                    open=price,
+                    high=price,
+                    low=price,
+                    close=price,
+                    volume=Decimal(1000),
+                    split_factor=Decimal(1),
+                    raw_close=price,
+                )
+            )
+        return out
+
+    def test_a_clean_series_flags_nothing(self) -> None:
+        bars = self._bars([31.0, 32.4, 33.8, 32.8, 33.7, 35.9])
+        assert series.unexplained_moves(bars, []) == frozenset()
+
+    def test_the_yell_discontinuity_is_flagged(self) -> None:
+        """$35.97 -> $275,325 on 2003-12-19 with no action recorded."""
+        bars = self._bars([33.1, 34.8, 35.97, 275325.0, 272625.0, 269550.0])
+        flagged = series.unexplained_moves(bars, [])
+        assert flagged == {dt.date(2003, 12, 18)}
+
+    def test_a_recorded_split_is_not_a_defect(self) -> None:
+        """A 1-for-10 reverse split the adjustment did not fully absorb."""
+        bars = self._bars([4.0, 4.1, 4.05, 40.2, 40.0, 39.5])
+        split = series.SplitAdjustment(
+            ex_date=dt.date(2003, 12, 18),
+            ratio=Decimal("0.1"),
+            knowledge_time=dt.datetime(2003, 12, 18, tzinfo=dt.UTC),
+        )
+        assert series.unexplained_moves(bars, [split]) == frozenset()
+        # ... and without the record, the same series IS a defect.
+        assert series.unexplained_moves(bars, []) == {dt.date(2003, 12, 18)}
+
+    def test_a_collapse_is_flagged_as_well_as_a_spike(self) -> None:
+        bars = self._bars([100.0, 101.0, 4.0, 4.1])
+        assert series.unexplained_moves(bars, []) == {dt.date(2003, 12, 17)}
+
+    def test_an_ordinary_crash_is_left_alone(self) -> None:
+        """-60% in a session is a market event, not a vendor defect."""
+        bars = self._bars([100.0, 40.0, 38.0])
+        assert series.unexplained_moves(bars, []) == frozenset()
+
+    def test_zero_closes_do_not_break_the_walk(self) -> None:
+        bars = self._bars([10.0, 0.0, 10.4, 0.0, 10.1])
+        assert series.unexplained_moves(bars, []) == frozenset()
+
+    def test_a_factor_at_or_below_one_is_refused(self) -> None:
+        with pytest.raises(ValueError):
+            series.unexplained_moves(self._bars([1.0, 2.0]), [], factor=1.0)

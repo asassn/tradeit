@@ -916,3 +916,61 @@ def series_coherence(
     if years > QUESTIONABLE_AFTER_YEARS:
         return Coherence.QUESTIONABLE, years
     return Coherence.COHERENT, years
+
+
+#: A session-to-session price ratio beyond this, with no corporate action to
+#: explain it, is a vendor discontinuity rather than a market move. Five is
+#: chosen to sit above what a real session produces in the liquid universes
+#: these studies use and far below the defects measured: YELL's 7,653x on
+#: 2003-12-19, and moves of 1e5 and beyond elsewhere.
+DISCONTINUITY_FACTOR = 5.0
+
+
+def unexplained_moves(
+    bars: Sequence[AdjustedBar],
+    splits: Sequence[SplitAdjustment],
+    *,
+    factor: float = DISCONTINUITY_FACTOR,
+) -> frozenset[dt.date]:
+    """Sessions whose close moves beyond ``factor`` with nothing explaining it.
+
+    **The defect this exists for.** EODHD's stored series for YELL steps from
+    $35.97 to $275,325 on 2003-12-19 and stays there. 7,653 is 25 x 300, this
+    security's two *later* reverse splits (2010 and 2011): the vendor restated
+    part of the history and not the rest. Nothing in the corpus records an
+    action on that date, so the adjustment cannot undo it, and every liquidity
+    floor passes an inflated price. Measured 2026-09-19 across the corpus,
+    **10,020 such sessions survive the supported read path, in 2,268
+    securities** -- every year, not one bad vintage.
+
+    A return computed *across* one of these sessions is not a return. The
+    caller excludes any outcome whose window contains one; this function only
+    says where they are, because what to do about them is the study's decision
+    and differs between a 5-session outcome and a 252-session one.
+
+    Sessions within one session of a recorded split are never flagged: the
+    series is adjusted for splits it knows, and one it does not know is exactly
+    what this is looking for -- but a split whose adjustment is imperfect at
+    the boundary must not be reported as a vendor defect.
+
+    A real session does not multiply a liquid stock by five. Where one does --
+    a buyout pop on a $0.30 shell -- refusing it costs a study one observation
+    and protects every mean it computes.
+    """
+    if factor <= 1.0:
+        raise ValueError("factor must exceed 1")
+    near_split = {s.ex_date for s in splits}
+    flagged: set[dt.date] = set()
+    previous: Decimal | None = None
+    for index, bar in enumerate(bars):
+        close = bar.close
+        if close > 0 and previous is not None and previous > 0:
+            ratio = float(close / previous)
+            explained = bar.session_date in near_split or (
+                index > 0 and bars[index - 1].session_date in near_split
+            )
+            if not explained and (ratio > factor or ratio < 1.0 / factor):
+                flagged.add(bar.session_date)
+        if close > 0:
+            previous = close
+    return frozenset(flagged)

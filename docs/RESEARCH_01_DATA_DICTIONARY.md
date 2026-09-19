@@ -20,7 +20,7 @@ will be rediscovered the hard way.
 
 ---
 
-## 0. Eight ways this corpus will mislead you
+## 0. Ten ways this corpus will mislead you
 
 Every one of these has produced a confident wrong answer during construction,
 most of them mine. They are listed first because a reader who stops here has
@@ -815,3 +815,56 @@ relative volume, money flow) — but only in windows that contain an ex-date.
 **Status: being fixed as a read rule**, by the same shape as the price fix — the
 basis is established per security from its own splits and fails closed where the
 evidence is ambiguous.
+
+### 0.10 A price series can step by a factor of thousands with **nothing recording it**
+
+**Found 2026-09-19 by the pattern-event study**, whose mean 21-session return
+read **+16.7%** against a median of +0.27%. A mean that far from its median is
+not a market, it is a defect, and this is the defect.
+
+The worked example. Security 2114, `YELL`, read through `price_series`:
+
+```
+2003-12-17   34.81
+2003-12-18   35.97
+2003-12-19  275,325.00      x7,653, and it STAYS there
+2003-12-22  272,625.00
+```
+
+The stored **raw** close carries the step, so this is not the adjustment: it is
+what the vendor served. The corpus records exactly two splits for this security,
+**1-for-25 in 2010 and 1-for-300 in 2011** — and 25 x 300 = 7,500, the size of
+the step. EODHD restated part of this history for splits that had not happened
+yet and left the rest alone, which is §0.1a's failure with a different join.
+
+**Measured corpus-wide, through the supported read path** — `price_series`, with
+split adjustment applied and every §0.3 exclusion in force:
+
+| | |
+|---|---|
+| sessions whose close moves beyond 5x with no recorded action | **10,020** |
+| securities carrying at least one | **2,268** (13% of 17,433) |
+| years affected | **every year, 1990–2026**; 1,000 in 2010, 1,218 in 2015, 586 in 2024 |
+| rows pinned at the `999999.9999` column cap, which is this defect hitting a ceiling | 233,472 rows, 247 securities |
+
+The extremes are unambiguous: `0.0001 → 75,630`, `1,905,000 → 499,999,999,950`.
+
+**Why no existing filter catches it.** A price of $275,325 passes a `close >= $5`
+floor; an inflated price times a normal share count passes a $1M/day turnover
+floor; and §0.8's ATR rule is applied at the *signal* bar, while the step usually
+lands inside the *outcome* window, where nothing was looking.
+
+**The read rule.** A return computed across one of these sessions is not a
+return. `tradeit.research01.series.unexplained_moves(bars, splits)` returns the
+sessions; a study excludes any observation whose outcome window contains one.
+The function deliberately does not filter the series itself, because a
+5-session outcome and a 252-session one are harmed differently and that choice
+belongs to the study, not to the reader.
+
+**What it does and does not change.** Measured against the studies already run:
+§42's swing panel has **0.05%** of observations spanning such a session, §41's
+twelve-month panel **1.03%**, and the pattern-event scan **0.08%**. Small counts,
+but a single +41,479% five-session return — which §42's panel does contain, above
+both floors — destroys any arithmetic mean it lands in. Rank statistics are
+unharmed; every mean, geometric or arithmetic, must be recomputed with the guard
+before it is quoted.
