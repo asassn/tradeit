@@ -1,8 +1,10 @@
 # Proposal: refuse an entry whose round-trip cost is more than 1% of it
 
-**Status: PROPOSED 2026-09-18. The guard is written, tested and switched OFF.**
-It changes trading logic, so it stays off until the owner approves it. Turning it
-on is a one-line change to the default of `RiskConfig.max_round_trip_cost_pct`.
+**Status: APPROVED 2026-09-18 by the owner, at 1%, and switched ON by default.**
+The guard was first committed switched off (`68c10f7`). The owner approved the
+recommendation below, and the default of `RiskConfig.max_round_trip_cost_pct`
+became `0.01`. Setting it to `None` switches the guard off and restores the
+pre-guard strategy digest.
 
 ---
 
@@ -17,9 +19,10 @@ to negative equity. In each, a single entry at $0.0001–$0.0002 cost several
 times the account in commission. With the guard on, and no other change, all
 four of those runs finish with equity positive throughout (table below).
 
-**What it costs.** Nothing measurable on any run the platform does today. In all
-20 current configurations (the $5 minimum price in place), the results with the
-guard on are **identical** to the results with it off: same CAGR, same trade
+**What it costs.** Nothing measurable on the stop-ladder and low-volatility
+runs, the ones measured here. In all 20 of their current configurations (the $5
+minimum price in place), the results with the guard on are **identical** to the
+results with it off: same CAGR, same trade
 count, same lowest equity. That holds at 1% and at 2%. The most expensive of
 their 7,050 entries cost 0.33% of its value at default costs and 0.85% at the
 5× stress costs.
@@ -186,11 +189,12 @@ $85.73 in their place.
   orders dearer.
 - `ParticipationCostModel.estimate_at` is `estimate` taken from a price instead
   of a bar. `estimate` now delegates to it, and a test pins the two as equal.
-- `RiskConfig.max_round_trip_cost_pct: float | None`, default `None`. `None`
-  omits the field from `StrategyConfig.to_payload`, so **every existing
-  strategy digest is unchanged** (checked against HEAD for the defaults and for
+- `RiskConfig.max_round_trip_cost_pct: float | None`, default `0.01` since
+  approval (first committed as `None`). `None` omits the field from
+  `StrategyConfig.to_payload`, so a strategy with the guard off keeps its
+  pre-guard digest (checked against the pre-guard HEAD for the defaults and for
   `config/strategies/baseline.toml`). When it is set, it is part of the digest.
-- `build_engine` adds the rule only when the field is set.
+- `build_engine` adds the rule unless the field is `None`.
 - `RiskLimitType.TRANSACTION_COST` is added. The enum is not persisted, so no
   migration is needed.
 
@@ -212,16 +216,24 @@ $85.73 in their place.
   volume" on a placeholder print is a separate defect in how dollar volume is
   read at sub-penny prices. It is not addressed here.
 
-### What turning it on by default would change
+### What turning it on by default changed
 
-- **Every strategy's digest.** Once the default is `0.01`, the field is in every
-  payload. Configurations whose behaviour is identical will hash differently
-  from the manifests of every run before the change.
-- **An open registration's "every other value at its default" clause** would
-  then include the guard. On current data it changes no result, as measured
-  above, but the digest in the manifest will differ. The owner may prefer to
-  turn it on after the stop-ladder verdict is read, or to state it in an
-  amendment.
+- **Every strategy's digest.** With the default at `0.01`, the field is in every
+  payload. Configurations whose behaviour is identical hash differently from
+  the manifests of every run before the change. A run that must reproduce an
+  old digest sets the field to `None`.
+- **No open registration.** The stop-ladder verdict had already been read (§38,
+  INCONCLUSIVE) when the guard was switched on. The one registration still
+  awaiting results, FUNDAMENTALS_12M, is a signal study that builds no trading
+  engine and reads no `StrategyConfig`, so the guard cannot reach it.
+  `config/strategies/baseline.toml` states the new default.
+- **Two older runners were not measured.** `backtest_rs250_gate.py` and
+  `backtest_survivorship.py` also assemble through `build_engine` and apply no
+  minimum price, so a re-run of either now includes the guard and may differ
+  from its recorded result wherever it bought below about $1.15. To reproduce a
+  recorded result exactly, set `max_round_trip_cost_pct` to `None`.
+  `backtest_volatility_sizing.py` applies the $5 minimum, where the guard has
+  never bound.
 
 ### Alternative considered: a minimum price in the sizer
 

@@ -641,12 +641,13 @@ class RiskConfig(Section):
     regime_risk_multiplier: float = Field(default=0.5, gt=0, le=1.0)
     #: The most an entry's estimated round-trip cost -- buy and sell at the
     #: entry price, priced by the configured ``CostConfig`` -- may be as a
-    #: fraction of its notional. ``None`` disables the check, and is the
-    #: default until the owner approves the proposition in
-    #: docs/PROPOSAL_TRANSACTION_COST_GUARD_2026-09-18.md. Without it the
-    #: platform bought 62.4 million shares at $0.0001 and paid $311,853 of
-    #: commission on a $6,241 position.
-    max_round_trip_cost_pct: float | None = Field(default=None, gt=0, le=1.0)
+    #: fraction of its notional. Without it the platform bought 62.4 million
+    #: shares at $0.0001 and paid $311,853 of commission on a $6,241 position.
+    #: 1% approved by the owner 2026-09-18, for the reasons in
+    #: docs/PROPOSAL_TRANSACTION_COST_GUARD_2026-09-18.md: inert above the $5
+    #: minimum price at default and 5x stress costs, where 0.5% would refuse
+    #: every stress-cost entry. ``None`` disables it.
+    max_round_trip_cost_pct: float | None = Field(default=0.01, gt=0, le=1.0)
 
 
 class ExitConfig(Section):
@@ -853,8 +854,8 @@ class StrategyConfig(BaseModel):
             self.sector_strength.normalised_factor_weights()
         )
         payload["regime"]["signal_weights"] = self.regime.normalised_signal_weights()
-        # A guard added switched off must not change the identity of every
-        # strategy that predates it: omitted while off, hashed once it is set.
+        # A strategy with the cost guard switched off is the strategy as it was
+        # before the guard existed, and keeps that strategy's digest.
         if payload["risk"]["max_round_trip_cost_pct"] is None:
             del payload["risk"]["max_round_trip_cost_pct"]
         return payload

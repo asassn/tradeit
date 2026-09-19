@@ -291,6 +291,7 @@ max_daily_loss_pct = 0.03
 drawdown_halt_pct = 0.15
 reduce_risk_below_regime = ["bear_trending", "high_volatility"]
 regime_risk_multiplier = 0.5
+max_round_trip_cost_pct = 0.01
 
 [exits]
 initial_stop_atr_multiple = 2.0

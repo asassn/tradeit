@@ -8,6 +8,8 @@ stop-ladder diagnostic's HOLD), base costs and recovery 1.0, recording every
 executed BUY fill. Each is run twice over -- with no minimum price, which is
 how the two samples crashed, and with the $5 minimum the runners use now --
 and, with ``--guard``, again with ``RiskConfig.max_round_trip_cost_pct`` set.
+Without ``--guard`` the guard is switched off explicitly, since the platform's
+default has had it on at 1% since 2026-09-18.
 
 Opens the corpus **read-only**. Writes to ``--out``, never to a registered
 result file. ``run`` records one sample; ``summarise`` reads a directory of
@@ -158,7 +160,8 @@ def run(args: argparse.Namespace) -> int:
                         name=f"costguard_{selection}_{arm}",
                         exits={"time_stop_sessions": HORIZON, "price_exits": arm == "ladder"},
                         sizing={"allow_pyramiding": False},
-                        risk={} if guard is None else {"max_round_trip_cost_pct": guard},
+                        # Stated either way: the default is itself the guard at 1%.
+                        risk={"max_round_trip_cost_pct": guard},
                     )
                     label = f"{args.window[:4]}-s{args.sample}-{selection}-{arm}-p{price_label}"
                     engine = build_engine(

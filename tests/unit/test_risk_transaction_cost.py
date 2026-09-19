@@ -1,4 +1,4 @@
-"""Tests for the transaction-cost guard, off by default pending the owner.
+"""Tests for the transaction-cost guard, on at 1% by default since 2026-09-18.
 
 The case the guard exists for is reproduced from the evidence, not invented.
 In the stop-ladder registration's sample 2, security 9106 closed at $0.0001 on
@@ -318,14 +318,14 @@ def _run(config: StrategyConfig) -> tuple[Decimal, int]:
 
 
 class TestTheAssembledEngine:
-    def test_off_the_platform_still_sinks_the_account(self) -> None:
-        """Pins today's behaviour, so turning the guard on is a visible change."""
-        low, trades = _run(StrategyConfig(name="off"))
+    def test_switched_off_the_platform_still_sinks_the_account(self) -> None:
+        """What the default used to do, so the guard is shown to be the difference."""
+        low, trades = _run(StrategyConfig(name="off", risk={"max_round_trip_cost_pct": None}))
         assert trades == 1
         assert low < 0
 
-    def test_on_the_entry_is_refused_and_the_account_survives(self) -> None:
-        low, trades = _run(StrategyConfig(name="on", risk={"max_round_trip_cost_pct": 0.01}))
+    def test_by_default_the_entry_is_refused_and_the_account_survives(self) -> None:
+        low, trades = _run(StrategyConfig(name="defaults"))
         assert trades == 0
         assert low == Decimal(100_000)
 
@@ -351,24 +351,25 @@ class TestTheAssembledEngine:
             )
             return [rule.name for rule in engine.cycle.engine.rules]
 
-        assert "transaction_cost" not in names(StrategyConfig(name="off"))
-        assert "transaction_cost" in names(
-            StrategyConfig(name="on", risk={"max_round_trip_cost_pct": 0.01})
+        assert "transaction_cost" in names(StrategyConfig(name="defaults"))
+        assert "transaction_cost" not in names(
+            StrategyConfig(name="off", risk={"max_round_trip_cost_pct": None})
         )
 
 
 class TestTheFlag:
-    def test_is_off_by_default(self) -> None:
-        assert RiskConfig().max_round_trip_cost_pct is None
+    def test_is_on_at_one_percent_by_default(self) -> None:
+        assert RiskConfig().max_round_trip_cost_pct == 0.01
 
-    def test_off_leaves_every_existing_digest_alone(self) -> None:
-        """A guard added switched off is not a change of strategy."""
-        payload = StrategyConfig(name="defaults").to_payload()
+    def test_switched_off_is_the_strategy_from_before_the_guard(self) -> None:
+        """Off hashes as the field never existed, so a pre-guard digest still
+        names the pre-guard behaviour."""
+        payload = StrategyConfig(name="s", risk={"max_round_trip_cost_pct": None}).to_payload()
         assert "max_round_trip_cost_pct" not in payload["risk"]
 
     def test_on_is_a_different_strategy(self) -> None:
-        off = StrategyConfig(name="s")
-        on = StrategyConfig(name="s", risk={"max_round_trip_cost_pct": 0.01})
+        on = StrategyConfig(name="s")
+        off = StrategyConfig(name="s", risk={"max_round_trip_cost_pct": None})
         assert on.digest != off.digest
         assert on.differs_from(off) == ["risk.max_round_trip_cost_pct"]
 

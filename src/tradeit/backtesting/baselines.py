@@ -253,7 +253,8 @@ def build_engine(
         GrossExposureRule(config=config.risk),
     )
     if config.risk.max_round_trip_cost_pct is not None:
-        # Off unless the config sets it; see RiskConfig.max_round_trip_cost_pct.
+        # On at 1% by default; None switches it off. See
+        # RiskConfig.max_round_trip_cost_pct.
         rules += (
             TransactionCostRule(
                 max_round_trip_cost_pct=config.risk.max_round_trip_cost_pct, costs=costs
