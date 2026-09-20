@@ -132,3 +132,40 @@ STOP RULE
 TRIALS  2 -- the rule against its placebo, and the quality gradient.
         Ledger 128 -> 130.
 ```
+
+## Amendment 1 — the machinery check, restated to something measurable
+
+Written while building the verdict, **before any statistic about the rule on
+2010–2019 had been computed or seen**. The replay had produced pair counts and
+nothing else.
+
+The registered check reads: *"the placebo's own mean net R must be within 0.05R
+of the same population's buy-and-hold over 63 sessions, minus costs."* It is not
+implementable as written. **The placebo carries a stop and buy-and-hold does
+not**, so the two differ by construction and by an amount nobody can specify in
+advance; any tolerance I picked afterwards would be picked to pass.
+
+What the check is *for* is unchanged: to catch a control that is not the market
+— a draw that lands only on survivors, or on names that cannot be held.
+
+```
+AMENDMENT 1 -- the machinery check, judged first, all three
+  a STOP RATE   the placebo's trades are stopped out on between 15% and 65%
+    of occasions. Outside that band the stop distance it inherited is not
+    doing what it does for the rule, and the two legs are not comparable.
+  b HOLDING     the placebo's mean holding period is at least 30 of the 63
+    sessions. A control stopped out immediately is not holding the market.
+  c DIRECTION   the placebo's mean net return per trade lies between 0% and
+    +6% per 63 sessions. US equities rose across 2010-2019; a control drawn
+    from that decade's eligible universe and held a quarter at a time must
+    make money, and about this much. A negative control has drawn something
+    other than the market; one above +6% is not a quarter of that decade.
+  Any of the three failing VOIDS the run and no rule statistic is printed.
+  Everything else in the registration is unchanged.
+```
+
+**Why this is not the tolerance-picking it replaces:** each band is stated in
+units whose plausible range was fixed before the decade was looked at — a stop
+either fires or does not, a holding period is bounded by the 63 sessions
+registered, and 2010–2019's market direction is a matter of public record, not
+of this corpus.
