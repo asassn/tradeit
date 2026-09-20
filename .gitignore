@@ -91,13 +91,27 @@ htmlcov/
 /research01.sqlite-journal
 /research01.sqlite-wal
 /research01.sqlite-shm
-/.research01_backfill.json
-/.research01_confirm.json
-/.research01_confirmed_backfill.json
-/.research01_fsds.json
-/.research01_dead_tickers.json
-# Resolver shard progress and cover-page verdicts. Named by pattern rather
-# than individually: every new run coins new filenames, and listing them one
-# by one is how sixteen of them arrived untracked in a status check.
-/.research01_*shard*.json
-/.research01_dead_backfill.json
+#
+# Every research-01 checkpoint, by one anchored pattern rather than by name.
+#
+# This replaced an enumerated list plus a `/.research01_*shard*.json` glob. The
+# enumeration failed exactly as its own comment predicted: 56 shard files were
+# committed before the glob was written, and three more --
+# .research01_confirm_delta.json, .research01_dead_tickers_pass4.json and
+# .research01_live_backfill.json -- were never covered by any rule at all,
+# because each new run coins a filename nobody thought to add. All 59 were
+# published when the repository went public on 2026-09-19. They contained only
+# SEC CIKs and tickers, so nothing secret escaped, but a checkpoint is
+# operational state and a rule that requires remembering to extend it is not a
+# rule.
+#
+# REJECTED ALTERNATIVE: a bare `.research01_*` with no `/` and no `.json`. It
+# would also match a future src/tradeit/research01_*.py module, which is the
+# precise shape of the unanchored `data/` defect this file already carries two
+# warnings about. The leading `/` confines it to the repository root and the
+# `.json` suffix confines it to checkpoints; `tests/unit/test_repository_hygiene.py`
+# asserts both halves rather than trusting this comment.
+#
+# An ignore rule does not untrack a file that is already committed. Adding a
+# pattern here is half the fix; `git rm --cached` is the other half.
+/.research01_*.json

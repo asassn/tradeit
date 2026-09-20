@@ -130,6 +130,91 @@ class TestReportWriting:
         assert target.exists()
 
 
+class TestResearch01CheckpointsAreIgnored:
+    """The rule that was written but never took effect.
+
+    `.gitignore` carried `/.research01_*shard*.json` with a comment explaining
+    that naming checkpoints one by one is how sixteen of them arrived untracked.
+    The comment was right and the fix was still incomplete twice over: an ignore
+    rule does not untrack a file already committed, so 56 shard files stayed
+    tracked and went public on 2026-09-19; and three later checkpoints --
+    confirm_delta, dead_tickers_pass4, live_backfill -- matched no rule at all,
+    because each run coins a filename nobody remembered to add.
+
+    Their contents were SEC CIKs and tickers, so nothing secret was published.
+    That is luck, not design: the same rule governs the corpus checkpoints, and
+    the next filename is always one nobody has thought of. Hence one anchored
+    pattern, and hence this test -- the enumeration is what failed, so asserting
+    a list of names here would rebuild the defect inside its own regression test.
+    """
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # The families that were tracked when the repository went public.
+            ".research01_shard0.json",
+            ".research01_v4_shard7_classes.json",
+            # The three that no rule ever covered.
+            ".research01_confirm_delta.json",
+            ".research01_dead_tickers_pass4.json",
+            ".research01_live_backfill.json",
+            # Names no run has produced yet. The point of the pattern is that it
+            # does not need to have heard of them.
+            ".research01_v9_shard3.json",
+            ".research01_some_future_checkpoint.json",
+        ],
+    )
+    def test_every_root_checkpoint_is_ignored(self, path: str) -> None:
+        assert is_ignored(path), f"{path} would be committed"
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # The other half, and the reason the pattern keeps its leading `/`
+            # and its `.json`. A bare `.research01_*` would hide all of these --
+            # the same shape as the unanchored `data/` rule that once kept
+            # src/tradeit/data out of every commit.
+            "src/tradeit/research01/__init__.py",
+            "src/tradeit/research01/eodhd_client.py",
+            "src/tradeit/research01_helpers.py",
+            "scripts/research01_gate.py",
+            "tests/fixtures/research01_sample.json",
+            "docs/research/control_identity_evidence.json",
+            # Root-level, but source rather than a checkpoint.
+            "research01_notes.md",
+        ],
+    )
+    def test_research01_source_and_evidence_are_never_ignored(self, path: str) -> None:
+        assert not is_ignored(path), (
+            f"{path} is hidden by .gitignore. The checkpoint rule is anchored to "
+            "the repository root and suffixed .json precisely so it cannot reach "
+            "source, scripts, fixtures or committed research evidence."
+        )
+
+    def test_the_checkpoint_rule_is_anchored_and_suffixed(self) -> None:
+        """A structural check, so the shape cannot regress to a bare glob.
+
+        The effects tested above would all still pass under `.research01_*`
+        today, because no source file is named that way yet. This catches the
+        pattern itself rather than waiting for the file that collides with it.
+        """
+        patterns = [
+            line
+            for raw in (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+            if (line := raw.strip()) and not line.startswith("#") and "research01_" in line
+        ]
+        assert patterns, "the research-01 checkpoint rule has gone missing"
+        for pattern in patterns:
+            assert pattern.startswith("/"), (
+                f"{pattern!r} is unanchored and would match nested paths such as "
+                "src/tradeit/research01_*.py"
+            )
+            assert pattern.endswith(".json"), (
+                f"{pattern!r} does not confine itself to .json checkpoints and "
+                "could hide a future module or document"
+            )
+
+
 class TestSourceIsNotIgnored:
     """The half that would have caught the original defect.
 
