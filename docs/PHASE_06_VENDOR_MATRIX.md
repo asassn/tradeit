@@ -16,6 +16,14 @@ organisation policy denials and are not to be routed around, so they were not.
 What *was* reachable: web search (result extracts only) and
 `raw.githubusercontent.com`.
 
+**Updated 2026-09-21.** That policy no longer holds for every host named above:
+`kibot.com`, `firstratedata.com`, `massive.com` (Polygon's new name) and
+`databento.com` were all reachable in this session, and §2a-i's intraday probe
+reads their primary pages and their free files **directly**. Grades in that
+section are therefore VERIFIED or MEASURED where it says so, on the definitions
+above, and not promoted second-hand claims. Nothing in the EOD sections was
+re-checked against the primary sources, so their grades stand as written.
+
 **Confidence grades are used strictly, and no secondary-source claim is promoted
 to VERIFIED.**
 
@@ -122,6 +130,8 @@ the price feed it comes with.
 | **Twelve Data** | in use for operating prices; `full-01` was built from it | never capability-probed for archive use |
 | **FMP** | in use for corporate actions and symbol reference | never capability-probed for archive use |
 | **Tiingo** | working acquisition adapter | never capability-probed for archive use |
+| **Kibot** *(intraday only)* | **probed 2026-09-21 from free files**, §2a-i: quality verified against our own corpus, delisted coverage measured, one adjustment defect found | eliminated on price for the EOD archive; **not eliminated for `intraday-01`**, where its one-time $990 covers stocks and ETFs |
+| **FirstRate Data** *(intraday only)* | new candidate, $499.95 one-time | coverage claim **not verifiable from public material** — a sample request is the only way |
 
 **Nothing here has been probed against the acceptance rules.** Every row above
 is a statement about what has and has not been *tested*, and the item most likely
@@ -833,18 +843,79 @@ Swing mandate's trigger layer need true 1-minute history, which cannot be derive
 from daily bars at any price (`MULTI_TIMEFRAME_MANDATES.md` §6.2). **This does
 not gate the EOD decision and must not delay it.**
 
-Every cell is **UNTESTED**. Probe items H1–H12 in `KIBOT_DATA_PROBE.md`.
+**Several cells are now MEASURED** — see *The free-sample probe* below, 2026-09-21.
+Probe items H1–H12 in `KIBOT_DATA_PROBE.md`.
 
-| # | criterion | **Kibot** | **Twelve Data** | **Polygon / Massive** |
-|---|---|---|---|---|
-| I-1 | historical intraday exists | advertises intraday products — untested | intraday API, depth not established | flat files include trades/aggregates — CORROBORATED |
-| I-2 | **raw 1-minute bars** | untested — H2 | untested | untested |
-| I-3 | earliest intraday history | untested — H3 | untested | untested |
-| I-4 | **delisted securities intraday** | **expected no** — H4 | expected no | expected no |
-| I-5 | **bulk file delivery** | untested — H5. **Hard requirement**: ~295k REST requests otherwise | REST only, as used today | S3 flat files — CORROBORATED, its strongest feature |
-| I-6 | regular vs extended hours separable | untested — H8 | untested | untested |
-| I-7 | timestamp convention (UTC? open- or close-stamped?) | untested — H9 | untested | untested |
-| I-8 | corporate-action treatment intraday | untested — H10 | untested | untested |
+| # | criterion | **Kibot** | **FirstRate Data** | **Twelve Data** | **Polygon / Massive** |
+|---|---|---|---|---|---|
+| I-1 | historical intraday exists | **VERIFIED — free sample loaded and checked** | VENDOR-STATED | intraday API, depth not established | flat files include trades/aggregates — CORROBORATED |
+| I-2 | **raw 1-minute bars** | **VERIFIED** — 24,556 IBM bars, OHLCV, adjusted *and* unadjusted | VENDOR-STATED, adjusted + unadjusted | untested | untested |
+| I-3 | earliest intraday history | **VERIFIED from the published symbol list**: 2,134 symbols from 1998 | VENDOR-STATED Jan 2000 | untested | 20+ years, VENDOR-STATED |
+| I-4 | **delisted securities intraday** | **MEASURED — 22,866 delisted symbols published; 60.0% of this corpus's post-2003 deaths, 23.9% of its pre-2003 deaths** | claims 7,000+; **NOT VERIFIABLE** — its public list holds only active names | expected no | date-partitioned flat files are survivorship-complete by construction — untested |
+| I-5 | **bulk file delivery** | **VERIFIED** — gzip CSV, one file per symbol, no API needed | bundles as zip, VENDOR-STATED | REST only, as used today | S3 flat files — CORROBORATED, its strongest feature |
+| I-6 | regular vs extended hours separable | **VERIFIED** — free sample is RTH only (09:30–15:59); paid claims 08:00–18:30 | VENDOR-STATED, out-of-hours included | untested | untested |
+| I-7 | timestamp convention | **VERIFIED — ET, OPEN-stamped**, one row per traded minute; **empty minutes omitted**, 387–390 rows a session | untested | untested | untested |
+| I-8 | corporate-action treatment intraday | **MEASURED, and it has a defect** — see below | VENDOR-STATED splits + dividends | untested | untested |
+| I-9 | archive size, from the vendor's own per-symbol figures | **315 GB stocks, 633 GB everything; 169 GB is the delisted set alone** | not published | n/a | n/a |
+| I-10 | price | **$990** one-time, all stocks + ETFs, lifetime | **$499.95** one-time (+$59.95/mo updates, optional) | n/a | **$199/mo**, and the plan is licensed *individual use, non-pros only* |
+
+### MEASURED 2026-09-21 — the free-sample probe
+
+Free files only: Kibot publishes three months of IBM 1-minute bars in both
+adjustment states, and its **whole symbol list, including delisted names**, with
+per-symbol start dates and file sizes. No money, no signup, no correspondence.
+
+**The data is good, and that is established against our own corpus rather than
+asserted.** The IBM minute bars were aggregated to sessions and compared with
+`research-01`'s daily bars for the same 53 sessions — a different vendor
+(EODHD), independently sourced:
+
+| | agreement |
+|---|---|
+| session **high** | median 0.00000%, max 0.0021% |
+| session **low** | median 0.00000%, max 0.0044% |
+| session **close** | median 0.017%, max 0.15% |
+| RTH minute volume ÷ our daily volume | median **0.463** |
+
+Highs and lows agreeing to the cent across two vendors is the strongest quality
+evidence obtainable without buying. **The close does not agree and should not**:
+the 15:59 bar is the last minute's trade, not the closing auction print that an
+EOD feed records — a distinction any rule reading "the close" has to make. The
+volume ratio is the other half of the same fact: about 54% of IBM's consolidated
+volume trades outside the regular session or away from the lit exchanges.
+
+**The corporate-action defect, which is §0.9 wearing different clothes.** In the
+adjusted file every price carries a factor of 0.99288 — IBM's dividend — and
+every **volume** carries **1.00717**, its exact reciprocal. That is the split
+convention applied to a dividend, and *a dividend does not create shares*. A
+study reading adjusted volume would carry a compounding error in every liquidity
+figure. Costless to avoid: **take the unadjusted file and apply our own split
+verdicts**, which is what `research-01` already does for the same reason.
+
+**Delisted coverage, measured instead of assumed.** `alldelisted.txt` holds
+22,866 symbols. Against the 10,145 securities in this corpus whose prices stop
+before 2026-06: **60.0% of post-2003 deaths and 23.9% of pre-2003 deaths** carry
+a matching symbol. Lehman is there from 1998 — and separately as `LEHMQ`, its
+post-bankruptcy ticker. Enron, WorldCom, Compaq and Exodus are not.
+
+Two cautions travel with that number. It matches on **ticker**, and tickers are
+reused — Kibot's `GM` starts in 2010, so it is the second General Motors — which
+makes 54.2% overall an **upper bound**. And `MULTI_TIMEFRAME_MANDATES.md` §6.4
+already requires `intraday-01` to be labelled with a measured delisted fraction:
+this is the first evidence for that label, and it says the Day mandate would be
+**materially survivorship-biased before 2003 and moderately so after**.
+
+**FirstRate could not be verified at all.** Its public ticker list carries only
+its ~8,200 active names; there is no page for a delisted ticker and no sample of
+one. Its "7,000+ delisted" stays **VENDOR-STATED**, which under §0's grading
+carries weight on price and **none on coverage**. Verifying it needs a sample
+request, which is the operator's to send.
+
+**Size is the binding constraint, not price.** 315 GB of stock files against
+660 GB free on the machine, and at `research-01`'s density (877 bytes a row) the
+same data in SQLite would want **multiple terabytes**. `intraday-01` therefore
+needs a columnar store before it needs a purchase — the engineering is the cost
+here, not the $990.
 
 **Note the reversal:** Polygon is ruled out for the EOD corpus because delisted
 coverage is its weakest area, but bulk flat-file delivery is its *strongest* —

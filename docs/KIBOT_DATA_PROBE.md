@@ -486,6 +486,14 @@ must be published in `CORPUS_REGISTRY.md` beside the corpus, permanently.
 
 ## H. Intraday — a separate, later, non-blocking probe
 
+> **PARTLY ANSWERED 2026-09-21, from free files and published lists — no money,
+> no correspondence.** H2, H3, H5, H8 and H9 are settled for Kibot and H4 is
+> *measured* rather than assumed. The findings, including an adjustment defect
+> in its adjusted feed and the 60%/24% post- and pre-2003 delisted coverage of
+> this corpus's own dead securities, are recorded in
+> [`PHASE_06_VENDOR_MATRIX.md`](PHASE_06_VENDOR_MATRIX.md) §2a-i rather than
+> duplicated here. The acceptance rules below are unchanged and still bind.
+
 **This item does not gate items A–G and must not delay them.** The EOD corpus
 serves the Swing and Retirement mandates and remains the priority; the intraday
 question exists because a *second* corpus is now specified
