@@ -23,6 +23,7 @@ before that session.
 from __future__ import annotations
 
 import argparse
+import collections
 import csv
 import datetime as dt
 import json
@@ -193,6 +194,12 @@ def main() -> int:
     ap.add_argument("--sample", type=int, required=True, choices=range(4))
     ap.add_argument("--pilot", type=int, default=0, help="first N securities; mechanics only")
     ap.add_argument(
+        "--exits",
+        default=None,
+        help="write per-arm exit-reason counts here. Diagnostic only: it explains "
+        "a result, it does not judge one.",
+    )
+    ap.add_argument(
         "--out",
         default=None,
         help="results CSV; defaults to one file per sample so parallel runs never share one",
@@ -295,6 +302,19 @@ def main() -> int:
                         f"{len(tilt.nominated)} rebalances, {time.time() - t1:>5.0f}s",
                         flush=True,
                     )
+                    if args.exits:
+                        tally = collections.Counter(str(t.exit_reason) for t in result.trades)
+                        with open(args.exits, "a", newline="") as exit_handle:
+                            csv.writer(exit_handle).writerow(
+                                (
+                                    args.sample,
+                                    arm.value,
+                                    cost_label,
+                                    str(recovery),
+                                    len(result.trades),
+                                    json.dumps(dict(tally)),
+                                )
+                            )
                     if args.pilot or m is None:
                         continue
                     first, second = _halves(result)

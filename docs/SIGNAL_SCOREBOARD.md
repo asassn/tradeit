@@ -3593,6 +3593,44 @@ prices have stopped moving. If that holds, it is also the mechanism behind §37,
 where low volatility lost to random by 4.35 pp/yr, and it would mean the
 low-volatility signal is partly a bet on what a dead holding is worth.
 
+### Why the calm arm loses everything: a fixed-percent stop is not a stop for a calm security
+
+Two diagnostics, neither a trial, and the second settles it.
+
+**Dying securities are not quiet beforehand.** Measured 63 sessions before each
+dead security's last bar, against its live peers on that session: median
+volatility percentile **61.8%**, and only **17.9%** sit in the calmest fifth
+against the 20% chance would give. Calm selection buys doomed companies *less*
+often than random does. The hypothesis this section was written expecting is
+**refuted**.
+
+**It is the stop that fails.** Exit reasons, sample 0, base costs:
+
+| arm | delisted exit | stop loss | time stop |
+|---|---|---|---|
+| **calm** | **6.2%** | 12.6% | 75.0% |
+| combined | 0.6% | 18.1% | 65.8% |
+| surprise | 0.5% | 28.1% | 45.5% |
+| random | 0.5% | 33.8% | 40.2% |
+
+**A calm holding leaves by delisting ten times more often than any other arm's**
+— not because it owns more dying companies, but because **it is never stopped
+out of them.** The platform's stop is a fixed 8% of price. A security selected
+for moving less than everything else rarely travels 8% in the window, so the
+stop sits outside its range and never fires; the position simply rides down to
+the delisting exit, where recovery 0.0 books the whole position as a loss. The
+volatile names random owns trip the stop and leave with a small one: random
+stops out of **33.8%** of its trades, calm out of **12.6%**.
+
+**This is a defect in the risk machinery, not a fact about volatility.** A stop
+expressed as a percentage of price is not a risk control for a low-volatility
+position — it is a formality that never binds. The fix is a stop scaled to the
+security's own volatility, which is exactly the equal-risk machinery §28 and §39
+examined for *sizing* and never applied to the *stop*. **That is trading logic
+and is proposed, not made** (CLAUDE.md). It also puts §37 in a new light: low
+volatility lost there too, and this is a mechanism that would penalise it in any
+run where holdings can die.
+
 ### Registered and spent
 
 **Ledger: 130 → 133 trials**, hurdle 2.6294. Fifty-five measurements. One signal
