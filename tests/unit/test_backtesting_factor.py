@@ -302,3 +302,54 @@ class TestSurpriseAndCombined:
         a = [c.instrument_id for c in _run(with_scores, panel, sessions)[day]]
         b = [c.instrument_id for c in _run(without, panel, sessions)[day]]
         assert a == b and len(a) == 5
+
+
+class TestVolatilityScaledStop:
+    """``VOLATILITY_STOP_2026-09-22``. The tests are the ways it fails to help.
+
+    A stop rule that ignores the security, or that a quiet name can still walk
+    past, would reproduce exactly the defect §46 measured.
+    """
+
+    @staticmethod
+    def _wound(tilt: FactorTilt, panel: dict[int, list[float]], sessions: int) -> None:
+        for n in range(sessions):
+            day = _day(n)
+            tilt.observe(day, {i: _bar(i, day, closes[n]) for i, closes in panel.items()})
+
+    def test_a_calm_security_gets_a_tighter_stop_than_a_wild_one(self) -> None:
+        """The whole point: the stop follows the security, not the price tag."""
+        sessions = 140
+        panel = _panel(6, sessions)  # 0 is calmest, 5 is wildest
+        tilt = _tilt(Selection.CALM, set(), atr_stop_multiple=2.5)
+        self._wound(tilt, panel, sessions)
+        calm = tilt.stop_for(0, Decimal("100"))
+        wild = tilt.stop_for(5, Decimal("100"))
+        assert calm > wild, "the calm security must be stopped out closer to entry"
+
+    def test_the_fixed_rule_is_blind_to_the_security(self) -> None:
+        """Why the defect existed: without a multiple, both get the same stop."""
+        sessions = 140
+        panel = _panel(6, sessions)
+        tilt = _tilt(Selection.CALM, set())
+        self._wound(tilt, panel, sessions)
+        assert tilt.stop_for(0, Decimal("100")) == tilt.stop_for(5, Decimal("100"))
+
+    def test_the_floor_and_cap_bind(self) -> None:
+        sessions = 140
+        panel = _panel(6, sessions)
+        tilt = _tilt(
+            Selection.CALM,
+            set(),
+            atr_stop_multiple=2.5,
+            atr_stop_floor=Decimal("0.05"),
+            atr_stop_cap=Decimal("0.06"),
+        )
+        self._wound(tilt, panel, sessions)
+        for instrument in (0, 5):
+            stop = tilt.stop_for(instrument, Decimal("100"))
+            assert Decimal("94") <= stop <= Decimal("95")
+
+    def test_no_history_falls_back_rather_than_inventing_a_stop(self) -> None:
+        tilt = _tilt(Selection.CALM, set(), atr_stop_multiple=2.5)
+        assert tilt.stop_for(99, Decimal("100")) == Decimal("100") * (Decimal(1) - Decimal("0.08"))

@@ -194,6 +194,13 @@ def main() -> int:
     ap.add_argument("--sample", type=int, required=True, choices=range(4))
     ap.add_argument("--pilot", type=int, default=0, help="first N securities; mechanics only")
     ap.add_argument(
+        "--atr-stop",
+        type=float,
+        default=None,
+        help="VOLATILITY_STOP_2026-09-22: stop at this many ATR(14) below entry, "
+        "floored at 3%% and capped at 13%%, instead of the fixed 8%%",
+    )
+    ap.add_argument(
         "--exits",
         default=None,
         help="write per-arm exit-reason counts here. Diagnostic only: it explains "
@@ -264,6 +271,7 @@ def main() -> int:
                         stop_pct=Decimal("0.08"),
                         seed=SEED,
                         external=surprise,
+                        atr_stop_multiple=args.atr_stop,
                     )
                     for day in warmup:
                         tilt.observe(day, data.bars(day))
@@ -274,7 +282,8 @@ def main() -> int:
                         sizing={"allow_pyramiding": False},
                         costs=cost_override,
                     )
-                    label = f"s{args.sample}-{arm.value}-{cost_label}-r{recovery}"
+                    stop_label = "fixed" if args.atr_stop is None else f"atr{args.atr_stop:g}"
+                    label = f"s{args.sample}-{arm.value}-{cost_label}-r{recovery}-{stop_label}"
                     engine = build_engine(
                         config,
                         data,

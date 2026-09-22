@@ -87,6 +87,13 @@ class FactorTilt:
     stop_pct: Decimal
     seed: int
     atr_period: int = 14
+    #: ``VOLATILITY_STOP_2026-09-22``: when set, the stop is this many ATR(14)
+    #: below entry instead of ``stop_pct`` of it, bounded by the two fractions
+    #: below. None keeps the fixed-percentage stop, which is still the
+    #: platform's rule until that registration's criteria are met.
+    atr_stop_multiple: float | None = None
+    atr_stop_floor: Decimal = Decimal("0.03")
+    atr_stop_cap: Decimal = Decimal("0.13")
     _closes: dict[int, deque[float]] = field(default_factory=dict)
     _highs: dict[int, deque[float]] = field(default_factory=dict)
     _lows: dict[int, deque[float]] = field(default_factory=dict)
@@ -164,6 +171,34 @@ class FactorTilt:
             return None
         return float(vol)
 
+    def stop_for(self, instrument_id: int, close: Decimal) -> Decimal:
+        """Where this candidate's stop sits.
+
+        The fixed rule is a fraction of price and knows nothing about the
+        security. §46 measured what that costs: a stop 8% away never binds for
+        something that moves 2% a month, so the position is never stopped and
+        is delisted instead. The scaled rule asks the security how far it
+        usually travels and puts the stop outside *that*, bounded so a quiet
+        name cannot get an absurdly tight stop nor a wild one an absurdly loose.
+        """
+        if self.atr_stop_multiple is None:
+            return close * (Decimal(1) - self.stop_pct)
+        highs = np.array(self._highs.get(instrument_id, ()), dtype=np.float64)
+        lows = np.array(self._lows.get(instrument_id, ()), dtype=np.float64)
+        closes = np.array(self._closes.get(instrument_id, ()), dtype=np.float64)
+        fraction: Decimal | None = None
+        if closes.shape[0] > self.atr_period:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                atr = atr_percent(highs, lows, closes, self.atr_period)[-1]
+            if np.isfinite(atr) and atr > 0:
+                fraction = Decimal(str(self.atr_stop_multiple * float(atr)))
+        if fraction is None:
+            # No usable ATR: fall back to the fixed rule rather than invent a
+            # stop. A fabricated stop is worse than the one being replaced.
+            fraction = self.stop_pct
+        fraction = min(max(fraction, self.atr_stop_floor), self.atr_stop_cap)
+        return close * (Decimal(1) - fraction)
+
     def _random_score(self, instrument_id: int, session_date: dt.date) -> float:
         digest = hashlib.sha256(
             f"{self.seed}:{instrument_id}:{session_date.isoformat()}".encode()
@@ -235,9 +270,9 @@ class FactorTilt:
                 strategy_config_digest="factor_tilt",
             ),
             entry_price=bar.close,
-            # Fixed percentage: equal-dollar sizing, so the arms differ only in
-            # what they choose. See the registration's reasoning.
-            stop_price=bar.close * (Decimal(1) - self.stop_pct),
+            # Equal-dollar sizing, so the arms differ only in what they
+            # choose; the stop rule is the same for every arm in a run.
+            stop_price=self.stop_for(instrument_id, bar.close),
             sector=None,
             average_dollar_volume=bar.close * bar.volume,
         )
