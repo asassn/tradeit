@@ -917,6 +917,47 @@ same data in SQLite would want **multiple terabytes**. `intraday-01` therefore
 needs a columnar store before it needs a purchase — the engineering is the cost
 here, not the $990.
 
+### MEASURED 2026-09-21 — what the subscriptions we ALREADY hold serve intraday
+
+Asked before any purchase, with keys this project already has
+(`scripts/research01_probe_intraday_plans.py`). The answer changes the decision.
+
+| vendor, on the plan we hold | 1-minute bars | depth | dead securities |
+|---|---|---|---|
+| **Tiingo** | **YES — IEX feed** | **back to 2019-08 at least**, probed at 30/400/1,000/1,800/2,600 days and served at every one | **NO** |
+| EODHD | **HTTP 403** — not on this plan | — | — |
+| FMP | HTTP 402, *"not available under your current subscription"* | — | — |
+| Sharadar | not probed — sells no intraday product at all | — | — |
+
+**Tiingo's IEX minute history is real and deep, and it has two hard limits.**
+
+*Dead companies are not served.* `SIVB` returns `404 Not found`; `BBBY` returns
+**zero bars even for 2021**, when it was trading every day. The feed is the
+survivors, which is precisely the failure `MULTI_TIMEFRAME_MANDATES.md` §6.4
+predicted for intraday and the reason that document forbids capital resting on
+it.
+
+*Accuracy is a function of liquidity, measured against this corpus's own daily
+bars over 53 sessions:*
+
+| | session high error | session low error | IEX share of volume | bars/session |
+|---|---|---|---|---|
+| AAPL | median **0.013%**, p90 0.042%, max 0.184% | median 0.011%, max 0.100% | **3.0%** | 390 of 390 |
+| CROX | median **0.100%**, p90 0.516%, **max 1.288%** | median 0.067%, max 1.228% | 5.1% | 390, min 386 |
+
+For a mega-cap the IEX path is the market's path to a basis point. For a
+mid-cap the session high is wrong by half a percent in a tenth of sessions and
+by 1.3% at worst — which is larger than the stop distances §44 traded on, so a
+CROX-sized name cannot carry an execution test. And at 3–5% of consolidated
+volume, **no intraday volume rule is possible on this feed at any liquidity**.
+
+**What it is nonetheless good for, free.** One bounded question the daily corpus
+cannot answer and this feed can, on liquid survivors: *when a daily bar closes
+above a level, how often did it first trade materially below it?* That is a
+measurement about **bar mechanics**, not about returns, so the survivorship the
+feed suffers from matters far less — it would tell us whether daily-bar entry
+and stop assumptions, including §44's, flatter themselves.
+
 **Note the reversal:** Polygon is ruled out for the EOD corpus because delisted
 coverage is its weakest area, but bulk flat-file delivery is its *strongest* —
 and bulk delivery is the hard requirement for intraday, where delisted coverage
