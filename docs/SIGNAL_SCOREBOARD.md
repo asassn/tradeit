@@ -3528,3 +3528,74 @@ time and treated every non-200 response as an empty week; Tiingo answered
 printed "0 sessions" and carried on. It would have reported a 60-ticker audit
 built from four. The loader now raises on any refusal, waits and retries on a
 rate limit, and refuses to write a ticker that returned nothing.
+
+---
+
+## §46 — low volatility × earnings surprise, as a portfolio: passes on one assumption, fails on the other — 2026-09-22
+
+**Registered in [`prereg/COMBINATION_PORTFOLIO_2026-09-22.md`](prereg/COMBINATION_PORTFOLIO_2026-09-22.md)
+at `bd75cc4`**, before the combined strategy existed as code; the arms and runner
+at `b6518ed`, before any result. **2020–2025 was not read.** The first test in
+this project of two signals *together*: 2013–2019, four disjoint samples of 500,
+four arms differing only in which securities they nominate, everything else the
+platform's own — sizing, stops, costs, fills, delisting.
+
+`sue` covered 387–405 of each sample's 500 securities across 27 rebalances.
+
+### Recovery 1.0 — a dead holding is paid its last price
+
+| sample | **combined** | calm | surprise | random |
+|---|---|---|---|---|
+| 0 | **6.68%** | 2.64% | 4.94% | 2.11% |
+| 1 | **4.50%** | 4.02% | 0.70% | 3.56% |
+| 2 | **4.82%** | 1.56% | 2.48% | 3.57% |
+| 3 | **6.95%** | 4.04% | 5.12% | 3.53% |
+| **mean** | **5.74%** | 3.07% | 3.31% | 3.19% |
+
+**Every registered criterion passes.** Over random: **+2.54 pp/yr, 4 of 4
+samples**, above the 2.0 pp margin criterion 3 demands. Over its own components:
+**+2.67 pp against calm and +2.43 pp against surprise** — criterion 2, the one
+the registration exists for. Drawdown 9.5% against random's 12.9%, so criterion
+4 passes with room. Under stress costs (15 bps spread, 25 bps slippage) the
+margin is **+2.49 pp**, essentially unchanged, because the arms trade at similar
+rates: 360 trades against random's 394.
+
+**Neither component beats random. Together they beat it by two and a half
+points.** That is what an interaction looks like, and it is the first time
+anything in 133 trials has produced one.
+
+### Recovery 0.0 — a dead holding is worth nothing
+
+| | combined | calm | surprise | random |
+|---|---|---|---|---|
+| mean CAGR | 0.12% | **−20.65%** | 1.40% | 0.89% |
+| vs random | **−0.77 pp** | −21.54 pp | +0.51 pp | — |
+
+**Criteria 1 and 2 fail.** The combination loses to random on the mean paired
+difference and loses to its own surprise component. The registration required a
+pass at **both** recoveries.
+
+### Verdict: FAILS, and the reason is worth more than the result
+
+**The edge exists only if delisted holdings retained value.** §16 measured that
+78.8% of this corpus's dead companies were bought out and 4.0% were confirmed
+bankruptcies, which makes 1.0 much the more realistic of the two assumptions —
+but *more realistic* is not *demonstrated*, and the registration was written to
+refuse a pass that rests on the favourable one. It refuses.
+
+**The calm arm's −20.65%/yr at zero recovery is the finding underneath.** Its
+drawdown is **79.9%**. A first check ruled out the obvious explanation: the
+calmest fifth of the 2013 population died *less* often than the wildest (22.2%
+against 47.5%), so low volatility is not selecting doomed companies at the
+outset. The remaining explanation — being measured — is that **securities go
+quiet before they die**, so a calm screen buys them in the window where their
+prices have stopped moving. If that holds, it is also the mechanism behind §37,
+where low volatility lost to random by 4.35 pp/yr, and it would mean the
+low-volatility signal is partly a bet on what a dead holding is worth.
+
+### Registered and spent
+
+**Ledger: 130 → 133 trials**, hurdle 2.6294. Fifty-five measurements. One signal
+survives as a signal (§35); **nothing survives as a strategy** — but for the
+first time a combination beat both of its parts, on the assumption the corpus
+says is the likelier one.
