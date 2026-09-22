@@ -1,7 +1,7 @@
 # Signal testing — where it ended, and what it leaves — 2026-09-18
 
 A plain summary for deciding whether to move on. The detail, every number and
-every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§46 and
+every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§47 and
 the registrations in [`prereg/`](prereg/). This document repeats only what a
 decision needs.
 
@@ -37,12 +37,13 @@ flattered results, and each was fixed.
 | equal-risk against equal-dollar sizing | **not an improvement** on a faithful engine | §39 |
 | **four fundamental signals** — earnings surprise, gross profitability, asset growth, accruals — point-in-time | **none passes**; earnings surprise misses only on significance (t +2.13 vs 2.56) | §40 |
 | the same four at **twelve months**, companies that died kept | **none passes**; earnings surprise again misses only on significance (t +1.73 vs 3.10), undetectable at this size | §41 |
+| a **volatility-scaled stop** against the platform's fixed 8% | **refused**: every arm worse, including the control, and the calm arm's delisting exits rose. A stop tight enough to bind on a quiet security sells it on noise | §47 |
 | **low volatility × earnings surprise, as a portfolio** | **fails as registered** — but beats random by +2.54 pp/yr and beats **both** its own components, if delisted holdings kept value; loses if they did not | §46 |
 | the daily-bar **execution assumption**, audited on real minutes | stops fill below the stop 57.6% of the time, costing a median 0.007R in §44's band; **stops tighter than ~2% cannot be honestly simulated on daily bars** | §45 |
 | **pattern breakouts as complete trades** — entry, stop, 63-session exit, costs, 147,916 trades | **fails**: +0.91% a trade, and a random stock bought the same day with the same stop made +0.91% too | §44 |
 | **eight swing indicators at 5 and 10 sessions** — RSI, stochastic, Bollinger %b, 10-day reversal, MACD, 9/21 EMA cross, 50/200 cross, 52-week rank | **none passes**; the best edge is +0.11% a hold against a 0.20% round trip. **Costs fail before significance does** | §42 |
 
-Ledger: **133 trials**; hurdle |t| > 2.5702 on the normal scale, restated with `small_sample_hurdle` for tests built from few blocks (3.0967 at twelve). Every result above is
+Ledger: **135 trials**; hurdle |t| > 2.5702 on the normal scale, restated with `small_sample_hurdle` for tests built from few blocks (3.0967 at twelve). Every result above is
 judged against the hurdle in force when it was registered.
 
 ## The benchmark any future idea must beat

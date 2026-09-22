@@ -3637,3 +3637,67 @@ run where holdings can die.
 survives as a signal (§35); **nothing survives as a strategy** — but for the
 first time a combination beat both of its parts, on the assumption the corpus
 says is the likelier one.
+
+---
+
+## §47 — the volatility-scaled stop: refused by its own control criterion — 2026-09-22
+
+**Registered in [`prereg/VOLATILITY_STOP_2026-09-22.md`](prereg/VOLATILITY_STOP_2026-09-22.md)
+at `98f6b5b`**, owner-authorised as a scoped proposition; the rule committed
+behind a flag before any comparison ran. §46's addendum diagnosed the platform's
+fixed 8% stop as never binding for a calm security — 6.2% of the calm arm's
+trades left by *delisting* against 0.5% elsewhere. This tested the obvious fix:
+**2.5 × ATR(14), floored at 3% and capped at 13%**, on §46's design with nothing
+else changed.
+
+### Criterion 1 — the control must not be worse. It is worse.
+
+Mean CAGR across the four samples, base costs:
+
+| arm | fixed 8% | 2.5×ATR | change |
+|---|---|---|---|
+| **random** (the control) | 3.19% | 2.20% | **−0.99 pp** |
+| calm | 3.07% | 1.30% | −1.77 pp |
+| combined | 5.74% | 4.31% | −1.42 pp |
+| surprise | 3.31% | 2.53% | −0.78 pp |
+
+At recovery 0.0 it is worse still: random **0.89% → −2.46%**, calm
+**−20.65% → −39.09%**. **Every arm is worse under the new rule, at both
+recoveries.** Criterion 1 fails, and it is the criterion that exists to stop a
+rule being adopted because it rescues the arm that motivated it.
+
+### Criterion 2 — the mechanism must move. It moved the wrong way.
+
+The calm arm's delisted-exit share was to fall below 3.1%. It **rose**, to
+7.0–12.7% across the samples, while its stop-loss share roughly doubled
+(12.6% → 24–29%) and its trade count fell 34% (337 → 222).
+
+Both facts at once explain the failure. **The scaled stop binds — and it binds
+on ordinary movement, not on death.** It fires on the noise a calm security
+makes, closing positions that would have recovered, which is why returns fall
+and why the surviving trade count drops. The dying positions are not saved:
+in absolute terms the calm arm still suffers about the same number of delisting
+exits, so the stop that finally binds is not the one standing between a quiet
+holding and its delisting.
+
+Criteria 3 and 4 pass — drawdown rises 2.3 pp for the control, within the 5 pp
+allowed, and no arm trades more — but the registration required all four.
+
+### Verdict: the fixed stop stands
+
+**Nothing in the platform changes.** Per the registration's own failure clause,
+the defect is recorded as a **known limitation of every low-volatility portfolio
+result** — §37 and §46 included — and **no further stop variant is tried**: not
+another multiple, not another floor, not a trailing form, until there is new
+evidence about the mechanism rather than a new parameter.
+
+**What was learned is worth more than the change would have been.** §46's
+diagnosis was right — the fixed stop does not bind for calm securities — and the
+obvious fix is worse, because a stop tight enough to bind on a quiet security is
+tight enough to sell it on noise. The two properties are the same property. That
+is a real constraint on risk design, and it was bought with two trials instead
+of a live account.
+
+### Registered and spent
+
+**Ledger: 133 → 135 trials.** Fifty-six measurements.
