@@ -225,3 +225,80 @@ class TestArguments:
     def test_bad_parameters_are_refused(self, overrides: dict[str, object]) -> None:
         with pytest.raises(ValueError):
             _tilt(Selection.CALM, set(), **overrides)
+
+
+class TestSurpriseAndCombined:
+    """The arms registered in ``COMBINATION_PORTFOLIO_2026-09-22``.
+
+    The combination's whole point is that it is neither of its components, so
+    the tests are the three ways it collapses into one of them or into noise.
+    """
+
+    @staticmethod
+    def _external(names: int, day: dt.date, best_first: list[int]) -> dict:
+        """Highest score to ``best_first[0]``, descending."""
+        return {(i, day): float(names - rank) for rank, i in enumerate(best_first)}
+
+    def test_surprise_nominates_the_highest_external_score(self) -> None:
+        sessions, day = 140, _day(139)
+        panel = _panel(10, sessions)
+        # Security 9 is the MOST volatile, so a calm arm would never take it.
+        tilt = _tilt(
+            Selection.SURPRISE,
+            {day},
+            fraction=0.2,
+            external=self._external(10, day, [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]),
+        )
+        chosen = [c.instrument_id for c in _run(tilt, panel, sessions)[day]]
+        assert chosen == [9, 8]
+
+    def test_a_security_without_a_score_is_not_nominable(self) -> None:
+        """Fundamentals are absent for most securities on most dates."""
+        sessions, day = 140, _day(139)
+        panel = _panel(10, sessions)
+        tilt = _tilt(
+            Selection.SURPRISE, {day}, fraction=0.5, external=self._external(10, day, [7, 3])
+        )
+        chosen = [c.instrument_id for c in _run(tilt, panel, sessions)[day]]
+        assert chosen == [7]  # half of the two that carry a score
+
+    def test_the_combination_is_neither_component(self) -> None:
+        """The calmest has the worst surprise and vice versa: the mean picks the middle."""
+        sessions, day = 140, _day(139)
+        panel = _panel(10, sessions)
+        # _panel makes 0 calmest and 9 most volatile; score them the opposite way.
+        external = self._external(10, day, [9, 8, 7, 6, 5, 4, 3, 2, 1, 0])
+        combined = _tilt(Selection.COMBINED, {day}, fraction=0.3, external=external)
+        calm = _tilt(Selection.CALM, {day}, fraction=0.3)
+        surprise = _tilt(Selection.SURPRISE, {day}, fraction=0.3, external=external)
+        picked = {
+            name: [c.instrument_id for c in _run(t, panel, sessions)[day]]
+            for name, t in (("combined", combined), ("calm", calm), ("surprise", surprise))
+        }
+        assert picked["calm"] == [0, 1, 2]
+        assert picked["surprise"] == [9, 8, 7]
+        # Ranks sum to a constant here, so ties break by id -- the point is only
+        # that it is not either end of the two orderings.
+        assert picked["combined"] != picked["calm"]
+        assert picked["combined"] != picked["surprise"]
+
+    def test_the_combination_follows_both_ranks_when_they_agree(self) -> None:
+        """Calm AND high-surprise: security 0 must come first on both readings."""
+        sessions, day = 140, _day(139)
+        panel = _panel(10, sessions)
+        external = self._external(10, day, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        tilt = _tilt(Selection.COMBINED, {day}, fraction=0.2, external=external)
+        chosen = [c.instrument_id for c in _run(tilt, panel, sessions)[day]]
+        assert chosen == [0, 1]
+
+    def test_the_control_is_untouched_by_a_missing_score(self) -> None:
+        """RANDOM must not shrink when fundamentals are sparse, or it is not a control."""
+        sessions, day = 140, _day(139)
+        panel = _panel(10, sessions)
+        with_scores = _tilt(
+            Selection.RANDOM, {day}, fraction=0.5, external=self._external(10, day, [1])
+        )
+        without = _tilt(Selection.RANDOM, {day}, fraction=0.5)
+        a = [c.instrument_id for c in _run(with_scores, panel, sessions)[day]]
+        b = [c.instrument_id for c in _run(without, panel, sessions)[day]]
+        assert a == b and len(a) == 5

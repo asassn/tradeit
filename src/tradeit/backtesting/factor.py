@@ -52,6 +52,14 @@ class Selection(StrEnum):
     #: A seeded hash of (security, date): a selection that knows nothing, used as
     #: the control arm so the only difference between two portfolios is choice.
     RANDOM = "random"
+    #: Highest external score first -- earnings surprise in
+    #: ``COMBINATION_PORTFOLIO_2026-09-22``. The score is supplied per
+    #: (security, session) rather than computed here, because a fundamental is
+    #: point-in-time evidence about a filing and this class only sees bars.
+    SURPRISE = "surprise"
+    #: The mean of two within-date ranks: volatility ascending and the external
+    #: score descending. A plain mean, because a weight would be a parameter.
+    COMBINED = "combined"
 
 
 @dataclass
@@ -84,6 +92,11 @@ class FactorTilt:
     _lows: dict[int, deque[float]] = field(default_factory=dict)
     _turnover: dict[int, deque[float]] = field(default_factory=dict)
     _seen: dict[int, int] = field(default_factory=dict)
+    #: ``(security, session) -> score``, higher is better. Required by SURPRISE
+    #: and COMBINED and ignored by the others. A security absent from it is not
+    #: nominable by those two arms and is untouched for the rest, which is what
+    #: keeps the control a control.
+    external: Mapping[tuple[int, dt.date], float] = field(default_factory=dict)
     #: What each rebalance nominated, kept so a run can be audited afterwards.
     nominated: dict[dt.date, tuple[int, ...]] = field(default_factory=dict)
 
@@ -174,6 +187,26 @@ class FactorTilt:
             ranked = sorted(eligible, key=lambda i: (eligible[i], i))
             chosen = ranked[:count]
             score = {i: -eligible[i] for i in chosen}
+        elif self.selection in (Selection.SURPRISE, Selection.COMBINED):
+            scored = {
+                i: v for i in eligible if (v := self.external.get((i, session_date))) is not None
+            }
+            count = max(1, int(len(scored) * self.fraction)) if scored else 0
+            if self.selection is Selection.SURPRISE:
+                ranked = sorted(scored, key=lambda i: (-scored[i], i))
+            else:
+                # Two within-date ranks, averaged. Ranking rather than scaling
+                # is deliberate: the two quantities have no common unit, and any
+                # standardisation would be a choice this registration does not make.
+                calm_rank = {
+                    i: n for n, i in enumerate(sorted(scored, key=lambda i: (eligible[i], i)))
+                }
+                score_rank = {
+                    i: n for n, i in enumerate(sorted(scored, key=lambda i: (-scored[i], i)))
+                }
+                ranked = sorted(scored, key=lambda i: ((calm_rank[i] + score_rank[i]) / 2.0, i))
+            chosen = ranked[:count]
+            score = {i: float(len(ranked) - n) for n, i in enumerate(ranked) if i in set(chosen)}
         else:
             ranked = sorted(eligible, key=lambda i: self._random_score(i, session_date))
             chosen = ranked[:count]
