@@ -3701,3 +3701,58 @@ of a live account.
 ### Registered and spent
 
 **Ledger: 133 → 135 trials.** Fifty-six measurements.
+
+---
+
+## §48 — the combination on the held-out window: it does not replicate — 2026-09-22
+
+**Registered in [`prereg/COMBINATION_CONFIRMATION_2026-09-22.md`](prereg/COMBINATION_CONFIRMATION_2026-09-22.md)
+at `3752b44`**, before the combination was run past 2019-12-31. §37's population
+and its four samples, unchanged, with a guard refusing to run unless the
+population is §37's recorded 2,806 — so its numbers stand beside these without a
+sampling difference to argue about. Nothing was re-chosen: same ranks, same
+fifth, same fixed 8% stop.
+
+### Result — recovery 1.0, base costs
+
+| sample | combined | calm | surprise | random |
+|---|---|---|---|---|
+| 0 | 7.06% | 2.66% | 11.04% | 8.09% |
+| 1 | 6.25% | 4.08% | 11.36% | 6.89% |
+| 2 | 2.31% | 3.28% | 4.79% | 4.63% |
+| 3 | 6.02% | 3.45% | 10.96% | 11.25% |
+| **mean** | **5.41%** | 3.37% | 9.54% | 7.71% |
+
+**Against random: −2.30 pp a year, 0 of 4 samples.** Against its own surprise
+component: **−4.13 pp**. Under stress costs, −2.31 pp. At recovery 0.0, −4.25 pp
+and 0 of 4.
+
+### Verdict: FAILED
+
+§46 measured **+2.54 pp over random in 4 of 4 samples** on 2013–2019. On
+2020–2025 the same rule, the same code, the same arms give **−2.30 pp in 0 of
+4**. A sign flip of that size between adjacent windows is what an in-sample
+artefact looks like, and the confirmation existed to find it.
+
+**Per the registration, the combination line closes.** No third window, no
+re-weighting, no other pair drawn from the measured set.
+
+### Two things worth keeping from the run
+
+**§37 reproduced to a hundredth of a point.** The calm arm returned 3.37%
+against random's 7.71% — **−4.34 pp**, against §37's recorded **−4.35 pp**, on
+the same samples through machinery that has since been rebuilt twice. That is
+the strongest reproducibility evidence this project has, and it was free.
+
+**The surprise arm beat random by +1.83 pp here** (9.54% against 7.71%), having
+been the weaker component on 2013–2019. It is **not a finding and licenses
+nothing**: `sue` is closed at the signal level by §41's stop rule, this window is
+one where §41 already measured it, and a component arm reported beside a failed
+registration is exactly the number a disciplined reader ignores. Recorded so
+nobody re-derives it as a discovery — including me.
+
+### Registered and spent
+
+**Ledger: 135 → 138 trials**, hurdle 2.6419. Fifty-seven measurements. One
+signal survives as a signal (§35); **nothing survives as a strategy**, and the
+one interaction that looked real did not replicate.
