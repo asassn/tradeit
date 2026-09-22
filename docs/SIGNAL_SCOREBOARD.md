@@ -3365,3 +3365,83 @@ a date and then average *those* ranks, while an excursion in units of risk is
 raw arithmetic on prices. **A defect's damage is a property of the estimator,
 not of the defect**, which is the reason to record both numbers here rather
 than only the reassuring one.
+
+---
+
+## §44 — pattern breakouts as complete trades: the market, and nothing else — 2026-09-21
+
+**Registered in [`prereg/PATTERN_BREAKOUT_TRADES_2026-09-19.md`](prereg/PATTERN_BREAKOUT_TRADES_2026-09-19.md)
+at `d94a971`**, Amendment 1 at `cdc8b36`, both before any 2010–2019 statistic
+existed. **2020–2025 was not read.** The first complete trade this project has
+tested: entry, stop, exit, costs, dead names, and a control.
+
+The design window (2003–2009) chose the rule and is disclosed in the
+registration: hold-63 beat every target and trailing variant, quality graded
+monotonically, and the stop band was set at 3–13% of price. 148,138 trades were
+taken on 2010–2019; **147,916 complete pairs** survived the §0.10 guard.
+
+### The result
+
+| | net R/trade | per trade | win rate | stopped out |
+|---|---|---|---|---|
+| **the rule** | +0.1298 | **+0.91%** | 38.4% | 55.1% |
+| **the placebo** | +0.1181 | **+0.91%** | 36.3% | 56.9% |
+| difference | +0.0116 | **−0.004%** | | |
+
+**The criterion, per registered calendar block: +0.0082R, t +0.68 against a
+hurdle of 2.760. It fails, and it fails by a distance.** Both halves fail
+(t +0.27, +0.68), the best-year-removed variant fails (t +0.86), and the
+double-cost variant is identical because a difference of two legs paying the
+same costs does not move when both pay more.
+
+The rule made money — +0.91% a trade over about a quarter — and a **randomly
+chosen stock bought on the same day, with the same stop distance and the same
+63-session exit, made exactly the same.** Everything the rule earned was the
+market it was long in. This is the number §37 taught us to demand: low
+volatility predicted and did not pay, and here a rule pays and does not predict.
+
+At recovery 0.0 the run is **VOID** by Amendment 1, and the reason is worth
+recording: when a dead holding is worth nothing, the placebo's own return goes
+**negative** (−0.19% a trade), so it is no longer the market and cannot serve as
+a control. The registration required a pass at both recoveries, so the verdict
+stands either way.
+
+### By family, because the aggregate could be hiding one
+
+| family | trades | rule − placebo |
+|---|---|---|
+| flat base | 23,009 | +0.067R |
+| ascending triangle | 8,739 | +0.063R |
+| cup with handle | 8,814 | +0.061R |
+| breakout-retest | 4,887 | +0.038R |
+| tight consolidation | 19,323 | +0.028R |
+| volatility contraction | 26,120 | +0.014R |
+| **bull flag** | 32,050 | **−0.015R** |
+| **pennant** | 20,424 | **−0.075R** |
+
+The spread is a tenth of an R between the best and worst family, none was
+registered separately, and **the stop rule forbids chasing the top of this
+table**. It is recorded so nobody re-derives it as a discovery.
+
+### An error in the registration, recorded
+
+Trial 2 was the **quality gradient**, and it could not be evaluated: the scan
+applies the registered `quality >= 58.5` filter, so the test window contains no
+bottom half to compare against. The filter and the gradient test contradict each
+other and I did not notice when writing it. The trial is charged to the ledger
+anyway.
+
+### What stands
+
+**Pattern breakouts as single-pattern trade rules are CLOSED on this corpus.**
+Per the stop rule: no other exit, target, trailing multiple, quality threshold
+or stop band is tried on daily bars. The machinery is not at fault — it did
+exactly what it was built to do, on 147,916 trades, and returned a clean answer.
+
+**What this does not close:** combinations rather than single patterns, the
+short side (no detector here is bearish), and anything needing intraday data.
+
+### Registered and spent
+
+**Ledger: 128 → 130 trials.** Fifty-three measurements. One signal survives as
+a signal (§35); **nothing survives as a strategy.**

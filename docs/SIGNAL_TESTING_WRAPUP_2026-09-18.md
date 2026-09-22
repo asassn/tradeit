@@ -1,7 +1,7 @@
 # Signal testing — where it ended, and what it leaves — 2026-09-18
 
 A plain summary for deciding whether to move on. The detail, every number and
-every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§42 and
+every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§44 and
 the registrations in [`prereg/`](prereg/). This document repeats only what a
 decision needs.
 
@@ -37,9 +37,10 @@ flattered results, and each was fixed.
 | equal-risk against equal-dollar sizing | **not an improvement** on a faithful engine | §39 |
 | **four fundamental signals** — earnings surprise, gross profitability, asset growth, accruals — point-in-time | **none passes**; earnings surprise misses only on significance (t +2.13 vs 2.56) | §40 |
 | the same four at **twelve months**, companies that died kept | **none passes**; earnings surprise again misses only on significance (t +1.73 vs 3.10), undetectable at this size | §41 |
+| **pattern breakouts as complete trades** — entry, stop, 63-session exit, costs, 147,916 trades | **fails**: +0.91% a trade, and a random stock bought the same day with the same stop made +0.91% too | §44 |
 | **eight swing indicators at 5 and 10 sessions** — RSI, stochastic, Bollinger %b, 10-day reversal, MACD, 9/21 EMA cross, 50/200 cross, 52-week rank | **none passes**; the best edge is +0.11% a hold against a 0.20% round trip. **Costs fail before significance does** | §42 |
 
-Ledger: **128 trials**; hurdle |t| > 2.5702 on the normal scale, restated with `small_sample_hurdle` for tests built from few blocks (3.0967 at twelve). Every result above is
+Ledger: **130 trials**; hurdle |t| > 2.5702 on the normal scale, restated with `small_sample_hurdle` for tests built from few blocks (3.0967 at twelve). Every result above is
 judged against the hurdle in force when it was registered.
 
 ## The benchmark any future idea must beat
@@ -112,6 +113,12 @@ anomalies were measured point-in-time on 2013–2025 at 63 sessions and at twelv
 months, the second keeping the companies that died. None passes. Earnings
 surprise is consistent in direction on every cut and too small for twelve years
 to establish.
+
+**For chart patterns as trades: yes, as of §44.** The twelve detectors were
+carried all the way to a complete trade — entry above a frozen boundary, the
+pattern's own stop, a fixed exit, real costs, dead companies included — and
+measured against a placebo that bought a random stock the same day on the same
+terms. The rule earned the market's return and not one basis point more.
 
 **What is left is not more of the same.** Every free, single-signal question this
 corpus can answer at the 21- and 63-session horizons has now been asked with
