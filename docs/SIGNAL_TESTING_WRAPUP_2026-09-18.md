@@ -1,7 +1,7 @@
 # Signal testing — where it ended, and what it leaves — 2026-09-18
 
 A plain summary for deciding whether to move on. The detail, every number and
-every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§44 and
+every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§45 and
 the registrations in [`prereg/`](prereg/). This document repeats only what a
 decision needs.
 
@@ -37,6 +37,7 @@ flattered results, and each was fixed.
 | equal-risk against equal-dollar sizing | **not an improvement** on a faithful engine | §39 |
 | **four fundamental signals** — earnings surprise, gross profitability, asset growth, accruals — point-in-time | **none passes**; earnings surprise misses only on significance (t +2.13 vs 2.56) | §40 |
 | the same four at **twelve months**, companies that died kept | **none passes**; earnings surprise again misses only on significance (t +1.73 vs 3.10), undetectable at this size | §41 |
+| the daily-bar **execution assumption**, audited on real minutes | stops fill below the stop 57.6% of the time, costing a median 0.007R in §44's band; **stops tighter than ~2% cannot be honestly simulated on daily bars** | §45 |
 | **pattern breakouts as complete trades** — entry, stop, 63-session exit, costs, 147,916 trades | **fails**: +0.91% a trade, and a random stock bought the same day with the same stop made +0.91% too | §44 |
 | **eight swing indicators at 5 and 10 sessions** — RSI, stochastic, Bollinger %b, 10-day reversal, MACD, 9/21 EMA cross, 50/200 cross, 52-week rank | **none passes**; the best edge is +0.11% a hold against a 0.20% round trip. **Costs fail before significance does** | §42 |
 

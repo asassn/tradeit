@@ -60,7 +60,7 @@ def get(url: str, key: str, headers: dict[str, str] | None = None) -> tuple[int,
     )
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
-            return response.status, response.read().decode()[:400_000]
+            return response.status, response.read().decode()
     except urllib.error.HTTPError as error:
         return error.code, error.read().decode(errors="replace")[:2000]
     except urllib.error.URLError as error:

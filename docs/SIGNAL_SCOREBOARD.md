@@ -3445,3 +3445,86 @@ short side (no detector here is bearish), and anything needing intraday data.
 
 **Ledger: 128 → 130 trials.** Fifty-three measurements. One signal survives as
 a signal (§35); **nothing survives as a strategy.**
+
+---
+
+## §45 — the daily-bar execution assumption, audited against real minutes — 2026-09-22
+
+**No trials.** An audit of two conventions, not a hypothesis about returns. Both
+were chosen when only daily bars existed, and §44 traded 147,916 trades on them:
+
+1. a stop **fills at the stop price**;
+2. a session whose daily bar spans **both** stop and target counts as
+   **stopped**, chosen because daily bars cannot order the two and the
+   pessimistic reading cannot flatter a rule.
+
+Measured on real 1-minute paths from **Tiingo's IEX feed — a subscription
+already held, not a purchase** (`PHASE_06_VENDOR_MATRIX.md` §2a-i). 20 of the
+most liquid securities in the corpus, six stop distances, **32,496 synthetic
+sessions**: buy the open, stop a fixed fraction below, target the same distance
+above. **2020–2025 was not read** — it is the held-out window for other
+registrations — so this uses 2019 and 2026, where the feed reaches.
+
+### What a stop actually fills at
+
+`slippage_r` is `(fill - stop) / (entry - stop)`: zero is what the simulation
+assumes, negative is the simulation flattering itself.
+
+| stop | stop events | fills **below** the stop | median | mean | p10 | worst |
+|---|---|---|---|---|---|---|
+| 1% | 2,671 | 57.8% | −0.0225R | | −0.349R | **−2.810R** |
+| 2% | 1,351 | 56.5% | −0.0080R | | −0.156R | −0.905R |
+| 3% | 734 | 58.9% | −0.0083R | −0.0181R | −0.119R | −0.422R |
+| 5% | 282 | 57.8% | −0.0061R | −0.0112R | −0.061R | −0.292R |
+| 8% | 73 | 54.8% | −0.0021R | −0.0026R | −0.035R | −0.074R |
+| 13% | 11 | 81.8% | −0.0104R | −0.0097R | −0.025R | −0.028R |
+
+**The assumption is wrong more often than it is right — 57.6% of stops fill
+below the stop — and the amount is small.** Across §44's registered band,
+3–13%, pooled: **1,100 stop events, median −0.0069R, mean −0.0152R.** The mean
+is twice the median because the damage is a tail, not a drift: the worst fill
+in the whole audit is −2.81R, a gap straight through a 1% stop.
+
+**Tight stops are where this bites.** At 1% the mean cost is −0.02R and the tail
+reaches −2.8R; at 8% it is −0.003R. A rule using stops of a few percent pays
+almost nothing to this effect; one using intraday-tight stops cannot be
+simulated on daily bars at all.
+
+### Was "stop first" the right call?
+
+| stop | ambiguous sessions | share of stops | stop **truly** first |
+|---|---|---|---|
+| 1% | 1,058 | 39.6% | **50.2%** |
+| 2% | 209 | 15.5% | 51.7% |
+| 3% | 37 | 5.0% | 43.2% |
+| 5% | 3 | 1.1% | 33.3% |
+| 8–13% | 0 | — | — |
+
+**It is a coin flip, and it almost never comes up.** In §44's band the ambiguous
+case is **3.6% of stops**, and the stop genuinely went first in **17 of 40**. So
+the convention is wrong about half the time on 3.6% of stopped trades —
+worth about a thousandth of an R, and *conservative*, which is the direction a
+convention should err in.
+
+### What this changes
+
+**Nothing in §44's verdict, and for a reason worth keeping.** §44 compared a
+rule against a placebo that carried the *same* stop distances and the same exit
+rule, so both legs pay this cost and **the paired difference cancels it
+almost exactly**. The absolute figure moves: the rule's +0.1298R per trade is
+nearer +0.11R once stops fill where they really fill. The measured difference,
++0.0082R at t +0.68, does not move enough to matter and was nowhere near its
+hurdle.
+
+**What it does change is what may be simulated on daily bars.** Recorded as a
+standing limit: a stop closer than about 2% of price cannot be honestly
+backtested on this corpus, because the fill it assumes is wrong by a tenth of
+its own risk at the tenth percentile and by multiples of it in a gap. Above
+about 3% the daily-bar assumption costs a hundredth of an R and is fair.
+
+**The audit found a defect in itself first.** The first run asked a week at a
+time and treated every non-200 response as an empty week; Tiingo answered
+`429 — hourly request allocation` from the fifth ticker onward, and the run
+printed "0 sessions" and carried on. It would have reported a 60-ticker audit
+built from four. The loader now raises on any refusal, waits and retries on a
+rate limit, and refuses to write a ticker that returned nothing.
