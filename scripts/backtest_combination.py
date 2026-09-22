@@ -194,6 +194,12 @@ def main() -> int:
     ap.add_argument("--sample", type=int, required=True, choices=range(4))
     ap.add_argument("--pilot", type=int, default=0, help="first N securities; mechanics only")
     ap.add_argument(
+        "--confirm",
+        action="store_true",
+        help="COMBINATION_CONFIRMATION_2026-09-22: run the held-out 2020-2025 "
+        "window on §37's own population and samples, unchanged",
+    )
+    ap.add_argument(
         "--atr-stop",
         type=float,
         default=None,
@@ -216,8 +222,26 @@ def main() -> int:
     session: Session = sessionmaker(
         bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
     )()
-    pop = population(session, Path(args.spans), OUT / "combo_bt_population.json")
+    if args.confirm:
+        # §37's window, population and samples, so its CALM and RANDOM numbers
+        # stand beside this run without a second sampling difference.
+        globals()["START"] = dt.date(2020, 1, 2)
+        globals()["END"] = dt.date(2025, 12, 31)
+        globals()["WARMUP_FROM"] = dt.date(2019, 1, 2)
+        globals()["SPLIT"] = dt.date(2023, 1, 1)
+        cache = OUT / "lowvol_bt_population.json"
+        if not cache.exists():
+            raise SystemExit("§37's population cache is missing; the samples would not match")
+    else:
+        cache = OUT / "combo_bt_population.json"
+    pop = population(session, Path(args.spans), cache)
+    if args.confirm and len(pop) != 2806:
+        # §37 recorded 2,806 securities alive and liquid on 2020-01-02. If this
+        # is not that number the samples are not §37's, and the comparison the
+        # registration promises does not exist.
+        raise SystemExit(f"population is {len(pop):,}, not §37's 2,806: samples would not match")
     drawn = samples(pop)
+    print(f"window {START} .. {END} (warmup from {WARMUP_FROM})", flush=True)
     universe = drawn[args.sample][: args.pilot] if args.pilot else drawn[args.sample]
     print(
         f"population {len(pop):,}; sample {args.sample}: {len(universe):,} securities"
