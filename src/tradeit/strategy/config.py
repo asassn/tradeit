@@ -615,6 +615,14 @@ class SizingConfig(Section):
     risk_per_trade_pct: float = Field(default=0.005, gt=0, le=0.05)
     max_position_pct_of_equity: float = Field(default=0.20, gt=0, le=1.0)
     min_position_notional: float = Field(default=500.0, ge=0)
+    #: The most of a position's own value its round trip may cost, owner-
+    #: authorised 2026-09-22. Commission is per *share*, so cost over notional
+    #: is ``commission_per_share / price`` -- the share count cancels, which is
+    #: why no size cap can catch it and why §38's sizer bought 20.6 million
+    #: shares of a $0.0001 stock and paid $102,911 to hold $2,000 of it. At the
+    #: default costs 1% implies a workable price of $1.087, so the guard admits
+    #: anything from about $1.10 up.
+    max_cost_fraction_of_notional: float = Field(default=0.01, gt=0, le=1.0)
     allow_fractional_shares: bool = False
     #: Pyramiding adds to winners only, and only with the stop already raised;
     #: adding to a loser is averaging down wearing a technical name.

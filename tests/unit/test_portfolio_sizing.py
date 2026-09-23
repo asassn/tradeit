@@ -22,7 +22,7 @@ from tradeit.portfolio.base import (
 )
 from tradeit.portfolio.sizing import BindingConstraint, RiskBasedSizer
 from tradeit.strategy.base import OpportunityScore, ScoreComponent, SignalDirection
-from tradeit.strategy.config import RiskConfig, SizingConfig
+from tradeit.strategy.config import CostConfig, RiskConfig, SizingConfig
 
 AS_OF = dt.datetime(2024, 6, 3, 21, 0, tzinfo=dt.UTC)
 
@@ -292,3 +292,74 @@ def test_parameters_are_reported_for_the_audit_trail() -> None:
     assert parameters["risk_per_trade_pct"] == 0.005
     assert parameters["max_portfolio_heat_pct"] == 0.06
     assert parameters["max_participation"] == "0.02"
+
+
+class TestRoundTripCostGuard:
+    """The guard authorised 2026-09-22, at the numbers that made it necessary.
+
+    §38: equal-dollar sizing bought 20.6 million shares of a security printing
+    at $0.0001 and paid $102,911 of commission to hold about $2,000 of it, on
+    the way to negative equity. Commission is per share, so the ratio it fails
+    on is `commission_per_share / price` -- the share count cancels, and no
+    position cap can reach it.
+    """
+
+    @staticmethod
+    def _guarded(limit: float = 0.01, **cost_overrides: float) -> RiskBasedSizer:
+        return RiskBasedSizer(
+            sizing=SizingConfig(max_cost_fraction_of_notional=limit, min_position_notional=0),
+            risk=RiskConfig(),
+            max_participation=Decimal("0.05"),
+            costs=CostConfig(**cost_overrides),
+        )
+
+    def test_the_sub_penny_position_is_refused(self) -> None:
+        sizer = self._guarded()
+        decision = sizer.size(
+            _candidate(),
+            entry_price=Decimal("0.0001"),
+            stop_price=Decimal("0.00009"),
+            portfolio=_portfolio(equity=Decimal(100_000)),
+        )
+        assert decision.rejected
+        assert decision.binding_constraint == BindingConstraint.COST
+        assert decision.quantity == 0
+
+    def test_an_ordinary_price_is_untouched(self) -> None:
+        """At $5 the round trip costs 0.36% -- the guard must not bind."""
+        sizer = self._guarded()
+        decision = sizer.size(
+            _candidate(),
+            entry_price=Decimal("5.00"),
+            stop_price=Decimal("4.60"),
+            portfolio=_portfolio(equity=Decimal(100_000)),
+        )
+        assert not decision.rejected
+        assert decision.quantity > 0
+
+    def test_the_ratio_is_price_only_and_does_not_improve_with_size(self) -> None:
+        """Why a position cap cannot fix it: the share count cancels."""
+        sizer = self._guarded()
+        one = sizer.round_trip_cost_fraction(Decimal("0.10"))
+        assert one is not None
+        # A tenth the equity would buy a tenth the shares and change nothing.
+        smaller = RiskBasedSizer(
+            sizing=SizingConfig(max_position_pct_of_equity=0.01, min_position_notional=0),
+            risk=RiskConfig(),
+            max_participation=Decimal("0.05"),
+            costs=CostConfig(),
+        )
+        assert smaller.round_trip_cost_fraction(Decimal("0.10")) == one
+
+    def test_the_implied_floor_is_just_under_a_dollar_ten(self) -> None:
+        """2 x 0.005 / p + 8 bps = 1% solves at $1.087, so the guard admits $1.10."""
+        sizer = self._guarded()
+        assert sizer.round_trip_cost_fraction(Decimal("1.10")) < Decimal("0.01")
+        assert sizer.round_trip_cost_fraction(Decimal("1.05")) > Decimal("0.01")
+
+    def test_without_a_cost_model_the_guard_does_not_pretend(self) -> None:
+        """No costs configured: it must say nothing rather than assume free trading."""
+        sizer = RiskBasedSizer(
+            sizing=SizingConfig(), risk=RiskConfig(), max_participation=Decimal("0.05")
+        )
+        assert sizer.round_trip_cost_fraction(Decimal("0.0001")) is None

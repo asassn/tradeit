@@ -253,7 +253,12 @@ def build_engine(
     return EventDrivenEngine(
         cycle=PortfolioCycle(
             sizer=RiskBasedSizer(
-                sizing=config.sizing, risk=config.risk, max_participation=participation
+                sizing=config.sizing,
+                risk=config.risk,
+                max_participation=participation,
+                # Without this the cost guard cannot price a round trip and
+                # silently does not apply -- the defect §38 recorded.
+                costs=config.costs,
             ),
             engine=MostRestrictiveEngine(rule_set=rules, sizing=config.sizing),
             ranker=DiversityAwareRanker(

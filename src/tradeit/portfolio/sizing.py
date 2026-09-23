@@ -49,7 +49,7 @@ from decimal import ROUND_DOWN, Decimal
 
 from tradeit.portfolio.base import PortfolioState, SizingDecision
 from tradeit.strategy.base import OpportunityScore
-from tradeit.strategy.config import RiskConfig, SizingConfig
+from tradeit.strategy.config import CostConfig, RiskConfig, SizingConfig
 
 __all__ = ["BindingConstraint", "RiskBasedSizer"]
 
@@ -67,6 +67,8 @@ class BindingConstraint:
     HEAT = "portfolio_heat_budget"
     CASH = "available_cash"
     LIQUIDITY = "liquidity_participation"
+    #: Refused because the round trip costs too much of the position itself.
+    COST = "round_trip_cost"
 
 
 def _floor(quantity: Decimal, *, fractional: bool) -> Decimal:
@@ -86,6 +88,10 @@ class RiskBasedSizer:
     sizing: SizingConfig
     risk: RiskConfig
     max_participation: Decimal
+    #: The cost model the guard below prices a round trip with. Optional so the
+    #: dataclass's existing call sites keep working; when it is absent the
+    #: guard cannot be applied and says so rather than assuming free trading.
+    costs: CostConfig | None = None
     name: str = "risk_based"
 
     @property
@@ -97,7 +103,24 @@ class RiskBasedSizer:
             "allow_fractional_shares": self.sizing.allow_fractional_shares,
             "max_portfolio_heat_pct": self.risk.max_portfolio_heat_pct,
             "max_participation": str(self.max_participation),
+            "max_cost_fraction_of_notional": self.sizing.max_cost_fraction_of_notional,
         }
+
+    def round_trip_cost_fraction(self, entry_price: Decimal) -> Decimal | None:
+        """What a round trip costs, as a fraction of the position's own value.
+
+        **The share count cancels.** Commission is charged per share, so
+        ``commission / notional`` is ``commission_per_share / price`` however
+        many shares are bought -- which is why no position-size cap catches the
+        failure §38 recorded, and why the guard belongs here rather than in any
+        strategy. Spread and slippage are already fractions of price and are
+        added as given.
+        """
+        if self.costs is None or entry_price <= 0:
+            return None
+        per_side = Decimal(str(self.costs.commission_per_share)) / entry_price
+        bps = Decimal(str(self.costs.spread_bps + self.costs.slippage_bps)) / Decimal(10_000)
+        return 2 * per_side + bps
 
     def size(
         self,
@@ -138,6 +161,19 @@ class RiskBasedSizer:
             )
         if portfolio.equity <= 0:
             return refuse("portfolio equity is not positive", BindingConstraint.RISK)
+
+        cost_fraction = self.round_trip_cost_fraction(entry_price)
+        limit = Decimal(str(self.sizing.max_cost_fraction_of_notional))
+        if cost_fraction is not None and cost_fraction > limit:
+            # Owner-authorised 2026-09-22. This can only ever refuse a trade,
+            # never improve one: a position whose round trip costs more than
+            # this of itself is a fee with a stock attached.
+            return refuse(
+                f"a round trip costs {cost_fraction:.2%} of notional at {entry_price}, "
+                f"above the {limit:.2%} limit; commission is per share, so this "
+                "ratio does not improve at any size",
+                BindingConstraint.COST,
+            )
 
         equity = portfolio.equity
 
