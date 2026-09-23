@@ -3772,3 +3772,60 @@ nobody re-derives it as a discovery — including me.
 **Ledger: 135 → 138 trials**, hurdle 2.6419. Fifty-seven measurements. One
 signal survives as a signal (§35); **nothing survives as a strategy**, and the
 one interaction that looked real did not replicate.
+
+---
+
+## §49 — a market-regime gate: the control gets worse, and the drawdown does not fall — 2026-09-22
+
+**Registered in [`prereg/MARKET_REGIME_GATE_2026-09-22.md`](prereg/MARKET_REGIME_GATE_2026-09-22.md)
+at `12f0795`**, before the gate existed as code. The first test here of **whether
+to be invested at all** rather than what to own — the Swing mandate's `1w`
+context layer, derived from daily bars rather than bought. The rule: nominate
+normally when the sample's own equal-weighted index sits at or above its
+50-session average, nominate nothing below it. §46's design, every arm run gated
+and ungated so the gate is the only difference.
+
+### Criterion 1 — the control must improve. It gets worse.
+
+Mean CAGR across four samples, recovery 1.0, base costs:
+
+| arm | ungated | gated | change | samples improved |
+|---|---|---|---|---|
+| **random** (the control) | 3.19% | 1.82% | **−1.37 pp** | **0 of 4** |
+| calm | 3.07% | 2.46% | −0.61 pp | 1 of 4 |
+| combined | 5.74% | 3.83% | −1.90 pp | 0 of 4 |
+| surprise | 3.31% | 2.83% | −0.48 pp | 2 of 4 |
+
+At recovery 0.0 the control goes 0.89% → **0.01%**, again 0 of 4. Under stress
+costs, 1.98% → 0.82%.
+
+### Criterion 2 — drawdown must fall. It rises.
+
+The control's mean maximum drawdown went **12.9% → 13.6%** at recovery 1.0. The
+entire mechanism claimed was sitting out declines; it did not happen. Exposure
+fell from 96.3% to 79.5%, so the gate was out of the market about a fifth of the
+time — and **it was not the right fifth**. A trailing average on a broad
+equal-weighted index leaves after a decline has begun and returns after the
+recovery has begun, and on this corpus that cost 1.4 points a year to learn.
+
+Criterion 3 passes (exposure stayed well above half) and criterion 4 is moot.
+
+### Verdict: FAILED
+
+**Per the stop rule, timing the market by its own trend is closed on this
+corpus**: no other lookback, no other proxy, no volatility- or breadth-based
+variant.
+
+**The one place it helped is the one the registration refuses.** The calm arm at
+recovery 0.0 improved by **+4.15 pp in 4 of 4 samples** (−20.65% → −16.50%) —
+because sitting out means holding fewer securities through their delisting, which
+is §46's stop-that-never-binds defect being partly dodged rather than a regime
+effect. Criterion 1 exists precisely so a gate cannot be adopted on that basis,
+and it was written before this number was seen.
+
+### Registered and spent
+
+**Ledger: 138 → 140 trials.** Fifty-eight measurements. One signal survives as a
+signal (§35); nothing survives as a strategy; and the two questions asked beyond
+selection — when to be invested (§49) and how to stop out (§47) — have both
+returned worse than doing nothing.
