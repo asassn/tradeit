@@ -2936,6 +2936,22 @@ strategy never read (`29111dc`). **The platform's sizer will still open a positi
 whose commission is fifty times its value** — that is trading logic, raised with
 the owner separately.
 
+> **FIXED 2026-09-22, owner-authorised.** The ratio that fails is
+> `commission_per_share / price`: commission is charged per share, so the share
+> count cancels and **no position-size cap can reach it** — which is why the
+> guard belongs in the sizer and not in a strategy, where the $5 minimum added
+> at `29111dc` only protects `FactorTilt`. `RiskBasedSizer` now refuses any
+> candidate whose round trip costs more than **1% of its own notional**
+> (`SizingConfig.max_cost_fraction_of_notional`), which at the platform's
+> default costs admits anything from **$1.09** up. Tested at §38's own numbers,
+> and shown to fail against a sizer without the guard and against one that
+> forgets to divide by price. **It changes nothing already measured**: §48's
+> sample 0 was re-run with the guard in place and all sixteen
+> arm/cost/recovery combinations returned identical CAGR, trade counts and
+> drawdowns, because every registered run since `29111dc` already carried the
+> $5 floor. A guard that can only refuse a trade cannot flatter a result — the
+> one class of change safe to make without re-running the scoreboard.
+
 ### §37 holds through all three runs
 
 | §37 run | CALM − RANDOM | t | criteria failed |
