@@ -47,6 +47,11 @@ from tradeit.backtesting.factor import FactorTilt, Selection
 from tradeit.core.calendar import get_calendar
 from tradeit.core.enums import ArtifactKind
 from tradeit.reproducibility.versioning import ArtifactVersion, RunManifest
+
+#: DELISTING_RECOVERY_2026-09-23's mapping, from what a holder actually received.
+PAID = {"acquired", "extinguished"}
+WIPED = {"bankrupt"}
+
 from tradeit.research01.fundamental_signals import FundamentalHistory, first_filed
 from tradeit.research01.series import price_series
 from tradeit.signals.sampling import common_grid
@@ -194,6 +199,20 @@ def main() -> int:
     ap.add_argument("--sample", type=int, required=True, choices=range(4))
     ap.add_argument("--pilot", type=int, default=0, help="first N securities; mechanics only")
     ap.add_argument(
+        "--causes",
+        type=Path,
+        default=None,
+        help="DELISTING_RECOVERY_2026-09-23: a measured per-security recovery, "
+        "from research01_exit_causes. Replaces the single number.",
+    )
+    ap.add_argument(
+        "--residual",
+        type=float,
+        default=None,
+        help="what an unexplained exit recovers, 1.0 or 0.0. The registration "
+        "brackets it rather than choosing, so both are run and both reported.",
+    )
+    ap.add_argument(
         "--regime",
         type=int,
         default=None,
@@ -257,6 +276,26 @@ def main() -> int:
         flush=True,
     )
 
+    measured: dict[int, Decimal] = {}
+    if args.causes is not None:
+        if args.residual is None:
+            raise SystemExit("--causes needs --residual: the unexplained are bracketed, not chosen")
+        residual = Decimal(str(args.residual))
+        with args.causes.open() as handle:
+            for row in csv.DictReader(handle):
+                cause = row["cause"]
+                measured[int(row["security_id"])] = (
+                    Decimal(1) if cause in PAID else Decimal(0) if cause in WIPED else residual
+                )
+        counts = collections.Counter(
+            "paid" if v == 1 else "wiped" if v == 0 else "residual" for sid, v in measured.items()
+        )
+        print(
+            f"measured recovery for {len(measured):,} securities "
+            f"(residual at {residual}): {dict(counts)}",
+            flush=True,
+        )
+
     t0 = time.time()
     data = CorpusSessionData(
         session=session,
@@ -286,7 +325,11 @@ def main() -> int:
     with open("/dev/null", "w") if args.pilot else out.open("w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(COLUMNS)
-        for recovery in RECOVERIES:
+        # With a measured map the bracket IS the residual: every classified
+        # death already carries its own number, so looping the old pair would
+        # differ only on securities the classifier did not cover.
+        recoveries = (Decimal(str(args.residual)),) if args.causes else RECOVERIES
+        for recovery in recoveries:
             for cost_label, cost_override in COSTS.items():
                 for arm in ARMS:
                     tilt = FactorTilt(
@@ -317,6 +360,7 @@ def main() -> int:
                     )
                     stop_label = "fixed" if args.atr_stop is None else f"atr{args.atr_stop:g}"
                     stop_label += "" if args.regime is None else f"-gate{args.regime}"
+                    stop_label += "" if args.causes is None else f"-measured{args.residual:g}"
                     label = f"s{args.sample}-{arm.value}-{cost_label}-r{recovery}-{stop_label}"
                     engine = build_engine(
                         config,
@@ -326,6 +370,7 @@ def main() -> int:
                         risk_free_rate=RISK_FREE,
                         delisting_after_sessions=DELISTING_AFTER,
                         delisting_recovery=recovery,
+                        delisting_recovery_by_instrument=measured,
                     )
                     spec = BacktestSpec(
                         name=f"combo/{label}",
