@@ -102,13 +102,30 @@ TRANSIENT = {
 # -- the population ------------------------------------------------------------
 
 
-def _died(spans: Path) -> dict[int, dt.date]:
+def _restrict(died: dict[int, dt.date], only: Path | None) -> dict[int, dt.date]:
+    """Keep only the ids listed, when a list is given."""
+    if only is None:
+        return died
+    wanted = {int(line) for line in only.read_text().split() if line.strip()}
+    return {sid: stop for sid, stop in died.items() if sid in wanted}
+
+
+def _died(
+    spans: Path, alive_on: str = "2000-01-03", died_before: str = "2009-12-31"
+) -> dict[int, dt.date]:
+    """Securities alive on ``alive_on`` whose prices stop before ``died_before``.
+
+    The window is an argument because §16 classified the 2000s population and
+    ``DELISTING_RECOVERY_2026-09-23`` needs the same classifier over 2013-2019.
+    The defaults reproduce §16 exactly, so an unargumented run still answers the
+    question that produced ``exit_causes.csv``.
+    """
     with spans.open() as handle:
         rows = [(int(a), b, c, int(d)) for a, b, c, d in csv.reader(handle)]
     return {
         sid: dt.date.fromisoformat(last)
         for sid, first, last, count in rows
-        if first <= "2000-01-03" <= last and count >= 250 and last < "2009-12-31"
+        if first <= alive_on <= last and count >= 250 and last < died_before
     }
 
 
@@ -153,7 +170,7 @@ def _population(
 ) -> tuple[sqlite3.Connection, dict[int, dt.date], list[int], dict[int, tuple[int, str, str]]]:
     con = sqlite3.connect("file:research01.sqlite?mode=ro", uri=True)
     con.execute("PRAGMA busy_timeout=300000")
-    died = _died(args.spans)
+    died = _restrict(_died(args.spans, args.alive_on, args.died_before), args.only)
     chosen = _thin(sorted(died), args.limit_securities)
     return con, died, chosen, _registrants(con, chosen)
 
@@ -452,6 +469,14 @@ def main() -> int:
     ap.add_argument("--docs", type=Path, default=OUT / "exit_documents.csv")
     ap.add_argument("--out", type=Path, default=OUT / "exit_causes.csv")
     ap.add_argument("--limit-securities", type=int, default=None)
+    ap.add_argument("--alive-on", default="2000-01-03")
+    ap.add_argument("--died-before", default="2009-12-31")
+    ap.add_argument(
+        "--only",
+        type=Path,
+        default=None,
+        help="restrict to the security ids in this file, one per line",
+    )
     ap.add_argument("--rate", type=float, default=DEFAULT_RATE)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--backoff", type=float, default=30.0)
