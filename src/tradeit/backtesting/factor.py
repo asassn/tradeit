@@ -99,6 +99,12 @@ class FactorTilt:
     _lows: dict[int, deque[float]] = field(default_factory=dict)
     _turnover: dict[int, deque[float]] = field(default_factory=dict)
     _seen: dict[int, int] = field(default_factory=dict)
+    #: ``MARKET_REGIME_GATE_2026-09-22``: when set, nominate nothing on a
+    #: rebalance date where the sample's own equal-weighted index sits below its
+    #: simple average over this many sessions. None leaves the gate off, which
+    #: is the platform's behaviour until that registration's criteria are met.
+    regime_lookback: int | None = None
+    _index: list[float] = field(default_factory=list)
     #: ``(security, session) -> score``, higher is better. Required by SURPRISE
     #: and COMBINED and ignored by the others. A security absent from it is not
     #: nominable by those two arms and is untouched for the rest, which is what
@@ -134,6 +140,38 @@ class FactorTilt:
                 )
             # Dollar turnover is price times shares: the two restatements cancel,
             # so it is left alone -- restating it would be the §0.9 error again.
+
+    def _extend_index(self, bars: Mapping[int, OhlcvBar]) -> None:
+        """One more point on the sample's own equal-weighted index.
+
+        The mean of this session's one-session returns across the securities
+        that have a previous close, compounded onto the running level. Built
+        from returns rather than from a mean price so a security entering or
+        leaving the sample moves the index by its return and not by its price.
+        """
+        moves = [
+            float(bar.close) / self._closes[instrument_id][-1]
+            for instrument_id, bar in bars.items()
+            if self._closes.get(instrument_id)
+            and bar.close > 0
+            and self._closes[instrument_id][-1] > 0
+        ]
+        if not moves:
+            return
+        level = self._index[-1] if self._index else 1.0
+        self._index.append(level * float(np.mean(moves)))
+
+    def regime_is_on(self) -> bool:
+        """Whether the gate permits nominating. Always true when it is off."""
+        if self.regime_lookback is None:
+            return True
+        if len(self._index) < self.regime_lookback:
+            # Not enough history to judge the regime. Permitting is the choice
+            # that leaves the ungated behaviour intact rather than inventing a
+            # flat period at the start of every run.
+            return True
+        window = self._index[-self.regime_lookback :]
+        return self._index[-1] >= float(np.mean(window))
 
     def observe(self, session_date: dt.date, bars: Mapping[int, OhlcvBar]) -> None:
         """Take one session into history without nominating anything.
@@ -208,8 +246,14 @@ class FactorTilt:
     def __call__(
         self, session_date: dt.date, bars: Mapping[int, OhlcvBar]
     ) -> Sequence[EntryCandidate]:
+        # The index is extended BEFORE observe() overwrites the previous
+        # closes, since it needs both sides of each session's return.
+        self._extend_index(bars)
         self.observe(session_date, bars)
         if session_date not in self.rebalance_dates:
+            return []
+        if not self.regime_is_on():
+            self.nominated[session_date] = ()
             return []
         eligible = {
             instrument_id: vol

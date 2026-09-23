@@ -353,3 +353,64 @@ class TestVolatilityScaledStop:
     def test_no_history_falls_back_rather_than_inventing_a_stop(self) -> None:
         tilt = _tilt(Selection.CALM, set(), atr_stop_multiple=2.5)
         assert tilt.stop_for(99, Decimal("100")) == Decimal("100") * (Decimal(1) - Decimal("0.08"))
+
+
+class TestRegimeGate:
+    """``MARKET_REGIME_GATE_2026-09-22``. The gate's failure modes, not its hopes."""
+
+    @staticmethod
+    def _ramp(names: int, sessions: int, per_session: float) -> dict[int, list[float]]:
+        """Every security moving the same way, so the index is unambiguous."""
+        return {i: [100.0 * (1 + per_session) ** n for n in range(sessions)] for i in range(names)}
+
+    def test_a_rising_market_nominates_normally(self) -> None:
+        sessions = 160
+        panel = self._ramp(8, sessions, 0.002)
+        day = _day(sessions - 1)
+        tilt = _tilt(Selection.CALM, {day}, regime_lookback=50)
+        assert [c.instrument_id for c in _run(tilt, panel, sessions)[day]]
+
+    def test_a_falling_market_nominates_nothing(self) -> None:
+        sessions = 160
+        panel = self._ramp(8, sessions, -0.002)
+        day = _day(sessions - 1)
+        tilt = _tilt(Selection.CALM, {day}, regime_lookback=50)
+        assert _run(tilt, panel, sessions)[day] == []
+        assert tilt.nominated[day] == ()
+
+    def test_the_same_panel_nominates_when_the_gate_is_off(self) -> None:
+        """The gate must be the only difference between the two runs."""
+        sessions = 160
+        panel = self._ramp(8, sessions, -0.002)
+        day = _day(sessions - 1)
+        ungated = _tilt(Selection.CALM, {day})
+        assert _run(ungated, panel, sessions)[day] != []
+
+    def test_too_little_history_permits_rather_than_inventing_a_flat_start(self) -> None:
+        sessions = 130
+        panel = self._ramp(8, sessions, -0.002)
+        day = _day(sessions - 1)
+        tilt = _tilt(Selection.CALM, {day}, regime_lookback=500)
+        assert _run(tilt, panel, sessions)[day] != []
+
+    def test_the_index_follows_returns_not_price_levels(self) -> None:
+        """A $500 flat security must not drown out a $5 one that is rising.
+
+        The panel is chosen so the two constructions DISAGREE: an index built
+        from mean price levels barely moves, because $500 dominates the mean,
+        while an equal-weighted index of returns rises about 0.5% a session.
+        A panel where both securities move together cannot tell them apart,
+        which is what the first version of this test got wrong.
+        """
+        sessions = 140
+        panel = {
+            0: [500.0] * sessions,
+            1: [5.0 * 1.01**n for n in range(sessions)],
+        }
+        tilt = _tilt(Selection.CALM, set(), regime_lookback=50)
+        _run(tilt, panel, sessions)
+        moves = [b / a for a, b in zip(tilt._index, tilt._index[1:], strict=False)]
+        # Equal weight: (1.000 + 1.010) / 2 = 1.005 every session.
+        assert all(abs(m - 1.005) < 1e-6 for m in moves)
+        # A price-level index would move by less than a tenth of that.
+        assert tilt._index[-1] / tilt._index[0] > 1.5

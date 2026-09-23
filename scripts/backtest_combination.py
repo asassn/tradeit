@@ -194,6 +194,14 @@ def main() -> int:
     ap.add_argument("--sample", type=int, required=True, choices=range(4))
     ap.add_argument("--pilot", type=int, default=0, help="first N securities; mechanics only")
     ap.add_argument(
+        "--regime",
+        type=int,
+        default=None,
+        help="MARKET_REGIME_GATE_2026-09-22: nominate nothing on a rebalance "
+        "where the sample's own equal-weighted index is below its average over "
+        "this many sessions",
+    )
+    ap.add_argument(
         "--confirm",
         action="store_true",
         help="COMBINATION_CONFIRMATION_2026-09-22: run the held-out 2020-2025 "
@@ -296,6 +304,7 @@ def main() -> int:
                         seed=SEED,
                         external=surprise,
                         atr_stop_multiple=args.atr_stop,
+                        regime_lookback=args.regime,
                     )
                     for day in warmup:
                         tilt.observe(day, data.bars(day))
@@ -307,6 +316,7 @@ def main() -> int:
                         costs=cost_override,
                     )
                     stop_label = "fixed" if args.atr_stop is None else f"atr{args.atr_stop:g}"
+                    stop_label += "" if args.regime is None else f"-gate{args.regime}"
                     label = f"s{args.sample}-{arm.value}-{cost_label}-r{recovery}-{stop_label}"
                     engine = build_engine(
                         config,
