@@ -1,7 +1,7 @@
 # Signal testing — where it ended, and what it leaves — 2026-09-18
 
 A plain summary for deciding whether to move on. The detail, every number and
-every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§49 and
+every correction, is in [`SIGNAL_SCOREBOARD.md`](SIGNAL_SCOREBOARD.md) §1–§50 and
 the registrations in [`prereg/`](prereg/). This document repeats only what a
 decision needs.
 
@@ -37,6 +37,7 @@ flattered results, and each was fixed.
 | equal-risk against equal-dollar sizing | **not an improvement** on a faithful engine | §39 |
 | **four fundamental signals** — earnings surprise, gross profitability, asset growth, accruals — point-in-time | **none passes**; earnings surprise misses only on significance (t +2.13 vs 2.56) | §40 |
 | the same four at **twelve months**, companies that died kept | **none passes**; earnings surprise again misses only on significance (t +1.73 vs 3.10), undetectable at this size | §41 |
+| the **delisting-recovery assumption**, measured from filings | **settled**: 73% of dead holdings were paid, 6.1% wiped out. The zero-recovery reading was counterfactual, and low volatility's −20.65%/yr was an artefact of it | §50 |
 | a **market-regime gate** — invest only above a 50-session trend | **fails**: the control loses 1.37 pp/yr in 0 of 4 samples and its drawdown *rises*. Timing this corpus by its own trend is closed | §49 |
 | the combination **on the held-out 2020–2025** | **does not replicate**: −2.30 pp/yr against random in 0 of 4 samples, having been +2.54 pp in 4 of 4 on 2013–2019. The line closes | §48 |
 | a **volatility-scaled stop** against the platform's fixed 8% | **refused**: every arm worse, including the control, and the calm arm's delisting exits rose. A stop tight enough to bind on a quiet security sells it on noise | §47 |

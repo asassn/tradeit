@@ -3829,3 +3829,78 @@ and it was written before this number was seen.
 signal (§35); nothing survives as a strategy; and the two questions asked beyond
 selection — when to be invested (§49) and how to stop out (§47) — have both
 returned worse than doing nothing.
+
+---
+
+## §50 — the delisting recovery, measured: the zero-recovery reading was counterfactual — 2026-09-23
+
+**Registered in [`prereg/DELISTING_RECOVERY_2026-09-23.md`](prereg/DELISTING_RECOVERY_2026-09-23.md)
+at `5a9d019`**, owner-authorised. **Not a trial** — it measures an input and
+re-reads one existing result against it. The ledger stands at 140.
+
+Every portfolio result here was run twice, at recovery 1.0 and 0.0, because the
+engine took **one number for every delisted holding** and nobody knew which was
+right. §16 measured the answer for the 2000s population and nothing had ever
+measured it for the window §46 ran on.
+
+### What the filings say about §46's own dead
+
+`tradeit.edgar.exit_cause`, used as committed, over the 637 securities in §46's
+four samples whose prices stop inside 2013–2019. **9,756 8-K headers fetched
+from EDGAR, none left unread; no bankruptcy header contradicted by its own
+document; 636 of 637 classified.**
+
+| fate | n | share | recovery applied |
+|---|---|---|---|
+| acquired | 426 | 67.0% | 1.0 |
+| extinguished (Form 15 certifies no public holders) | 36 | 5.7% | 1.0 |
+| **confirmed bankrupt** | **39** | **6.1%** | **0.0** |
+| residual — acquisition indicated, distress, deregistered, unresolved | 135 | 21.2% | bracketed at both ends |
+
+**About 73% were paid and 6% were wiped out** — §16 found 78.8% and 4.0%
+independently, on a different decade and a different population. Two
+measurements, the same shape.
+
+### §46 re-run with the measured map
+
+Mean CAGR across the four samples, base costs:
+
+| arm | assume all paid | assume all zero | **measured, residual paid** | **measured, residual zero** |
+|---|---|---|---|---|
+| combined | 5.74% | 0.12% | **5.74%** | **5.56%** |
+| calm | 3.07% | **−20.65%** | 2.82% | 1.63% |
+| surprise | 3.31% | 1.40% | 3.31% | 2.85% |
+| random | 3.19% | 0.89% | 3.19% | 2.76% |
+
+Combined over random: **+2.54 pp** at one end of the bracket and **+2.80 pp** at
+the other, **4 of 4 samples at both**, and it beats each component in 4 of 4 at
+both. Drawdown 9.5% against random's 12.9–14.3%.
+
+### The assumption is settled, and one number in this scoreboard was never real
+
+**Criterion 1 of the registration is met: the bracket's two ends agree.** The
+delisting recovery stops being a caller's choice and becomes a measured input,
+with the 21.2% residual carried as the open part it is.
+
+**The zero-recovery reading was counterfactual.** "Every delisted holding is
+worth nothing" is wrong about **94% of them**. The most visible casualty is the
+calm arm's **−20.65%/yr with a 79.9% drawdown**, which measured is **+1.63% with
+12.4%** — a swing of twenty-two points a year that was an artefact of an
+assumption, not a property of low volatility. §46's addendum diagnosed the
+mechanism correctly — a fixed-percentage stop never binds for a calm security,
+so it leaves by delisting ten times more often than any other arm — but the
+*cost* of that mechanism was overstated by the assumption, and is now measured.
+
+**It does not reopen anything.** §46's registered verdict required a pass at
+both extremes; under the measured map both ends pass, so its failure was driven
+by a reading now shown to be counterfactual. **The combination stays closed
+regardless**, because §48 refused it out of sample at recovery 1.0, which this
+work does not touch. That consequence was written into the registration before
+the numbers existed, precisely so this result could not be used to reopen it.
+
+### What every future result inherits
+
+A per-security recovery from the filings where they speak, and an explicit
+21.2% residual where they do not. Any portfolio result quoting a single
+recovery number from here on is quoting an assumption this project has stopped
+needing to make.
