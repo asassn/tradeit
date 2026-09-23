@@ -1,5 +1,8 @@
 # What forty-four days of measurement established — 2026-09-23
 
+*Amended 2026-09-23 for §50, which settled the delisting-recovery assumption and
+corrected one number this document previously quoted.*
+
 A consolidation, written to be acted on. Everything here is measured; the
 sections it cites hold the arithmetic. Where a number is an estimate it says so.
 
@@ -67,6 +70,12 @@ that had gone vacuous, an estimator whose t-statistic and estimate described
 different quantities, and — twice in the last week — my own analysis code
 reporting a sample it had not actually collected.
 
+**The delisting-recovery assumption is now measured, not chosen (§50).** Of the
+637 securities that died inside §46's window, the filings say **67.0% were
+acquired, 5.7% extinguished, 6.1% confirmed bankrupt**, with 21.2% unexplained —
+against §16's independent 78.8%/4.0% on a different decade. The engine now takes
+a per-security recovery instead of one number for everybody.
+
 **Execution assumptions are fair where we use them (§45).** Against real
 1-minute paths, stops fill below the stop price 57.6% of the time, costing a
 median 0.007R at the distances used. Below about 2% of price, daily bars cannot
@@ -101,11 +110,11 @@ Honesty about the limits matters more here than anywhere else in the document.
   one thing here that behaves like a real but small effect.
 - **Half the dead are missing.** 48% of exits cannot be priced, and pre-1998
   history is survivors only. Every result carries that.
-- **The recovery assumption is unresolved.** §46's combination passed on one
-  assumption about what delisted holdings were worth and failed on the other.
-  §16 measured that 78.8% of the dead were bought out, which makes the
-  favourable assumption the likelier — but the engine still takes one number for
-  all of them.
+- **The recovery assumption is resolved; 21% of it is not.** §50 measured each
+  dead holding's fate from the filings, and §46's verdict is now the same at
+  both ends of the remaining bracket. What stays open is the **21.2% the
+  filings do not explain** — small enough not to decide anything measured so
+  far, and carried explicitly rather than guessed.
 - **Nothing here tested day trading.** The free intraday feed is survivors-only
   and accurate only for the most liquid names.
 
@@ -127,6 +136,14 @@ chose at random. **On this data, every departure from "own a diversified basket
 and leave it alone" has cost money.** That is a finding, and it is the most
 robust one in the document.
 
+**One correction, from §50.** An earlier version of this section leaned on low
+volatility's −20.65%/yr at zero recovery. Measured, that arm returns **+1.63%**:
+the catastrophe was an artefact of assuming every delisted holding was worthless,
+which is wrong about 94% of them. The conclusion is unchanged — the stop and the
+timing gate were both refused *on the random control at recovery 1.0*, which §50
+does not touch — but the number is corrected here rather than left to flatter
+the argument.
+
 ---
 
 ## 7. What I would do now
@@ -143,9 +160,12 @@ coverage) this project's own rules say cannot justify capital, or running a
    discipline and the placebo method are reusable for any future claim —
    including someone else's. A tool that can cheaply prove an idea *doesn't*
    work has value precisely because most ideas don't.
-2. **Settle the delisting-recovery question** (§46's open item). It is a corpus
-   question, free, and it decides whether the one interaction found was real.
-   It is also the assumption every future portfolio result will rest on.
+2. ~~**Settle the delisting-recovery question.**~~ **Done 2026-09-23 (§50).**
+   It cost one afternoon and nine thousand EDGAR headers, it settled the
+   assumption every future portfolio result rests on, and it established that
+   one of this scoreboard's most alarming numbers was never real. The one
+   interaction found still does not survive, because §48 refused it out of
+   sample on the assumption §50 leaves untouched.
 3. **If money is ever spent, spend it on information nobody else has cheaply** —
    analyst estimates for a true earnings surprise, which is the one line that
    kept pointing the right way. Not on more price history; price history is
