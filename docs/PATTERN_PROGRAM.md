@@ -67,7 +67,7 @@ Status: **atlas** = descriptively measured · **tested** = registered test run �
 
 | # | setup | detector | status | where |
 |---|---|---|---|---|
-| 1 | **bull flag** | built | tested (§44, §51) — **re-opening for the atlas** | in progress |
+| 1 | **bull flag** | built | **atlas done** (below) + tested (§44, §51) | item 1 complete |
 | 2 | flat base / flat top breakout | built | tested as a family (§44) | atlas pending |
 | 3 | ascending triangle | built | tested as a family (§44) | atlas pending |
 | 4 | pennant | built | tested as a family (§44) | atlas pending |
@@ -135,3 +135,64 @@ VWAP fade · gap fades · halt-resumption shorts · parabolic multi-day momentum
 
 **Read these as the pooled, unconditional numbers they are.** The program exists
 because pooling over a decade that rose is exactly what the owner objected to.
+
+
+---
+
+## Item 1 — bull flag: the atlas
+
+**2010–2019, 180,410 paired trades, five horizons, both regimes, every row
+beside a placebo drawn from the same session.** Descriptive. No trial charged.
+**None of this is evidence** and none of it may be quoted as such.
+
+### The regime split the owner asked for
+
+By this corpus's own index, the decade is **2,038 uptrend sessions against 511
+downtrend** — 80/20. Every pattern number this project published before today
+was pooled across that.
+
+### Does it continue? (reaching +1R before the stop)
+
+| arm | uptrend | its placebo | edge | downtrend | its placebo | edge |
+|---|---|---|---|---|---|---|
+| at the breakout | 49.4% | 46.6% | **+2.8 pp** | 47.0% | 47.0% | **0.0 pp** |
+| retest-confirmed | 48.8% | 46.6% | **+2.2 pp** | 48.0% | 49.8% | **−1.8 pp** |
+| confirmed, any path | 47.0% | 45.9% | +1.1 pp | 45.5% | 47.9% | −2.4 pp |
+
+**The edge is an uptrend phenomenon.** In a downtrend a bull flag reaches its
+target before its stop exactly as often as a random security does — and a
+*confirmed* one does so slightly less often. The owner's objection is answered
+in the direction he suspected, though not by the mechanism he proposed: the
+placebo already removed the drift, and what regime conditioning reveals is that
+the small edge itself only exists on one side of the 200-session average.
+
+**Raw continuation is higher in downtrends** (58.0% still up at 63 sessions
+against 55.7% in uptrends) — and the placebo shows the same, because a
+"downtrend" by a 200-session average includes the sharp recoveries of 2011,
+2016 and 2019. Without the control that number would read as a discovery.
+
+### Does it pay? (net per trade, stop honoured, 10 bps a side, rule − placebo)
+
+| arm | regime | 5 sessions | 10 | 21 | 63 | 126 |
+|---|---|---|---|---|---|---|
+| at the breakout | uptrend | −0.05% | −0.09% | +0.01% | +0.05% | **+0.33%** |
+| at the breakout | downtrend | −0.28% | −0.26% | −0.63% | −0.35% | +0.05% |
+| retest-confirmed | uptrend | −0.04% | −0.00% | −0.07% | **+0.28%** | **+0.57%** |
+| retest-confirmed | downtrend | −0.12% | −0.39% | −0.80% | +0.28% | +0.50% |
+| confirmed | uptrend | −0.07% | −0.08% | −0.09% | +0.16% | **+0.42%** |
+| confirmed | downtrend | +0.01% | −0.10% | −0.47% | **+0.68%** | **+1.37%** |
+
+**Every arm loses at 5, 10 and 21 sessions and every arm gains at 126.** That is
+the single most useful thing in this table and it was invisible to §44 and §51,
+which measured one horizon. Short-horizon pattern trading on this corpus pays
+costs for nothing; the edge, such as it is, needs **six months**.
+
+### What this does and does not license
+
+It licenses **one Stage B registration**: retest-confirmed or confirmed entries
+held **126 sessions**, tested on the held-out 2020–2025. Nothing else.
+
+It does not license belief. The largest edge here is **+1.37% per trade over six
+months** on 5,682 overlapping trades in the thinner regime, measured in the
+window the rule was chosen from. §46 produced a bigger number than that on seven
+years and inverted on the next six.
