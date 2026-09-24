@@ -1,0 +1,246 @@
+#!/usr/bin/env python
+"""Price every arm of the confirmation question, and a placebo for each.
+
+``docs/prereg/BREAKOUT_CONFIRMATION_2026-09-23.md`` at ``30b9a60``. Each event
+from the scan carries up to three entries -- at the breakout, at
+``RETEST_CONFIRMED``, at ``CONFIRMED`` -- and every one is priced identically:
+the pattern's invalidation as the stop, the stop or the 63rd session as the
+exit, 10 and 20 bps a side, recovery 1.0 and 0.0.
+
+**A placebo per entry, not per event.** The arms enter on different sessions, so
+one placebo would compare three arms against one market day. Each entry draws
+its own random security from that session's eligible universe (§44's index)
+with the same stop distance as a fraction of price.
+
+Continuation is recorded as well as return, because the question asked was a
+probability: whether price reaches +1R before the stop, and whether it is above
+the entry at 21 and 63 sessions.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import datetime as dt
+import sys
+import time
+from collections import defaultdict
+
+import numpy as np
+
+sys.path.insert(0, "src")
+sys.path.insert(0, "scripts")
+
+from signal_jump_guard import load_jumps
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from tradeit.research01.series import price_series
+from tradeit.storage.session import install_sqlite_busy_timeout
+
+HOLD = 63
+SEED = 20260923
+COSTS = (0.0010, 0.0020)
+RECOVERIES = (1.0, 0.0)
+ARMS = ("closed_above", "retest_confirmed", "confirmed")
+COLUMNS = (
+    "arm",
+    "leg",
+    "trade_id",
+    "security_id",
+    "quality",
+    "entry_date",
+    "stop_fraction",
+    "exit_reason",
+    "bars_held",
+    "reached_1r_first",
+    "stopped_first",
+    "up_at_21",
+    "up_at_63",
+    "ret_63",
+    *[f"r_c{int(c * 10000)}_rec{int(r)}" for c in COSTS for r in RECOVERIES],
+)
+
+
+def walk(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    start: int,
+    entry: float,
+    stop: float,
+    cost: float,
+    recovery: float,
+) -> tuple[float, str, int] | None:
+    risk = entry - stop
+    available = min(HOLD, close.shape[0] - start - 1)
+    if risk <= 0:
+        return None
+    paid = entry * (1.0 + cost)
+    if available <= 0:
+        return ((entry * recovery * (1.0 - cost)) - paid) / risk, "terminal", 0
+    for j in range(start + 1, start + 1 + available):
+        if low[j] <= stop:
+            return ((stop * (1.0 - cost)) - paid) / risk, "stop", j - start
+    last = start + available
+    exit_price = float(close[last])
+    if available < HOLD:
+        return ((exit_price * recovery * (1.0 - cost)) - paid) / risk, "terminal", available
+    return ((exit_price * (1.0 - cost)) - paid) / risk, "horizon", available
+
+
+def continuation(
+    high: np.ndarray, low: np.ndarray, close: np.ndarray, start: int, entry: float, stop: float
+) -> dict[str, str]:
+    """The probabilities the question asked for, per trade."""
+    risk = entry - stop
+    available = min(HOLD, close.shape[0] - start - 1)
+    target = entry + risk
+    first = ""
+    for j in range(start + 1, start + 1 + available):
+        if low[j] <= stop:
+            first = "stop"
+            break
+        if high[j] >= target:
+            first = "target"
+            break
+    out = {
+        "reached_1r_first": "1" if first == "target" else "0",
+        "stopped_first": "1" if first == "stop" else "0",
+        "up_at_21": "",
+        "up_at_63": "",
+        "ret_63": "",
+    }
+    for horizon, key in ((21, "up_at_21"), (63, "up_at_63")):
+        if horizon <= available:
+            out[key] = "1" if float(close[start + horizon]) > entry else "0"
+    if available >= HOLD:
+        out["ret_63"] = f"{float(close[start + HOLD]) / entry - 1.0:.6f}"
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--db", default="sqlite:///research01.sqlite")
+    ap.add_argument("--events", required=True)
+    ap.add_argument("--eligible", required=True)
+    ap.add_argument("--jumps", default="")
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+
+    events: list[dict[str, str]] = []
+    for path in args.events.split(","):
+        with open(path.strip()) as handle:
+            events.extend(csv.DictReader(handle))
+    print(f"{len(events):,} events", flush=True)
+
+    pool: dict[str, list[int]] = defaultdict(list)
+    for path in args.eligible.split(","):
+        with open(path.strip()) as handle:
+            for row in csv.DictReader(handle):
+                pool[row["session_date"]].append(int(row["security_id"]))
+    print(f"eligibility: {sum(len(v) for v in pool.values()):,} pairs", flush=True)
+
+    # Trades and their placebos, drawn once before anything is priced.
+    rng = np.random.default_rng(SEED)
+    legs: dict[int, list[tuple[str, str, int, dict[str, str]]]] = defaultdict(list)
+    trade_id = 0
+    for event in events:
+        for arm in ARMS:
+            day, entry = event[f"{arm}_date"], event[f"{arm}_entry"]
+            if not day or not entry:
+                continue
+            candidates = pool.get(day)
+            if not candidates:
+                continue
+            trade = {
+                "arm": arm,
+                "entry_date": day,
+                "entry": entry,
+                "stop": event["stop"],
+                "quality": event["quality"],
+            }
+            legs[int(event["security_id"])].append((arm, "rule", trade_id, trade))
+            drawn = int(candidates[rng.integers(len(candidates))])
+            legs[drawn].append((arm, "placebo", trade_id, trade))
+            trade_id += 1
+    print(f"{trade_id:,} trades over {len(legs):,} securities", flush=True)
+
+    flagged = load_jumps(args.jumps.split(",")) if args.jumps else {}
+    session: Session = sessionmaker(
+        bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
+    )()
+    as_of = dt.datetime(2019, 12, 31, 21, tzinfo=dt.UTC)
+    rows: dict[int, dict[str, tuple[object, ...]]] = defaultdict(dict)
+    t0 = time.time()
+    for n, (security_id, wanted) in enumerate(sorted(legs.items()), 1):
+        bars = price_series(
+            session, security_id, as_of=as_of, start=dt.date(2009, 1, 1), end=dt.date(2019, 12, 31)
+        )
+        if len(bars) < 2:
+            continue
+        place = {b.session_date: i for i, b in enumerate(bars)}
+        high = np.array([float(b.high) for b in bars])
+        low = np.array([float(b.low) for b in bars])
+        close = np.array([float(b.close) for b in bars])
+        open_ = np.array([float(b.open) for b in bars])
+        suspect = set(flagged.get(security_id, ()))
+        for arm, leg, tid, trade in wanted:
+            start = place.get(dt.date.fromisoformat(trade["entry_date"]))
+            if start is None or open_[start] <= 0:
+                continue
+            if {b.session_date for b in bars[start : start + 1 + HOLD]} & suspect:
+                continue
+            entry = float(open_[start])
+            # The placebo inherits the rule's stop DISTANCE, not its price.
+            fraction = (float(trade["entry"]) - float(trade["stop"])) / float(trade["entry"])
+            stop = entry * (1.0 - fraction)
+            results: list[str] = []
+            reason, held = "", 0
+            for cost in COSTS:
+                for recovery in RECOVERIES:
+                    walked = walk(high, low, close, start, entry, stop, cost, recovery)
+                    if walked is None:
+                        results = []
+                        break
+                    value, reason, held = walked
+                    results.append(f"{value:.6f}")
+            if len(results) != len(COSTS) * len(RECOVERIES):
+                continue
+            path = continuation(high, low, close, start, entry, stop)
+            rows[tid][leg] = (
+                arm,
+                leg,
+                tid,
+                security_id,
+                trade["quality"] if leg == "rule" else "",
+                trade["entry_date"],
+                f"{fraction:.6f}",
+                reason,
+                held,
+                path["reached_1r_first"],
+                path["stopped_first"],
+                path["up_at_21"],
+                path["up_at_63"],
+                path["ret_63"],
+                *results,
+            )
+        if n % 500 == 0 or n == len(legs):
+            print(f"  {n}/{len(legs)} securities [{time.time() - t0:.0f}s]", flush=True)
+
+    written = 0
+    with open(args.out, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(COLUMNS)
+        for tid in sorted(rows):
+            pair = rows[tid]
+            if "rule" in pair and "placebo" in pair:
+                writer.writerow(pair["rule"])
+                writer.writerow(pair["placebo"])
+                written += 1
+    print(f"\n{written:,} complete pairs -> {args.out}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

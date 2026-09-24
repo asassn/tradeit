@@ -3904,3 +3904,74 @@ A per-security recovery from the filings where they speak, and an explicit
 21.2% residual where they do not. Any portfolio result quoting a single
 recovery number from here on is quoting an assumption this project has stopped
 needing to make.
+
+---
+
+## §51 — confirmed bull-flag breakouts: waiting does not pay for itself — 2026-09-23
+
+**Registered in [`prereg/BREAKOUT_CONFIRMATION_2026-09-23.md`](prereg/BREAKOUT_CONFIRMATION_2026-09-23.md)
+at `30b9a60`**, before the Phase 5 breakout engine had been run over a single
+real security. §11 recorded its tables empty and filling them as "a project, not
+a study"; this is that project, scoped to the question asked: **when a bull flag
+breaks out and the platform's own policy calls it confirmed, does price
+continue?**
+
+**Nothing was tuned.** The `balanced` profile, its zones, evidence requirements
+and confirmation paths are as committed in Phase 5. 293,504 bull flags on
+2010–2019 produced **140,453 breakout events**; the engine confirmed **55.7%**
+by some path and **15.1%** by retest. §44's stop band and exit were reused so
+the two studies compare.
+
+### The answer, as asked
+
+| arm | trades | reached +1R **before** the stop | stopped first | up at 21 sessions | up at 63 | median 63-session return |
+|---|---|---|---|---|---|---|
+| at the breakout | 110,786 | **49.1%** | 43.2% | 52.7% | 55.9% | +1.92% |
+| **retest-confirmed** | 16,934 | **48.7%** | 43.5% | 53.5% | **56.7%** | **+2.17%** |
+| confirmed, any path | 52,877 | 46.9% | 39.6% | 53.1% | **57.2%** | +2.15% |
+
+**A confirmed breakout continues about as often as an unconfirmed one.** Waiting
+for a retest does not raise the chance of reaching +1R before the stop — it is
+*fractionally lower*, 48.7% against 49.1% — and moves the share still up after
+three months from 55.9% to 56.7%. The median trade improves by a quarter of a
+percentage point over three months, before the cost of waiting.
+
+### Does waiting earn its cost?
+
+Difference of block means, recovery 1.0, 10 bps a side:
+
+| comparison | difference | t | hurdle | |
+|---|---|---|---|---|
+| retest-confirmed vs **at the breakout** | +0.0491R | +1.54 | 2.799 | FAIL |
+| retest-confirmed vs **its placebo** | +0.0392R | +1.26 | 2.799 | FAIL |
+| confirmed vs at the breakout | +0.0105R | +0.72 | 2.795 | FAIL |
+| confirmed vs its placebo | −0.0058R | −0.28 | 2.795 | FAIL |
+
+Unchanged at 20 bps. **Both arms fail, and the retest arm fails while pointing
+the right way** — +0.049R over entering at the breakout is the largest edge any
+pattern rule has shown here, and at t +1.54 it is one a decade cannot resolve.
+
+**The only passes come at recovery 0.0**, where both arms beat their placebo
+decisively (+0.166R, t +4.78; +0.129R, t +5.16). That is not evidence: §50
+measured the recovery mix at **73% paid and 6.1% wiped out**, so "every delisted
+holding is worth nothing" is counterfactual, and what those two lines actually
+show is that a *random* security delists more often than a bull flag that has
+just confirmed a breakout. Registered before the numbers existed as requiring a
+pass at both recoveries, which is why it is recorded here and not claimed.
+
+### Verdict: FAILED, and the layer is closed as a trade filter
+
+Per the stop rule: **no other profile, evidence threshold, confirmation path,
+pattern family or entry offset is tried.** Phase 5's confirmation layer remains
+what ADR-0025 says it is — an observational state that authorises nothing — and
+this section adds that on 140,453 real events it also predicts nothing a decade
+can resolve.
+
+**What it cost to wait, stated plainly.** A retest-confirmed rule trades a
+seventh as often (16,934 against 110,786), enters higher, and buys a 0.8
+percentage point improvement in the share still up at three months. That is the
+trade-off the question asked about, now measured.
+
+### Registered and spent
+
+**Ledger: 140 → 142 trials.** Fifty-nine measurements.
