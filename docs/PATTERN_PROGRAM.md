@@ -41,6 +41,14 @@ Raised by the owner 2026-09-23 and accepted:
    over a decade that mostly rose. §49 tested regime as a *timing gate*; nobody
    asked whether a setup behaves differently inside an uptrend, a downtrend or a
    flat market. **Every atlas entry is broken down by regime.**
+   *Widened 2026-09-24* — trend was still only one reading, so the atlas now
+   tags every session **twice**: trend (index against its 200-session average)
+   and **volatility** (its trailing 21-session deviation against its own median
+   over the year before). The two disagree often enough to matter: this
+   corpus's downtrends are **89% turbulent** but its uptrends are **69%
+   quiet**, and the 686 sessions where the readings part are the only ones that
+   can separate *"this setup needs a rising market"* from *"this setup needs a
+   calm one."*
 2. **One horizon, one timeframe.** Everything used 63 sessions on daily bars.
    **The atlas reports 5, 10, 21, 63 and 126 sessions**, and weekly-bar variants
    where the detector supports them.
@@ -48,7 +56,19 @@ Raised by the owner 2026-09-23 and accepted:
    score a fixed window. A trader who sees a failed breakout and waits for the
    next one is living a different experiment. **The atlas scores both**: the
    first attempt, and the pattern's eventual outcome across repeated attempts,
-   reported separately and never mixed.
+   reported separately and never mixed. *Closed 2026-09-24* —
+   `pattern_atlas_scan.py` allows up to three events per pattern identity, each
+   required to open only after the previous one resolved, and stamps every row
+   with its attempt number. Item 1's scan could not see this at all.
+
+**One more column, added 2026-09-24.** Every table now also carries the rule
+leg's **own** return, beside the placebo-adjusted edge. A difference cancels
+anything both legs pay -- costs, and on the short side the borrow fee -- so a
+rule that beats its placebo by half a point while both lose money reads as a
+success in an edge column and as what it is in this one. It is also the fastest
+way to see the owner's original objection: the bull flag's own six-month return
+is **+2.5% to +4.3%**, of which at most **+1.4pp** is the pattern. The rest is
+the market.
 
 **What does not change.** The placebo stays: every probability is reported
 beside a random security bought the same session with the same stop and horizon,
@@ -65,37 +85,80 @@ Status: **atlas** = descriptively measured · **tested** = registered test run �
 
 ### Continuation and breakout patterns — long
 
-| # | setup | detector | status | where |
-|---|---|---|---|---|
-| 1 | **bull flag** | built | **atlas done** (below) + tested (§44, §51) | item 1 complete |
-| 2 | flat base / flat top breakout | built | tested as a family (§44) | atlas pending |
-| 3 | ascending triangle | built | tested as a family (§44) | atlas pending |
-| 4 | pennant | built | tested as a family (§44) | atlas pending |
-| 5 | cup with handle | built | tested as a family (§44) | atlas pending |
-| 6 | high tight flag | built | tested as a family (§44) | atlas pending |
-| 7 | base on base | built | tested as a family (§44) | atlas pending |
-| 8 | tight consolidation / VCP | built | tested as a family (§44) | atlas pending |
-| 9 | double bottom | built | tested as a family (§44) | atlas pending |
-| 10 | inverse head and shoulders | built | tested as a family (§44) | atlas pending |
-| 11 | breakout-retest | built | tested (§51) | atlas pending |
-| 12 | ABCD | needs build | — | queued |
-| 13 | moving-average pullback | needs build | — | queued |
-| 14 | recent-IPO breakout | needs build (needs listing dates) | — | queued |
+**Items 2-11 are measured in one pass, not ten.** `PatternScanner.scan` already
+evaluates every detector on every window; item 1 threw eleven results away at
+`!= "bull_flag"`. Keeping them costs the breakout engine's advance loop and
+nothing else, so the marginal price of the other ten setups is a fraction of
+item 1's. Running them one at a time would have cost ten times the compute for
+identical numbers — **the *reporting* is one at a time, the measuring is not.**
+
+**The detector names are measured, not assumed.** This table used to list
+"tight consolidation / VCP" as one row; the scanner emits
+``tight_consolidation`` and ``volatility_contraction`` as **two** pattern
+types, and a merged row would have pooled two setups under one heading. A
+3-security pilot on 2026-09-24 produced eleven distinct types and
+``high_tight_flag`` was not among them — the detector exists, so the row stays,
+but it is rare enough not to appear in a small sample and may not clear the
+reporting floor.
+
+| # | setup | detector (`pattern_type`) | status |
+|---|---|---|---|
+| 1 | **bull flag** | `bull_flag` | **atlas done** + tested (§44, §51) |
+| 2 | **flat base / flat top breakout** | `flat_base` | **atlas running** 2026-09-24 |
+| 3 | ascending triangle | `ascending_triangle` | atlas running (same pass) |
+| 4 | pennant | `pennant` | atlas running (same pass) |
+| 5 | cup with handle | `cup_with_handle` | atlas running (same pass) |
+| 6 | high tight flag | `high_tight_flag` | atlas running — **absent from the pilot** |
+| 7 | base on base | `base_on_base` | atlas running (same pass) |
+| 8 | tight consolidation | `tight_consolidation` | atlas running (same pass) |
+| 8b | **VCP** | `volatility_contraction` | atlas running — **was pooled with 8** |
+| 9 | double bottom | `double_bottom` | atlas running (same pass) |
+| 10 | inverse head and shoulders | `inverse_head_and_shoulders` | atlas running (same pass) |
+| 11 | breakout-retest | `breakout_retest` | atlas running (same pass) |
+| 12 | ABCD | needs build | queued |
+| 13 | moving-average pullback | needs build | queued |
+| 14 | recent-IPO breakout | needs build (needs listing dates) | queued |
 
 ### Breakdown patterns — short
 
-**No bearish detector exists and the engine has never held a short position.**
-Both are builds, and they are the owner's stated next priority after the bull
-flag.
+**Unblocked 2026-09-24 without building a bearish detector.** The platform has
+twelve long detectors and an 11,000-line long-directional breakout engine, all
+audited; a bearish twin would be a second copy of both, needing its own audit
+and drifting from the first. So the *series* is mirrored instead of the
+machinery: under the reciprocal map a bear flag **is** a bull flag and a
+breakdown through support **is** a breakout through resistance. See
+[`SHORT_SIDE_DESIGN.md`](SHORT_SIDE_DESIGN.md) and
+`src/tradeit/patterns/mirror.py`; `tests/unit/test_pattern_mirror.py` proves
+the mirror inverts direction rather than doing nothing, and each assertion was
+shown to fail against a deliberately broken mirror.
+
+**The mirror locates events. It never prices them.** A short sold at `E` and
+covered at `X` returns `1 − X/E`; the mirrored long returns `E/X − 1`, which is
+a different and larger number. Every short return is computed on real prices
+with short arithmetic, a stop *above* the entry, and a borrow fee charged at
+3%/yr as a stated assumption.
+
+**The survivorship bias runs the other way for a short**, and this is the one
+place in the project where §7e's coverage gap is a penalty rather than a
+flattery: the companies the corpus cannot price to their end went to zero, and
+those are exactly the trades a short would have won biggest. Against that,
+locate availability is unmodellable and the bear-flag population is precisely
+the one most likely to be unborrowable. **The two do not cancel in any quantity
+anybody here can compute.**
 
 | # | setup | status |
 |---|---|---|
-| 15 | **bear flag breakdown + confirmation + retest** | needs build — **next after item 1** |
-| 16 | double top | needs build |
-| 17 | head and shoulders top | needs build |
-| 18 | descending triangle | needs build |
-| 19 | rising wedge | needs build |
+| 15 | **bear flag breakdown + confirmation + retest** | **atlas running** 2026-09-24 |
+| 16 | double top | mirror of item 9 — running in the same pass |
+| 17 | head and shoulders top | mirror of item 10 — running in the same pass |
+| 18 | descending triangle | mirror of item 3 — running in the same pass |
+| 19 | rising wedge | needs build (no long twin) |
 | 20 | bull trap / failed breakout | needs build |
+
+Items 16-18 come free: the mirror of a double bottom is a double top, the
+mirror of an inverse head and shoulders is a head and shoulders top, and the
+mirror of an ascending triangle is a descending one. Item 19 has no long twin
+in the registry and remains a build.
 
 ### Candlestick patterns — from the owner's reference chart
 
