@@ -241,6 +241,57 @@ because pooling over a decade that rose is exactly what the owner objected to.
 
 ---
 
+## The atlas of 2026-09-25 was built twice, and the first one was wrong
+
+Recorded because it is the most useful thing that happened in this program so
+far, and because the shape of it will recur.
+
+**What happened.** The overnight pipeline completed: 16 scan shards over the
+full 5,782-security universe, then two replays producing 773,308 long pairs and
+377,309 short pairs, then the consolidated book. Everything reported success.
+One cell then read **−44.30%** at five sessions — a mean that large over 10,411
+trades is not a result, it is one row.
+
+**The row.** Security 3953 on 2013-05-15, a placebo leg returning **+460,516%
+over five sessions**: a §0.10 price step with no recorded corporate action. The
+jump guard exists to remove exactly this and had flagged it.
+
+**Why the guard did not fire.** It was handed five of its eight shards. The
+file list was built from a `ls | grep jump | head`, which truncates at ten lines
+— five CSVs and five logs — and the truncation was read as the whole listing.
+`jumps_s5`, `s6` and `s7` were never passed. **The guard ran at 62% coverage,
+6,003 of 9,701 flagged sessions**, and every one of the ten worst contaminated
+legs was flagged in exactly the three omitted shards.
+
+**How far it reached.** Not one cell. Removing the unguarded securities moved
+**15 of 27 cells by more than 0.10pp and flipped six signs** — 
+`tight_consolidation/closed_above/uptrend` went from −1.59% to +0.68% at six
+months, `breakout_retest/closed_above` from −3.08% to +0.95%, `pennant` from
++0.13% to −0.66% the other way. **No number from that run was reported**, and
+the corrected replay was re-run with all eight shards.
+
+### The two safeguards this bought
+
+**A guard that depends on being handed every one of its own shards is not a
+guard.** `pattern_atlas_report.py` now checks the *numbers*: any cell containing
+a leg beyond `EXTREME_RETURN` (4.0, set from §0.10's own 5x signature) is
+**refused and its security named**, rather than averaged. Run against the
+contaminated atlas it refuses **19 of 27 cells** — the visible −44.30 was the
+smaller half of the problem. Fail closed: `UNRESOLVED` is a real answer.
+
+**A check must live on the path that runs.** The guard-rail was added to the
+shared table builder while the terminal path still had its own copy of the
+printing loop, so the refusal never appeared where anyone would look. The
+duplicate is gone and `tests/unit/test_pattern_atlas_report.py` drives both
+output formats. Each of its assertions was shown to fail against the guard-rail
+removed, checked at only one horizon, made one-sided, not suppressing the row,
+and with the threshold loosened.
+
+`scripts/` had **no test coverage at all** before this. That is how a safety
+mechanism came to sit in one of two code paths.
+
+---
+
 ## Item 1 — bull flag: the atlas
 
 **2010–2019, 180,410 paired trades, five horizons, both regimes, every row

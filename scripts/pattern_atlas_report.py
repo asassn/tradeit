@@ -41,6 +41,19 @@ import statistics as st
 from collections import defaultdict
 
 HORIZONS = (5, 10, 21, 63, 126)
+#: A single leg beyond this multiple of its entry price is treated as a data
+#: defect rather than a trade, and the table it would have entered is refused.
+#: Set from §0.10's own signature: a price step of 5x with no recorded action is
+#: the documented shape of an uncorrected split in this corpus. A trade that
+#: really returned +400% is rare enough that stopping to look at it is right.
+#:
+#: This exists because an atlas built on 2026-09-24 ran with only five of the
+#: eight jump-guard shards -- the file list was built from a truncated
+#: `ls | head` -- and one placebo leg returning +460,516% over five sessions
+#: carried a reported edge to -44.30%. The table printed it without complaint.
+#: A guard that depends on being handed every one of its own shards is not a
+#: guard, so this checks the numbers themselves.
+EXTREME_RETURN = 4.0
 
 
 Pair = tuple[dict[str, str], dict[str, str]]
@@ -49,6 +62,16 @@ Pair = tuple[dict[str, str], dict[str, str]]
 def share(pairs: list[Pair], column: str, leg: int) -> float | None:
     values = [p[leg][column] for p in pairs if p[0][column] and p[1][column]]
     return sum(1 for v in values if v == "1") / len(values) if values else None
+
+
+def extremes(pairs: list[Pair], column: str) -> list[tuple[str, str, float]]:
+    """Legs whose return is too large to be a trade. Named, never averaged."""
+    out: list[tuple[str, str, float]] = []
+    for legs in pairs:
+        for leg in legs:
+            if leg[column] and abs(float(leg[column])) > EXTREME_RETURN:
+                out.append((leg["security_id"], leg["entry_date"], float(leg[column])))
+    return out
 
 
 def own_mean(pairs: list[Pair], column: str) -> float | None:
@@ -85,9 +108,22 @@ def table(grouped: dict[tuple[str, ...], list[Pair]], minimum: int, markdown: bo
         text = f"{columns[0]:<58}{columns[1]:>8}{columns[2]:>11}{columns[3]:>9}{columns[4]:>8}"
         text += "".join(f"{c:>10}" for c in columns[5:])
         lines.extend((text, "-" * len(text)))
+    refused: list[str] = []
     for key in sorted(grouped):
         pairs = grouped[key]
         if len(pairs) < minimum:
+            continue
+        # Refuse the cell rather than print a mean one bad print decided.
+        # Fail closed: an unexplained number is worse than no number, because
+        # it will be acted on.
+        bad = [b for h in HORIZONS for b in extremes(pairs, f"net_{h}")]
+        if bad:
+            worst = max(bad, key=lambda b: abs(b[2]))
+            refused.append(
+                f"{' / '.join(k for k in key if k != 'all')}: {len(bad)} leg(s) beyond "
+                f"{EXTREME_RETURN:.0%}, worst security {worst[0]} on {worst[1]} "
+                f"at {worst[2]:+,.0%}"
+            )
             continue
         hit = share(pairs, "reached_1r_first", 0)
         base = share(pairs, "reached_1r_first", 1)
@@ -108,6 +144,13 @@ def table(grouped: dict[tuple[str, ...], list[Pair]], minimum: int, markdown: bo
         else:
             row = f"{cells[0]:<58}{cells[1]:>8}{cells[2]:>11}{cells[3]:>9}{cells[4]:>8}"
             lines.append(row + "".join(f"{c:>10}" for c in cells[5:]))
+    if refused:
+        lines.append("")
+        lines.append(
+            f"**{len(refused)} cell(s) REFUSED** -- a leg moved further than a trade can. "
+            "This is a corpus defect reaching the table, not a result:"
+        )
+        lines.extend(f"* {r}" for r in refused)
     return lines
 
 
@@ -264,30 +307,10 @@ def main() -> int:
         return 0
     grouped = group(rows, args.by, args.split_attempts, [c for c in (args.where or []) if c])
 
-    header = (
-        f"{'setup / arm / regime / attempt':<58}{'n':>8}{'+1R first':>11}{'placebo':>9}{'edge':>8}"
-    )
-    full = header + "".join(f"{f'net {h}':>10}" for h in HORIZONS) + f"{'own 126':>10}"
-    print(full)
-    print("-" * len(full))
-    for key in sorted(grouped):
-        pairs = grouped[key]
-        if len(pairs) < args.min_trades:
-            continue
-        hit = share(pairs, "reached_1r_first", 0)
-        base = share(pairs, "reached_1r_first", 1)
-        label = " / ".join(k for k in key if k != "all")
-        line = f"{label:<58}{len(pairs):>8,}"
-        line += f"{hit:>10.1%}" if hit is not None else f"{'--':>10}"
-        line += f"{base:>9.1%}" if base is not None else f"{'--':>9}"
-        line += (
-            f"{(hit - base) * 100:>+8.1f}" if hit is not None and base is not None else f"{'--':>8}"
-        )
-        for horizon in HORIZONS:
-            edge = paired_edge(pairs, f"net_{horizon}")
-            line += f"{edge * 100:>+10.2f}" if edge is not None else f"{'--':>10}"
-        own = own_mean(pairs, f"net_{max(HORIZONS)}")
-        line += f"{own * 100:>+10.2f}" if own is not None else f"{'--':>10}"
+    # The SAME builder the book uses. This path had its own copy of the loop
+    # until 2026-09-25, and the copy is how a refused cell still printed: the
+    # guard-rail went into one of the two and the terminal used the other.
+    for line in table(grouped, args.min_trades, markdown=False):
         print(line)
     print("\n'+1R first' is the share reaching one unit of risk in favour before the stop;")
     print("'net' columns are the rule's mean return minus its placebo's, in percent,")
