@@ -19,6 +19,17 @@ all three:
   continue without first taking me out" are different questions and the second
   is the one a stop-using trader lives.
 
+**Items 21-40, the candlesticks, ride on this file and cost no scan.** The
+program says they are measured as *entry filters on the structural patterns*,
+not as standalone signals, and a filter is evaluated at the **signal bar** --
+the session whose close triggered the entry, which is the bar before the entry
+open. That bar is already loaded here, so every shape in
+``tradeit.patterns.candlesticks`` is recorded per trade and the atlas can ask
+whether a bull flag that broke out on a bullish engulfing did better than one
+that did not. Asking it the other way round -- scanning for hammers and seeing
+what follows -- is a different and much weaker question, and is not what the
+owner's reference chart describes.
+
 ``--direction short`` prices the bear side. The events arrive already in real
 prices from the scan's mirror (``tradeit.patterns.mirror``), and **every number
 below them is computed with short arithmetic on those real prices** -- a stop
@@ -45,6 +56,7 @@ from signal_jump_guard import load_jumps
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from tradeit.patterns.candlesticks import CONTEXTUAL, SHAPES, prior_trend, shapes_at
 from tradeit.patterns.mirror import borrow_cost, short_return
 from tradeit.research01.series import price_series
 from tradeit.storage.session import install_sqlite_busy_timeout
@@ -75,12 +87,15 @@ COLUMNS = (
     "entry_date",
     "regime",
     "vol_regime",
+    "final_state",
     "stop_fraction",
     "stopped_within_63",
     "reached_1r_first",
     *[f"up_{h}" for h in HORIZONS],
     *[f"ret_{h}" for h in HORIZONS],
     *[f"net_{h}" for h in HORIZONS],
+    "signal_trend",
+    *[f"cs_{name}" for name in (*SHAPES, *CONTEXTUAL)],
 )
 
 
@@ -244,6 +259,11 @@ def main() -> int:
                 # answer a question nobody asked.
                 "pattern": event.get("pattern", ""),
                 "attempt": event.get("attempt", "1"),
+                # Item 20, the bull trap, is this column. The scan already
+                # records where each event ended, so "what happens after a
+                # breakout that fails" is a report-time question and needs no
+                # second scan.
+                "final_state": event.get("final_state", ""),
             }
             legs[int(event["security_id"])].append((arm, "rule", trade_id, trade))
             legs[int(candidates[rng.integers(len(candidates))])].append(
@@ -279,6 +299,16 @@ def main() -> int:
             if {b.session_date for b in bars[start : start + 1 + max(HORIZONS)]} & suspect:
                 continue
             entry = float(open_[start])
+            # The signal bar is the session BEFORE the entry open -- the close
+            # that triggered the breakout. Reading the shape off the entry bar
+            # instead would be a look-ahead: that bar is still forming when
+            # the trade is placed.
+            signal = start - 1
+            shapes = (
+                shapes_at(open_, high, low, close, signal)
+                if signal >= 0
+                else dict.fromkeys((*SHAPES, *CONTEXTUAL), False)
+            )
             # The placebo inherits the rule's stop DISTANCE, not its price.
             reference, level = float(trade["entry"]), float(trade["stop"])
             fraction = (level - reference) / reference if short else (reference - level) / reference
@@ -297,12 +327,15 @@ def main() -> int:
                 trade["entry_date"],
                 regime[day][0],
                 regime[day][1],
+                trade["final_state"],
                 f"{fraction:.6f}",
                 found["stopped_within_63"],
                 found["reached_1r_first"],
                 *[found[f"up_{h}"] for h in HORIZONS],
                 *[found[f"ret_{h}"] for h in HORIZONS],
                 *[found[f"net_{h}"] for h in HORIZONS],
+                prior_trend(close, signal) if signal >= 0 else "unknown",
+                *["1" if shapes[name] else "0" for name in (*SHAPES, *CONTEXTUAL)],
             )
         if n % 500 == 0 or n == len(legs):
             print(f"  {n}/{len(legs)} securities [{time.time() - t0:.0f}s]", flush=True)

@@ -152,19 +152,47 @@ anybody here can compute.**
 | 16 | double top | mirror of item 9 — running in the same pass |
 | 17 | head and shoulders top | mirror of item 10 — running in the same pass |
 | 18 | descending triangle | mirror of item 3 — running in the same pass |
-| 19 | rising wedge | needs build (no long twin) |
-| 20 | bull trap / failed breakout | needs build |
+| 19 | rising wedge | needs build (no long twin in the registry) |
+| 20 | bull trap / failed breakout | **no build needed** — see below |
 
 Items 16-18 come free: the mirror of a double bottom is a double top, the
 mirror of an inverse head and shoulders is a head and shoulders top, and the
 mirror of an ascending triangle is a descending one. Item 19 has no long twin
 in the registry and remains a build.
 
+**Item 20 needs no build either.** A bull trap *is* a breakout whose event
+ended in `failed_breakout`, and the scan already records where every event
+ended. It is a report-time restriction (`--where final_state=failed_breakout`)
+on data being written now, not a second scan.
+
 ### Candlestick patterns — from the owner's reference chart
 
-None is implemented. They are 1–3 bar timing triggers; the atlas will measure
-them **as entry filters on the patterns above**, not as standalone signals,
-which is how they are used.
+**Implemented 2026-09-24, and they cost no scan.** They are 1-3 bar timing
+triggers, and the atlas measures them **as entry filters on the patterns
+above**, not as standalone signals, which is how the reference chart uses them.
+A filter is evaluated at the **signal bar** -- the close that triggered the
+entry, one session before the entry open -- and the replay already has that
+bar loaded, so items 21-40 ride on the scan that was already running.
+
+`src/tradeit/patterns/candlesticks.py`. They deliberately sit **outside the
+detector registry**: the twelve structural detectors fit geometry, swings and a
+quality model, and `bull_flag.py` is 1,387 lines for one of them. A candlestick
+is an arithmetic relation between four numbers on up to three bars. Registering
+them would buy a scanner pass none of them needs and would cost a re-scan of
+the decade.
+
+**Every threshold is a published convention, written down before it was
+measured** -- a 10% body for the doji family, a 2x shadow for "long", 5% of
+range for a tweezer's tolerance. None was tuned, and none may be tuned to
+improve a result without the scoped proposition `CLAUDE.md` requires.
+
+**Shape and context are kept apart.** A hammer and a hanging man are the *same*
+bar, and so are an inverted hammer and a shooting star; only what preceded them
+differs. Each is reported as a shape plus a separate prior-trend reading, never
+as one combined flag, so the atlas can ask whether "hammer" pays because of the
+wick or because of the decline it followed. A combined flag has already decided
+that. (The two tweezers are *not* such a pair — they differ in the order of the
+two bars' colours, which is shape, so they are defined separately.)
 
 | # | setups |
 |---|---|
@@ -173,6 +201,17 @@ which is how they are used.
 | 31–32 | tweezer top · tweezer bottom |
 | 33–36 | morning star · morning doji star · evening star · evening doji star |
 | 37–40 | three white soldiers · three black crows · rising three · falling three |
+
+Two findings from building them, both recorded because they would otherwise
+recur:
+
+* **A doji is never also a hammer here.** A bar with a long lower shadow and no
+  body is a *dragonfly doji*, item 27, not a hammer, item 21. Letting both fire
+  would count one bar under two of the program's numbered setups.
+* **"Engulfing" barely needs its size clause.** If the second bar spans the
+  first's open *and* close it cannot have a smaller body, so the comparison
+  only decides the exact tie. A mutation removing it survived every test until
+  one was written for that single case.
 
 ### Intraday setups — from the Warrior Trading guide
 
@@ -220,7 +259,13 @@ was pooled across that.
 |---|---|---|---|---|---|---|
 | at the breakout | 49.4% | 46.6% | **+2.8 pp** | 47.0% | 47.0% | **0.0 pp** |
 | retest-confirmed | 48.8% | 46.6% | **+2.2 pp** | 48.0% | 49.8% | **−1.8 pp** |
-| confirmed, any path | 47.0% | 45.9% | +1.1 pp | 45.5% | 47.9% | −2.4 pp |
+| confirmed, any path | 47.0% | 45.9% | +1.2 pp | 45.5% | 47.9% | −2.4 pp |
+
+*Corrected 2026-09-24:* the confirmed/uptrend edge was published as +1.1 pp,
+which is what subtracting the two rounded percentages beside it gives.
+Recomputed from the unrounded values by `pattern_atlas_report.py` it is
+**+1.2 pp**. Small, and the reason the report is now a script rather than a
+one-liner: a table assembled by eye subtracts what it displays.
 
 **The edge is an uptrend phenomenon.** In a downtrend a bull flag reaches its
 target before its stop exactly as often as a random security does — and a
