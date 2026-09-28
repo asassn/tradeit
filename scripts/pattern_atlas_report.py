@@ -74,6 +74,56 @@ def extremes(pairs: list[Pair], column: str) -> list[tuple[str, str, float]]:
     return out
 
 
+def differences(pairs: list[Pair], column: str) -> list[float]:
+    return [
+        float(rule[column]) - float(placebo[column])
+        for rule, placebo in pairs
+        if rule[column] and placebo[column]
+    ]
+
+
+def paired_median(pairs: list[Pair], column: str) -> float | None:
+    """Median of (rule - placebo). Measured, and it is **always zero here.**
+
+    Kept and reported anyway, because the *reason* it is zero is a fact about
+    the design rather than a defect: roughly a fifth of pairs are **exact
+    ties**. The placebo inherits the rule's stop as a fraction of price, so
+    when both legs stop they return the identical number to the cent, and the
+    median falls inside that tie block in every cell measured.
+
+    It is therefore uninformative as an edge statistic, which is why
+    :func:`tie_share` sits beside it: a reader who sees +0.00 in every row
+    should be told why rather than left to infer a null result.
+    """
+    both = differences(pairs, column)
+    return st.median(both) if both else None
+
+
+def tie_share(pairs: list[Pair], column: str) -> float | None:
+    """Share of pairs returning *exactly* the same thing on both legs.
+
+    Both legs stopped, at the same stop fraction, so the trade and its control
+    are arithmetically identical. Measured at 21.1% for the bull flag at six
+    months -- a fifth of the sample carries no information about the rule
+    either way, and no statistic computed over it should pretend otherwise.
+    """
+    both = differences(pairs, column)
+    return sum(1 for d in both if abs(d) < 1e-9) / len(both) if both else None
+
+
+def win_share(pairs: list[Pair], column: str) -> float | None:
+    """How often the rule beat its placebo, **among pairs that decided**.
+
+    Ties are excluded rather than counted as losses. Counting them as losses
+    is the natural way to write this and it is wrong: it turned a bull flag
+    winning 40.3% against a placebo's 38.6% into a reported "40.3%", which
+    reads as a rule that loses. Among decided pairs it is 51.1%, which is what
+    a reader needs and is still a very small edge.
+    """
+    both = [d for d in differences(pairs, column) if abs(d) >= 1e-9]
+    return sum(1 for d in both if d > 0) / len(both) if both else None
+
+
 def own_mean(pairs: list[Pair], column: str) -> float | None:
     """The rule leg's own return, unadjusted.
 
@@ -99,7 +149,7 @@ def paired_edge(pairs: list[Pair], column: str) -> float | None:
 def table(grouped: dict[tuple[str, ...], list[Pair]], minimum: int, markdown: bool) -> list[str]:
     """One block of rows, as fixed-width text or as a markdown table."""
     head = ("setup / arm / regime / attempt", "n", "+1R first", "placebo", "edge")
-    columns = (*head, *[f"net {h}" for h in HORIZONS], "own 126")
+    columns = (*head, *[f"net {h}" for h in HORIZONS], "own 126", "tie 126", "win 126")
     lines: list[str] = []
     if markdown:
         lines.append("| " + " | ".join(columns) + " |")
@@ -113,18 +163,20 @@ def table(grouped: dict[tuple[str, ...], list[Pair]], minimum: int, markdown: bo
         pairs = grouped[key]
         if len(pairs) < minimum:
             continue
-        # Refuse the cell rather than print a mean one bad print decided.
-        # Fail closed: an unexplained number is worse than no number, because
-        # it will be acted on.
-        bad = [b for h in HORIZONS for b in extremes(pairs, f"net_{h}")]
-        if bad:
-            worst = max(bad, key=lambda b: abs(b[2]))
+        # A contaminated horizon withholds its MEAN and nothing else. Dropping
+        # the whole row was the first attempt and it cost 22 of 45 cells to ten
+        # securities out of 5,782 -- discarding evidence to avoid a defect,
+        # which is the opposite error. The median and the win rate cannot be
+        # moved by one leg, so they are still reported and the mean is the only
+        # thing withheld.
+        spoiled = {h: extremes(pairs, f"net_{h}") for h in HORIZONS if extremes(pairs, f"net_{h}")}
+        if spoiled:
+            worst = max((b for v in spoiled.values() for b in v), key=lambda b: abs(b[2]))
             refused.append(
-                f"{' / '.join(k for k in key if k != 'all')}: {len(bad)} leg(s) beyond "
-                f"{EXTREME_RETURN:.0%}, worst security {worst[0]} on {worst[1]} "
-                f"at {worst[2]:+,.0%}"
+                f"{' / '.join(k for k in key if k != 'all')}: mean withheld at "
+                f"{', '.join(str(h) for h in sorted(spoiled))} sessions; worst leg "
+                f"security {worst[0]} on {worst[1]} at {worst[2]:+,.0%}"
             )
-            continue
         hit = share(pairs, "reached_1r_first", 0)
         base = share(pairs, "reached_1r_first", 1)
         cells = [
@@ -135,10 +187,14 @@ def table(grouped: dict[tuple[str, ...], list[Pair]], minimum: int, markdown: bo
             f"{(hit - base) * 100:+.1f}" if hit is not None and base is not None else "--",
         ]
         for horizon in HORIZONS:
-            edge = paired_edge(pairs, f"net_{horizon}")
+            edge = None if horizon in spoiled else paired_edge(pairs, f"net_{horizon}")
             cells.append(f"{edge * 100:+.2f}" if edge is not None else "--")
         own = own_mean(pairs, f"net_{max(HORIZONS)}")
         cells.append(f"{own * 100:+.2f}" if own is not None else "--")
+        tied = tie_share(pairs, f"net_{max(HORIZONS)}")
+        cells.append(f"{tied:.1%}" if tied is not None else "--")
+        won = win_share(pairs, f"net_{max(HORIZONS)}")
+        cells.append(f"{won:.1%}" if won is not None else "--")
         if markdown:
             lines.append("| " + " | ".join(cells) + " |")
         else:
@@ -147,8 +203,9 @@ def table(grouped: dict[tuple[str, ...], list[Pair]], minimum: int, markdown: bo
     if refused:
         lines.append("")
         lines.append(
-            f"**{len(refused)} cell(s) REFUSED** -- a leg moved further than a trade can. "
-            "This is a corpus defect reaching the table, not a result:"
+            f"**{len(refused)} cell(s) have a WITHHELD mean** -- a leg moved further than a "
+            "trade can, so that horizon's mean is a corpus defect rather than a result. "
+            "The median and win rate beside it are unaffected:"
         )
         lines.extend(f"* {r}" for r in refused)
     return lines

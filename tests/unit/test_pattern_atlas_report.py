@@ -34,10 +34,14 @@ from pattern_atlas_report import (
     EXTREME_RETURN,
     extremes,
     group,
+    paired_median,
     table,
+    tie_share,
+    win_share,
 )
 
 HORIZONS = (5, 10, 21, 63, 126)
+KEY = ("long", "bull_flag", "closed_above", "uptrend", "all")
 
 
 def leg(trade: str, which: str, net: float, **over: str) -> dict[str, str]:
@@ -85,20 +89,37 @@ def test_a_clean_table_reports_its_cell() -> None:
     assert "REFUSED" not in output
 
 
-def test_one_poisoned_leg_refuses_the_whole_cell() -> None:
-    """The failure that happened, reduced to its smallest form."""
+def test_one_poisoned_leg_withholds_the_mean_and_names_the_security() -> None:
+    """The failure that happened, reduced to its smallest form.
+
+    The invariant is *a contaminated mean never prints as a number*. It used to
+    be enforced by dropping the whole row, which cost 22 of 45 cells to ten
+    securities out of 5,782 -- discarding evidence to avoid a defect. Now the
+    row survives and only the spoiled mean is withheld.
+    """
     output = "\n".join(built(rows(20, poison=4605.16)))
-    assert "REFUSED" in output
-    assert "3953" in output, "the refusal must name the security to investigate"
-    # And it must NOT quietly print a mean that one print decided.
-    printed = built(rows(20, poison=4605.16))
-    assert not any(line.startswith("long / bull_flag") and "%" in line for line in printed)
+    assert "WITHHELD" in output
+    assert "3953" in output, "the note must name the security to investigate"
+    row = next(line for line in built(rows(20, poison=4605.16)) if line.startswith("long /"))
+    # The poisoned mean is gone; the robust statistics are still there.
+    assert "+46051" not in row and "4605" not in row
+    assert row.count("--") >= len(HORIZONS), "every spoiled horizon's mean is withheld"
 
 
-def test_the_refusal_names_the_horizon_and_size() -> None:
+def test_a_clean_cell_keeps_every_mean() -> None:
+    """The control: withholding must not be the default.
+
+    A rule that withheld everything would satisfy the test above and destroy
+    the atlas.
+    """
+    row = next(line for line in built(rows(20)) if line.startswith("long /"))
+    assert "--" not in row
+
+
+def test_the_note_names_the_horizons_and_the_size() -> None:
     output = "\n".join(built(rows(20, poison=4605.16)))
-    assert "beyond" in output
-    assert "460,516%" in output or "+460,516%" in output
+    assert "mean withheld at" in output
+    assert "+460,516%" in output
 
 
 def test_a_defect_that_appears_only_at_a_late_horizon_is_caught() -> None:
@@ -115,8 +136,56 @@ def test_a_defect_that_appears_only_at_a_late_horizon_is_caught() -> None:
     late["net_126"] = "88.0"
     data[1] = late
     output = "\n".join(built(data))
-    assert "REFUSED" in output
+    assert "WITHHELD" in output
     assert "3953" in output
+    row = next(line for line in built(data) if line.startswith("long /"))
+    # Only the late horizon is spoiled, so the short ones must still print.
+    assert row.count("--") == 1
+
+
+def test_the_median_and_win_rate_survive_a_poisoned_leg() -> None:
+    """Why the row is worth keeping at all.
+
+    One leg at +460,516% moves a mean over twenty pairs by tens of thousands of
+    percent. It moves the **median by nothing**, and it moves the **win rate by
+    exactly one observation** -- because a defect can flip at most the pair it
+    is in. Bounded is not the same as unaffected, and saying so is the point of
+    reporting both beside the mean rather than in place of it.
+    """
+    clean = group(rows(20), "trend", False, [])[KEY]
+    dirty = group(rows(20, poison=4605.16), "trend", False, [])[KEY]
+    assert paired_median(clean, "net_126") == pytest.approx(
+        paired_median(dirty, "net_126"), abs=1e-9
+    )
+    moved = abs((win_share(clean, "net_126") or 0) - (win_share(dirty, "net_126") or 0))
+    assert moved == pytest.approx(1 / 20), "one bad leg may flip its own pair and no other"
+
+
+def test_ties_are_excluded_from_the_win_rate_not_counted_as_losses() -> None:
+    """The number that was nearly published as a result.
+
+    A fifth of real pairs are exact ties -- both legs stopped at the same stop
+    fraction, so the trade and its control return the identical number. Scoring
+    those as losses turned a bull flag winning 40.3% against its placebo's
+    38.6% into a reported "40.3%", which reads as a rule that loses money.
+    """
+    data = rows(10)
+    for i in range(4):  # four pairs return exactly the same on both legs
+        data[2 * i + 1] = leg(str(i), "placebo", 0.02, security_id="7")
+    pairs = group(data, "trend", False, [])[KEY]
+    assert tie_share(pairs, "net_126") == pytest.approx(0.4)
+    # Six decided pairs, all won by the rule.
+    assert win_share(pairs, "net_126") == pytest.approx(1.0)
+
+
+def test_the_median_is_reported_but_lands_in_the_tie_block() -> None:
+    """Documents why every real cell shows +0.00 and it is not a null."""
+    data = rows(10)
+    for i in range(6):
+        data[2 * i + 1] = leg(str(i), "placebo", 0.02, security_id="7")
+    pairs = group(data, "trend", False, [])[KEY]
+    assert paired_median(pairs, "net_126") == pytest.approx(0.0)
+    assert tie_share(pairs, "net_126") == pytest.approx(0.6)
 
 
 def test_a_large_but_possible_trade_is_not_refused() -> None:
@@ -125,19 +194,19 @@ def test_a_large_but_possible_trade_is_not_refused() -> None:
     If this ever starts failing, the threshold has been tightened into
     discarding evidence rather than defects, which is the opposite error.
     """
-    assert not any("REFUSED" in line for line in built(rows(20, poison=2.5)))
+    assert not any("WITHHELD" in line for line in built(rows(20, poison=2.5)))
 
 
 def test_the_bound_is_symmetric() -> None:
     """A catastrophic negative print is as much a defect as a positive one."""
-    assert any("REFUSED" in line for line in built(rows(20, poison=-9.0)))
+    assert any("WITHHELD" in line for line in built(rows(20, poison=-9.0)))
 
 
 def test_extremes_reports_every_offending_leg_not_just_the_first() -> None:
     data = rows(20)
     for i in (0, 1, 2):
         data[2 * i + 1] = leg(str(i), "placebo", 50.0, security_id=f"{900 + i}")
-    pairs = group(data, "trend", False, [])[("long", "bull_flag", "closed_above", "uptrend", "all")]
+    pairs = group(data, "trend", False, [])[KEY]
     found = extremes(pairs, "net_5")
     assert len(found) == 3
     assert {f[0] for f in found} == {"900", "901", "902"}
@@ -155,7 +224,7 @@ def test_the_threshold_is_what_the_module_documents() -> None:
 
 
 @pytest.mark.parametrize("markdown", [True, False])
-def test_both_output_formats_refuse(markdown: bool) -> None:
+def test_both_output_formats_withhold(markdown: bool) -> None:
     """The bug was that one of two output paths lacked the check."""
     output = "\n".join(table(group(rows(20, poison=4605.16), "trend", False, []), 5, markdown))
-    assert "REFUSED" in output
+    assert "WITHHELD" in output

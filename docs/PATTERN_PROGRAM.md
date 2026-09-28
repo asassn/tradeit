@@ -270,6 +270,49 @@ months, `breakout_retest/closed_above` from −3.08% to +0.95%, `pennant` from
 +0.13% to −0.66% the other way. **No number from that run was reported**, and
 the corrected replay was re-run with all eight shards.
 
+### And a third defect, found by the safeguard itself
+
+The corrected replay still refused **22 of 45 cells**, tracing to **ten
+securities out of 5,782**. Two were inspected directly:
+
+* **1331** oscillates between ~$33 and ~$133 — a factor-of-four flip-flop
+  across December 2013, some bars adjusted and some not;
+* **5698** steps ×4.4 on 2010-12-17 while its volume collapses from 53,492 to
+  3,181 — a reverse split carried into the price and not into the share count.
+
+Both are §0.10 unrecorded splits, and both sit at **4.0–4.4x, just under the
+jump guard's documented `DISCONTINUITY_FACTOR = 5.0`.** A volume fingerprint
+was tried as an independent second signature and **abandoned**: across the ten
+securities the price-ratio × volume-ratio product ranges from 0.15 to 2,000,
+and security 1493's volume rose *with* its price. Building a threshold from
+that would have been tuning until the tables printed, which is the failure
+this file already has a section about. **Lowering the 5.0 factor is a detector
+threshold and therefore the owner's call, not this program's.**
+
+**What was fixed instead is the statistic, not the data.** A mean is destroyed
+by one leg; a median is not. Dropping a whole row cost 22 of 45 cells to ten
+bad securities — discarding evidence to avoid a defect, the opposite error. So
+a contaminated horizon now withholds **only its mean**, and the row still
+reports.
+
+### A number that was nearly published
+
+Two columns were added beside the mean, and measuring them caught a third
+mistake before it reached the owner:
+
+* **`tie 126` — 21.1% of pairs are exact ties.** The placebo inherits the
+  rule's stop as a *fraction of price*, so when both legs stop they return the
+  identical number to the cent. A fifth of the sample carries no information
+  about the rule either way. This also explains why the paired median is
+  **+0.00 in every cell measured**: the median falls inside the tie block. It
+  is uninformative here, and a reader seeing +0.00 twenty-four times must be
+  told why rather than left to read it as a null.
+* **`win 126` excludes ties rather than scoring them as losses.** Written the
+  natural way it counted them as losses, turning a bull flag that wins 40.3%
+  against its placebo's 38.6% into a reported **"40.3%"** — which reads as a
+  rule that loses money. Among *decided* pairs it is **51.1%**, which is the
+  honest number and still a very small edge.
+
 ### The two safeguards this bought
 
 **A guard that depends on being handed every one of its own shards is not a
