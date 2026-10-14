@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from tradeit.analytics import kernels as k
 from tradeit.core.enums import Bartimeframe
 from tradeit.patterns.scanner import PatternScanner
+from tradeit.research01.holdout import authorise
 from tradeit.research01.series import price_series
 from tradeit.storage.session import install_sqlite_busy_timeout
 
@@ -72,11 +73,20 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--trades", required=True)
     ap.add_argument("--eligible", required=True)
+    ap.add_argument(
+        "--spend-holdout",
+        default="",
+        help="path of a COMMITTED pre-registration authorising a read past 2019",
+    )
     args = ap.parse_args()
 
     start, end = dt.date.fromisoformat(args.start), dt.date.fromisoformat(args.end)
-    if end >= dt.date(2020, 1, 1):
-        raise SystemExit("2020-2025 is held out for confirmation and is not read here")
+    # The same gate the pattern scan uses, from the same place. This script
+    # emits the eligibility file a hold-out test needs, so a flat refusal here
+    # made the window unreadable even with a registration in hand.
+    spent = authorise(end, args.spend_holdout)
+    if spent:
+        print(f"spending the hold-out window under {args.spend_holdout} at {spent}", flush=True)
     as_of = dt.datetime.combine(end, dt.time(21), tzinfo=dt.UTC)
     session: Session = sessionmaker(
         bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True

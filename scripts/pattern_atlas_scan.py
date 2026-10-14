@@ -41,10 +41,8 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
-import subprocess
 import sys
 import time
-from pathlib import Path
 
 import numpy as np
 
@@ -64,6 +62,7 @@ from tradeit.breakouts.lifecycle import BreakoutState
 from tradeit.core.enums import Bartimeframe
 from tradeit.patterns.mirror import mirror_bars, unmirror_price
 from tradeit.patterns.scanner import PatternScanner
+from tradeit.research01.holdout import authorise
 from tradeit.research01.series import price_series
 from tradeit.storage.session import install_sqlite_busy_timeout
 
@@ -111,40 +110,11 @@ def main() -> int:
     args = ap.parse_args()
 
     start, end = dt.date.fromisoformat(args.start), dt.date.fromisoformat(args.end)
-    # The hold-out window is spent once per question, and the refusal below is
-    # the only thing standing between "one more look" and a window that no
-    # longer tests anything. It is opened by naming a pre-registration that is
-    # already committed -- not by a boolean, because a boolean records no
-    # reason and a flag anybody can pass is not a gate.
-    if end >= dt.date(2020, 1, 1):
-        if not args.spend_holdout:
-            raise SystemExit(
-                "2020-2025 is held out. To spend it, pass --spend-holdout with the path of "
-                "a committed pre-registration that authorises this exact test."
-            )
-        prereg = Path(args.spend_holdout)
-        if not prereg.is_file():
-            raise SystemExit(f"no such pre-registration: {prereg}")
-        committed = subprocess.run(
-            ["git", "log", "-1", "--format=%H", "--", str(prereg)],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-        if not committed:
-            raise SystemExit(
-                f"{prereg} is not committed. A registration written after the window was "
-                "read is not a registration."
-            )
-        dirty = subprocess.run(
-            ["git", "status", "--porcelain", "--", str(prereg)],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-        if dirty:
-            raise SystemExit(f"{prereg} has uncommitted changes: {dirty}")
-        print(f"spending the hold-out window under {prereg} at {committed}", flush=True)
+    # One gate, in src, tested. See tradeit.research01.holdout for why it
+    # asks for a committed registration rather than a boolean.
+    spent = authorise(end, args.spend_holdout)
+    if spent:
+        print(f"spending the hold-out window under {args.spend_holdout} at {spent}", flush=True)
     wanted = {p.strip() for p in args.patterns.split(",") if p.strip()}
     short = args.direction == "short"
     as_of = dt.datetime.combine(end, dt.time(21), tzinfo=dt.UTC)
