@@ -144,3 +144,54 @@ TRIALS  1 -- the CONFIRMED arm at 126 sessions. The placebo is a control
    their path. The block statistic is the defence; it is not a complete one.
 4. **This is one setup out of eleven measured.** The ledger hurdle prices that
    in, and the hurdle is why a +0.7% edge needs t > 2.98 rather than t > 2.
+
+---
+
+## Amendment 1 — the index's `as_of` is pinned, 2026-10-14
+
+Written **after the eligibility build began and before any outcome existed**,
+which is the only window in which an amendment is legitimate. It changes no
+rule, no arm, no horizon and no pass criterion. It records a fact the original
+text left open and the recomputed baseline that follows from closing it.
+
+**What was left open.** The registration said *"the corpus's own
+equal-weighted index"* without naming which build. Two now exist, and they
+disagree about the design window: the one used to pick this candidate ran
+`as_of` 2019-12-31, and the one the hold-out test needs runs `as_of`
+2026-09-14 so the window has a continuous 200-session lookback.
+
+**Why they disagree at all, which is the part worth recording.**
+`price_series` back-adjusts for every split it knows at its `as_of`. At
+`as_of` 2026 a security that split 2-for-1 in 2022 has its 2015 prices halved,
+so a $6 stock then reads as $3 and **fails the $5 eligibility floor**. The
+index therefore contains ~35 fewer securities a session across 2009-2019
+(1,996 against 2,031) and its level path differs by up to 8.7%.
+
+**This is weak look-ahead and it is named as such.** A 2015 session's regime
+label depends on whether a security split in 2022. The index moves on
+*returns*, which split adjustment leaves alone, so the level path is only
+mildly affected; what moves is which securities clear the price floor. A truly
+point-in-time index would need rebuilding at every session's own `as_of` and is
+a project rather than a correction. **It is recorded as a limitation of the
+regime variable, not fixed here, and it applies to both windows equally.**
+
+**The pin.** `market_index_full.csv`, built `as_of` 2026-09-14, is the index
+for this test and for the baseline it is judged against. Using one build for
+the design window and another for the hold-out would have meant the two were
+never comparable.
+
+**The baseline, recomputed on that index.** The candidate survives the switch:
+
+| index | uptrend pairs | mean/block | t | hurdle | blocks + |
+|---|---|---|---|---|---|
+| `as_of` 2019 | 43,435 | +0.706% | 3.68 | 2.98 | 14/19 |
+| **`as_of` 2026 (pinned)** | 42,985 | **+0.710%** | **3.82** | 2.98 | 14/19 |
+
+450 fewer pairs, the same conclusion. **+0.710% a block, t = 3.82** is the
+design-window figure the out-of-sample result is compared against.
+
+**The held-out window is a harder test than the design window**, measured
+before it was scanned: **65.9% of its sessions are uptrend against the design
+window's 79.4%**. Criterion 2 splits it at 2022/2023 for the reason given
+above, and a 2020-2022 half containing the February-March 2020 crash and its
+recovery is a half about one event.
