@@ -41,8 +41,10 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -93,6 +95,13 @@ def main() -> int:
     ap.add_argument("--patterns", default="", help="comma-separated; empty means every detector")
     ap.add_argument("--start", default="2010-01-04")
     ap.add_argument("--end", default="2019-12-31", help="2020+ is held out")
+    ap.add_argument(
+        "--spend-holdout",
+        default="",
+        help="the path of a COMMITTED pre-registration authorising a read of 2020-2025. "
+        "Required to scan past 2019, and recorded in the output so the file says which "
+        "registration spent the window",
+    )
     ap.add_argument("--attempts", type=int, default=3, help="events allowed per pattern identity")
     ap.add_argument("--direction", choices=("long", "short"), default="long")
     ap.add_argument("--shards", type=int, default=1)
@@ -102,8 +111,40 @@ def main() -> int:
     args = ap.parse_args()
 
     start, end = dt.date.fromisoformat(args.start), dt.date.fromisoformat(args.end)
+    # The hold-out window is spent once per question, and the refusal below is
+    # the only thing standing between "one more look" and a window that no
+    # longer tests anything. It is opened by naming a pre-registration that is
+    # already committed -- not by a boolean, because a boolean records no
+    # reason and a flag anybody can pass is not a gate.
     if end >= dt.date(2020, 1, 1):
-        raise SystemExit("2020-2025 is held out and is not read here")
+        if not args.spend_holdout:
+            raise SystemExit(
+                "2020-2025 is held out. To spend it, pass --spend-holdout with the path of "
+                "a committed pre-registration that authorises this exact test."
+            )
+        prereg = Path(args.spend_holdout)
+        if not prereg.is_file():
+            raise SystemExit(f"no such pre-registration: {prereg}")
+        committed = subprocess.run(
+            ["git", "log", "-1", "--format=%H", "--", str(prereg)],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        if not committed:
+            raise SystemExit(
+                f"{prereg} is not committed. A registration written after the window was "
+                "read is not a registration."
+            )
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--", str(prereg)],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        if dirty:
+            raise SystemExit(f"{prereg} has uncommitted changes: {dirty}")
+        print(f"spending the hold-out window under {prereg} at {committed}", flush=True)
     wanted = {p.strip() for p in args.patterns.split(",") if p.strip()}
     short = args.direction == "short"
     as_of = dt.datetime.combine(end, dt.time(21), tzinfo=dt.UTC)

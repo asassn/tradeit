@@ -167,19 +167,38 @@ def outcomes(
         return None
     target = entry - risk if short else entry + risk
     out: dict[str, str] = {}
-    # First touch, over the longest horizon a stop-using trader would hold.
-    available = min(63, close.shape[0] - start - 1)
+
+    # TWO searches, because they answer two questions over two windows.
+    #
+    # The probability columns are a 63-session race between the stop and +1R,
+    # which is §44's and §51's definition and is kept at 63 so those studies
+    # stay comparable with this one.
+    #
+    # The stop itself is searched over the LONGEST horizon reported. It used to
+    # be searched over 63 only, which silently made `net_126` the return of a
+    # trade whose stop was ignored for its entire second half: a position
+    # stopped out on session 80 was scored at its session-126 close as though
+    # it had been held. Every 126-session mean in the atlas of 2026-09-25 is
+    # overstated by that, and it was found while preparing to stake a trial on
+    # one of them.
+    race = min(63, close.shape[0] - start - 1)
     first = ""
-    stop_at = None
-    for j in range(start + 1, start + 1 + available):
+    for j in range(start + 1, start + 1 + race):
         if (high[j] >= stop) if short else (low[j] <= stop):
-            first, stop_at = first or "stop", j
+            first = first or "stop"
             break
         if (low[j] <= target) if short else (high[j] >= target):
             first = first or "target"
             break
     out["reached_1r_first"] = "1" if first == "target" else "0"
     out["stopped_within_63"] = "1" if first == "stop" else "0"
+
+    longest = min(max(HORIZONS), close.shape[0] - start - 1)
+    stop_at = None
+    for j in range(start + 1, start + 1 + longest):
+        if (high[j] >= stop) if short else (low[j] <= stop):
+            stop_at = j
+            break
     for horizon in HORIZONS:
         if start + horizon >= close.shape[0]:
             out[f"up_{horizon}"] = out[f"ret_{horizon}"] = out[f"net_{horizon}"] = ""
