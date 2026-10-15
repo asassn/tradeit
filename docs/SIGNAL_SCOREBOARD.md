@@ -3974,4 +3974,89 @@ trade-off the question asked about, now measured.
 
 ### Registered and spent
 
-**Ledger: 140 → 142 trials.** Fifty-nine measurements.
+**Ledger: 140 → 142 trials.** Fifty-nine measurements. *(§52 takes it to 143.)*
+
+---
+
+## §52 — VCP confirmed, out of sample: the edge got bigger and became unmeasurable
+
+Registered at `251ab5f` with amendment 1 at `fda70bf`, both committed before
+2020–2025 was read. `docs/prereg/VCP_CONFIRMED_HOLDOUT_2026-10-14.md`. The
+first Stage B test of the pattern program, and the first time this project has
+spent the confirmation window.
+
+**The rule, fixed in advance.** A `volatility_contraction` pattern whose
+breakout the Phase 5 engine calls `CONFIRMED`, entered at the next open in an
+uptrend, stop at the pattern's invalidation 3–13% below entry, held 126
+sessions or until the stop, 10 bps a side, against a placebo drawn from the
+same session's eligible universe with the same stop distance. Entries
+2020-01-02 to 2025-12-31. **13,039 pairs.**
+
+| criterion | result | verdict |
+|---|---|---|
+| 1 — beats its placebo past `small_sample_hurdle(143, 10)` | mean **+0.826%**, **t 1.02** against a **3.39** hurdle | **FAIL** |
+| 2 — positive against the placebo in both halves | 2020–2022 **+0.024%**, 2023–2025 **+1.360%** | pass, on the letter |
+| 3 — survives 20 bps a side | own return +1.886% → +1.686% | pass |
+| 4 — no leg beyond 400% | two placebo legs at **+667%** and **+671%** | **FAIL** |
+
+### The out-of-sample mean was LARGER than in-sample. It still fails.
+
+In-sample: **+0.710% a block, t 3.82**. Out of sample: **+0.826% a block,
+t 1.02**. The edge did not shrink — the *noise* tripled. Block standard
+deviation went from **0.81%** in the design window to **2.56%** here, on half
+as many blocks (10 against 19).
+
+| half-year | n | mean |
+|---|---|---|
+| 2020 H1 | 937 | −0.60% |
+| 2020 H2 | 901 | **−5.07%** |
+| 2021 H1 | 1,918 | +3.96% |
+| 2021 H2 | 1,594 | +1.80% |
+| **2022** | **2** | **excluded — below the 30-trade floor** |
+| 2023 H1 | 931 | +2.27% |
+| 2023 H2 | 1,074 | −0.40% |
+| 2024 H1 | 1,958 | +3.07% |
+| 2024 H2 | 1,681 | +2.31% |
+| 2025 H1 | 651 | −0.07% |
+| 2025 H2 | 910 | +0.99% |
+
+**This is not "there is no edge". It is "a +0.8% edge over six months cannot be
+established on 13,039 trades across six years at this hurdle."** The two are
+different claims and only the second is supported.
+
+### Three things the table says that the verdict does not
+
+**2022 is missing, and 2022 was the test.** The uptrend regime filter admitted
+**two trades in all of 2022** — the one genuinely adverse stretch in the
+window. The filter did exactly what it was registered to do, and the
+consequence is that the rule was never examined in the conditions that would
+break it. A rule that only trades in uptrends cannot be tested by a bear
+market; it can only be absent from one.
+
+**Criterion 2 passes on the letter and fails on the intent.** It asked for a
+positive first half and got **+0.024%** — a wash assembled from −0.60, −5.07,
++3.96 and +1.80. The criterion checked the sign and should have checked
+whether the halves agreed. Recorded as a registration defect, charged against
+this test rather than repaired after the fact.
+
+**The guard caught the corpus again.** Two placebo legs returning +667% and
++671% — securities 4947 and 12358, in the *held-out* window. §0.10's
+discontinuities are not confined to the design period, and criterion 4 existed
+because a pass resting on one of those is not a pass.
+
+### Verdict: FAILED, and `volatility_contraction` is closed as a trade filter
+
+Per the stop rule, in full: **no other arm, horizon, regime, stop band, cost
+assumption or pattern family is substituted, and the window is not read again
+for this setup.** The 63-session reading that looked more consistent in-sample
+(t 3.38, 17 of 20 blocks) is **not** now tested — substituting it is exactly
+what the stop rule forbids.
+
+What stands: the atlas entry remains a description of 2010–2019, and this
+section records that the strongest candidate it produced did not survive
+contact with 2020–2025.
+
+### Registered and spent
+
+**Ledger: 142 → 143 trials.** Sixty measurements. The hurdle is now
+|t| > 2.6540 on the normal scale.

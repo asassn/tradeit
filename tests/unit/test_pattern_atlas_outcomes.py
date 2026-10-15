@@ -18,7 +18,9 @@ The two windows are deliberately different and both are pinned here:
 
 from __future__ import annotations
 
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -115,6 +117,61 @@ def test_a_short_stop_after_63_fires_on_the_right_session() -> None:
     # And the long side's inequality would have charged one session of borrow.
     wrong = short_return(100.0, 110.0, COST) - borrow_cost(1, BORROW_ANNUAL)
     assert abs(expected - wrong) > 10 * TOLERANCE
+
+
+def test_an_empty_result_is_an_error_not_a_success() -> None:
+    """The failure mode that has now cost this project two overnight runs.
+
+    Item 1's atlas compared a date string to a date-keyed dict, skipped every
+    trade and wrote a header with no rows. The Stage B replay loaded the design
+    window's bars for a hold-out run and did the same. **Both exited 0**, and
+    both were only caught by a human reading the output.
+
+    There is no question whose honest answer is a file containing a header and
+    nothing else, so the script raises. This test drives the CLI rather than a
+    function, because the exit code is the thing that was wrong.
+    """
+    repo = Path(__file__).resolve().parents[2]
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        # Events whose entry dates no price window will contain.
+        (work / "events.csv").write_text(
+            "security_id,direction,pattern,pattern_key,attempt,quality,scan_date,"
+            "closed_above_date,retest_confirmed_date,confirmed_date,closed_above_entry,"
+            "retest_confirmed_entry,confirmed_entry,stop,final_state\n"
+            "1,long,volatility_contraction,k,1,50.0,1890-01-02,1890-01-03,,,"
+            "10.0,,,9.0,confirmed\n"
+        )
+        (work / "elig.csv").write_text("security_id,session_date\n1,1890-01-03\n")
+        (work / "index.csv").write_text(
+            "session_date,level,securities\n"
+            + "".join(f"1890-01-{d:02d},1.0,500\n" for d in range(1, 29))
+        )
+        done = subprocess.run(
+            [
+                str(repo / ".venv/bin/python"),
+                str(repo / "scripts/pattern_atlas.py"),
+                "--events",
+                str(work / "events.csv"),
+                "--eligible",
+                str(work / "elig.csv"),
+                "--index",
+                str(work / "index.csv"),
+                "--out",
+                str(work / "out.csv"),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=repo,
+            check=False,
+        )
+    assert done.returncode != 0, "an empty result must not exit 0"
+    assert "wrote NO pairs" in done.stderr + done.stdout
+    # NOTE: this guard is also the only practical defence against the window
+    # being hard-coded again. A test that distinguished a parameterised window
+    # from a hard-coded one would need the corpus, which a unit test must not
+    # touch; instead, getting the window wrong now ends in this error rather
+    # than in an empty file reported as a success.
 
 
 def test_the_raw_return_column_ignores_the_stop_by_design() -> None:

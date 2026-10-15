@@ -111,7 +111,7 @@ reporting floor.
 | 6 | high tight flag | `high_tight_flag` | atlas running — **absent from the pilot** |
 | 7 | base on base | `base_on_base` | atlas running (same pass) |
 | 8 | tight consolidation | `tight_consolidation` | atlas running (same pass) |
-| 8b | **VCP** | `volatility_contraction` | atlas running — **was pooled with 8** |
+| 8b | **VCP** | `volatility_contraction` | **CLOSED** — §52 failed out of sample |
 | 9 | double bottom | `double_bottom` | atlas running (same pass) |
 | 10 | inverse head and shoulders | `inverse_head_and_shoulders` | atlas running (same pass) |
 | 11 | breakout-retest | `breakout_retest` | atlas running (same pass) |
@@ -238,6 +238,38 @@ VWAP fade · gap fades · halt-resumption shorts · parabolic multi-day momentum
 **Read these as the pooled, unconditional numbers they are.** The program exists
 because pooling over a decade that rose is exactly what the owner objected to.
 
+
+---
+
+## Stage B, once: the strongest candidate failed
+
+`SIGNAL_SCOREBOARD.md` §52, registered at `251ab5f`. VCP-confirmed held 126
+sessions in uptrends, tested on 2020–2025, **13,039 pairs**.
+
+**The out-of-sample mean was larger than in-sample and it still failed.**
++0.710% a block in 2010–2019 at t 3.82; **+0.826% a block in 2020–2025 at
+t 1.02** against a 3.39 hurdle. The edge did not shrink — block standard
+deviation tripled, from 0.81% to 2.56%, on half as many blocks.
+
+Three things worth carrying into every later item:
+
+1. **A rule that only trades in uptrends cannot be tested by a bear market.**
+   The regime filter admitted **two trades in all of 2022**, the one adverse
+   stretch in the window. It did what it was registered to do, and the
+   consequence is that the rule was never examined where it would break.
+2. **"Positive in both halves" checked the sign, not the agreement.** The first
+   half came in at +0.024%, a wash assembled from −5.07% and +3.96%. Recorded
+   as a registration defect and charged against that test rather than repaired
+   afterwards. **Later registrations should require the halves to agree, not
+   merely to share a sign.**
+3. **§0.10 discontinuities are not confined to the design window.** Two placebo
+   legs in 2020–2025 returned +667% and +671%.
+
+**`volatility_contraction` is closed as a trade filter on this corpus.** The
+63-session reading that looked *more* consistent in-sample is deliberately not
+tested — substituting it is what the stop rule forbids.
+
+**Ledger: 142 → 143 trials.**
 
 ---
 

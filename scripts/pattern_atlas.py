@@ -58,6 +58,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.patterns.candlesticks import CONTEXTUAL, SHAPES, prior_trend, shapes_at
 from tradeit.patterns.mirror import borrow_cost, short_return
+from tradeit.research01.holdout import authorise
 from tradeit.research01.series import price_series
 from tradeit.storage.session import install_sqlite_busy_timeout
 
@@ -237,6 +238,19 @@ def main() -> int:
     ap.add_argument("--index", required=True)
     ap.add_argument("--jumps", default="")
     ap.add_argument("--direction", choices=("long", "short"), default="long")
+    # The window used to be hard-coded to the design period, two lines below
+    # where the events were read. A hold-out run therefore loaded 2010-2019
+    # bars, found none of its own entry dates in them, skipped every leg and
+    # wrote an EMPTY FILE with exit code 0 after 9,440 seconds of work.
+    ap.add_argument("--start", default="2009-01-01", help="first session of price history to load")
+    ap.add_argument(
+        "--end", default="2019-12-31", help="last session; past 2019 needs --spend-holdout"
+    )
+    ap.add_argument(
+        "--spend-holdout",
+        default="",
+        help="path of a COMMITTED pre-registration authorising a read past 2019",
+    )
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -295,13 +309,16 @@ def main() -> int:
     session: Session = sessionmaker(
         bind=install_sqlite_busy_timeout(create_engine(args.db, future=True)), future=True
     )()
-    as_of = dt.datetime(2019, 12, 31, 21, tzinfo=dt.UTC)
+    history_start = dt.date.fromisoformat(args.start)
+    history_end = dt.date.fromisoformat(args.end)
+    spent = authorise(history_end, args.spend_holdout)
+    if spent:
+        print(f"spending the hold-out window under {args.spend_holdout} at {spent}", flush=True)
+    as_of = dt.datetime.combine(history_end, dt.time(21), tzinfo=dt.UTC)
     rows: dict[int, dict[str, tuple[object, ...]]] = defaultdict(dict)
     t0 = time.time()
     for n, (security_id, wanted) in enumerate(sorted(legs.items()), 1):
-        bars = price_series(
-            session, security_id, as_of=as_of, start=dt.date(2009, 1, 1), end=dt.date(2019, 12, 31)
-        )
+        bars = price_series(session, security_id, as_of=as_of, start=history_start, end=history_end)
         if len(bars) < 2:
             continue
         place = {b.session_date: i for i, b in enumerate(bars)}
@@ -370,6 +387,19 @@ def main() -> int:
                 writer.writerow(pair["placebo"])
                 written += 1
     print(f"\n{written:,} complete pairs -> {args.out}", flush=True)
+    # FAIL LOUDLY ON NOTHING. This project has twice spent hours producing an
+    # empty file and reporting success: item 1's atlas compared a date string
+    # to a date key and skipped every trade, and this replay loaded the design
+    # window's bars for a hold-out run. Both exited 0. An empty result is
+    # always a bug -- there is no question whose honest answer is a file with a
+    # header and no rows -- so it is an error now.
+    if written == 0:
+        raise SystemExit(
+            f"wrote NO pairs from {trade_id:,} trades over {len(legs):,} securities. "
+            f"Every leg was dropped. Check that --start/--end cover the events' entry "
+            f"dates ({history_start} .. {history_end} was loaded), that --eligible covers "
+            f"those sessions, and that --index classifies them."
+        )
     return 0
 
 
