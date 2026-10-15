@@ -919,11 +919,32 @@ def series_coherence(
 
 
 #: A session-to-session price ratio beyond this, with no corporate action to
-#: explain it, is a vendor discontinuity rather than a market move. Five is
-#: chosen to sit above what a real session produces in the liquid universes
-#: these studies use and far below the defects measured: YELL's 7,653x on
-#: 2003-12-19, and moves of 1e5 and beyond elsewhere.
-DISCONTINUITY_FACTOR = 5.0
+#: explain it, is a vendor discontinuity rather than a market move.
+#:
+#: **4.0 by the owner's decision of 2026-10-15**, lowered from the original
+#: 5.0. The 5.0 was chosen in §0.10 against the defects then visible -- YELL's
+#: 7,653x on 2003-12-19 and moves of 1e5 and beyond. The atlas of 2026-09-25
+#: then found ten securities stepping 4.0-4.4x, under the threshold and large
+#: enough to carry a reported edge to -44.30% on its own, and §52's criterion 4
+#: found two more inside the held-out window.
+#:
+#: **Priced before it was changed**, in `RESEARCH_01_STEP_CENSUS_2026-10-15.md`
+#: and reproducible from `scripts/research01_step_census.py`: 67,377 unexplained
+#: steps beyond 2.0x across 6,043 securities, 1990-2026. Judged against the
+#: twelve securities that have actually damaged a result, 5.0 catches **6**,
+#: and 4.0, 3.5 and 3.0 all catch **9** -- so 4.0 is the efficient choice, at
+#: 3,023 extra flagged sessions and roughly 1,875 lost market moves, 5% of the
+#: upward steps beyond 2.0x. Going lower buys nothing measured and costs two to
+#: three times as much.
+#:
+#: **This does not make the corpus trustworthy and is not the main defence.**
+#: Three of those twelve have no qualifying single-session step at all -- 5533
+#: and 3350 move less than 2.0x in any session and still produced >400%
+#: outcomes -- because their damage accumulates over a holding period rather
+#: than arriving at once. The outcome-level guard-rail in
+#: `scripts/pattern_atlas_report.py`, which refuses any cell containing a leg
+#: beyond 400% and names the security, is what caught all twelve.
+DISCONTINUITY_FACTOR = 4.0
 
 
 def unexplained_moves(

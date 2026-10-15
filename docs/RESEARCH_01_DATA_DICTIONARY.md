@@ -818,6 +818,24 @@ evidence is ambiguous.
 
 ### 0.10 A price series can step by a factor of thousands with **nothing recording it**
 
+> **The threshold moved on 2026-10-15, by the owner's decision: the factor is
+> now 4.0, not 5.0.** It was priced first — 67,377 unexplained steps beyond
+> 2.0× across 6,043 securities, costed per candidate factor in
+> [`RESEARCH_01_STEP_CENSUS_2026-10-15.md`](RESEARCH_01_STEP_CENSUS_2026-10-15.md).
+> Against the twelve securities that have actually damaged a result, 5.0 caught
+> **six** and 4.0 catches **nine**, for 3,023 extra flagged sessions and about
+> 1,875 lost market moves (5% of upward steps beyond 2.0×).
+>
+> **Read this before trusting it:** three of those twelve have **no qualifying
+> single-session step at all** — 5533 and 3350 move under 2.0× in every session
+> and still produced >400% outcomes, because their damage accumulates across a
+> holding period. **No single-session threshold can be the primary defence.**
+> The outcome-level check that refuses any result containing a leg beyond 400%
+> is what caught all twelve, and it is not optional.
+>
+> Any count below this line that was measured at factor 5.0 is now a lower
+> bound. Re-measure before relying on it.
+
 **Found 2026-09-19 by the pattern-event study**, whose mean 21-session return
 read **+16.7%** against a median of +0.27%. A mean that far from its median is
 not a market, it is a defect, and this is the defect.

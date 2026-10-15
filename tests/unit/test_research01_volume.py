@@ -417,6 +417,38 @@ class TestUnexplainedMoves:
         bars = self._bars([10.0, 0.0, 10.4, 0.0, 10.1])
         assert series.unexplained_moves(bars, []) == frozenset()
 
+    def test_the_boundary_the_owner_moved_on_2026_10_15(self) -> None:
+        """4.0, not 5.0, and the band between them is the whole decision.
+
+        No test pinned this boundary when it was 5.0, so lowering it would have
+        passed the suite unchanged -- which is how a threshold moves without
+        anybody noticing. These are the two cases the change actually decides:
+        a 4.2x step was a market move yesterday and is a defect today, and a
+        3.5x step is still a market move.
+
+        The band exists because the atlas of 2026-09-25 found ten securities
+        stepping 4.0-4.4x, under the old threshold and large enough to carry a
+        reported edge to -44.30%.
+        """
+        assert series.DISCONTINUITY_FACTOR == 4.0
+        # Just inside the new threshold: now a defect.
+        assert series.unexplained_moves(self._bars([10.0, 42.0, 41.5]), []) == {
+            dt.date(2003, 12, 16)
+        }
+        # Its reciprocal, on the way down.
+        assert series.unexplained_moves(self._bars([42.0, 10.0, 10.1]), []) == {
+            dt.date(2003, 12, 16)
+        }
+        # Below it: still a market move, and refusing it would discard evidence.
+        assert series.unexplained_moves(self._bars([10.0, 35.0, 34.5]), []) == frozenset()
+        assert series.unexplained_moves(self._bars([35.0, 10.0, 10.1]), []) == frozenset()
+
+    def test_the_old_threshold_would_now_miss_the_band(self) -> None:
+        """The cost of the old setting, stated as a test rather than a claim."""
+        band = self._bars([10.0, 42.0, 41.5])
+        assert series.unexplained_moves(band, [], factor=5.0) == frozenset()
+        assert series.unexplained_moves(band, [], factor=4.0) == {dt.date(2003, 12, 16)}
+
     def test_a_factor_at_or_below_one_is_refused(self) -> None:
         with pytest.raises(ValueError):
             series.unexplained_moves(self._bars([1.0, 2.0]), [], factor=1.0)

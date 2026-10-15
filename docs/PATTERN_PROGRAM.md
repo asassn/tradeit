@@ -318,8 +318,12 @@ was tried as an independent second signature and **abandoned**: across the ten
 securities the price-ratio × volume-ratio product ranges from 0.15 to 2,000,
 and security 1493's volume rose *with* its price. Building a threshold from
 that would have been tuning until the tables printed, which is the failure
-this file already has a section about. **Lowering the 5.0 factor is a detector
-threshold and therefore the owner's call, not this program's.**
+this file already has a section about. **Lowering the 5.0 factor was a detector
+threshold and therefore the owner's call; he took it on 2026-10-15 and the
+factor is now 4.0** (`RESEARCH_01_STEP_CENSUS_2026-10-15.md`). It catches nine
+of the twelve securities that damaged a result, against six before — and the
+three it cannot catch have no qualifying single-session step at all, which is
+why the outcome-level guard-rail remains the defence that matters.
 
 **What was fixed instead is the statistic, not the data.** A mean is destroyed
 by one leg; a median is not. Dropping a whole row cost 22 of 45 cells to ten

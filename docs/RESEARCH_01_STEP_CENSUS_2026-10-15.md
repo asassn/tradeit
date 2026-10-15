@@ -23,6 +23,22 @@ ten from the atlas, two from Stage B — rather than against step counts.
 |---|---|---|---|---|
 | current **5.0** | **6/12** | — | — | — |
 | **4.0** | **9/12** | 3,023 | 1,448 | ~1,875 |
+
+*Measured after the change, 2026-10-15:* the guard went from **9,701 sessions
+in 2,228 securities** to **12,753 in 2,804** — **+3,052 sessions**, within 1% of
+the 3,023 predicted, and **9 of the 12 confirmed flagged** exactly as the
+costing said. The "new securities" column above is **wrong as a prediction**:
+576 securities were newly flagged, not 1,448, because 872 of those 1,448
+already had some other session flagged at 5.0. The column counted securities
+with a step in the band, which is not the same question. Left in place with
+this correction rather than edited, since the costing is what the decision was
+taken on.
+
+An invariant worth keeping: every session flagged at 5.0 **must** also be
+flagged at 4.0, since a lower factor is strictly more inclusive. The first
+comparison showed 1,109 missing, which is impossible — two shards had not
+finished. The check caught a premature conclusion that would otherwise have
+read as a real inconsistency.
 | 3.5 | 9/12 | 5,291 | 2,109 | ~3,408 |
 | 3.0 | 9/12 | 10,601 | 2,960 | ~6,218 |
 | 5.0 + a round-ratio rule ≥3.0× | 7/12 | 4,383 | 1,635 | fewer |
