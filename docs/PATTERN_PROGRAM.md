@@ -241,6 +241,29 @@ because pooling over a decade that rose is exactly what the owner objected to.
 
 ---
 
+## The program is measuring below its own resolution
+
+Measured 2026-10-16, [`PATTERN_PROGRAM_POWER_2026-10-16.md`](PATTERN_PROGRAM_POWER_2026-10-16.md).
+
+The design window resolves per-trade effects of **0.4%–0.9%** over six months.
+The effects these setups produce are **0.1%–0.8%**. The held-out window, with
+11 blocks at double the block variance, resolves about **1.5%** — more than any
+pattern here produces, so **it cannot confirm what the atlas finds.**
+
+The placebo was checked first, because a leaky control would have been the
+fixable answer: rule and placebo block means correlate at **0.96–0.99** and the
+control removes **73–88%** of market variance. It works. The residual is real
+dispersion, and a 0.5% effect would need **18 years of disjoint blocks** against
+the 10 the design window holds.
+
+**So screening items 6-40 will not produce a confirmable result** unless one
+shows an effect near 1%, double anything seen in five setups. The recommended
+alternative is portfolio-level testing — one equity curve against the market
+rather than a per-trade differential — which is both statistically stronger and
+the question the roadmap actually asks.
+
+---
+
 ## Stage B, twice: both candidates failed the same way
 
 | | in-sample t | held-out t | verdict |
