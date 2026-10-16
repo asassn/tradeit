@@ -257,10 +257,20 @@ dispersion, and a 0.5% effect would need **18 years of disjoint blocks** against
 the 10 the design window holds.
 
 **So screening items 6-40 will not produce a confirmable result** unless one
-shows an effect near 1%, double anything seen in five setups. The recommended
-alternative is portfolio-level testing — one equity curve against the market
-rather than a per-trade differential — which is both statistically stronger and
-the question the roadmap actually asks.
+shows an effect near 1%, double anything seen in five setups.
+
+**The portfolio alternative was then checked and also fails.** Diversification
+across setups is real — mean correlation 0.17, 3.5 effective setups of 7, block
+sd from 0.96% to 0.52%, detection limit to 0.36%. But the seven in-sample
+effects have **mixed signs** (flat base +0.837% and VCP +0.819% against the
+pennant's −0.752%), so the honest equal-weighted combination measures
+**+0.318% against a 0.36% limit, t +2.66 against a 2.99 hurdle** — a failure
+*in-sample*, with nothing to register. Sign-selecting from the same data gives
++0.496% at t +3.93, which is what screening produces and is recorded only so
+nobody re-derives it as a finding.
+
+**The program is therefore at its end on this corpus**, per-trade and portfolio
+alike. See [`PATTERN_PROGRAM_POWER_2026-10-16.md`](PATTERN_PROGRAM_POWER_2026-10-16.md).
 
 ---
 

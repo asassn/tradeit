@@ -109,3 +109,65 @@ either way at these effect sizes, and that **§52 and §53 are properly read as
 "not established" rather than "refuted"** — a distinction the stop rules
 deliberately do not make, because a line that stays open on that reasoning
 never closes. Both remain closed.
+
+---
+
+## Addendum — the portfolio route was checked and it fails in-sample
+
+Added the same day, after §48 was re-read and the combination actually computed.
+**It does not survive, and the recommendation above for portfolio-level testing
+is withdrawn.**
+
+### Why it looked promising
+
+Diversification across setups is real. The seven cells' block differentials
+correlate at a mean of **0.17**, giving **3.5 effective independent setups of 7**
+and cutting the block sd from 0.96% to **0.52%** — which moves the detectable
+effect from ~0.66% to **0.36%**, below several of the observed per-setup effects
+for the first time.
+
+### Why it fails anyway: the signs cancel
+
+| setup | trades | in-sample effect |
+|---|---|---|
+| flat base / confirmed | 13,041 | **+0.837%** |
+| VCP / confirmed | 40,513 | **+0.819%** |
+| cup with handle / confirmed | 7,229 | +0.647% |
+| ascending triangle / confirmed | 11,925 | +0.348% |
+| tight consolidation / breakout | 79,362 | +0.191% |
+| bull flag / breakout | 118,222 | **−0.125%** |
+| pennant / breakout | 49,563 | **−0.752%** |
+
+**Equal-weighted, all seven, no sign selection: +0.318% against a 0.36%
+detection limit, t +2.66 against a 2.99 hurdle.** It fails *in-sample*. There
+is nothing here to register.
+
+The diversification worked exactly as predicted — the sd fell to 0.52% as
+計算ed. The gain was then eaten by the mixed signs: the pennant's −0.752% and
+the bull flag's −0.125% cancel against the positives, and the combination
+measures the average of effects pointing in different directions.
+
+### The trap, quantified
+
+Selecting each setup's sign from the same data gives **+0.496%, t +3.93** —
+comfortably past the hurdle. That number is what screening produces and it is
+**not a legitimate test**: the signs are chosen from the window the test would
+then be run on. It is recorded here at its exact size so that nobody — me
+included — re-derives it later as a finding.
+
+### What this closes
+
+**The pattern program has reached its end on this corpus**, per-trade and
+portfolio alike:
+
+* individual effects (0.13%–0.84%) sit at or below what 10 years of disjoint
+  blocks resolve (0.39%–0.93%);
+* the hold-out window resolves ~1.5% and no setup produces that;
+* the honest equal-weighted combination fails in-sample;
+* and the placebo is sound, so none of this is a control problem.
+
+Further screening of items 6–40 would add entries in the same band and raise
+the ledger hurdle for everything after. **The three options that remain are
+shorter horizons where the atlas says the edge is not, portfolio construction
+on signals rather than patterns, or more history** — and only the last changes
+the arithmetic.
