@@ -105,8 +105,8 @@ reporting floor.
 |---|---|---|---|
 | 1 | **bull flag** | `bull_flag` | **atlas done** + tested (§44, §51) |
 | 2 | **flat base / flat top breakout** | `flat_base` | **atlas running** 2026-09-24 |
-| 3 | ascending triangle | `ascending_triangle` | atlas running (same pass) |
-| 4 | pennant | `pennant` | atlas running (same pass) |
+| 3 | ascending triangle | `ascending_triangle` | atlas done — no Stage B, strongest t 1.81 |
+| 4 | pennant | `pennant` | **CLOSED** — §53 failed out of sample |
 | 5 | cup with handle | `cup_with_handle` | atlas running (same pass) |
 | 6 | high tight flag | `high_tight_flag` | atlas running — **absent from the pilot** |
 | 7 | base on base | `base_on_base` | atlas running (same pass) |
@@ -238,6 +238,27 @@ VWAP fade · gap fades · halt-resumption shorts · parabolic multi-day momentum
 **Read these as the pooled, unconditional numbers they are.** The program exists
 because pooling over a decade that rose is exactly what the owner objected to.
 
+
+---
+
+## Stage B, twice: both candidates failed the same way
+
+| | in-sample t | held-out t | verdict |
+|---|---|---|---|
+| §52 VCP confirmed | 3.82 | 1.02 | closed |
+| §53 pennant long | −3.02 | −0.53 | closed |
+| §53 pennant short | +4.44 | +2.05 | closed with it |
+
+**Both kept their direction and lost two thirds of their magnitude.** The
+pennant's long/short coherence — the only reason it earned a trial — did
+replicate out of sample; the size did not. That signature fits a real effect too
+small to establish at this hurdle *or* a selection artefact with a small real
+component, and nothing in this corpus separates them.
+
+Carried forward from §53: **the agreement criterion works.** §52 recorded that
+its own "positive in both halves" test checked only the sign; §53 required the
+halves to agree in magnitude and that is what failed the pennant, which a
+shared-sign test would have passed.
 
 ---
 

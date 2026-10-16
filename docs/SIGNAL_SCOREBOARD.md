@@ -4060,3 +4060,81 @@ contact with 2020–2025.
 
 **Ledger: 142 → 143 trials.** Sixty measurements. The hurdle is now
 |t| > 2.6540 on the normal scale.
+
+---
+
+## §53 — the pennant: the direction replicated, the magnitude did not
+
+Registered at `eb9e723`, committed before 2020–2025 was read for this question.
+`docs/prereg/PENNANT_UNDERPERFORMANCE_2026-10-15.md`. The second Stage B test
+of the pattern program and the first to register a **negative** edge: the claim
+was that buying a pennant breakout is worse than buying nothing.
+
+**39,393 long pairs and 32,313 short.**
+
+| | design window | held out |
+|---|---|---|
+| long (bought) | −0.752%, **t −3.02** | −0.242%, **t −0.53** |
+| short (mirror) | +1.096%, **t +4.44** | +0.433%, **t +2.05** |
+
+| criterion | result | verdict |
+|---|---|---|
+| 1 — long mean negative past `small_sample_hurdle(144, 11)` | −0.242%, t −0.53 against **3.31** | **FAIL** |
+| 2 — both halves negative **and agreeing** | 2020–22 −0.412%, 2023–25 −0.101% | **FAIL** |
+| 3 — the short mirror stays positive | +0.433%, t +2.05, 8/10 blocks | pass |
+| 4 — no leg beyond 400% | **32 legs in 23 securities** | **FAIL** |
+
+### Both signs survived. Both magnitudes fell by two thirds.
+
+This is a more informative failure than §52's. The long side stayed negative and
+the short mirror stayed positive — the coherence that justified the trial did
+replicate — but the long magnitude fell from −0.752% to −0.242% and its t from
+−3.02 to −0.53. Block standard deviation on the long side **nearly doubled**,
+0.83% to 1.51%.
+
+Per-block, long: `+0.8 +0.7 −0.2 −2.1 −1.3 −0.8 −0.4 −2.1 −0.1 −0.6 +3.3`.
+Eight of eleven negative, and a +3.3 block at the end.
+
+### The criterion that caught it was the one §52 wrote against itself
+
+**Criterion 2 under §52's original wording would have PASSED this test.** Both
+halves are negative, so a shared-sign test is satisfied. Requiring the halves to
+*agree in magnitude* — the weaker at least a third of the stronger — failed it at
+0.101% against a 0.137% bar. The defect §52 recorded in itself was corrected in
+the very next registration and immediately changed a verdict.
+
+### Two tests, one signature
+
+| | in-sample t | held-out t |
+|---|---|---|
+| §52 VCP confirmed | 3.82 | 1.02 |
+| §53 pennant long | −3.02 | −0.53 |
+| §53 pennant short | +4.44 | +2.05 |
+
+Both setups kept their direction and lost roughly two thirds of their
+magnitude. That is the signature of **either a genuine effect too small to
+establish at this hurdle, or a selection artefact with a small real component**,
+and nothing measurable in this corpus distinguishes those two readings. Saying
+which it is would be inventing a fact.
+
+### Verdict: FAILED, and the pennant is closed
+
+Per the stop rule, in full: **the pennant is closed on this corpus, as a trade
+filter AND as an exclusion rule**, and no other arm, horizon, regime, stop band,
+cost assumption or direction is substituted.
+
+**Criterion 3 passed, and that is the whole reason the clause exists.** The
+short mirror is positive out of sample at t +2.05 and re-testing it on its own
+is the obvious move. It is **not** re-tested. A passing sub-criterion after a
+failed test is the most tempting moment in this process, which is why the
+registration named this exact substitution and forbade it in advance.
+
+**32 contaminated legs across 23 securities** turned up in the held-out window
+*at the 4.0 factor* — 8062, 4345, 12358, 16137, 1864, 12384, 12586 among them.
+The damaging population is long-tailed and no single-session threshold replaces
+the outcome-level guard-rail.
+
+### Registered and spent
+
+**Ledger: 143 → 144 trials.** Sixty-one measurements. Hurdle now
+|t| > 2.6563 on the normal scale.
