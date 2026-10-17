@@ -269,8 +269,18 @@ pennant's −0.752%), so the honest equal-weighted combination measures
 +0.496% at t +3.93, which is what screening produces and is recorded only so
 nobody re-derives it as a finding.
 
-**The program is therefore at its end on this corpus**, per-trade and portfolio
-alike. See [`PATTERN_PROGRAM_POWER_2026-10-16.md`](PATTERN_PROGRAM_POWER_2026-10-16.md).
+~~**The program is therefore at its end on this corpus**, per-trade and
+portfolio alike.~~ **Withdrawn the same day.** The corpus holds 6,106–6,682
+securities a year from 1998 onward — *more* than the 5,800–6,088 of the decade
+the atlas actually used. 2003–2019 gives **~34 disjoint blocks against 20**,
+taking the combined detection limit to **~0.25%**, below the combination's
+measured +0.318%.
+
+**The binding constraint was this document's own window rule, not the data**, and
+nobody asked why 2010–2019 before two ledger trials were spent on it. See
+[`PATTERN_PROGRAM_POWER_2026-10-16.md`](PATTERN_PROGRAM_POWER_2026-10-16.md)
+addendum 2. Extending the window reverses the rule below and is the owner's
+call.
 
 ---
 

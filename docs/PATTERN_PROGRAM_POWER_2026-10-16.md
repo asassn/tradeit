@@ -171,3 +171,73 @@ the ledger hurdle for everything after. **The three options that remain are
 shorter horizons where the atlas says the edge is not, portfolio construction
 on signals rather than patterns, or more history** — and only the last changes
 the arithmetic.
+
+---
+
+## Addendum 2 — the corpus already holds the blocks. The window was the constraint.
+
+Added the same day, when a purchase proposal was requested and **the first
+check killed it.** Measured, `research01.sqlite`, raw basis, securities with
+≥200 sessions in a calendar year:
+
+| years | securities |
+|---|---|
+| 1998–2002 | 6,239 – 6,682 |
+| 2003–2009 | 6,106 – 6,493 |
+| **2010–2019** — what the atlas used | **5,800 – 6,088** |
+| 2020–2025 | 5,932 – 6,786 |
+
+**Coverage from 1998 onward matches or exceeds the decade the atlas ran on.**
+6,264 securities in 1998 against 5,800 in 2019. `security_spans_2026-09-18.csv`
+agrees: 4,194 securities have history beginning in 1997.
+
+### What that does to this document's own conclusion
+
+Section 3 above says a 0.5% effect needs **36 disjoint six-month blocks** and
+treats that as out of reach. It is not:
+
+| window | blocks | detectable, single setup | detectable, 7 combined |
+|---|---|---|---|
+| 2010–2019 (used) | 20 | 0.66% | 0.35% |
+| **2003–2019 (available, clean)** | **~34** | **~0.47%** | **~0.25%** |
+| 1998–2019 (available, caveated) | ~44 | ~0.45% | ~0.24% |
+
+At ~0.25% the equal-weighted combination's **+0.318% would clear**, and so
+would several individual setups. **The conclusion that the program had reached
+its end on this corpus was wrong**, and it was wrong because the power analysis
+computed what was needed without checking what was held.
+
+### How the error happened, since it will recur
+
+The atlas ran on 2010–2019 because `PATTERN_PROGRAM.md` declared that window,
+and nobody — including the program that then spent two ledger trials — asked
+why. The answer was two SQL queries away. A purchase was then recommended,
+which is the failure `CLAUDE.md` names directly: *free work comes before paid
+work, because most of what is needed is free and nobody has finished it yet.*
+
+### The caveat that is real, and whose call it is
+
+`EDGAR_DELISTING_DENOMINATOR.md` records that delisting evidence is **"not
+reliably present in EDGAR for the 1998–2002 window"** and calls that "the
+single most important caveat in this document". §7e adds that exit pricing is
+thinnest in the oldest years — **25.4% for 1998, 52.9% for 1999**. So
+1998–2002 is survivorship-compromised: the companies that died then are
+under-represented.
+
+A placebo-controlled test draws both legs from the same compromised universe,
+which cancels much of that — **but not all, and the residual is not currently
+quantified.** So the conservative window is **2003–2019, ~34 blocks**, which
+still nearly doubles the blocks with none of the 1998–2002 problem.
+
+### What an extension would and would not be
+
+**It would be a better-powered Stage A, not independent confirmation.**
+2003–2019 contains 2010–2019, so any setup that looked good on the shorter
+window partly carries forward. That is legitimate for resolution — Stage A is
+descriptive and charges no trials — but a setup clearing the hurdle on the
+extended window has **not** been confirmed out of sample. The hold-out remains
+2020–2025 and remains the only thing that can confirm anything.
+
+**Changing the Stage A window reverses a written rule** in
+`PATTERN_PROGRAM.md` ("the atlas is computed on 2010–2019"), so it is the
+owner's decision rather than this program's, and is proposed rather than taken.
