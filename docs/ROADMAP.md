@@ -234,6 +234,14 @@ profitability or comparison metric.
 
 See [`STRATEGY_BUILDER.md`](STRATEGY_BUILDER.md).
 
+> **Delivery overlay, 2026-10-17.** Phases 7–12 below are unchanged in number,
+> scope and intent. [`DELIVERY_PLAN_2026-10-17.md`](DELIVERY_PLAN_2026-10-17.md)
+> separates them into a **dated engineering track** (target: paper-trading-ready
+> **2026-12-12**, with Phase 9 first because it serves both tracks, and Phase 10
+> deliberately deferred as non-gating) and an **undated research track** carrying
+> a 20-trial budget and a stopping rule. The platform's completion does not
+> depend on a strategy being found.
+
 ## Phase 7 — Opportunity scoring
 
 Three distinct scores, deliberately separated:
