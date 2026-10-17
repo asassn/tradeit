@@ -28,10 +28,32 @@ Only setups whose atlas entry shows a *placebo-adjusted* edge worth the trial
 proceed. Each gets its own pre-registration, out-of-sample window and stop rule,
 exactly as §35 through §51 did.
 
-**The rule that keeps Stage A honest:** the atlas is computed on **2010–2019**.
+**The rule that keeps Stage A honest:** the atlas is computed on
+**2003–2019** — *widened from 2010–2019 by the owner's decision of 2026-10-16.*
 **2020–2025 is never read in Stage A.** A setup promoted to Stage B is tested
 there, and that window is spent once. An atlas number is not evidence and may
 never be quoted as one.
+
+**Why it widened, and what the widening is not.** The original 2010–2019 was
+never justified against the corpus, and two ledger trials were spent inside it
+before anybody measured what else was available: coverage from 1998 onward runs
+**6,106–6,682 securities a year against the used decade's 5,800–6,088**. The
+wider window takes the disjoint six-month blocks from **20 to ~34** and the
+combined detection limit from **0.35% to ~0.25%**, below the equal-weighted
+combination's measured +0.318%.
+
+**2003 and not 1998**, deliberately. `EDGAR_DELISTING_DENOMINATOR.md` records
+delisting evidence as *"not reliably present in EDGAR for the 1998–2002
+window"* — its own "single most important caveat" — and §7e prices only **25.4%
+of 1998 exits** and 52.9% of 1999's. A placebo draws both legs from the same
+compromised universe and cancels much of that, but not all, and the residual is
+unquantified. The extra ten blocks are not worth an unmeasurable bias.
+
+**The widening is a better-powered Stage A, not confirmation.** 2003–2019
+contains 2010–2019, so a setup that looked good on the shorter window partly
+carries forward; nothing here becomes evidence by being re-measured at higher
+resolution. **The hold-out remains 2020–2025** and remains the only thing that
+can confirm anything.
 
 ### Three design faults in the work so far, which this program fixes
 
