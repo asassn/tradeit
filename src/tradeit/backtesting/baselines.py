@@ -11,6 +11,29 @@ numbers somebody quotes, so they live here.
 and nothing about it is tuned; if the surrounding machinery flatters anything,
 it will flatter this, and that is exactly what it is for.
 
+The other three arrived on 2026-10-17, when a Phase 9 audit found this module
+shipping **one** of the four baselines the paragraph above promises. Until then
+every signal study here compared itself against a *placebo* -- a random
+security bought the same session with the same stop -- which answers "did this
+beat a coin toss" and **not** "did this beat doing nothing", a different and
+harder question. §44 through §53 are all missing that comparison.
+
+:class:`BuyAndHold`
+    Buys everything eligible on the first session it sees it and never sells.
+    The honest floor: a strategy that trades constantly and loses to this has
+    paid costs for nothing.
+:class:`EqualWeightBenchmark`
+    Buys the whole eligible universe and rebalances on a fixed cadence. The
+    difference from buy-and-hold is drift -- buy-and-hold lets winners dominate
+    and is therefore a momentum bet nobody declared.
+:class:`NaiveMomentumClassifier`
+    "Yesterday went up, so buy." The crudest possible predictive rule, and the
+    one a sophisticated model most needs to beat.
+
+All three take their stop from the same ATR helper the moving-average rule
+uses, so a difference between them is a difference in *selection* rather than
+in risk management.
+
 :func:`build_engine` assembles the Phase 8 and Phase 9 components into a
 runnable engine. It exists because the assembly is long, easy to get subtly
 wrong, and identical between an ordinary run and a survivorship comparison --
@@ -24,6 +47,7 @@ from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
+from itertools import pairwise
 
 import numpy as np
 
@@ -49,7 +73,13 @@ from tradeit.risk.rules import (
 from tradeit.strategy.base import OpportunityScore, ScoreComponent
 from tradeit.strategy.config import StrategyConfig
 
-__all__ = ["MovingAverageCross", "build_engine"]
+__all__ = [
+    "BuyAndHold",
+    "EqualWeightBenchmark",
+    "MovingAverageCross",
+    "NaiveMomentumClassifier",
+    "build_engine",
+]
 
 
 @dataclass
@@ -223,6 +253,164 @@ class MovingAverageCross:
                     average_dollar_volume=bar.close * bar.volume,
                 )
             )
+        return out
+
+
+@dataclass
+class _StopFromPercent:
+    """Shared stop rule, so the baselines differ only in what they select.
+
+    A fixed fraction below the close. The moving-average rule can take an ATR
+    stop instead; these three deliberately do not, because a baseline whose
+    risk management is cleverer than the thing it benchmarks is not a baseline.
+    """
+
+    stop_pct: Decimal = Decimal("0.08")
+
+    def stop_for(self, bar: OhlcvBar) -> Decimal | None:
+        stop = bar.close * (1 - self.stop_pct)
+        return stop if 0 < stop < bar.close else None
+
+
+def _candidate(
+    instrument_id: int,
+    session_date: dt.date,
+    bar: OhlcvBar,
+    stop: Decimal,
+    strength: float,
+    name: str,
+) -> EntryCandidate:
+    """One candidate, scored by whatever the baseline calls strength."""
+    return EntryCandidate(
+        score=OpportunityScore(
+            instrument_id=instrument_id,
+            session_date=session_date,
+            direction=SignalDirection.LONG,
+            total=strength,
+            components=(
+                ScoreComponent(name=name, raw_value=strength, normalised=strength, weight=1.0),
+            ),
+            feature_set_digest=name,
+            strategy_config_digest="baseline",
+        ),
+        entry_price=bar.close,
+        stop_price=stop,
+        sector=None,
+        average_dollar_volume=bar.close * bar.volume,
+    )
+
+
+@dataclass
+class BuyAndHold(_StopFromPercent):
+    """Buys each name the first session it appears, and never again.
+
+    The floor every trading strategy has to clear. A rule that turns over
+    constantly and cannot beat this has paid spread, commission and slippage
+    for nothing -- which is the comparison §44 through §53 never made, because
+    they measured against a random security rather than against inaction.
+
+    It still carries a stop, because the engine sizes from one. That makes this
+    *buy and hold with a disaster stop* rather than literal buy-and-hold, and
+    the difference is stated rather than hidden: a stopped-out position here is
+    not re-entered.
+    """
+
+    name: str = "buy_and_hold"
+
+    def __post_init__(self) -> None:
+        self._seen: set[int] = set()
+
+    def __call__(
+        self, session_date: dt.date, bars: Mapping[int, OhlcvBar]
+    ) -> Sequence[EntryCandidate]:
+        out: list[EntryCandidate] = []
+        for instrument_id, bar in sorted(bars.items()):
+            if instrument_id in self._seen:
+                continue
+            self._seen.add(instrument_id)
+            stop = self.stop_for(bar)
+            if stop is not None:
+                out.append(_candidate(instrument_id, session_date, bar, stop, 1.0, self.name))
+        return out
+
+
+@dataclass
+class EqualWeightBenchmark(_StopFromPercent):
+    """Holds the whole eligible universe, re-offering every ``cadence``.
+
+    Distinct from :class:`BuyAndHold` by rebalancing: buy-and-hold lets its
+    winners grow into the portfolio and is therefore a momentum bet nobody
+    declared, while this one keeps re-offering every name so position sizing
+    pulls weights back toward equal.
+
+    It re-offers rather than rebalances outright, because the sizer and the
+    risk engine decide what is actually taken -- a baseline that bypassed them
+    would be measuring a different system from the one under test.
+    """
+
+    cadence_sessions: int = 63
+    name: str = "equal_weight_benchmark"
+
+    def __post_init__(self) -> None:
+        if self.cadence_sessions < 1:
+            raise ValueError("cadence_sessions must be at least 1")
+        self._session_count = 0
+
+    def __call__(
+        self, session_date: dt.date, bars: Mapping[int, OhlcvBar]
+    ) -> Sequence[EntryCandidate]:
+        offer = self._session_count % self.cadence_sessions == 0
+        self._session_count += 1
+        if not offer:
+            return ()
+        out: list[EntryCandidate] = []
+        for instrument_id, bar in sorted(bars.items()):
+            stop = self.stop_for(bar)
+            if stop is not None:
+                out.append(_candidate(instrument_id, session_date, bar, stop, 1.0, self.name))
+        return out
+
+
+@dataclass
+class NaiveMomentumClassifier(_StopFromPercent):
+    """ "It went up yesterday, so buy it." The crudest predictive rule there is.
+
+    The roadmap's fourth baseline, and the one a sophisticated model most needs
+    to beat: if a pattern detector with twelve geometric conditions cannot
+    outperform *one bar of sign*, the geometry is decoration.
+
+    ``lookback`` sessions of consecutive gains are required, so the rule can be
+    made slightly less naive without becoming a strategy. It is not tuned and
+    the default is 1.
+    """
+
+    lookback: int = 1
+    name: str = "naive_momentum"
+
+    def __post_init__(self) -> None:
+        if self.lookback < 1:
+            raise ValueError("lookback must be at least 1")
+        self._closes: dict[int, deque[Decimal]] = {}
+
+    def __call__(
+        self, session_date: dt.date, bars: Mapping[int, OhlcvBar]
+    ) -> Sequence[EntryCandidate]:
+        out: list[EntryCandidate] = []
+        for instrument_id, bar in sorted(bars.items()):
+            history = self._closes.setdefault(instrument_id, deque(maxlen=self.lookback + 1))
+            history.append(bar.close)
+            if len(history) < self.lookback + 1:
+                continue
+            values = list(history)
+            # Every step up, not just the net move: two sessions of +5% then
+            # -4% is not "it went up yesterday".
+            if not all(b > a for a, b in pairwise(values)):
+                continue
+            stop = self.stop_for(bar)
+            if stop is None:
+                continue
+            strength = float(values[-1] / values[0] - 1)
+            out.append(_candidate(instrument_id, session_date, bar, stop, strength, self.name))
         return out
 
 

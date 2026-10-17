@@ -39,11 +39,34 @@ succeeding.
 
 | order | phase | why here | target |
 |---|---|---|---|
-| 1 | **9** — portfolio backtesting & Monte Carlo | **serves both tracks.** It is the machinery Track B needs for the portfolio-level question, which has better statistics than per-trade | **2026-11-07** |
-| 2 | **8** — portfolio construction, risk & compounding | partly exists (`portfolio/sizing.py` carries `BindingConstraint` and the cost model); sizing, heat, correlation and sector limits, stops, trailing, recycling | **2026-11-21** |
-| 3 | **7** — opportunity scoring | three separated scores; needs 8 for portfolio fit | **2026-11-28** |
-| 4 | **11** — paper trading execution | cost and fill models, paper broker, reconciliation, trade journal, on the live code path | **2026-12-09** |
-| 5 | **12** — readiness framework & production readiness | `RESEARCH → ROBUST_BACKTEST → PAPER → LIMITED_LIVE → SCALED_LIVE`, demotion, risk controls outside a strategy's reach, explainability | **2026-12-12** |
+| 1 | **9** — portfolio backtesting & Monte Carlo | **CLOSED 2026-10-17** — see [`PHASE_09_CLOSURE_2026-10-17.md`](PHASE_09_CLOSURE_2026-10-17.md) | ~~2026-11-07~~ **done** |
+| 2 | **8** — portfolio construction, risk & compounding | partly exists (`portfolio/sizing.py`, `stops.py`, `allocation.py`, `cycle.py` — 1,695 lines); needs the same audit treatment | **2026-10-31** |
+| 3 | **7** — opportunity scoring | three separated scores; needs 8 for portfolio fit | **2026-11-07** |
+| 4 | **11** — paper trading execution | cost and fill models, paper broker, reconciliation, trade journal, on the live code path | **2026-11-21** |
+| 5 | **12** — readiness framework & production readiness | `RESEARCH → ROBUST_BACKTEST → PAPER → LIMITED_LIVE → SCALED_LIVE`, demotion, risk controls outside a strategy's reach, explainability | **2026-11-28** |
+
+### Re-dated 2026-10-17, and why the estimate was wrong
+
+**Paper-trading-ready moves from 2026-12-12 to 2026-11-28** — two weeks earlier.
+
+Phase 9 was estimated at three weeks and took one day, because **five of its
+nine modules were already complete and the remaining work was running three of
+them on real data** plus implementing three baselines the module had promised
+and not shipped. The estimate was built from the roadmap's description of the
+phase rather than from the code, which is the same error that produced the
+purchase recommendation two days earlier.
+
+**The revised dates assume the same shape holds for Phases 8, 7, 11 and 12 —
+and that assumption is now explicit rather than buried.** Phase 8 already has
+1,695 lines across four modules. If its audit finds what Phase 9's did, it
+closes in days. If it finds genuinely missing machinery, these dates move and I
+will say so at the time rather than at the end.
+
+**The honest reading: Phases 7–12 are probably far more built than the roadmap
+implies, and the remaining work is auditing, exercising and closing gaps rather
+than building.** Every phase gets the Phase 9 treatment — audit against stated
+requirements, separate complete from present-but-unexercised, run the
+unexercised parts on real data — before any date is defended.
 
 **Phase 10 (dashboard, assistant, news and sentiment) is deliberately deferred
 and does not gate paper-ready.** It is the largest remaining phase and nothing

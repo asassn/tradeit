@@ -12,7 +12,12 @@ from decimal import Decimal
 
 import pytest
 
-from tradeit.backtesting.baselines import MovingAverageCross
+from tradeit.backtesting.baselines import (
+    BuyAndHold,
+    EqualWeightBenchmark,
+    MovingAverageCross,
+    NaiveMomentumClassifier,
+)
 from tradeit.core.enums import Bartimeframe, KnowledgeTimeSource
 from tradeit.core.models import OhlcvBar
 
@@ -77,3 +82,103 @@ def test_running_without_a_split_source_is_refused() -> None:
     rule = MovingAverageCross(fast=5, slow=20, stop_pct=Decimal("0.08"))
     with pytest.raises(ValueError, match="splits_on"):
         rule(START, {7: _bar(START, 100.0)})
+
+
+class TestTheOtherThreeBaselines:
+    """The roadmap names four baselines; this module shipped one until 2026-10-17.
+
+    The module docstring has always promised *"buy and hold, the benchmark, a
+    moving-average rule, a naive classifier"* and stated why they must be
+    runnable strategies rather than quoted numbers. Only the moving-average
+    rule existed, which means **§44 through §53 never compared themselves
+    against doing nothing** — their control was a random security, which
+    answers "did this beat a coin toss" and not "did this beat inaction".
+
+    These tests pin the behaviour that distinguishes the three, because the
+    easy mistakes make them collapse into each other: a buy-and-hold that
+    re-buys is a benchmark, a benchmark that never re-offers is buy-and-hold,
+    and a naive classifier reading net movement instead of each step is a
+    momentum strategy with a lookback.
+    """
+
+    @staticmethod
+    def _bars(day: dt.date, prices: dict[int, float]) -> dict[int, OhlcvBar]:
+        out = {}
+        for instrument_id, close in prices.items():
+            bar = _bar(day, close)
+            out[instrument_id] = bar.model_copy(update={"instrument_id": instrument_id})
+        return out
+
+    def test_buy_and_hold_buys_each_name_exactly_once(self) -> None:
+        """The floor. If it re-bought, it would be the benchmark."""
+        rule = BuyAndHold()
+        first = rule(START, self._bars(START, {1: 100.0, 2: 50.0}))
+        assert {c.instrument_id for c in first} == {1, 2}
+        later = rule(START + dt.timedelta(days=1), self._bars(START, {1: 101.0, 2: 51.0}))
+        assert later == () or len(later) == 0
+        # A name that appears for the first time later is still bought once.
+        third = rule(START + dt.timedelta(days=2), self._bars(START, {1: 102.0, 3: 20.0}))
+        assert {c.instrument_id for c in third} == {3}
+
+    def test_the_benchmark_re_offers_on_its_cadence(self) -> None:
+        """What makes it a benchmark rather than buy-and-hold.
+
+        Buy-and-hold lets winners grow into the portfolio and is therefore an
+        undeclared momentum bet; re-offering lets the sizer pull weights back.
+        """
+        rule = EqualWeightBenchmark(cadence_sessions=3)
+        offered = [
+            len(rule(START + dt.timedelta(days=n), self._bars(START, {1: 100.0, 2: 50.0})))
+            for n in range(7)
+        ]
+        assert offered == [2, 0, 0, 2, 0, 0, 2]
+
+    def test_the_benchmark_refuses_a_cadence_below_one(self) -> None:
+        with pytest.raises(ValueError, match="at least 1"):
+            EqualWeightBenchmark(cadence_sessions=0)
+
+    def test_naive_momentum_needs_every_step_up_not_a_net_gain(self) -> None:
+        """The mistake that turns the crudest rule into a momentum strategy.
+
+        Two sessions of +5% then -4% is a net gain and is **not** "it went up
+        yesterday". Reading the net move would make this a two-day lookback
+        momentum rule, which is not the baseline the roadmap asks for.
+        """
+        rule = NaiveMomentumClassifier(lookback=2)
+        prices = [100.0, 105.0, 100.8]  # net up over the window, last step down
+        fired = []
+        for n, close in enumerate(prices):
+            day = START + dt.timedelta(days=n)
+            fired.append(len(rule(day, self._bars(day, {1: close}))))
+        assert fired == [0, 0, 0]
+        rising = NaiveMomentumClassifier(lookback=2)
+        fired = []
+        for n, close in enumerate([100.0, 101.0, 102.0]):
+            day = START + dt.timedelta(days=n)
+            fired.append(len(rising(day, self._bars(day, {1: close}))))
+        assert fired == [0, 0, 1]
+
+    def test_naive_momentum_refuses_a_lookback_below_one(self) -> None:
+        with pytest.raises(ValueError, match="at least 1"):
+            NaiveMomentumClassifier(lookback=0)
+
+    def test_all_three_share_one_stop_rule(self) -> None:
+        """A difference between baselines must be selection, not risk.
+
+        If one of them managed risk more cleverly than the others, comparing a
+        candidate against it would conflate two questions.
+        """
+        bars = self._bars(START, {1: 100.0})
+        stop_pct = Decimal("0.10")
+        held = BuyAndHold(stop_pct=stop_pct)(START, bars)
+        bench = EqualWeightBenchmark(stop_pct=stop_pct)(START, bars)
+        naive_rule = NaiveMomentumClassifier(stop_pct=stop_pct)
+        naive_rule(START, bars)
+        naive = naive_rule(START + dt.timedelta(days=1), self._bars(START, {1: 101.0}))
+        assert held[0].stop_price == Decimal(100) * Decimal("0.90")
+        assert bench[0].stop_price == held[0].stop_price
+        assert naive[0].stop_price == Decimal("101") * Decimal("0.90")
+
+    def test_a_stop_at_or_above_the_close_is_refused(self) -> None:
+        """A stop that cannot size a position is dropped, not widened."""
+        assert BuyAndHold(stop_pct=Decimal(1))(START, self._bars(START, {1: 100.0})) == []
