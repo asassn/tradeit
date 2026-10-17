@@ -301,8 +301,21 @@ measured +0.318%.
 **The binding constraint was this document's own window rule, not the data**, and
 nobody asked why 2010–2019 before two ledger trials were spent on it. See
 [`PATTERN_PROGRAM_POWER_2026-10-16.md`](PATTERN_PROGRAM_POWER_2026-10-16.md)
-addendum 2. Extending the window reverses the rule below and is the owner's
-call.
+addendum 2.
+
+**Measured 2026-10-17, and the projection was wrong.** The window was widened
+and the blocks did double — 20 to 33–34 — but **block variance rose with them**,
+because 2003–2009 contains 2008. The detection limit improved for the pennant
+and bull flag (0.74% → 0.49%) and got *worse* for VCP (0.61% → 0.89%) and
+cup-with-handle (0.93% → 1.36%), while the effects themselves shrank. Years of
+history needed to resolve 0.50% went from 18 to **35**. **No setup's effect now
+exceeds its own detection limit**, so the extension did not reopen the program.
+
+The error was scaling `hurdle × sd / √blocks` by adding blocks while holding sd
+constant — variance is a property of the period, not of the corpus. Addendum 3
+records it. **The constraint is not the number of blocks**; it is that effects
+of 0.1–0.8% sit below block variance of 1.0–2.6% at any window length this
+corpus offers.
 
 ---
 

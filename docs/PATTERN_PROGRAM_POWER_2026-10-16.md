@@ -241,3 +241,53 @@ extended window has **not** been confirmed out of sample. The hold-out remains
 **Changing the Stage A window reverses a written rule** in
 `PATTERN_PROGRAM.md` ("the atlas is computed on 2010–2019"), so it is the
 owner's decision rather than this program's, and is proposed rather than taken.
+
+---
+
+## Addendum 3 — the extension doubled the blocks and the variance rose with them
+
+Measured 2026-10-17 on the extended Stage A window (2003–2019, authorised
+2026-10-16). **1,247,565 long pairs and 606,817 short**, against 772,082 and
+376,656 on 2010–2019.
+
+Addendum 2 predicted the blocks would roughly double and the detection limit
+roughly halve. **The first happened. The second did not.**
+
+| cell | blocks | block sd | detectable | observed effect |
+|---|---|---|---|---|
+| pennant / breakout | 34 *(was 20)* | 1.00% *(1.12%)* | **0.49%** *(0.74%)* | −0.45% *(−0.75%)* |
+| bull flag / breakout | 34 *(20)* | 1.01% *(0.59%)* | 0.49% *(0.39%)* | +0.13% *(−0.13%)* |
+| VCP / confirmed | 33 *(19)* | **1.80%** *(0.89%)* | **0.89%** *(0.61%)* | +0.63% *(+0.82%)* |
+| cup with handle / confirmed | 30 *(19)* | **2.60%** *(1.36%)* | **1.36%** *(0.93%)* | +0.76% *(+0.65%)* |
+
+**Years of history needed to resolve 0.50%, at the median block sd: 18 became
+35.** The median sd rose from 1.00% to 1.40%, because the seven added years
+contain **2008**, and a decade containing a financial crisis does not supply
+variance at the rate the preceding one did.
+
+### What the extension actually bought
+
+Two setups improved and two got worse. The pennant and bull flag reached a
+0.49% limit, close to the 0.47% projected; VCP and cup-with-handle went the
+other way. And **the effects themselves shrank** — VCP +0.82% → +0.63%, the
+pennant −0.75% → −0.45%. **No setup's effect now exceeds its own detection
+limit.**
+
+So the extension did **not** reopen the program. It was still the right call —
+it cost only compute, the resolution question needed answering empirically, and
+a wash is a real answer — but the gain was assumed rather than measured.
+
+### The error, which is the same one twice
+
+Addendum 2's arithmetic scaled `hurdle × sd / √blocks` by adding blocks **and
+held sd constant.** Block variance is a property of the period, not a constant
+of the corpus, and 2003–2009 is more volatile than 2010–2019 by construction.
+A projection that moves one term of a ratio and assumes the other is fixed is a
+guess wearing arithmetic, and it is the second time in two days that a
+confident projection about this window has been wrong in a checkable way.
+
+**What stands:** the placebo still works (correlations 0.91–0.99, 54–83% of
+market variance removed) and the per-trade route remains out of reach — now for
+a better-understood reason. The constraint is not the number of blocks. It is
+that **effects of 0.1–0.8% sit below what block variance of 1.0–2.6% can
+resolve at any window length this corpus can offer.**

@@ -114,8 +114,16 @@ class WalkForwardReport:
     def out_of_sample_trade_count(self) -> int:
         return sum(len(result.out_of_sample.trades) for result in self.results)
 
+    @property
     def consistency(self) -> float | None:
         """Share of windows whose out-of-sample return was positive.
+
+        A property, like ``degradation``, ``mean_degradation`` and
+        ``out_of_sample_trade_count``. It was a plain method until 2026-10-17,
+        which made this class four properties and one method -- and the first
+        caller outside these tests formatted the bound method instead of the
+        number. Eighteen unit tests did not catch it because they all called it
+        correctly; nothing had ever read the class from outside.
 
         The number that distinguishes a strategy that works from one that had a
         very good year. A high average return with a consistency of 0.2 is

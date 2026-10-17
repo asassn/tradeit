@@ -229,9 +229,9 @@ class TestReporting:
     def test_consistency_counts_winning_windows_not_average_return(self) -> None:
         """A high average with low consistency is one lucky window."""
         report = self._report(in_sample=0.1, out_of_sample=0.05)
-        assert report.consistency() == 1.0
+        assert report.consistency == 1.0
         losing = self._report(in_sample=0.1, out_of_sample=-0.05)
-        assert losing.consistency() == 0.0
+        assert losing.consistency == 0.0
 
     def test_degradation_is_none_when_a_side_produced_no_metrics(self) -> None:
         spec = _spec()
@@ -252,4 +252,4 @@ class TestReporting:
         report = _harness(sessions=10).evaluate(_spec(10))
         assert report.results == ()
         assert report.mean_degradation is None
-        assert report.consistency() is None
+        assert report.consistency is None
