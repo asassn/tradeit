@@ -13,6 +13,9 @@ refused by the second no matter what the first says.
 Score 1 already existed as
 :class:`~tradeit.strategy.base.OpportunityScore`. This package adds the two that
 turn it into a portfolio decision.
+
+``ranking`` puts score 3 in the allocation seat, authorised 2026-10-18. Until
+then this package was measured beside the decision and never inside it.
 """
 
 from tradeit.opportunity.final import FinalOpportunityScore, combine
@@ -23,17 +26,29 @@ from tradeit.opportunity.fit import (
     VetoReason,
     score_fit,
 )
+from tradeit.opportunity.gates import GateOutcome, GateResult, breakout_confirmation_gate
+from tradeit.opportunity.ranking import (
+    OpportunityFitRanker,
+    StandaloneScoreOutOfRange,
+    normalise_total,
+)
 from tradeit.opportunity.slate import Contender, Slate, build_slate
 
 __all__ = [
     "Contender",
     "FinalOpportunityScore",
     "FitComponent",
+    "GateOutcome",
+    "GateResult",
+    "OpportunityFitRanker",
     "PortfolioContext",
     "PortfolioFit",
     "Slate",
+    "StandaloneScoreOutOfRange",
     "VetoReason",
+    "breakout_confirmation_gate",
     "build_slate",
     "combine",
+    "normalise_total",
     "score_fit",
 ]

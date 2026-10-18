@@ -4379,3 +4379,86 @@ opposite.
 opportunity package is measured beside the decision, not inside it. **Nothing
 here is a return result, and no scoreboard number changes.** Wiring score 3
 into selection is trading logic and needs a scoped proposition.
+
+---
+
+## §57 — score 3 wired into the decision path: it changes decisions, and in sample it loses — 2026-10-18
+
+**Not a trial, and this one is worth being emphatic about.** No
+pre-registration, no held-out window, no ledger spend — 144 trials before, 144
+after. A return number appears below and **must not be cited as a result.**
+Authorised by the owner on 2026-10-18; recorded in
+[`adr/0027-score-3-ranks-capital.md`](adr/0027-score-3-ranks-capital.md).
+
+### What changed
+
+`OpportunityFitRanker` implements `AllocationRanker`, so score 3 can occupy the
+seat `DiversityAwareRanker` held. `PortfolioCycle` is unchanged: the seat
+already existed and already permitted a ranker to return fewer candidates than
+it was given, which is what lets a fit veto refuse rather than demote.
+
+### The measurement
+
+Same universe (195 SIC-classified names), window (2010-2019), sizing, stops,
+costs, fills, delisting assumption and risk rules. **Only the ranker differs.**
+
+| | trades | return | Sharpe |
+|---|---|---|---|
+| `DiversityAwareRanker` (as every prior result) | 802 | 48.31% | 0.28 |
+| `OpportunityFitRanker` | 800 | 44.40% | 0.25 |
+
+**Admissions barely moved — predicted before the run, in the script's own
+docstring.** The fit's refusals overlap `MostRestrictiveEngine`, which remains
+the authority, so the change lands in the *order* trades are taken rather than
+in which are allowed. Predicting it was the point: "we wired in portfolio fit
+and admissions barely moved" would otherwise read as a defect, and it is the
+designed behaviour.
+
+**It performed worse in sample: 48.31% to 44.40%, Sharpe 0.28 to 0.25.** Stated
+plainly rather than contextualised away. A diversification constraint declines
+concentrated bets, and in one in-sample window the most concentrated bets often
+were the best ones — that is a mechanical consequence and not a defence.
+
+**What this is evidence of: the wiring is real and the decisions differ. What it
+is evidence of about profitability: nothing whatsoever.** One universe, one
+window, in sample, unregistered.
+
+### The scale trap, which would have produced a plausible wrong number
+
+`combine` blends score 1 and the fit **linearly**, and `OpportunityScore.total`
+declares no range. `MovingAverageCross` puts a raw spread fraction there —
+around 0.02 — against a fit score of 0 to 1. Blended at the declared 0.6
+standalone weight, the fit dominates completely while `standalone_weight` goes
+on claiming a 60/40 mixture.
+
+**The ranker raises rather than normalising.** The rejected alternative,
+within-slate min-max normalisation, is worse than it looks: on a two-candidate
+slate it forces the better name to exactly 1.0 and the worse to exactly 0.0
+whatever the real gap, so the blend weight silently varies with slate size.
+Callers declare their range; the run above declares [0.0, 0.20] and prints it.
+
+### A test that was right to fail
+
+The first version of "a worse setup that fits better can win" used a 0.30 setup
+gap against a 0.24 fit gap and failed. **The ranker was correct and the test was
+wrong:** at a 0.6 standalone weight a fit gap can overturn a setup advantage of
+at most `gap × 0.4 / 0.6`. Fit is a weighted input, not an override, and a test
+demanding otherwise would have asserted a behaviour the design explicitly
+rejects. The boundary is now pinned from both sides.
+
+### A mutation that survived
+
+Six mutants were run against the new module. The one that broke sector
+accumulation — `totals[s] = value` instead of `totals[s] + value` — **passed
+every test**, because the pinning test used one position per sector and never
+exercised the sum. Fixed with two positions in one sector plus an unclassified
+third, and the mutant now dies. Recorded because a test that claims to pin a
+duplicated function and does not is exactly the vacuous test this project has
+produced twice before.
+
+### What the archive now means
+
+**Every portfolio result on this scoreboard describes an unconstrained book**,
+and none is retracted. A diversification limit refuses or shrinks positions; it
+cannot add return, so their absence cannot have inflated anything. Re-running
+them under the constraint is now possible and costs no ledger budget.
