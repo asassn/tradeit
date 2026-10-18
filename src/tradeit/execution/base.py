@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from tradeit.core.enums import OrderSide, OrderType, TimeInForce
@@ -178,6 +179,64 @@ class FillModel(Protocol):
     ) -> Fill | None: ...
 
 
+class DiscrepancyKind(StrEnum):
+    """What kind of disagreement was found between our state and the broker's."""
+
+    #: We hold a quantity the broker does not agree with.
+    QUANTITY = "quantity"
+    #: The broker reports a position we have no record of at all.
+    UNKNOWN_POSITION = "unknown_position"
+    #: We hold a position the broker does not report.
+    MISSING_POSITION = "missing_position"
+    #: Quantities agree but the average entry price does not.
+    AVERAGE_PRICE = "average_price"
+    #: Cash balances disagree.
+    CASH = "cash"
+
+
+@dataclass(frozen=True, slots=True)
+class Discrepancy:
+    """One disagreement between our state and the broker's, as a value.
+
+    **Typed rather than a string, decided 2026-10-18 before any implementation
+    existed.** The protocol originally returned ``list[str]``: readable by a
+    person, actionable by nothing. A halt is the easy half of reconciliation —
+    the hard half is answering *what is wrong, by how much, and in which
+    position*, which is what resolving it requires and what Phase 12's live gate
+    will need from an automated check. A string can be logged; it cannot be
+    compared against a tolerance, aggregated, or used to decide whether the
+    disagreement is a rounding artefact or a missed fill.
+
+    ``ours`` and ``theirs`` are deliberately ``Decimal | None`` rather than
+    ``Decimal``: a position one side does not know about has no quantity there,
+    and zero is a different claim from absence.
+    """
+
+    kind: DiscrepancyKind
+    instrument_id: int | None
+    ours: Decimal | None
+    theirs: Decimal | None
+    note: str = ""
+
+    @property
+    def magnitude(self) -> Decimal | None:
+        """How far apart the two views are, when both have a value.
+
+        ``None`` when one side has no value, because the distance from a number
+        to an absence is not a number. A caller comparing against a tolerance
+        must handle that case rather than being handed a 0 that reads as
+        agreement — which is the specific mistake this returns None to prevent.
+        """
+        if self.ours is None or self.theirs is None:
+            return None
+        return abs(self.ours - self.theirs)
+
+    def describe(self) -> str:
+        where = "portfolio" if self.instrument_id is None else f"instrument {self.instrument_id}"
+        detail = f"ours={self.ours} theirs={self.theirs}"
+        return f"{self.kind}: {where}, {detail}{f' ({self.note})' if self.note else ''}"
+
+
 @runtime_checkable
 class ExecutionService(Protocol):
     """Places orders through a broker and reconciles the result.
@@ -193,10 +252,15 @@ class ExecutionService(Protocol):
 
     def cancel(self, order_id: int) -> None: ...
 
-    def reconcile(self, portfolio_id: int) -> list[str]:
+    def reconcile(self, portfolio_id: int, *, session_date: dt.date) -> tuple[Discrepancy, ...]:
         """Return discrepancies between our state and the broker's.
 
-        An empty list means agreement. A non-empty list must stop trading for
+        An empty tuple means agreement. A non-empty result must stop trading for
         that portfolio until resolved.
+
+        ``session_date`` is required rather than defaulted to today: whatever an
+        implementation records belongs to a trading session, and wall-clock does
+        not know which one -- a reconcile after midnight UTC, or replayed over
+        history, would file itself under the wrong day.
         """
         ...
