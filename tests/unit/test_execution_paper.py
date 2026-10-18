@@ -344,3 +344,128 @@ def test_an_unknown_order_id_raises_rather_than_returning_nothing() -> None:
         broker.get_order("nope")
     with pytest.raises(KeyError):
         broker.cancel_order("nope")
+
+
+def test_a_split_restates_the_holding_without_moving_money() -> None:
+    """A real broker applies the split to the real account.
+
+    Found on 2026-10-18 by replaying the backtester's orders through this
+    venue: 1,456 of 1,457 fills agreed, and the single disagreement was an exit
+    of 312 shares against a venue holding 208 -- a 3-for-2 split the engine had
+    applied and the venue had not.
+    """
+    broker = _broker()
+    broker.submit_order(_order(quantity=100), "c-1")
+    broker.advance(NEXT, {1: _bar()})
+    before = broker.list_positions()[0]
+    equity_before = broker.equity
+
+    broker.apply_splits({1: Decimal("1.5")})
+
+    after = broker.list_positions()[0]
+    assert after.quantity == Decimal(150)
+    assert after.average_price == pytest.approx(before.average_price / Decimal("1.5"))
+    assert broker.equity == pytest.approx(equity_before), (
+        "a split moved money, which is the one thing a split does not do"
+    )
+
+
+def test_a_split_restates_a_resting_order_rather_than_cancelling_it() -> None:
+    """Yesterday's decision was about a share of the account, and the split did
+    not change it."""
+    broker = _broker()
+    broker.advance(SESSION, {1: _bar()})
+    submitted = broker.submit_order(_order(quantity=100), "c-1")
+
+    broker.apply_splits({1: Decimal(2)})
+    fills = broker.advance(NEXT, {1: _bar(session_date=NEXT)})
+
+    assert len(fills) == 1
+    assert fills[0].quantity == Decimal(200), "the resting order was not restated"
+    assert broker.get_order(submitted.broker_order_id).status is OrderStatus.FILLED
+
+
+def test_a_nonsense_split_ratio_is_ignored_rather_than_destroying_a_position() -> None:
+    broker = _broker()
+    broker.submit_order(_order(quantity=100), "c-1")
+    broker.advance(NEXT, {1: _bar()})
+    broker.apply_splits({1: Decimal(0)})
+    assert broker.list_positions()[0].quantity == Decimal(100)
+
+
+def test_a_split_in_an_instrument_we_do_not_hold_is_harmless() -> None:
+    broker = _broker()
+    broker.apply_splits({99: Decimal(2)})
+    assert broker.list_positions() == ()
+
+
+def test_cost_is_estimated_against_the_decision_bar_not_the_filling_bar() -> None:
+    """The reference bar SETS the fill price, so which bar is used is not cosmetic.
+
+    `BarFillModel` derives `slip_per_share` from the cost estimate and adds it
+    to the trigger price. `ParticipationCostModel` charges spread and slippage
+    on the **notional**, which is `reference_bar.close * quantity` -- so a
+    reference bar at a different close prices the order differently. The
+    backtester estimates against the bar the decision was made on
+    (`engine._Pending.reference_bar`); a venue estimating against the bar it is
+    filling on would price every paper fill differently from the equivalent
+    backtest fill while appearing to share the code path.
+
+    Added because a mutant swapping the reference bar for the filling bar
+    passed all twenty-five other tests in this file.
+
+    **A first version of this test varied the bar's VOLUME and failed against
+    correct code.** Market impact is the only volume-sensitive term and it
+    requires `average_dollar_volume`, which this venue does not pass -- see
+    `test_market_impact_is_inert_without_average_dollar_volume`. The close is
+    what the reference bar actually feeds through.
+    """
+    decided_on = _bar(open_=100, close=101)
+    filled_on = _bar(open_=200, close=205, session_date=NEXT)
+
+    with_reference = _broker()
+    with_reference.advance(SESSION, {1: decided_on})
+    with_reference.submit_order(_order(quantity=100), "c-1")
+    priced_on_decision = with_reference.advance(NEXT, {1: filled_on})
+
+    without_reference = _broker()
+    without_reference.submit_order(_order(quantity=100), "c-1")
+    priced_on_fill = without_reference.advance(NEXT, {1: filled_on})
+
+    assert without_reference.orders_without_reference == 1
+    assert with_reference.orders_without_reference == 0
+    assert len(priced_on_decision) == 1
+    assert len(priced_on_fill) == 1
+    assert priced_on_decision[0].price != priced_on_fill[0].price, (
+        "the reference bar made no difference to the fill price, so the venue is "
+        "pricing against whatever bar it happens to fill on"
+    )
+
+
+def test_market_impact_is_inert_without_average_dollar_volume() -> None:
+    """A finding, pinned rather than fixed.
+
+    `ParticipationCostModel` computes market impact only when handed an
+    `average_dollar_volume`, and **neither this venue nor the backtester's
+    `_settle` passes one** -- so `market_impact` is zero on every fill either
+    produces, and `participation_rate` is 0.0. The impact coefficient in
+    `CostConfig` has no effect on any backtest this project has run.
+
+    Not changed here: cost assumptions are explicitly a scoped proposition in
+    this project, and quietly switching impact on would move every published
+    result. Pinned so the next reader finds it stated rather than assuming
+    impact was modelled and found not to matter -- the same mistake
+    `correlation_weight=0.0` invited for a year.
+    """
+    broker = _broker()
+    broker.submit_order(_order(quantity=100), "c-1")
+    fills = broker.advance(NEXT, {1: _bar()})
+
+    assert len(fills) == 1
+    config = StrategyConfig(name="ma_cross_baseline")
+    assert config.costs.market_impact_coefficient > 0, (
+        "the coefficient is configured, which is what makes its inertness worth pinning"
+    )
+    estimate = ParticipationCostModel(config=config.costs).estimate(_order(quantity=100), _bar())
+    assert estimate.market_impact == 0
+    assert estimate.participation_rate == 0.0

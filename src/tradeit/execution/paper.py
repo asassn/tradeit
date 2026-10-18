@@ -47,7 +47,8 @@ construction rather than by coincidence.
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
 from tradeit.config import Settings, get_settings
@@ -111,6 +112,21 @@ class _Resting:
     broker_order_id: str
     request: OrderRequest
     status: OrderStatus
+    #: The market as it stood when this order was accepted.
+    #:
+    #: Costs are estimated against THIS bar, not the one the order fills
+    #: against, and the difference is not cosmetic: `BarFillModel` derives
+    #: `slip_per_share` from the cost estimate and adds it to the trigger
+    #: price, so the reference bar **sets the fill price**. The backtester
+    #: estimates against the bar the decision was made on
+    #: (`engine._Pending.reference_bar`); a venue estimating against the bar it
+    #: is filling on would price every paper fill differently from the
+    #: equivalent backtest fill, and the claim that paper and backtest share a
+    #: code path would be false while looking true.
+    #:
+    #: None only before this venue has seen any bar for the instrument, which
+    #: is the very first submission. Counted rather than hidden.
+    reference_bar: OhlcvBar | None = None
     filled_quantity: Decimal = Decimal(0)
     filled_value: Decimal = Decimal(0)
     updated_at: dt.datetime = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
@@ -172,6 +188,12 @@ class PaperBroker:
     _last_prices: dict[int, Decimal] = field(init=False, default_factory=dict)
     _as_of: dt.datetime = field(init=False)
     _sequence: int = field(init=False, default=0)
+    _reference_bars: dict[int, OhlcvBar] = field(init=False, default_factory=dict)
+    #: Orders accepted before this venue had ever seen a bar for the
+    #: instrument, so their cost was estimated against the filling bar.
+    #: Reported rather than hidden: it is the one case where a paper fill can
+    #: legitimately differ from the backtester's.
+    orders_without_reference: int = field(init=False, default=0)
     _fills: list[Fill] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
@@ -274,12 +296,16 @@ class PaperBroker:
 
         self._sequence += 1
         broker_order_id = f"{self.account_id}-{self._sequence:06d}"
+        reference = self._reference_bars.get(order.instrument_id)
+        if reference is None:
+            self.orders_without_reference += 1
         resting = _Resting(
             order_id=self._sequence,
             broker_order_id=broker_order_id,
             request=order,
             status=OrderStatus.NEW,
             updated_at=self._as_of,
+            reference_bar=reference,
         )
         self._orders[broker_order_id] = resting
         self._by_client_id[client_order_id] = broker_order_id
@@ -333,6 +359,51 @@ class PaperBroker:
         """
         return tuple(self._fills)
 
+    def apply_splits(self, ratios: Mapping[int, Decimal]) -> None:
+        """Restate holdings and resting orders for splits with this ex-date.
+
+        **A real broker does this to the real account**, and a paper venue that
+        does not will drift from our book after every split. Found on
+        2026-10-18 by replaying the backtester's own orders through this venue:
+        1,456 of 1,457 fills agreed, and the single disagreement was an exit of
+        312 shares against a venue holding 208 -- a 3-for-2 split on 2014-05-20
+        that the engine had applied and the venue had not.
+
+        It is the case `ExecutionService` names, inverted: there the worry is a
+        corporate action the broker applied and we missed. Here we applied it
+        and the venue did not, which reconciliation would correctly halt on.
+
+        Called **before** the session's fills, for the reason the engine gives:
+        the session's own prints are already post-split, so marking a pre-split
+        share count against a post-split price reports a loss the holder never
+        took.
+
+        The cost basis is unchanged in total and divided per share, so a split
+        moves no money -- which is the whole point of one.
+        """
+        for instrument_id, ratio in ratios.items():
+            if ratio <= 0:
+                continue
+            holding = self._holdings.get(instrument_id)
+            if holding is not None:
+                # Quantity scales and the TOTAL basis does not: a 3-for-2 leaves
+                # the holder with the same money in the same company.
+                holding.quantity *= ratio
+            for resting in self._orders.values():
+                if resting.request.instrument_id == instrument_id and resting.status in (
+                    OrderStatus.NEW,
+                    OrderStatus.PARTIALLY_FILLED,
+                ):
+                    # A resting order is restated, not cancelled: yesterday's
+                    # decision was about a share of the account and the split
+                    # did not change it.
+                    resting.request = replace(
+                        resting.request, quantity=resting.request.quantity * ratio
+                    )
+                    resting.filled_quantity *= ratio
+            if instrument_id in self._last_prices:
+                self._last_prices[instrument_id] /= ratio
+
     def advance(self, session_date: dt.date, bars: dict[int, OhlcvBar]) -> tuple[Fill, ...]:
         """Trade one session's bars against the resting orders.
 
@@ -358,6 +429,10 @@ class PaperBroker:
                 produced.append(fill)
         for instrument_id, bar in bars.items():
             self._last_prices[instrument_id] = bar.close
+            # Recorded AFTER the fills, so an order submitted between this
+            # advance and the next references this session's bar -- which is
+            # the one its caller decided on.
+            self._reference_bars[instrument_id] = bar
         self._expire_day_orders()
         self._fills.extend(produced)
         return tuple(produced)
@@ -379,7 +454,7 @@ class PaperBroker:
             intent=resting.request.intent,
             parent_position_id=resting.request.parent_position_id,
         )
-        cost = self.costs.estimate(probe, bar)
+        cost = self.costs.estimate(probe, resting.reference_bar or bar)
         simulated = self.fills.simulate(probe, bar, cost)
         if simulated is None:
             return None

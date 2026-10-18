@@ -578,3 +578,55 @@ class TestTheLadderMovesTheStop:
         # exit -- not at the initial 92 two sessions later.
         assert first_exit.exit_reason == str(ExitReason.TRAILING_STOP)
         assert first_exit.exit_price > Decimal(92)
+
+
+def test_client_order_ids_are_unique_across_sessions() -> None:
+    """`orders.client_order_id` is a `unique=True` column, and the engine must honour it.
+
+    Until 2026-10-18 the id was `e-{instrument_id}` alone, so every entry order
+    for one instrument over a whole run shared a single id. Nothing inside the
+    backtester noticed: it tracks pending orders in a list and never reads the
+    id. It matters because that same decision path is what Phase 11 points at a
+    broker, where `client_order_id` is the idempotency key -- a second entry in
+    the same name would be swallowed as a duplicate submission or rejected.
+
+    Found by replaying the engine's own orders through `PaperBroker`, which
+    refused nine of them as "already used for a different order". This test is
+    the cheap version of that discovery.
+    """
+    days = _days(16)
+    bars = {day: {1: _bar(1, day, open_="100", high="104", low="99", close="102")} for day in days}
+    # Two entries in the same instrument on different sessions.
+    candidates = {
+        days[1]: [_candidate(1, "102", "94")],
+        days[8]: [_candidate(1, "102", "94")],
+    }
+
+    seen: list[str] = []
+
+    class _Spy(EventDrivenEngine):
+        """Records the ids of orders resting when each session opens.
+
+        A subclass rather than a patched attribute: EventDrivenEngine is a
+        frozen slots dataclass, so the instance cannot be monkeypatched -- and
+        the subclass is clearer about what it observes.
+        """
+
+        def _settle(self, state, bars_arg, session_date):  # type: ignore[no-untyped-def]
+            seen.extend(item.order.client_order_id for item in state.pending)
+            super()._settle(state, bars_arg, session_date)
+
+    base = _engine(_Script(bars_by_session=bars, candidates_by_session=candidates))
+    engine = _Spy(**{f.name: getattr(base, f.name) for f in dataclasses.fields(base)})
+    engine.run(dataclasses.replace(_spec(), start=days[0], end=days[-1]))
+
+    assert seen, "no orders rested in any session, so this test asserts nothing"
+    # Carried orders legitimately reappear, so the invariant is about the id
+    # CARRYING its session, not about the list being free of repeats.
+    for order_id in seen:
+        assert order_id.count("-") >= 2, f"{order_id!r} carries no session date"
+    entry_sessions = {order_id.split("-", 2)[2] for order_id in seen if order_id[0] == "e"}
+    assert len(entry_sessions) >= 2, (
+        f"two entries on different sessions produced ids for {len(entry_sessions)} "
+        f"session(s): {entry_sessions}. They have collapsed to one id."
+    )

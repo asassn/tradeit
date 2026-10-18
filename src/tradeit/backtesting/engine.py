@@ -375,9 +375,11 @@ class EventDrivenEngine:
                 # backtest that filled here would be selling at a price nobody
                 # was quoting, which is the most flattering fill there is.
                 continue
-            state.pending.append(self._exit_order(state, signal, bars))
+            state.pending.append(self._exit_order(state, signal, bars, session_date))
         for entry in plan.accepted:
-            state.pending.append(self._entry_order(entry.candidate, entry.quantity, bars))
+            state.pending.append(
+                self._entry_order(entry.candidate, entry.quantity, bars, session_date)
+            )
 
     # -- order construction -------------------------------------------------
 
@@ -410,11 +412,27 @@ class EventDrivenEngine:
         )
 
     def _entry_order(
-        self, candidate: EntryCandidate, quantity: Decimal, bars: Mapping[int, OhlcvBar]
+        self,
+        candidate: EntryCandidate,
+        quantity: Decimal,
+        bars: Mapping[int, OhlcvBar],
+        session_date: dt.date,
     ) -> _Pending:
         return _Pending(
             order=OrderRequest(
-                client_order_id=f"e-{candidate.instrument_id}",
+                # The session is part of the id. Until 2026-10-18 this was
+                # `e-{instrument_id}` alone, so every entry order for one
+                # instrument over a ten-year run shared a single
+                # `client_order_id` -- against a schema that declares the
+                # column `unique=True` and a docstring that calls it the key
+                # making a retry safe. Harmless inside the backtester, which
+                # tracks pending orders in a list and never reads the id, and
+                # not harmless at all the moment this same decision path drives
+                # a broker: a second entry in the same name would be swallowed
+                # as a duplicate submission or rejected outright. Found by
+                # replaying these orders through the paper venue, which refused
+                # 9 of them as "already used for a different order".
+                client_order_id=f"e-{candidate.instrument_id}-{session_date.isoformat()}",
                 portfolio_id=1,
                 instrument_id=candidate.instrument_id,
                 side=OrderSide.BUY,
@@ -428,7 +446,12 @@ class EventDrivenEngine:
         )
 
     @staticmethod
-    def _exit_order(state: _RunState, signal: ExitSignal, bars: Mapping[int, OhlcvBar]) -> _Pending:
+    def _exit_order(
+        state: _RunState,
+        signal: ExitSignal,
+        bars: Mapping[int, OhlcvBar],
+        session_date: dt.date,
+    ) -> _Pending:
         lot = state.lots[signal.instrument_id]
         quantity = (lot.quantity * signal.fraction).quantize(Decimal(1))
         if signal.fraction >= 1 or quantity > lot.quantity:
@@ -439,7 +462,7 @@ class EventDrivenEngine:
             lot.partial_profit_taken = True
         return _Pending(
             order=OrderRequest(
-                client_order_id=f"x-{signal.instrument_id}",
+                client_order_id=f"x-{signal.instrument_id}-{session_date.isoformat()}",
                 portfolio_id=1,
                 instrument_id=signal.instrument_id,
                 side=OrderSide.SELL,
