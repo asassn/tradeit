@@ -43,8 +43,35 @@ succeeding.
 | 2 | **8** — portfolio construction, risk & compounding | **CLOSED 2026-10-17** — see [`PHASE_08_CLOSURE_2026-10-17.md`](PHASE_08_CLOSURE_2026-10-17.md) | ~~2026-10-31~~ **done** |
 | 3 | **7** — opportunity scoring, **Swing only** | **audited 2026-10-17, not closed** — see [`PHASE_07_AUDIT_2026-10-17.md`](PHASE_07_AUDIT_2026-10-17.md). Built and exercised; three of five refusal paths still unmeasured | **2026-11-07** |
 | 3b | **7** — opportunity scoring, **Day** | **blocked, and not by effort**: no `intraday-01` corpus exists, and scoring the Day mandate on Daily bars would collapse Day into Swing | **undated** |
-| 4 | **11** — paper trading execution | cost and fill models, paper broker, reconciliation, trade journal, on the live code path | **2026-11-21** |
+| 4 | **11** — paper trading execution | **CLOSED 2026-10-18** — see [`PHASE_11_AUDIT_2026-10-18.md`](PHASE_11_AUDIT_2026-10-18.md). Built this week, not pre-existing; 2,516 of 2,516 sessions reconciled clean with the broker owning the book | ~~2026-11-21~~ **done** |
 | 5 | **12** — readiness framework & production readiness | `RESEARCH → ROBUST_BACKTEST → PAPER → LIMITED_LIVE → SCALED_LIVE`, demotion, risk controls outside a strategy's reach, explainability | **2026-11-28** |
+
+### Amended 2026-10-18 — Phase 11 closed, and this one was actually built
+
+Phases 8 and 9 closed in a day each because the work already existed. **Phase 11
+did not exist**: `ExecutionService` was a protocol with no implementation, there
+was no paper broker, and the trade journal had no writer. All three were written
+on 2026-10-18 and closed three days ahead of target.
+
+The exercise that closed it found **two defects neither phase's own tests could
+see**, because both only appear when two phases are connected:
+
+* **The engine's `client_order_id` was not unique** — `e-{instrument_id}` for a
+  whole ten-year run, against a column declared `unique=True`. Invisible to the
+  backtester, which never reads the id; fatal at a real broker, where it is the
+  idempotency key. **That defect was in Phase 9.**
+* **The paper venue ignored corporate actions**, so its share count drifted from
+  ours after every split.
+
+And one asymmetry no unit test would surface: **the backtester can refuse an
+entry whose fill gapped through its stop; a live system cannot, because the
+shares are already bought.** 60 such entries in the run, now counted rather
+than refused.
+
+**The argument this settles for Phase 12.** Connecting phases finds defects that
+auditing them separately does not. Phase 12 gates promotion to live, and it
+should be exercised against the whole assembled path rather than its own modules
+in isolation.
 
 ### Amended 2026-10-17 — Phase 7 splits, and one date cannot cover it
 
