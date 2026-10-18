@@ -4138,3 +4138,176 @@ the outcome-level guard-rail.
 
 **Ledger: 143 → 144 trials.** Sixty-one measurements. Hurdle now
 |t| > 2.6563 on the normal scale.
+
+---
+
+## §54 — the risk controls, measured on a book nobody was trading — 2026-10-17
+
+**Not a trial.** No hypothesis about returns was tested, nothing was registered
+and the ledger does not move: 144 trials before, 144 after. This entry exists
+because the Phase 8 audit produced *measurements*, and a measurement that lives
+only in a closure document is one nobody will find.
+
+Full record: [`PHASE_08_CLOSURE_2026-10-17.md`](PHASE_08_CLOSURE_2026-10-17.md).
+
+### What had never been measured
+
+Four modules, 74 passing tests between them, had never been handed corpus data.
+Two were blocked by working correctly: `CorrelationRule` fails closed on an
+unknown pair, so installing it without a correlation source would have refused
+every position on session one; `SectorExposureRule` pools unclassified names,
+and `sectors` held **zero rows**, so a 30% cap would have held the whole book to
+30%.
+
+**The line that matters was never written down**, and it is not scattered — it
+is **one line in `build_engine`**, the shared engine constructor in
+`baselines.py` that §46's portfolio test, §48's held-out replication and this
+week's walk-forward all went through:
+
+```
+ranker=DiversityAwareRanker(
+    correlation_weight=0.0, sector_penalty_per_holding=0.0, held_sectors={}
+),
+```
+
+**Every portfolio-level result on this scoreboard was produced with
+diversification switched off**, by that line, uncommented, while the line
+directly above it carried a careful note about §38's cost guard. A reader would
+reasonably have concluded diversification was tested and found not to matter. It
+was not tested. The line now carries the explanation, including why it stays
+`0.0` even though both inputs finally exist: turning it on changes what every
+published result means, which is a scoped proposition and not a default.
+
+### The measurement: 2,516 sessions, 2010-2019, fourteen names
+
+| | |
+|---|---|
+| snapshots built | 2,516, one per session |
+| sessions holding **nothing** | 892 (35.5%) |
+| `correlation_cluster` breached | 89 (3.5%) |
+| `sector_exposure` breached | 14 (0.6%) |
+| largest single-sector share | 30.6%, Manufacturing, against a 30% cap |
+| heat | median 0.55%, max 3.85%, limit 6% |
+| gross exposure | median 6.3%, max 32.4%, limit 100% |
+| drawdown from peak | median 0.9%, max 3.0%, halt 15% |
+
+**Both breaches happened with no proposal involved.** Prices moved and the book
+drifted outside a limit nobody had traded into — which is the entire argument
+for a daily record rather than a trade-triggered one, and 35.5% of this run
+would have been absent from the latter.
+
+**The configured limits barely bind on this universe.** Heat peaked at 64% of
+its limit and gross at a third of its. The two that did bind, bound by a
+whisker: 0.77 against a 0.75 correlation limit, 30.6% against a 30% sector cap.
+Nothing here says the limits are well calibrated — it says a fourteen-name
+large-cap book run at this sizing is nowhere near them, which is a fact about
+the test universe and not about the risk framework.
+
+### What the sector map cost: nothing
+
+SIC codes were already in EDGAR filing headers in the corpus. **16,768
+bitemporal interval rows over 13,738 securities, 76.4% of those with prices,
+every row citing its accession.** Division level over two-digit major group,
+because a 30% cap over eight divisions binds and over eighty groups never does.
+The 23.6% without a SIC observation stay pooled in `UNCLASSIFIED` and the cap
+limits them collectively — conservative, and a real limit on what any
+sector-constrained result means.
+
+### Two detection flaws, caught before they became results
+
+**A sector cap binds by resizing at least as often as by refusing.** The first
+version of the test compared trade counts only and printed "the rule changed
+NOTHING" for a run in which the return moved 5.19% → 5.09%. The cap had bound
+on every one of those sessions and simply taken a smaller position.
+**A refusal-only test is blind to the commoner case.**
+
+**`BacktestResult` carries no record of declined proposals.** A draft counted
+`getattr(result, "planned", ())` — a field that does not exist — and reported
+`0` refusals as though measured. Same family as §41: the answer arrived, and it
+was not an answer to the question asked.
+
+### One branch is still unexercised, recorded rather than rounded up
+
+The honest-`None` path for an unmeasured correlation pair **never fired**. 1,599
+sessions held fewer than two positions so no pair existed, and of the 917 that
+held a pair, **zero** hit an unmeasured one — the 66-pair matrix happens to
+cover every pair this book ever held, though it covers only 66 of the
+universe's 91. Thirteen unit tests remain the only evidence for that branch.
+The first draft of the reporting lumped both reasons for a `None` together and
+would have claimed it as exercised.
+
+### What this changes for the scoreboard
+
+Nothing is retracted. §46's portfolio result and §48's replication were run
+without a correlation constraint, which **cannot have inflated** them in the
+direction that matters: a diversification limit refuses or shrinks positions, it
+does not add return. The honest statement is that those results describe an
+unconstrained book, and a constrained one would differ by an amount nobody has
+measured. **Re-running them under the constraint is now possible and was not
+before.** It is not a trial and costs no ledger budget.
+
+---
+
+## §55 — portfolio fit, measured: it discriminates, and its sector veto has never once fired on a real sector — 2026-10-17
+
+**Not a trial.** No return hypothesis, nothing registered, ledger unchanged at
+144. Full record:
+[`PHASE_07_AUDIT_2026-10-17.md`](PHASE_07_AUDIT_2026-10-17.md).
+
+`tradeit.opportunity` — Phase 7's three separated scores, 583 lines, 35 tests —
+had **never been imported by any script**. The question is not whether it runs.
+The deliverable is the distinction *a great stock is not a great trade*, and **a
+fit score that never changes a ranking has not been exercised** however many
+tests it passes.
+
+### The first run proved nothing, and the script now says so
+
+Fourteen large caps: 123 candidates, zero vetoes, zero rankings changed. The
+tempting reading is that the fit score is inert. **Only 8 of 115 slates ever
+held two contenders, and the largest held two** — a slate of one cannot test a
+ranking. The run was a fact about a universe that nominates one candidate at a
+time.
+
+### 143 names, 2010-2019
+
+| | |
+|---|---|
+| candidates scored | 587 over 499 slates |
+| **refused by the fit** | **102 (17.4%)**, 123 veto reasons between them |
+| fit score | min 0.350, median 0.675, max 1.000 |
+| contested slates (≥2 contenders) | 75 of 499, largest 6 |
+| **slates where fit changed who ranked first** | **4 of the 75 that could** |
+
+Four reorderings in seventy-five contested slates is real evidence the fit score
+discriminates on corpus data, and **no evidence that the separation earns
+anything** — the scoring is read-only and does not feed the engine's decisions,
+because wiring score 3 into selection changes what the backtest measures.
+
+### The sector veto fired 26 times, all of them on a coverage gap
+
+| veto reason | fired | on what |
+|---|---|---|
+| `position_limit_reached` | 49 | genuine |
+| `heat_limit_exceeded` | 48 | genuine |
+| `sector_limit_reached` | 26 | **all 26 on the pooled `UNCLASSIFIED` bucket** |
+| `already_at_full_size` | 0 | unit tests only |
+| `insufficient_cash` | 0 | unit tests only |
+
+**Every sector veto fell on a candidate with no SIC classification**, pooled into
+the single bucket the 30% cap also limits. **Zero fell on a named sector**, so
+the sector veto has still never fired on real sector concentration. Without the
+attribution this would have entered the record as "the sector veto works on real
+data" — §41's family again, and the attribution was added before the number was
+written down rather than after.
+
+Coverage here is 48 of 143 (33.6%) against 76.4% corpus-wide, because the 143
+were selected for *price* coverage over 2010-2019, which selects differently from
+SIC reachability. A sampling fact about this universe, not a defect in §54's map.
+
+### What this does not say
+
+Nothing here is a return result, and **three of five refusal paths remain
+unexercised on real data**. The honest position: Phase 7's machinery works for
+Swing and is measured; the Day mandate cannot be scored at all until an
+intraday corpus exists, and scoring it on Daily bars would collapse Day into
+Swing — the one thing the three-horizon architecture exists to prevent.

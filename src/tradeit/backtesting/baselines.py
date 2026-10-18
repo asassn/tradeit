@@ -449,6 +449,24 @@ def build_engine(
                 costs=config.costs,
             ),
             engine=MostRestrictiveEngine(rule_set=rules, sizing=config.sizing),
+            # Diversification is OFF, and every portfolio result this project has
+            # published came through here with it off -- SIGNAL_SCOREBOARD.md
+            # §46, §48, the walk-forward, all of them. That was true for a year
+            # and this line said nothing about it, while the cost-guard line
+            # above carried a careful note; a reader would reasonably have
+            # concluded diversification was tested and found not to matter.
+            #
+            # It was off because it could not be on. Correlation weighting needs
+            # a correlation source and sector penalties need a sector map, and
+            # the corpus had neither -- `sectors` held zero rows. **Both now
+            # exist** (§54): scripts/derive_sectors_from_sic.py builds the map
+            # from SIC codes already in EDGAR headers, and
+            # scripts/backtest_correlation_limit.py builds a matrix source.
+            #
+            # They stay 0.0 here regardless, because turning them on changes
+            # what every published result means and that is a scoped
+            # proposition, not a default. A caller who wants a constrained book
+            # constructs its own ranker and says so in the result.
             ranker=DiversityAwareRanker(
                 correlation_weight=0.0, sector_penalty_per_holding=0.0, held_sectors={}
             ),
