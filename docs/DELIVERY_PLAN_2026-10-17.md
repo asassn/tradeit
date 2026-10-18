@@ -40,10 +40,34 @@ succeeding.
 | order | phase | why here | target |
 |---|---|---|---|
 | 1 | **9** — portfolio backtesting & Monte Carlo | **CLOSED 2026-10-17** — see [`PHASE_09_CLOSURE_2026-10-17.md`](PHASE_09_CLOSURE_2026-10-17.md) | ~~2026-11-07~~ **done** |
-| 2 | **8** — portfolio construction, risk & compounding | partly exists (`portfolio/sizing.py`, `stops.py`, `allocation.py`, `cycle.py` — 1,695 lines); needs the same audit treatment | **2026-10-31** |
-| 3 | **7** — opportunity scoring | three separated scores; needs 8 for portfolio fit | **2026-11-07** |
+| 2 | **8** — portfolio construction, risk & compounding | **CLOSED 2026-10-17** — see [`PHASE_08_CLOSURE_2026-10-17.md`](PHASE_08_CLOSURE_2026-10-17.md) | ~~2026-10-31~~ **done** |
+| 3 | **7** — opportunity scoring, **Swing only** | **audited 2026-10-17, not closed** — see [`PHASE_07_AUDIT_2026-10-17.md`](PHASE_07_AUDIT_2026-10-17.md). Built and exercised; three of five refusal paths still unmeasured | **2026-11-07** |
+| 3b | **7** — opportunity scoring, **Day** | **blocked, and not by effort**: no `intraday-01` corpus exists, and scoring the Day mandate on Daily bars would collapse Day into Swing | **undated** |
 | 4 | **11** — paper trading execution | cost and fill models, paper broker, reconciliation, trade journal, on the live code path | **2026-11-21** |
 | 5 | **12** — readiness framework & production readiness | `RESEARCH → ROBUST_BACKTEST → PAPER → LIMITED_LIVE → SCALED_LIVE`, demotion, risk controls outside a strategy's reach, explainability | **2026-11-28** |
+
+### Amended 2026-10-17 — Phase 7 splits, and one date cannot cover it
+
+Phases 8 and 9 both closed the day they were dated, for the reason the plan
+anticipated: the work was built and unexercised, and auditing it was the work.
+**Phase 7 is different, and the difference is not effort.**
+
+Its machinery is built and now measured — 587 real candidates scored, 102
+refused by the fit, the ranking changed on 4 of 75 contested slates. But Phase
+7 scores setups *per horizon*, and **the Day mandate cannot be scored at all
+without intraday bars**, which this corpus does not hold. Declaring Phase 7
+complete on Daily evidence would collapse Day into Swing — the one thing the
+three-horizon architecture exists to prevent, and a far worse outcome than a
+late phase.
+
+So the row splits. **Swing keeps 2026-11-07 and is achievable. Day is undated**,
+and stays undated until the intraday corpus exists, which is a Phase 6 data
+question and not a Phase 7 one. **This does not move paper-trading-ready**:
+Phases 11 and 12 depend on the Swing path, which is the one that is ready.
+
+What it does mean plainly: **the platform will reach paper trading with one of
+its three horizons unscored.** That is a real gap and it is stated here rather
+than discovered at the Phase 12 gate.
 
 ### Re-dated 2026-10-17, and why the estimate was wrong
 
