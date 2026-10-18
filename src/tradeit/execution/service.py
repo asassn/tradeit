@@ -40,12 +40,27 @@ from sqlalchemy.orm import Session
 from tradeit.execution.base import Discrepancy, DiscrepancyKind, OrderRequest
 from tradeit.execution.journal import JournalEntryKind, record_entry
 from tradeit.portfolio.base import PortfolioState
+from tradeit.risk.controls import ControlRefusal, PreTradeControls
 
-__all__ = ["BrokerExecutionService", "TradingHalted"]
+__all__ = ["BrokerExecutionService", "OrderRefusedByControl", "TradingHalted"]
 
 
 class TradingHalted(RuntimeError):
     """An order was attempted for a portfolio whose state does not reconcile."""
+
+
+class OrderRefusedByControl(RuntimeError):
+    """A pre-trade control refused the order before it reached a venue.
+
+    Separate from :class:`TradingHalted` because the two mean different things
+    and need different responses: a halt says our book is wrong, a control
+    refusal says the order is wrong (or that trading is stopped). Collapsing
+    them would send an operator to reconcile a book that is fine.
+    """
+
+    def __init__(self, refusals: tuple[ControlRefusal, ...]) -> None:
+        self.refusals = refusals
+        super().__init__("; ".join(refusal.describe() for refusal in refusals))
 
 
 @dataclass
@@ -65,6 +80,14 @@ class BrokerExecutionService:
     price_tolerance: Decimal
     cash_tolerance: Decimal
     ours: object = None
+    #: The controls a strategy cannot reach, checked before every submission.
+    #:
+    #: Optional, and `configured` reports what is installed — because a run
+    #: with no controls must be visible as such rather than letting a reader
+    #: assume protection that was never wired. Checked HERE, at the boundary
+    #: where orders leave, rather than at sizing: a kill switch that only
+    #: stopped sizing would let a resting order fill after it was thrown.
+    controls: PreTradeControls | None = None
     _halted: dict[int, tuple[Discrepancy, ...]] = field(default_factory=dict)
     _order_ids: dict[int, str] = field(default_factory=dict)
     _sequence: int = 0
@@ -75,8 +98,26 @@ class BrokerExecutionService:
     def halt_reason(self, portfolio_id: int) -> tuple[Discrepancy, ...]:
         return self._halted.get(portfolio_id, ())
 
-    def place(self, order: OrderRequest) -> int:
-        """Submit an order, unless this portfolio is halted."""
+    def place(
+        self,
+        order: OrderRequest,
+        *,
+        session_date: dt.date | None = None,
+        as_of: dt.datetime | None = None,
+        last_seen: Mapping[int, dt.datetime] | None = None,
+    ) -> int:
+        """Submit an order, unless this portfolio is halted or a control refuses.
+
+        The halt is checked first: a book known to be wrong makes every
+        decision after it meaningless, so there is nothing for a control to
+        usefully say about an order that should not exist.
+
+        ``session_date`` and ``as_of`` are required **when controls are
+        installed** and are not defaulted to today, for the reason `reconcile`
+        gives: a replay or a session crossing midnight UTC would otherwise be
+        judged against the wrong day, and a stale-data guard reading wall-clock
+        time could not be replayed at all.
+        """
         if self.is_halted(order.portfolio_id):
             raise TradingHalted(
                 f"portfolio {order.portfolio_id} is halted on "
@@ -84,7 +125,33 @@ class BrokerExecutionService:
                 "resolve them and call resume() rather than placing orders against a "
                 "portfolio whose state is known to be wrong"
             )
+        if self.controls is not None:
+            if session_date is None or as_of is None:
+                raise ValueError(
+                    "controls are installed, so place() needs session_date and as_of; "
+                    "defaulting them to now would make a stale-data guard unreplayable "
+                    "and a duplicate guard wrong across midnight"
+                )
+            refusals = self.controls.check(
+                order, session_date=session_date, as_of=as_of, last_seen=last_seen
+            )
+            if refusals:
+                record_entry(
+                    self.session,
+                    kind=JournalEntryKind.DECLINED,
+                    session_date=session_date,
+                    portfolio_id=order.portfolio_id,
+                    instrument_id=order.instrument_id,
+                    summary=f"order refused by {len(refusals)} pre-trade control(s)",
+                    rationale="; ".join(refusal.describe() for refusal in refusals),
+                )
+                raise OrderRefusedByControl(refusals)
         status = self.broker.submit_order(order, order.client_order_id)  # type: ignore[attr-defined]
+        if self.controls is not None and session_date is not None:
+            # Recorded only AFTER a successful submission. An order the venue
+            # refused was not sent, and recording it would block the
+            # legitimate retry.
+            self.controls.record(order, session_date)
         self._sequence += 1
         self._order_ids[self._sequence] = status.broker_order_id
         return self._sequence
