@@ -50,6 +50,7 @@ from decimal import Decimal
 sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 
+from backtest_correlation_limit import build_correlations
 from backtest_research01 import MovingAverageCross, _manifest, _universe
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -58,7 +59,7 @@ from tradeit.backtesting.base import BacktestSpec
 from tradeit.backtesting.corpus import CorpusSessionData
 from tradeit.backtesting.engine import EventDrivenEngine
 from tradeit.backtesting.performance import StandardPerformanceAnalyzer
-from tradeit.core.enums import Bartimeframe
+from tradeit.core.enums import Bartimeframe, SignalDirection
 from tradeit.execution.simulation import BarFillModel, ParticipationCostModel
 from tradeit.opportunity import (
     Contender,
@@ -69,7 +70,7 @@ from tradeit.opportunity import (
     score_fit,
 )
 from tradeit.portfolio.allocation import DiversityAwareRanker
-from tradeit.portfolio.cycle import PortfolioCycle
+from tradeit.portfolio.cycle import EntryCandidate, PortfolioCycle
 from tradeit.portfolio.mandate import Mandate, UnitOfStudy
 from tradeit.portfolio.sizing import RiskBasedSizer
 from tradeit.portfolio.stops import StopLadder
@@ -83,6 +84,7 @@ from tradeit.risk.rules import (
 )
 from tradeit.risk.snapshot import sector_exposures
 from tradeit.storage.session import install_sqlite_busy_timeout
+from tradeit.strategy.base import OpportunityScore
 from tradeit.strategy.config import StrategyConfig
 
 SECTORS_AS_OF = text("""
@@ -101,6 +103,22 @@ def main() -> int:
     ap.add_argument("--start", default="2010-01-04")
     ap.add_argument("--end", default="2019-12-31")
     ap.add_argument("--standalone-weight", type=float, default=None)
+    ap.add_argument(
+        "--pyramid",
+        action="store_true",
+        help=(
+            "also nominate names already held, as Phase 8 pyramiding would. "
+            "The cross-only source never re-nominates a holding."
+        ),
+    )
+    ap.add_argument("--overlap-lookback", type=int, default=126)
+    # ALREADY_AT_FULL_SIZE reached 65.6% of its threshold at the configured
+    # 0.5% risk per trade -- within reach, so leaving it inferred rather than
+    # fired would be settling for an argument where a measurement is
+    # available. This overrides sizing for the EXERCISE and is NOT a proposal
+    # to change risk config, exactly as --max-sector and --max-correlation are
+    # not in the two Phase 8 scripts.
+    ap.add_argument("--risk-per-trade", type=float, default=None)
     args = ap.parse_args()
 
     start, end = dt.date.fromisoformat(args.start), dt.date.fromisoformat(args.end)
@@ -110,6 +128,18 @@ def main() -> int:
     )()
     resolved = _universe(session, tickers)
     config = StrategyConfig(name="ma_cross_baseline")
+    if args.risk_per_trade is not None:
+        config = config.model_copy(
+            update={
+                "sizing": config.sizing.model_copy(
+                    update={"risk_per_trade_pct": args.risk_per_trade}
+                )
+            }
+        )
+        print(
+            f"sizing OVERRIDDEN for this exercise: risk per trade "
+            f"{args.risk_per_trade:.2%}. Not a proposal."
+        )
     rows = session.execute(SECTORS_AS_OF, {"as_of": start.isoformat()}).all()
     universe_ids = set(resolved.values())
     sectors = {int(i): str(s) for i, s in rows if int(i) in universe_ids}
@@ -127,9 +157,39 @@ def main() -> int:
         rule.splits_on = data.splits_on
         return data, rule
 
+    # `overlap` defaulted to 0.0 in the first version of this script, which made
+    # `distinctness` a constant 1.0 and one of the five fit components inert for
+    # all 587 candidates. It is a declared input, so a default is a silent
+    # answer: fed here from the same pairwise correlation the Phase 8 exercise
+    # built, as the nearest honest proxy for "another way to own what we own".
+    probe_data, _ = make_data()
+    probe_sessions = list(probe_data.sessions(start, end))
+    correlations = build_correlations(probe_data, probe_sessions, args.overlap_lookback)
+    print(f"overlap proxy: {len(correlations):,} measured pairs")
+
+    def overlap_against(instrument_id: int, held_ids: list[int]) -> float:
+        """Strongest correlation with anything already held, 0 when unknown.
+
+        0.0 for an unmeasured pair is a *known* understatement rather than a
+        guess, and it is recorded as such below: unlike the correlation RULE,
+        which must fail closed because it gates a trade, this feeds a ranking
+        weight where refusing to rank is not an option the caller has.
+        """
+        best = 0.0
+        for other in held_ids:
+            if other == instrument_id:
+                continue
+            key = (min(instrument_id, other), max(instrument_id, other))
+            value = correlations.get(key)
+            if value is not None:
+                best = max(best, value)
+        return max(0.0, best)
+
     tally: collections.Counter[str] = collections.Counter()
     vetoes: collections.Counter[str] = collections.Counter()
     sector_veto_pooled = 0
+    closest_weight = 0.0
+    closest_cash = 0.0
     fit_scores: list[float] = []
     reorderings: list[tuple[dt.date, str, str]] = []
     slate_sizes: list[int] = []
@@ -148,8 +208,34 @@ def main() -> int:
         def _decide(self, state, bars, session_date):  # type: ignore[no-untyped-def]
             nonlocal slates
             candidates = list(self.data.candidates(session_date))
+            portfolio = state.portfolio()
+            if args.pyramid:
+                # What a pyramiding source does: offer to add to what is
+                # already held. Scored only -- never handed to the engine, so
+                # the backtest it runs is unchanged.
+                nominated = {c.instrument_id for c in candidates}
+                for position in portfolio.open_positions:
+                    iid = position.instrument_id
+                    bar = bars.get(iid)
+                    if bar is None or iid in nominated:
+                        continue
+                    candidates.append(
+                        EntryCandidate(
+                            score=OpportunityScore(
+                                instrument_id=iid,
+                                session_date=session_date,
+                                direction=SignalDirection.LONG,
+                                total=0.0,
+                                components=(),
+                                feature_set_digest="pyramid-probe",
+                                strategy_config_digest=config.digest,
+                            ),
+                            entry_price=bar.close,
+                            stop_price=bar.close * Decimal("0.92"),
+                        )
+                    )
+                    tally["pyramid_nominations"] += 1
             if candidates:
-                portfolio = state.portfolio()
                 exposures = sector_exposures(portfolio, sectors)
                 held = {p.instrument_id: p for p in portfolio.open_positions}
                 equity = portfolio.equity
@@ -170,6 +256,20 @@ def main() -> int:
                     standalone = 0.5
                     if bar is not None and bar.low < bar.high:
                         standalone = float((bar.close - bar.low) / (bar.high - bar.low))
+                    # `required_cash` defaulted to Decimal(0) in the first
+                    # version, which made INSUFFICIENT_CASH unreachable -- the
+                    # veto fires on `required_cash > cash` and zero never
+                    # exceeds anything. That was a gap in this script, not in
+                    # the module, and it meant one of five refusal paths was
+                    # reported as "never fired on real data" when it had never
+                    # been given the chance. Taken from the real sizer here.
+                    decision = self.cycle.sizer.size(
+                        candidate.score,
+                        candidate.entry_price,
+                        candidate.stop_price,
+                        portfolio,
+                        candidate.average_dollar_volume,
+                    )
                     context = PortfolioContext(
                         equity=equity,
                         cash=portfolio.cash,
@@ -181,7 +281,21 @@ def main() -> int:
                         heat_limit=config.risk.max_portfolio_heat_pct,
                         existing_weight=weight,
                         max_weight=config.sizing.max_position_pct_of_equity,
+                        overlap=overlap_against(iid, list(held)),
+                        required_cash=decision.notional,
                     )
+                    # "Never fired" is not a measurement. How CLOSE a veto came
+                    # to firing is, and it distinguishes a path that is merely
+                    # unexercised from one this configuration cannot reach.
+                    nonlocal closest_weight, closest_cash
+                    if context.max_weight > 0:
+                        closest_weight = max(
+                            closest_weight, context.existing_weight / context.max_weight
+                        )
+                    if context.cash > 0:
+                        closest_cash = max(
+                            closest_cash, float(context.required_cash / context.cash)
+                        )
                     fit = score_fit(context)
                     if not fit.reconciles:
                         raise SystemExit(
@@ -313,9 +427,58 @@ def main() -> int:
         )
     unseen = [r for r in VetoReason if str(r) not in vetoes]
     if unseen:
-        print("  veto reasons never triggered on real data:")
+        print("\n  veto reasons that never fired, and how close they came:")
         for reason in unseen:
-            print(f"    {reason!s:<28} (unit tests only)")
+            if reason is VetoReason.ALREADY_AT_FULL_SIZE:
+                print(f"    {reason!s:<24} closest was {closest_weight:.1%} of max_weight")
+            elif reason is VetoReason.INSUFFICIENT_CASH:
+                print(f"    {reason!s:<24} closest was {closest_cash:.1%} of available cash")
+            else:
+                print(f"    {reason!s:<24} (unit tests only)")
+        # The verdict follows the margin rather than preceding it. A first
+        # draft called both paths "unreachable", which is wrong for a path that
+        # got to two thirds of its threshold.
+        for label, margin in (
+            ("already_at_full_size", closest_weight),
+            ("insufficient_cash", closest_cash),
+        ):
+            if str(getattr(VetoReason, label.upper())) in vetoes:
+                continue
+            if label == "insufficient_cash" and margin >= 0.999:
+                # Not a sampling fact. RiskBasedSizer carries
+                # BindingConstraint.CASH and caps quantity at cash/entry_price,
+                # so a notional taken FROM it can equal available cash and can
+                # never exceed it. The veto tests `required_cash > cash`, which
+                # is therefore unreachable on this path by construction.
+                print(
+                    f"    {label}: reached {margin:.1%} of available cash and stopped there.\n"
+                    "      That is not an unsampled path -- it is UNREACHABLE BY\n"
+                    "      CONSTRUCTION: RiskBasedSizer caps quantity at cash/entry_price\n"
+                    "      (BindingConstraint.CASH), so a notional taken from it equals cash\n"
+                    "      at most and never exceeds it. No sizing change fires this veto\n"
+                    "      while the required cash comes from that sizer.\n"
+                    "      The veto is correct defensive code for a caller that computes\n"
+                    "      required cash some other way -- a fixed-notional sizer, or an\n"
+                    "      externally placed order -- and dead on the current path."
+                )
+            elif margin >= 0.5:
+                print(
+                    f"    {label}: reached {margin:.1%} of its threshold, so it is WITHIN\n"
+                    "      REACH and simply not reached by this strategy and sizing -- not a\n"
+                    "      structural impossibility. A modest sizing change would fire it."
+                )
+            else:
+                print(
+                    f"    {label}: peaked at {margin:.1%} of its threshold, far enough below\n"
+                    "      that this configuration cannot reach it at all. Firing it needs a\n"
+                    "      sizing or exposure regime nobody has proposed."
+                )
+        print(
+            f"    Context: risk-based sizing at {config.sizing.risk_per_trade_pct:.2%} risk per "
+            f"trade over a {config.exits.max_initial_stop_pct:.0%}\n"
+            f"    stop, against a {config.sizing.max_position_pct_of_equity:.0%} "
+            "position cap."
+        )
 
     if fit_scores:
         fit_scores.sort()

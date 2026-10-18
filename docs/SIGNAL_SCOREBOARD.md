@@ -4311,3 +4311,71 @@ unexercised on real data**. The honest position: Phase 7's machinery works for
 Swing and is measured; the Day mandate cannot be scored at all until an
 intraday corpus exists, and scoring it on Daily bars would collapse Day into
 Swing — the one thing the three-horizon architecture exists to prevent.
+
+---
+
+## §56 — the refusal paths, finished: four fire, the fifth cannot — 2026-10-18
+
+**Not a trial.** Ledger unchanged at 144. Completes §55, which left three of
+five refusal paths unmeasured. Full record:
+[`PHASE_07_AUDIT_2026-10-17.md`](PHASE_07_AUDIT_2026-10-17.md) addendum.
+
+### Two of the three gaps were in the harness, not the module
+
+* **`insufficient_cash` was unreachable because the script passed
+  `required_cash=Decimal(0)`.** The veto fires on `required_cash > cash`, and
+  zero exceeds nothing. §55 reported it as "never fired on real data" when it
+  had never been given the chance.
+* **`overlap` also defaulted to 0.0**, making the `distinctness` component a
+  constant 1.0 — a flat 0.20 contribution for all 587 candidates in §55. **One
+  of the five fit components was inert and §55's fit-score range was reported as
+  though all five were live.**
+
+Both were silent defaults on declared inputs, and both would have entered the
+record as findings about the module.
+
+### §55's headline finding inverts
+
+| veto reason | §55 | §56 |
+|---|---|---|
+| `heat_limit_exceeded` | 48 | 6,662 |
+| `sector_limit_reached` | 26, **all pooled** | 1,903, **none pooled** |
+| `already_at_full_size` | 0 | 1,875 |
+| `position_limit_reached` | 49 | 335 |
+| `insufficient_cash` | 0 | **0, by construction** |
+
+§55 found every sector veto falling on the unclassified pool. **A universe
+selected for SIC coverage instead of price coverage — 195 names, 169 classified
+— puts all 1,903 on named sectors and none on the pool.** The inversion came
+from fixing the universe, not from touching the code.
+
+`already_at_full_size` needed a source that re-nominates a holding. The
+cross-only rule never does, because a holding stays above its averages and
+never crosses up again, so a `--pyramid` mode supplies what Phase 8's
+pyramiding would.
+
+### The separation is now comfortably exercised
+
+15,095 candidates over 2,359 slates, 8,545 refused by the fit. **2,327 slates
+held real competition, fit changed the ranking on 1,703 and changed who ranked
+first on 544** — against §55's 4 of 75.
+
+### `insufficient_cash` is a proof of impossibility, not a near miss
+
+It reached **exactly 100.0% of available cash and stopped.** `RiskBasedSizer`
+carries `BindingConstraint.CASH` and caps quantity at `cash / entry_price`
+(`sizing.py:197`), so a notional taken from that sizer equals cash at most and
+never exceeds it. **No sizing change fires this veto on that path.** It is
+correct defensive code for a caller that computes required cash some other way,
+and structurally unreachable on the current one.
+
+A first draft of the reporting said "a modest sizing change would fire it",
+which is false. "Reached 100% and stopped" reads as near-success and is the
+opposite.
+
+### What is still not true
+
+**The scoring is read-only.** The engine ranks with `DiversityAwareRanker`; the
+opportunity package is measured beside the decision, not inside it. **Nothing
+here is a return result, and no scoreboard number changes.** Wiring score 3
+into selection is trading logic and needs a scoped proposition.
