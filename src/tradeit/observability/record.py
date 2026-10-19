@@ -59,9 +59,12 @@ from sqlalchemy.orm import Session
 
 from tradeit.core.enums import OrderStatus
 from tradeit.execution.base import Fill, OrderRequest
+from tradeit.execution.journal import JournalEntryKind, RejectedCandidate, record_entry
+from tradeit.observability.base import RecordedDecision
 from tradeit.storage.tables import Execution, OpportunityScore, Order, Trade
 
 __all__ = [
+    "DatabaseRecorder",
     "DecisionChain",
     "reconstruct",
     "record_execution",
@@ -368,3 +371,76 @@ def reconstruct(session: Session, portfolio_id: int, session_date: dt.date) -> D
         journal=journal,
         missing=missing,
     )
+
+
+@dataclass
+class DatabaseRecorder:
+    """Writes a session's decisions through this module's writers.
+
+    ``run_manifest_id`` is required and has no default. A score row's manifest
+    is what makes the result reproducible, and a recorder that invented one
+    would produce exactly the "fabricated provenance wearing the shape of the
+    real thing" the engine's own manifest docstring refuses.
+
+    **Does not commit**, for the reason every writer here does not: the record
+    belongs in the same transaction as whatever else the caller is doing.
+    """
+
+    session: Session
+    run_manifest_id: int
+
+    def record(self, decision: RecordedDecision) -> None:
+        for instrument_id, direction, total, components in decision.scores:
+            record_score(
+                self.session,
+                instrument_id=instrument_id,
+                session_date=decision.session_date,
+                direction=direction,
+                total=total,
+                components=components,
+                run_manifest_id=self.run_manifest_id,
+            )
+        by_client: dict[str, Order] = {}
+        for request in decision.orders:
+            by_client[request.client_order_id] = record_order(
+                self.session,
+                request,
+                status=OrderStatus.NEW,
+                run_manifest_id=self.run_manifest_id,
+            )
+        if by_client:
+            # Flushed so the order rows have ids, which `executions.order_id`
+            # needs as a foreign key. Flush is not commit: a rollback still
+            # discards everything.
+            self.session.flush()
+        for client_order_id, fill in decision.fills:
+            order = by_client.get(client_order_id)
+            if order is None:
+                # A fill for an order this session did not place. Refused
+                # rather than written with a null order: an execution that
+                # cannot be traced to its order is the link the chain exists
+                # to provide.
+                raise ValueError(
+                    f"fill for {client_order_id!r} has no order recorded in this "
+                    "session; an execution that cannot be traced to its order "
+                    "defeats the chain"
+                )
+            record_execution(
+                self.session,
+                fill,
+                order_id=order.id,
+                portfolio_id=decision.portfolio_id,
+                session_date=decision.session_date,
+            )
+        if decision.refused:
+            record_entry(
+                self.session,
+                kind=JournalEntryKind.DECLINED,
+                session_date=decision.session_date,
+                portfolio_id=decision.portfolio_id,
+                summary=f"{len(decision.refused)} candidate(s) refused by risk",
+                rejected=tuple(
+                    RejectedCandidate(instrument_id=iid, score=0.0, reason=rule)
+                    for iid, rule in decision.refused
+                ),
+            )

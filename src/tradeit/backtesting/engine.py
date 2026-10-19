@@ -74,8 +74,9 @@ from tradeit.core.enums import (
 )
 from tradeit.core.models import OhlcvBar
 from tradeit.execution.base import CostModel, Fill, FillModel, OrderRequest
+from tradeit.observability.base import DecisionRecorder, NullRecorder, RecordedDecision
 from tradeit.portfolio.base import PortfolioState, PositionState
-from tradeit.portfolio.cycle import EntryCandidate, PortfolioCycle
+from tradeit.portfolio.cycle import CyclePlan, EntryCandidate, PortfolioCycle
 from tradeit.portfolio.stops import ExitSignal, StopContext
 from tradeit.reproducibility.versioning import RunManifest
 
@@ -187,6 +188,20 @@ class EventDrivenEngine:
     #: validates and never reproduces, which is fabricated provenance wearing
     #: the shape of the real thing.
     manifest: RunManifest
+    #: Where this run's decisions are written, if anywhere.
+    #:
+    #: Defaults to :class:`~tradeit.observability.record.NullRecorder`, and that
+    #: default is deliberate rather than provisional: **a backtest over
+    #: scripted bars should write nothing**, and most runs are that -- unit
+    #: tests, and the thousands of Stage A scans this project performs.
+    #:
+    #: A protocol rather than a `Session`, so this class stays storage-free.
+    #: Taking a session would put the database inside the component whose
+    #: independence from it is why its tests are fast and its behaviour
+    #: reproducible. Phase 10's assistant "is only as honest as the record
+    #: beneath it", and this is the seam that lets a record exist without the
+    #: engine knowing whether one does.
+    recorder: DecisionRecorder = field(default_factory=NullRecorder)
     #: Per-instrument recovery, overriding :attr:`delisting_recovery` for the
     #: holdings it names.
     #:
@@ -380,8 +395,56 @@ class EventDrivenEngine:
             state.pending.append(
                 self._entry_order(entry.candidate, entry.quantity, bars, session_date)
             )
+        self._hand_over(state, plan, candidates, session_date)
 
     # -- order construction -------------------------------------------------
+
+    def _hand_over(
+        self,
+        state: _RunState,
+        plan: CyclePlan,
+        candidates: Sequence[EntryCandidate],
+        session_date: dt.date,
+    ) -> None:
+        """Give the recorder what this session decided, and nothing derived.
+
+        Called once per session, after the plan is applied. It reports the
+        orders **as placed** and the refusals **as the risk engine returned
+        them**, so the record cannot disagree with what happened — a recorder
+        handed reconstructed arguments would be writing a second opinion.
+
+        ``NullRecorder`` makes this free, so there is no `if recorder` guard:
+        a conditional would be a second code path that only the recording runs
+        exercise, and the one thing worse than an unwritten record is a record
+        written by a path no test covers.
+        """
+        orders = tuple(item.order for item in state.pending)
+        refused = tuple(
+            (entry.candidate.instrument_id, entry.verdict.binding_rule or "refused")
+            for entry in plan.declined
+            if entry.verdict.binding_rule is not None or entry.verdict.blocking_rules
+        )
+        self.recorder.record(
+            RecordedDecision(
+                session_date=session_date,
+                portfolio_id=1,
+                scores=tuple(
+                    (
+                        candidate.instrument_id,
+                        str(candidate.score.direction),
+                        candidate.score.total,
+                        {
+                            component.name: component.contribution
+                            for component in candidate.score.components
+                        },
+                    )
+                    for candidate in candidates
+                    if candidate.score.components
+                ),
+                orders=orders,
+                refused=refused,
+            )
+        )
 
     @staticmethod
     def _context(

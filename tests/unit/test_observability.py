@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from tradeit.core.enums import OrderSide, OrderStatus, OrderType
 from tradeit.execution.base import Fill, OrderRequest
 from tradeit.execution.journal import JournalEntryKind, record_entry
-from tradeit.observability import (
+from tradeit.observability.record import (
     reconstruct,
     record_execution,
     record_order,
@@ -365,3 +365,91 @@ def test_executions_are_scoped_to_this_portfolios_orders(db_session: Session) ->
         "another portfolio's execution appeared in this portfolio's chain"
     )
     assert chain.executions[0].order_id == mine.id
+
+
+def test_importing_the_engine_pulls_in_no_database_machinery() -> None:
+    """The seam's whole purpose, asserted rather than trusted.
+
+    `EventDrivenEngine` takes a `DecisionRecorder` so a run's decisions can be
+    persisted without the engine knowing a database exists. That property is
+    invisible at the call site that breaks it: `base` was split out of `record`
+    to protect it, and the split achieved **nothing** at first, because a
+    submodule import executes the package `__init__` and that file re-exported
+    `record`. Importing `observability.base` therefore still dragged in 150
+    SQLAlchemy modules.
+
+    Measured in a subprocess because `sys.modules` is process-wide: by the time
+    this file's other tests have run, SQLAlchemy is loaded regardless of who
+    asked for it, and an in-process check would pass whatever the engine
+    imports.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[2] / "src"
+    probe = (
+        f"import sys; sys.path.insert(0, {str(src)!r});"
+        "import tradeit.backtesting.engine;"
+        "print(len([m for m in sys.modules if m.startswith('sqlalchemy')]))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    count = int(result.stdout.strip())
+    assert count == 0, (
+        f"importing the engine pulled in {count} sqlalchemy modules; the recorder seam "
+        "has been re-coupled to storage, most likely by a convenience re-export in "
+        "tradeit/observability/__init__.py"
+    )
+
+
+def test_a_fill_with_no_recorded_order_is_refused(db_session: Session) -> None:
+    """An execution that cannot be traced to its order defeats the chain."""
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    recorder = DatabaseRecorder(session=db_session, run_manifest_id=1)
+    with pytest.raises(ValueError, match="defeats the chain"):
+        recorder.record(
+            RecordedDecision(
+                session_date=SESSION,
+                portfolio_id=1,
+                fills=(("never-placed", _fill()),),
+            )
+        )
+
+
+def test_the_database_recorder_writes_the_whole_session(db_session: Session) -> None:
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    recorder = DatabaseRecorder(session=db_session, run_manifest_id=1)
+    request = _request()
+    recorder.record(
+        RecordedDecision(
+            session_date=SESSION,
+            portfolio_id=1,
+            scores=((7, "long", 0.42, {"ma_spread": 0.42}),),
+            orders=(request,),
+            fills=((request.client_order_id, _fill()),),
+            refused=((9, "portfolio_heat"),),
+        )
+    )
+    db_session.flush()
+
+    chain = reconstruct(db_session, portfolio_id=1, session_date=SESSION)
+    assert len(chain.scores) == 1
+    assert len(chain.orders) == 1
+    assert len(chain.executions) == 1
+    assert len(chain.journal) == 1, "the refusal was not journalled"
+    assert chain.journal[0].entry_type == "declined"
+
+
+def test_the_null_recorder_is_the_engines_default() -> None:
+    """A backtest over scripted bars should write nothing, and most runs are that."""
+    from tradeit.backtesting.engine import EventDrivenEngine
+    from tradeit.observability.base import NullRecorder
+
+    field = next(f for f in EventDrivenEngine.__dataclass_fields__.values() if f.name == "recorder")
+    assert field.default_factory is NullRecorder  # type: ignore[misc]
