@@ -8,6 +8,8 @@ crossover and the ATR stop that sizes §28's equal-risk arm.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
 import pytest
@@ -22,6 +24,25 @@ from tradeit.core.enums import Bartimeframe, KnowledgeTimeSource
 from tradeit.core.models import OhlcvBar
 
 START = dt.date(2020, 1, 1)
+
+
+@dataclass
+class _Script:
+    """A minimal SessionData, enough for `build_engine` to assemble against."""
+
+    bars_by_session: dict[dt.date, dict[int, OhlcvBar]]
+
+    def sessions(self, start: dt.date, end: dt.date) -> Sequence[dt.date]:
+        return sorted(d for d in self.bars_by_session if start <= d <= end)
+
+    def bars(self, session_date: dt.date) -> Mapping[int, OhlcvBar]:
+        return self.bars_by_session.get(session_date, {})
+
+    def candidates(self, session_date: dt.date) -> Sequence[object]:
+        return []
+
+    def splits_on(self, session_date: dt.date) -> Mapping[int, Decimal]:
+        return {}
 
 
 def _bar(day: dt.date, close: float) -> OhlcvBar:
@@ -182,3 +203,87 @@ class TestTheOtherThreeBaselines:
     def test_a_stop_at_or_above_the_close_is_refused(self) -> None:
         """A stop that cannot size a position is dropped, not widened."""
         assert BuyAndHold(stop_pct=Decimal(1))(START, self._bars(START, {1: 100.0})) == []
+
+
+def test_build_engine_defaults_to_the_unconstrained_behaviour() -> None:
+    """Every scoreboard result came through `build_engine`, so the default must
+    not move.
+
+    `extra_rules` and `ranker` were added 2026-10-19 so the archive could be
+    re-run under constraints that did not exist when it was produced. They are
+    optional precisely so that calling the function the way it was called then
+    reproduces what it produced then.
+    """
+    import datetime as dt
+    from decimal import Decimal
+
+    from tradeit.backtesting.baselines import build_engine
+    from tradeit.core.enums import ArtifactKind
+    from tradeit.portfolio.allocation import DiversityAwareRanker
+    from tradeit.reproducibility.versioning import ArtifactVersion, RunManifest
+    from tradeit.strategy.config import StrategyConfig
+
+    config = StrategyConfig(name="t")
+    as_of = dt.datetime(2015, 1, 1, tzinfo=dt.UTC)
+    manifest = RunManifest(
+        run_id="t",
+        as_of=as_of,
+        strategy_config=config.version(as_of),
+        data_snapshot=ArtifactVersion.of(ArtifactKind.DATA_SNAPSHOT, "t", {}, as_of),
+        feature_set=None,
+        model=None,
+        code_version="t",
+        created_at=as_of,
+    )
+    engine = build_engine(
+        config,
+        _Script(bars_by_session={}),  # type: ignore[arg-type]
+        manifest,
+        participation=Decimal("0.02"),
+        risk_free_rate=0.0,
+        delisting_after_sessions=10,
+        delisting_recovery=Decimal(1),
+    )
+    assert isinstance(engine.cycle.ranker, DiversityAwareRanker)
+    assert engine.cycle.ranker.correlation_weight == 0.0
+    assert len(engine.cycle.engine.rule_set) == 4
+
+
+def test_build_engine_installs_extra_rules_and_a_ranker_when_given_them() -> None:
+    import datetime as dt
+    from decimal import Decimal
+
+    from tradeit.backtesting.baselines import build_engine
+    from tradeit.core.enums import ArtifactKind
+    from tradeit.opportunity import OpportunityFitRanker
+    from tradeit.reproducibility.versioning import ArtifactVersion, RunManifest
+    from tradeit.risk.contextual import SectorExposureRule
+    from tradeit.strategy.config import StrategyConfig
+
+    config = StrategyConfig(name="t")
+    as_of = dt.datetime(2015, 1, 1, tzinfo=dt.UTC)
+    manifest = RunManifest(
+        run_id="t",
+        as_of=as_of,
+        strategy_config=config.version(as_of),
+        data_snapshot=ArtifactVersion.of(ArtifactKind.DATA_SNAPSHOT, "t", {}, as_of),
+        feature_set=None,
+        model=None,
+        code_version="t",
+        created_at=as_of,
+    )
+    ranker = OpportunityFitRanker(risk=config.risk, sizing=config.sizing, sectors={1: "A"})
+    engine = build_engine(
+        config,
+        _Script(bars_by_session={}),  # type: ignore[arg-type]
+        manifest,
+        participation=Decimal("0.02"),
+        risk_free_rate=0.0,
+        delisting_after_sessions=10,
+        delisting_recovery=Decimal(1),
+        extra_rules=(SectorExposureRule(config=config.risk, sectors={1: "A"}),),
+        ranker=ranker,
+    )
+    assert engine.cycle.ranker is ranker
+    assert len(engine.cycle.engine.rule_set) == 5
+    assert any(isinstance(rule, SectorExposureRule) for rule in engine.cycle.engine.rule_set)

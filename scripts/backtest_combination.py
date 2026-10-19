@@ -37,7 +37,7 @@ import numpy as np
 
 sys.path.insert(0, "src")
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.backtesting.base import BacktestResult, BacktestSpec
@@ -54,6 +54,7 @@ WIPED = {"bankrupt"}
 
 from tradeit.research01.fundamental_signals import FundamentalHistory, first_filed
 from tradeit.research01.series import price_series
+from tradeit.risk.contextual import SectorExposureRule
 from tradeit.signals.sampling import common_grid
 from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import SecurityFundamentalFact
@@ -64,6 +65,12 @@ START = dt.date(2013, 1, 2)
 END = dt.date(2019, 12, 31)
 WARMUP_FROM = dt.date(2012, 1, 3)
 HORIZON = 63
+SECTORS_AS_OF = text("""
+    SELECT instrument_id, sector FROM sectors
+    WHERE scheme = 'SIC' AND valid_from <= :as_of
+      AND (valid_to IS NULL OR valid_to > :as_of)
+""")
+
 SEED = 20260918
 SAMPLE_CAP = 500
 FLOOR = Decimal(1_000_000)
@@ -195,6 +202,20 @@ def surprise_scores(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="sqlite:///research01.sqlite")
+    # Added 2026-10-19. §46 and §48 were produced on an UNCONSTRAINED book:
+    # `sectors` held zero rows, no correlation source existed, and
+    # `build_engine` hard-coded correlation_weight=0.0. Both inputs now exist,
+    # so the archive can be re-measured under the constraints the platform
+    # actually applies. Off by default, because every published result must
+    # stay reproducible by running this script the way it was run then.
+    ap.add_argument(
+        "--constrained",
+        action="store_true",
+        help=(
+            "install the sector limit and the opportunity-fit ranker, which did "
+            "not exist when the archived results were produced"
+        ),
+    )
     ap.add_argument("--spans", required=True)
     ap.add_argument("--sample", type=int, required=True, choices=range(4))
     ap.add_argument("--pilot", type=int, default=0, help="first N securities; mechanics only")
@@ -328,6 +349,20 @@ def main() -> int:
         # With a measured map the bracket IS the residual: every classified
         # death already carries its own number, so looping the old pair would
         # differ only on securities the classifier did not cover.
+        sectors: dict[int, str] = {}
+        if args.constrained:
+            # As of the window's FIRST session and held fixed, the same stated
+            # simplification `backtest_sector_limit.py` records: 881 securities
+            # changed SIC code at some point, so a name reclassified mid-run
+            # keeps what it had when the run started.
+            sectors = {
+                int(instrument_id): str(sector)
+                for instrument_id, sector in session.execute(
+                    SECTORS_AS_OF, {"as_of": START.isoformat()}
+                ).all()
+            }
+            print(f"constrained: {len(sectors):,} instruments classified as of {START}")
+
         recoveries = (Decimal(str(args.residual)),) if args.causes else RECOVERIES
         for recovery in recoveries:
             for cost_label, cost_override in COSTS.items():
@@ -362,6 +397,8 @@ def main() -> int:
                     stop_label += "" if args.regime is None else f"-gate{args.regime}"
                     stop_label += "" if args.causes is None else f"-measured{args.residual:g}"
                     label = f"s{args.sample}-{arm.value}-{cost_label}-r{recovery}-{stop_label}"
+                    if args.constrained:
+                        label += "-constrained"
                     engine = build_engine(
                         config,
                         data,
@@ -371,6 +408,11 @@ def main() -> int:
                         delisting_after_sessions=DELISTING_AFTER,
                         delisting_recovery=recovery,
                         delisting_recovery_by_instrument=measured,
+                        extra_rules=(
+                            (SectorExposureRule(config=config.risk, sectors=sectors),)
+                            if args.constrained
+                            else ()
+                        ),
                     )
                     spec = BacktestSpec(
                         name=f"combo/{label}",

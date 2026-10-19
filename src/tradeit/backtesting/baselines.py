@@ -58,6 +58,7 @@ from tradeit.core.enums import SignalDirection
 from tradeit.core.models import OhlcvBar
 from tradeit.execution.simulation import BarFillModel, ParticipationCostModel
 from tradeit.portfolio.allocation import DiversityAwareRanker
+from tradeit.portfolio.base import AllocationRanker
 from tradeit.portfolio.cycle import EntryCandidate, PortfolioCycle
 from tradeit.portfolio.sizing import RiskBasedSizer
 from tradeit.portfolio.stops import StopLadder
@@ -424,6 +425,8 @@ def build_engine(
     delisting_after_sessions: int,
     delisting_recovery: Decimal,
     delisting_recovery_by_instrument: Mapping[int, Decimal] | None = None,
+    extra_rules: Sequence[RiskRule] = (),
+    ranker: AllocationRanker | None = None,
 ) -> EventDrivenEngine:
     """Assemble the live components behind a simulated venue.
 
@@ -431,12 +434,23 @@ def build_engine(
     and those are required arguments rather than defaults for the usual reason:
     participation, the risk-free rate and both delisting assumptions each change
     the answer, and none of them should be inherited by accident.
+
+    ``extra_rules`` and ``ranker`` are **both optional and both default to the
+    unconstrained behaviour**, added 2026-10-19 so the archive can be re-run
+    under the constraints that now exist without any existing result changing.
+    That is the whole reason they are optional rather than required: every
+    scoreboard result produced through this function must stay reproducible by
+    calling it the way it was called then.
+
+    A caller that supplies either is asking a different question from the
+    archive's, and it is the caller's job to say so in the result.
     """
     rules: tuple[RiskRule, ...] = (
         PortfolioHeatRule(config=config.risk),
         MaxPositionsRule(config=config.risk),
         PositionSizeRule(max_position_pct_of_equity=config.sizing.max_position_pct_of_equity),
         GrossExposureRule(config=config.risk),
+        *extra_rules,
     )
     return EventDrivenEngine(
         cycle=PortfolioCycle(
@@ -467,7 +481,8 @@ def build_engine(
             # what every published result means and that is a scoped
             # proposition, not a default. A caller who wants a constrained book
             # constructs its own ranker and says so in the result.
-            ranker=DiversityAwareRanker(
+            ranker=ranker
+            or DiversityAwareRanker(
                 correlation_weight=0.0, sector_penalty_per_holding=0.0, held_sectors={}
             ),
             ladder=StopLadder(config=config.exits),
