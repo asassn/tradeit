@@ -4462,3 +4462,73 @@ produced twice before.
 and none is retracted. A diversification limit refuses or shrinks positions; it
 cannot add return, so their absence cannot have inflated anything. Re-running
 them under the constraint is now possible and costs no ledger budget.
+
+---
+
+## §58 — §46 re-measured under the constraints that now exist, and why §48 was not — 2026-10-19
+
+**Not a trial.** No hypothesis, no registration, ledger unchanged at 144. A
+re-measurement of a design-window result under a configuration that did not
+exist when it was produced.
+
+§46 and §48 were run on an **unconstrained book**: `sectors` held zero rows, no
+correlation source existed, and `build_engine` hard-coded
+`correlation_weight=0.0` by one uncommented line (§54, §57). Both inputs now
+exist, so the question is answerable: *a diversification limit refuses or
+shrinks positions and cannot add return — how much does it take away?*
+
+### First, the re-run reproduces §46 exactly
+
+| | sample 0 | 1 | 2 | 3 | mean |
+|---|---|---|---|---|---|
+| **§46 as recorded, 2026-09-22** | 6.68% | 4.50% | 4.82% | 6.95% | **5.74%** |
+| **re-run unconstrained, 2026-10-19** | 6.68% | 4.50% | 4.82% | 6.95% | **5.74%** |
+
+Identical to two decimals on every sample, a month later, after the corpus
+gained a sector table and 1,807 recovered splits. **That is the reproducibility
+claim actually being honoured**, and it is reported first because without it the
+comparison below would be measuring two different things.
+
+### The constraint, on the same arms (CAGR, recovery 1.0, base costs)
+
+| arm | unconstrained | constrained | change |
+|---|---|---|---|
+| **combined** | 5.74% | **6.10%** | **+0.36pp** |
+| calm | 3.06% | 3.05% | −0.01pp |
+| surprise | 3.31% | 3.21% | −0.10pp |
+| random | 3.19% | 3.04% | −0.15pp |
+
+Across all 64 arms (4 samples × 4 arms × 2 cost models × 2 recovery
+assumptions): **every one moved**, 27 worse, 37 better, **mean change in total
+return +0.04%** — indistinguishable from zero against per-arm swings of up to
+±4%.
+
+### What this does and does not say
+
+**The constraint costs the §46 result nothing**, and the combined arm's margin
+over its three controls is slightly *wider* under it. That is a genuinely
+useful negative: the diversification limit can be left installed without
+re-litigating the archive.
+
+**It does not make §46 a pass.** §48 — the held-out test — already failed to
+replicate, and nothing here touches that. A design-window result that survives
+a constraint is still a design-window result.
+
+**Where arms improved, the mechanism is worth naming.** A sector cap cannot add
+return by refusing a trade, but it **resizes** as readily as it refuses (§54),
+and trade counts moved *up* on several arms: a shrunk position frees capital the
+next candidate takes. So "better" sometimes means "declined a loser" and
+sometimes means "redeployed sooner", and this comparison cannot separate them.
+
+### §48 was deliberately not re-run, and that is the point
+
+Re-running §48 would mean **reading the held-out window again under a new
+configuration**, and that is a new look however it is labelled. The ledger
+exists to count looks; `research01/holdout.py` refuses the window without a
+committed pre-registration. "It is only a re-measurement" is exactly the
+argument that would turn one registered test into unlimited free ones.
+
+So the held-out question — *does the combination replicate out of sample under
+the constraint?* — **stays unanswered**, and answering it costs a registration
+and a trial. §46's design window was re-read freely because it is the design
+window; that asymmetry is the whole architecture.
