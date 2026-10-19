@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from tradeit.cli_data import add_data_commands
 from tradeit.cli_edgar import add_edgar_commands
+from tradeit.cli_status import add_status_commands
 from tradeit.config import get_settings
 from tradeit.core.calendar import get_calendar
 from tradeit.core.clock import AsOfClock
@@ -169,6 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--end", default=None, help="ISO end date (default: today)")
     demo.set_defaults(func=cmd_demo_ingest)
 
+    add_status_commands(sub)
     add_data_commands(sub)
     add_edgar_commands(sub)
     return parser
