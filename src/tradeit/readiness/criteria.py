@@ -382,7 +382,12 @@ DEMOTION_CRITERIA: tuple[Criterion, ...] = (
                 "OWED: strategy-decay detection is a named Phase 12 requirement and "
                 "no written decision says how far live may fall below expectation "
                 "before a strategy comes down. It is the single most consequential "
-                "number in this module and the one most obviously wrong to invent."
+                "number in this module and the one most obviously wrong to invent. "
+                "The MEASUREMENT now exists -- readiness/decay.py produces the z of "
+                "realised against expected, so `live_vs_expected` can be fed. What is "
+                "owed is the bar, in units of that z: at -2 a strategy comes down on "
+                "ordinary noise roughly one time in forty, and at -4 it may bleed for "
+                "a long while first. That trade-off is the owner's."
             ),
         ),
         applies_from=StrategyState.LIVE,
