@@ -4532,3 +4532,38 @@ So the held-out question — *does the combination replicate out of sample under
 the constraint?* — **stays unanswered**, and answering it costs a registration
 and a trial. §46's design window was re-read freely because it is the design
 window; that asymmetry is the whole architecture.
+
+### Correction, 2026-10-19 — the held-out question is not open, and §58 implied it was
+
+§58 above ends by saying the held-out question "stays unanswered, and answering
+it costs a registration and a trial". **The second half is wrong**, and it was
+wrong when it was written.
+
+`prereg/COMBINATION_CONFIRMATION_2026-09-22.md` names the consequence of a
+failure in advance:
+
+> FAILED: the combination line closes. No third window, no re-weighting, no
+> other pair drawn from the measured set.
+
+§48 was graded **FAILED**, and §48 records the consequence in those words:
+*"Per the registration, the combination line closes. No third window, no
+re-weighting, no other pair drawn from the measured set."*
+
+**Re-running the combination on 2020–2025 under the constraint is a third
+window.** It is not made into something else by the configuration differing,
+and "the constraint is new" is precisely the kind of reason the clause exists to
+refuse — a closed line that reopens whenever some input changes was never
+closed.
+
+So the trial was **not** spent, and the question is not available at the price
+of a registration. It is available only at the price of **the owner explicitly
+reversing a committed registration**, which is a different and much larger
+thing, and one that should be done knowing that is what it is rather than
+slipped in as a routine next step.
+
+**What was nearly lost.** The registration's licensing clause is the mechanism
+that stops a failed hypothesis being retried until it passes. An agent that
+proposes a retry, gets a yes, and runs it has defeated that mechanism without
+anybody deciding to — and the yes was given on a recommendation that did not
+mention the clause existed. Recorded here because the near-miss is more
+instructive than the result would have been.
