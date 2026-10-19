@@ -41,10 +41,45 @@ succeeding.
 |---|---|---|---|
 | 1 | **9** — portfolio backtesting & Monte Carlo | **CLOSED 2026-10-17** — see [`PHASE_09_CLOSURE_2026-10-17.md`](PHASE_09_CLOSURE_2026-10-17.md) | ~~2026-11-07~~ **done** |
 | 2 | **8** — portfolio construction, risk & compounding | **CLOSED 2026-10-17** — see [`PHASE_08_CLOSURE_2026-10-17.md`](PHASE_08_CLOSURE_2026-10-17.md) | ~~2026-10-31~~ **done** |
-| 3 | **7** — opportunity scoring, **Swing only** | **audited 2026-10-17, not closed** — see [`PHASE_07_AUDIT_2026-10-17.md`](PHASE_07_AUDIT_2026-10-17.md). Built and exercised; three of five refusal paths still unmeasured | **2026-11-07** |
+| 3 | **7** — opportunity scoring, **Swing only** | **CLOSED 2026-10-19** — see [`PHASE_07_AUDIT_2026-10-17.md`](PHASE_07_AUDIT_2026-10-17.md) and ADR-0027. Four refusal paths fire on corpus data, the fifth is proven unreachable by construction, and score 3 is wired into selection | ~~2026-11-07~~ **done** |
 | 3b | **7** — opportunity scoring, **Day** | **blocked, and not by effort**: no `intraday-01` corpus exists, and scoring the Day mandate on Daily bars would collapse Day into Swing | **undated** |
 | 4 | **11** — paper trading execution | **CLOSED 2026-10-18** — see [`PHASE_11_AUDIT_2026-10-18.md`](PHASE_11_AUDIT_2026-10-18.md). Built this week, not pre-existing; 2,516 of 2,516 sessions reconciled clean with the broker owning the book | ~~2026-11-21~~ **done** |
-| 5 | **12** — readiness framework & production readiness | `RESEARCH → ROBUST_BACKTEST → PAPER → LIMITED_LIVE → SCALED_LIVE`, demotion, risk controls outside a strategy's reach, explainability | **2026-11-28** |
+| 5 | **12** — readiness framework & production readiness | **MECHANISMS COMPLETE 2026-10-19**, not closed — see [`PHASE_12_AUDIT_2026-10-18.md`](PHASE_12_AUDIT_2026-10-18.md). Framework, the three controls, decay monitor, `tradeit status`, [`RUNBOOK.md`](RUNBOOK.md) and the observability writers all built. **Owed: four approved thresholds (owner's), and live-system monitoring and incident response, which cannot honestly be written before a live system exists** | **2026-11-28** |
+
+### Closed out 2026-10-19 — Track A is materially ahead, and what is left is not effort
+
+**Four of Track A's five rows are done**, and the fifth has every mechanism
+built. Measured rather than estimated:
+
+| phase | dated | closed |
+|---|---|---|
+| 9 — portfolio backtesting | 2026-11-07 | 2026-10-17 |
+| 8 — portfolio construction & risk | 2026-10-31 | 2026-10-17 |
+| 11 — paper trading execution | 2026-11-21 | 2026-10-18 |
+| 7 — opportunity scoring (Swing) | 2026-11-07 | 2026-10-19 |
+| 12 — readiness & production readiness | 2026-11-28 | mechanisms 2026-10-19 |
+
+**Phase 7 closes for Swing only**, and the Day row stays undated: no intraday
+corpus exists, and scoring the Day mandate on Daily bars would collapse it into
+Swing. That is unchanged and is not a scheduling problem.
+
+**Phase 12 is deliberately not marked closed.** Everything buildable is built —
+framework, controls, decay monitor, status command, runbook, observability. What
+remains is two things neither of which is work:
+
+1. **Four approved thresholds.** They block rather than defaulting, by design,
+   and they are the owner's decision. **None is currently binding**:
+   `ma_cross_baseline` fails at `out_of_sample_testing` on `beats_baselines`,
+   several rungs below where any of them apply.
+2. **Live-system monitoring and incident response.** Writing a procedure for an
+   incident class that cannot yet occur produces a document that is wrong by the
+   time it is needed. Owed when a strategy first reaches `LIMITED_LIVE`.
+
+**So the honest completion estimate for everything not gated on a decision is
+early November**, three weeks inside the dated plan. The platform will reach
+that point with **no validated strategy to run on it** — Track B is paused at a
+data-access decision with the ledger unchanged at 144 — and that was already
+true and is stated here rather than discovered at the gate.
 
 ### Amended 2026-10-18 — Phase 11 closed, and this one was actually built
 
