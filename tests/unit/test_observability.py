@@ -102,7 +102,9 @@ def test_an_order_row_cannot_disagree_with_the_request_that_was_sent(
 ) -> None:
     """Takes the OrderRequest rather than loose fields, so the two cannot drift."""
     request = _request()
-    record_order(db_session, request, status=OrderStatus.NEW, broker_order_id="b-1")
+    record_order(
+        db_session, request, submitted_at=FILLED_AT, status=OrderStatus.NEW, broker_order_id="b-1"
+    )
     db_session.flush()
     row = db_session.query(Order).one()
     assert row.client_order_id == request.client_order_id
@@ -123,7 +125,7 @@ def test_an_empty_intent_is_stored_as_null_not_as_an_empty_string(
         order_type=OrderType.MARKET,
         quantity=Decimal(10),
     )
-    record_order(db_session, request)
+    record_order(db_session, request, submitted_at=FILLED_AT)
     db_session.flush()
     assert db_session.query(Order).one().intent is None
 
@@ -133,9 +135,9 @@ def test_the_unique_client_order_id_is_enforced_by_the_database(
 ) -> None:
     """The column is unique=True, which is why the engine's ids had to carry
     their session -- see PHASE_11_AUDIT_2026-10-18."""
-    record_order(db_session, _request())
+    record_order(db_session, _request(), submitted_at=FILLED_AT)
     db_session.flush()
-    record_order(db_session, _request())
+    record_order(db_session, _request(), submitted_at=FILLED_AT)
     with pytest.raises(Exception):
         db_session.flush()
 
@@ -143,7 +145,7 @@ def test_the_unique_client_order_id_is_enforced_by_the_database(
 def test_an_execution_is_tied_to_the_order_by_database_id(db_session: Session) -> None:
     """Not the broker's string: a chain tied by a vendor identifier breaks the
     moment a second venue uses the same format."""
-    order = record_order(db_session, _request())
+    order = record_order(db_session, _request(), submitted_at=FILLED_AT)
     db_session.flush()
     record_execution(
         db_session,
@@ -163,7 +165,7 @@ def test_an_execution_is_tied_to_the_order_by_database_id(db_session: Session) -
 def test_partial_fills_are_separate_rows(db_session: Session) -> None:
     """`Fill`'s own requirement: the average price of a position built across
     three fills at three prices is only reconstructible if all three were kept."""
-    order = record_order(db_session, _request())
+    order = record_order(db_session, _request(), submitted_at=FILLED_AT)
     db_session.flush()
     for quantity, price in ((40, "101.00"), (35, "101.50"), (25, "102.00")):
         record_execution(
@@ -229,7 +231,7 @@ def test_nothing_commits_so_the_record_cannot_outlive_a_rollback(
 ) -> None:
     """A chain that survived a rollback would describe orders never placed --
     worse than none, because it is confidently wrong."""
-    record_order(db_session, _request())
+    record_order(db_session, _request(), submitted_at=FILLED_AT)
     record_score(
         db_session,
         instrument_id=7,
@@ -259,7 +261,7 @@ def test_reconstruct_names_the_links_that_hold_nothing(db_session: Session) -> N
 
 
 def test_a_fully_recorded_session_walks_end_to_end(db_session: Session) -> None:
-    order = record_order(db_session, _request())
+    order = record_order(db_session, _request(), submitted_at=FILLED_AT)
     db_session.flush()
     record_score(
         db_session,
@@ -299,7 +301,7 @@ def test_a_partial_chain_reports_exactly_which_link_is_absent(
     """The informative case: orders exist, executions do not. That is a real
     operational state -- orders placed and nothing filled -- and it must read
     differently from orders never having been written."""
-    record_order(db_session, _request())
+    record_order(db_session, _request(), submitted_at=FILLED_AT)
     db_session.flush()
     chain = reconstruct(db_session, portfolio_id=1, session_date=SESSION)
     assert "orders" not in chain.missing
@@ -335,7 +337,7 @@ def test_executions_are_scoped_to_this_portfolios_orders(db_session: Session) ->
     other test in this file: they only ever hold executions belonging to the
     order under test, so the scoping was never exercised.
     """
-    mine = record_order(db_session, _request("mine-1"))
+    mine = record_order(db_session, _request("mine-1"), submitted_at=FILLED_AT)
     theirs = Order(
         portfolio_id=99,
         instrument_id=7,
@@ -453,3 +455,85 @@ def test_the_null_recorder_is_the_engines_default() -> None:
 
     field = next(f for f in EventDrivenEngine.__dataclass_fields__.values() if f.name == "recorder")
     assert field.default_factory is NullRecorder  # type: ignore[misc]
+
+
+def test_orders_are_scoped_to_the_session_they_were_placed_on(
+    db_session: Session,
+) -> None:
+    """The defect that made a first real run report an impossible number.
+
+    `orders` has no `session_date` column, so `reconstruct` filtered on
+    portfolio alone and returned every order the portfolio had ever placed. On
+    504 real sessions it reported **189 orders on a single session** and "504 of
+    504 sessions can be walked end to end" -- the second being true only because
+    the first was wrong. The fix is two parts: the recorder stamps
+    `submitted_at` from the session, and the query bounds on it.
+    """
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    recorder = DatabaseRecorder(session=db_session, run_manifest_id=1)
+    monday, tuesday = dt.date(2015, 6, 1), dt.date(2015, 6, 2)
+    recorder.record(
+        RecordedDecision(session_date=monday, portfolio_id=1, orders=(_request("mon-1"),))
+    )
+    recorder.record(
+        RecordedDecision(
+            session_date=tuesday,
+            portfolio_id=1,
+            orders=(_request("tue-1"), _request("tue-2")),
+        )
+    )
+    db_session.flush()
+
+    assert db_session.query(Order).count() == 3
+    assert [o.client_order_id for o in reconstruct(db_session, 1, monday).orders] == ["mon-1"]
+    assert sorted(o.client_order_id for o in reconstruct(db_session, 1, tuesday).orders) == [
+        "tue-1",
+        "tue-2",
+    ]
+
+
+def test_submitted_at_is_never_left_null_by_the_recorder(db_session: Session) -> None:
+    """Because it is the only thing tying an order to its session."""
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    DatabaseRecorder(session=db_session, run_manifest_id=1).record(
+        RecordedDecision(session_date=SESSION, portfolio_id=1, orders=(_request(),))
+    )
+    db_session.flush()
+    assert db_session.query(Order).one().submitted_at is not None
+
+
+def test_a_fill_settling_a_later_session_finds_its_earlier_order(
+    db_session: Session,
+) -> None:
+    """The ordinary case, and the one a single-call map cannot serve.
+
+    The engine settles yesterday's decisions against today's prices, so by the
+    time an execution exists its order was written by a previous `record` call.
+    A first version looked only at the current call's map and would have refused
+    every real execution while passing its own unit test, where order and fill
+    are handed over together.
+    """
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    recorder = DatabaseRecorder(session=db_session, run_manifest_id=1)
+    request = _request("placed-monday")
+    recorder.record(
+        RecordedDecision(session_date=dt.date(2015, 6, 1), portfolio_id=1, orders=(request,))
+    )
+    db_session.flush()
+    recorder.record(
+        RecordedDecision(
+            session_date=dt.date(2015, 6, 2),
+            portfolio_id=1,
+            fills=((request.client_order_id, _fill()),),
+        )
+    )
+    db_session.flush()
+
+    row = db_session.query(Execution).one()
+    assert row.order_id == db_session.query(Order).one().id

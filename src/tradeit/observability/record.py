@@ -118,9 +118,9 @@ def record_order(
     session: Session,
     request: OrderRequest,
     *,
+    submitted_at: dt.datetime,
     status: OrderStatus = OrderStatus.PENDING_NEW,
     broker_order_id: str | None = None,
-    submitted_at: dt.datetime | None = None,
     run_manifest_id: int | None = None,
     rejection_reason: str | None = None,
 ) -> Order:
@@ -317,8 +317,23 @@ def reconstruct(session: Session, portfolio_id: int, session_date: dt.date) -> D
         .scalars()
         .all()
     )
+    # Scoped to the session via `submitted_at`, because `orders` carries no
+    # session_date column. Filtering on portfolio alone returned every order the
+    # portfolio had ever placed: a first run reported 189 orders on a single
+    # session, which is impossible, and reported '504 of 504 sessions can be
+    # walked end to end' -- true only because every session returned every order.
+    day_start = dt.datetime.combine(session_date, dt.time(0, 0), tzinfo=dt.UTC)
+    day_end = day_start + dt.timedelta(days=1)
     orders = tuple(
-        session.execute(select(Order).where(Order.portfolio_id == portfolio_id)).scalars().all()
+        session.execute(
+            select(Order).where(
+                Order.portfolio_id == portfolio_id,
+                Order.submitted_at >= day_start,
+                Order.submitted_at < day_end,
+            )
+        )
+        .scalars()
+        .all()
     )
     order_ids = [order.id for order in orders]
     executions: tuple[Execution, ...] = ()
@@ -389,6 +404,25 @@ class DatabaseRecorder:
     session: Session
     run_manifest_id: int
 
+    def _order_by_client_id(self, client_order_id: str) -> Order | None:
+        """The order row for an id placed on an earlier session.
+
+        **Needed because fills arrive a session after the order was placed** —
+        the engine settles yesterday's decisions against today's prices, so by
+        the time an execution exists its order was written by a previous
+        `record` call and is not in this one's map. A first version looked only
+        at the current call and would have refused every real execution while
+        passing its own unit test, where order and fill are handed over
+        together.
+
+        Keyed on `client_order_id` because that column is `unique=True`, which
+        is what makes the lookup single-valued — and why the engine's ids had
+        to start carrying their session.
+        """
+        return self.session.execute(
+            select(Order).where(Order.client_order_id == client_order_id)
+        ).scalar_one_or_none()
+
     def record(self, decision: RecordedDecision) -> None:
         for instrument_id, direction, total, components in decision.scores:
             record_score(
@@ -401,12 +435,20 @@ class DatabaseRecorder:
                 run_manifest_id=self.run_manifest_id,
             )
         by_client: dict[str, Order] = {}
+        # `submitted_at` is stamped from the session rather than left NULL,
+        # because `orders` has no session_date column and this is the only
+        # thing tying an order to the day it was placed. Left NULL, a first
+        # run reported 189 orders on a single session -- impossible -- and
+        # '504 of 504 sessions can be walked end to end', true only because
+        # every session returned every order.
+        submitted = dt.datetime.combine(decision.session_date, dt.time(20, 0), tzinfo=dt.UTC)
         for request in decision.orders:
             by_client[request.client_order_id] = record_order(
                 self.session,
                 request,
                 status=OrderStatus.NEW,
                 run_manifest_id=self.run_manifest_id,
+                submitted_at=submitted,
             )
         if by_client:
             # Flushed so the order rows have ids, which `executions.order_id`
@@ -414,16 +456,15 @@ class DatabaseRecorder:
             # discards everything.
             self.session.flush()
         for client_order_id, fill in decision.fills:
-            order = by_client.get(client_order_id)
+            order = by_client.get(client_order_id) or self._order_by_client_id(client_order_id)
             if order is None:
-                # A fill for an order this session did not place. Refused
+                # A fill for an order that was never recorded anywhere. Refused
                 # rather than written with a null order: an execution that
                 # cannot be traced to its order is the link the chain exists
                 # to provide.
                 raise ValueError(
-                    f"fill for {client_order_id!r} has no order recorded in this "
-                    "session; an execution that cannot be traced to its order "
-                    "defeats the chain"
+                    f"fill for {client_order_id!r} has no recorded order; an "
+                    "execution that cannot be traced to its order defeats the chain"
                 )
             record_execution(
                 self.session,

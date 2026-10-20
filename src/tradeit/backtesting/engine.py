@@ -295,6 +295,7 @@ class EventDrivenEngine:
         self, state: _RunState, bars: Mapping[int, OhlcvBar], session_date: dt.date
     ) -> None:
         pending, state.pending = state.pending, []
+        state.settled.clear()
         for item in pending:
             bar = bars.get(item.order.instrument_id)
             if bar is None:
@@ -306,6 +307,7 @@ class EventDrivenEngine:
             fill = self.fills.simulate(item.order, bar, estimate)
             if fill is None:
                 continue
+            state.settled.append((item.order.client_order_id, fill))
             if item.order.side is OrderSide.BUY:
                 if item.candidate is not None and fill.price <= item.candidate.stop_price:
                     # The market gapped through the intended stop overnight, so
@@ -442,6 +444,7 @@ class EventDrivenEngine:
                     if candidate.score.components
                 ),
                 orders=orders,
+                fills=tuple(state.settled),
                 refused=refused,
             )
         )
@@ -599,6 +602,10 @@ class _RunState:
     #: about the strategy and not a quirk of the simulator.
     abandoned_entries: int = 0
     as_of: dt.datetime = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
+    #: Fills produced by this session's settle, with the client id that
+    #: caused them. Cleared each session: the recorder is handed what
+    #: happened *today*, not a growing history it would rewrite.
+    settled: list[tuple[str, Fill]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.cash = self.spec.initial_capital
