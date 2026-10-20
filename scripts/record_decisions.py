@@ -133,6 +133,18 @@ def main() -> int:
     ap.add_argument("--start", default="2015-01-02")
     ap.add_argument("--end", default="2016-12-30")
     ap.add_argument("--capital", type=Decimal, default=Decimal(100000))
+    # `MovingAverageCross` puts a raw spread ratio in OpportunityScore.total,
+    # which is not a score: `opportunity_scores` constrains total to [0, 1]
+    # (ck_score_range) and the ratio exceeds 1.0 whenever a 50-day mean doubles
+    # a 200-day one -- which a 2009-style recovery does. The 2015-2016 window
+    # happened to stay inside the range; 2003-2019 does not, and SQLite raised
+    # an opaque CHECK failure from inside a bulk insert.
+    #
+    # So the range is DECLARED here and printed with the result, exactly as
+    # ADR-0027 requires of the ranker. 0.5 as the upper bound means a 50%
+    # spread of the fast mean over the slow one maps to 1.0.
+    ap.add_argument("--score-lower", type=float, default=0.0)
+    ap.add_argument("--score-upper", type=float, default=0.5)
     args = ap.parse_args()
 
     if Path(args.record).resolve() == Path("research01.sqlite").resolve():
@@ -171,6 +183,10 @@ def main() -> int:
     manifest = _manifest(config, dt.datetime.now(dt.UTC), data.bar_count)
     manifest_id = _persist_manifest(record, manifest)
     print(f"manifest row {manifest_id} written first, because every score cites one")
+    print(
+        f"score range declared as [{args.score_lower}, {args.score_upper}]: the MA\n"
+        "  spread ratio is not a 0-1 score and ck_score_range requires one"
+    )
 
     engine = EventDrivenEngine(
         cycle=PortfolioCycle(
@@ -204,7 +220,11 @@ def main() -> int:
         delisting_after_sessions=10,
         delisting_recovery=Decimal(1),
         manifest=manifest,
-        recorder=DatabaseRecorder(session=record, run_manifest_id=manifest_id),
+        recorder=DatabaseRecorder(
+            session=record,
+            run_manifest_id=manifest_id,
+            score_range=(args.score_lower, args.score_upper),
+        ),
     )
     spec = BacktestSpec(
         name="ma_cross_baseline",
@@ -245,6 +265,17 @@ def main() -> int:
             "the run completed and wrote nothing. The recorder was not reached, and "
             "reporting an empty record as success is the failure this project keeps "
             "finding."
+        )
+
+    clamped = record.execute(
+        text("select count(*) from opportunity_scores where total >= 1.0 or total <= 0.0")
+    ).scalar()
+    if clamped:
+        print(
+            f'\n  {clamped:,} score(s) sit at a clamp bound. **1.0 does not mean "best\n'
+            '  possible"** -- it means at or beyond the declared ceiling, and the real\n'
+            "  value is unrecoverable from the record. Reported because a dashboard\n"
+            "  showing a 1.0 would otherwise imply a maximum that was never measured."
         )
 
     sessions = list(data.sessions(start, end))

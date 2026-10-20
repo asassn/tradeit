@@ -108,6 +108,27 @@ def record_score(
             "a total with no breakdown cannot be explained later and the explanation "
             "is the deliverable"
         )
+    if not 0.0 <= total <= 1.0:
+        # **The schema says so**: `opportunity_scores` carries
+        # `CheckConstraint("total >= 0 AND total <= 1", name="ck_score_range")`.
+        # Refused here with the value and the reason rather than left to SQLite,
+        # which raises an opaque "CHECK constraint failed: ck_score_range" from
+        # inside a bulk insert and names neither the instrument nor the number.
+        #
+        # This is ADR-0027's scale problem from the other side. That decision
+        # made `OpportunityFitRanker` refuse an out-of-range total because
+        # blending one makes `standalone_weight` describe a mixture that is not
+        # happening; the schema had independently declared the same range. A
+        # caller whose scorer is unbounded -- `MovingAverageCross` puts a raw
+        # spread ratio here, which exceeds 1.0 when a 50-day mean doubles a
+        # 200-day one, as happens in a 2009-style recovery -- normalises against
+        # a **declared** range and says what range it used.
+        raise ValueError(
+            f"score {total} for instrument {instrument_id} on {session_date} is "
+            "outside [0, 1], which ck_score_range forbids. Normalise it against a "
+            "declared range first and record what range was used; a scorer whose "
+            "output has no stated scale has not produced a score"
+        )
     row = OpportunityScore(
         instrument_id=instrument_id,
         session_date=session_date,
@@ -411,6 +432,26 @@ class DatabaseRecorder:
 
     session: Session
     run_manifest_id: int
+    #: The range this run's standalone scorer produces, when it is not already
+    #: 0-1. Scores are mapped into [0, 1] against it and clamped at the ends.
+    #:
+    #: ``None`` means "the scorer already produces a score", and an
+    #: out-of-range value is then **refused** rather than silently rescaled --
+    #: because rescaling against a range nobody declared is inventing the
+    #: scale, which is what ADR-0027 refused for the ranker.
+    score_range: tuple[float, float] | None = None
+
+    def _scaled(self, total: float) -> float:
+        """The total on the 0-1 scale the schema requires."""
+        if self.score_range is None:
+            return total
+        lower, upper = self.score_range
+        if upper <= lower:
+            raise ValueError(
+                f"score_range upper {upper} must exceed lower {lower}; an inverted "
+                "range maps every score to the same value"
+            )
+        return max(0.0, min(1.0, (total - lower) / (upper - lower)))
 
     def _order_by_client_id(self, client_order_id: str) -> Order | None:
         """The order row for an id placed on an earlier session.
@@ -438,7 +479,7 @@ class DatabaseRecorder:
                 instrument_id=instrument_id,
                 session_date=decision.session_date,
                 direction=direction,
-                total=total,
+                total=self._scaled(total),
                 components=components,
                 run_manifest_id=self.run_manifest_id,
             )

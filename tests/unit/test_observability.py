@@ -712,3 +712,88 @@ def test_record_order_cannot_be_called_without_a_submitted_at(
     """
     with pytest.raises(TypeError, match="submitted_at"):
         record_order(db_session, _request())  # type: ignore[call-arg]
+
+
+def test_an_out_of_range_score_is_refused_with_the_value_and_the_reason(
+    db_session: Session,
+) -> None:
+    """`opportunity_scores` carries ck_score_range: total >= 0 AND total <= 1.
+
+    Refused here rather than left to SQLite, which raises an opaque "CHECK
+    constraint failed: ck_score_range" from inside a bulk insert and names
+    neither the instrument nor the number. Found by recording 2003-2019: the
+    2015-2016 window happened to stay in range, and a 2009-style recovery puts
+    `MovingAverageCross`'s raw spread ratio above 1.0 because the 50-day mean
+    doubles the 200-day one.
+
+    This is ADR-0027's scale problem from the other side -- the schema had
+    independently declared the range the ranker refuses to blend outside.
+    """
+    for bad in (1.5, -0.1):
+        with pytest.raises(ValueError, match="outside \\[0, 1\\]"):
+            record_score(
+                db_session,
+                instrument_id=7,
+                session_date=SESSION,
+                direction="long",
+                total=bad,
+                components={"x": bad},
+                run_manifest_id=1,
+            )
+
+
+def test_a_declared_range_maps_an_unbounded_scorer_into_the_schemas_range(
+    db_session: Session,
+) -> None:
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    recorder = DatabaseRecorder(session=db_session, run_manifest_id=1, score_range=(0.0, 0.5))
+    recorder.record(
+        RecordedDecision(
+            session_date=SESSION,
+            portfolio_id=1,
+            scores=(
+                (7, "long", 0.25, {"s": 0.25}),
+                (8, "long", 2.0, {"s": 2.0}),
+            ),
+        )
+    )
+    db_session.flush()
+    totals = {row.instrument_id: row.total for row in db_session.query(OpportunityScore).all()}
+    assert totals[7] == pytest.approx(0.5), "0.25 of a 0-0.5 range is the midpoint"
+    assert totals[8] == pytest.approx(1.0), "2.0 clamps at the ceiling"
+
+
+def test_without_a_declared_range_an_unbounded_score_is_refused_not_rescaled(
+    db_session: Session,
+) -> None:
+    """Rescaling against a range nobody declared is inventing the scale, which
+    is exactly what ADR-0027 refused for the ranker."""
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    recorder = DatabaseRecorder(session=db_session, run_manifest_id=1)
+    with pytest.raises(ValueError, match="outside"):
+        recorder.record(
+            RecordedDecision(
+                session_date=SESSION,
+                portfolio_id=1,
+                scores=((7, "long", 2.0, {"s": 2.0}),),
+            )
+        )
+
+
+def test_an_inverted_declared_range_is_refused(db_session: Session) -> None:
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    recorder = DatabaseRecorder(session=db_session, run_manifest_id=1, score_range=(0.5, 0.0))
+    with pytest.raises(ValueError, match="must exceed"):
+        recorder.record(
+            RecordedDecision(
+                session_date=SESSION,
+                portfolio_id=1,
+                scores=((7, "long", 0.25, {"s": 0.25}),),
+            )
+        )
