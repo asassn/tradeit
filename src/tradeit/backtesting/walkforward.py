@@ -85,6 +85,37 @@ class WindowResult:
             return None
         return self.in_sample.metrics.total_return_pct - self.out_of_sample.metrics.total_return_pct
 
+    @property
+    def annualised_degradation(self) -> float | None:
+        """The same question asked of CAGR, because the spans differ in length.
+
+        **:attr:`degradation` compares total returns over spans of different
+        length, and in ANCHORED mode that difference grows every window.**
+        Measured 2026-10-20 on 2003-2019: window 0 compares a 3-year in-sample
+        span against a 1-year test, window 12 compares a **15-year** span
+        (+66.46%) against a 1-year test (-1.40%), and the raw difference of
+        +67.86% is almost entirely span length. The mean across windows came to
+        +34.10% for anchored against +2.94% for rolling, and a reader would
+        reasonably have taken that as evidence of severe overfitting in one
+        mode.
+
+        On CAGR the same two windows read +3.45% against -1.40%, a real
+        degradation of 4.85 points; and window 0 reads +4.61% against +14.33%,
+        where out-of-sample was **better**. Those are the comparable numbers.
+
+        **:attr:`degradation` is deliberately left as it was.** It is the
+        metric the harness shipped with and nothing published quotes a value
+        from it, so changing it would rewrite a definition rather than add a
+        measurement -- and this project requires a scoped proposition for that.
+        This property is the measurement; which one a readiness criterion
+        should use is a decision, and
+        ``readiness.criteria.out_of_sample_degradation`` is already waiting on
+        one.
+        """
+        if self.in_sample.metrics is None or self.out_of_sample.metrics is None:
+            return None
+        return self.in_sample.metrics.cagr - self.out_of_sample.metrics.cagr
+
 
 @dataclass(frozen=True, slots=True)
 class WalkForwardReport:
@@ -109,6 +140,24 @@ class WalkForwardReport:
         if not gaps:
             return None
         return sum(gaps) / len(gaps)
+
+    @property
+    def mean_annualised_degradation(self) -> float | None:
+        """Mean of :attr:`WindowResult.annualised_degradation`, where defined.
+
+        Reported beside :attr:`mean_degradation` rather than instead of it, so
+        the gap between them is visible: on 2003-2019 anchored they were +34.10%
+        and a far smaller annualised figure, and the gap *is* the span-length
+        artefact.
+        """
+        values = [
+            result.annualised_degradation
+            for result in self.results
+            if result.annualised_degradation is not None
+        ]
+        if not values:
+            return None
+        return sum(values) / len(values)
 
     @property
     def out_of_sample_trade_count(self) -> int:

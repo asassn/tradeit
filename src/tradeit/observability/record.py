@@ -49,6 +49,7 @@ most dangerous confusion available here.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -57,7 +58,8 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from tradeit.backtesting.base import BacktestResult, BacktestSpec
+from tradeit.backtesting.base import BacktestResult, BacktestSpec, MonteCarloResult
+from tradeit.backtesting.walkforward import WalkForwardReport
 from tradeit.core.enums import OrderStatus
 from tradeit.execution.base import Fill, OrderRequest
 from tradeit.execution.journal import JournalEntryKind, RejectedCandidate, record_entry
@@ -69,6 +71,9 @@ from tradeit.storage.tables import (
     BacktestTrade as BacktestTradeRow,
 )
 from tradeit.storage.tables import Execution, OpportunityScore, Order, Trade
+from tradeit.storage.tables import (
+    MonteCarloRun as MonteCarloRunRow,
+)
 
 __all__ = [
     "DatabaseRecorder",
@@ -76,9 +81,11 @@ __all__ = [
     "reconstruct",
     "record_backtest_result",
     "record_execution",
+    "record_monte_carlo",
     "record_order",
     "record_score",
     "record_trade",
+    "record_walk_forward",
 ]
 
 
@@ -659,3 +666,108 @@ def record_backtest_result(
             )
         )
     return run
+
+
+def record_monte_carlo(
+    session: Session,
+    result: MonteCarloResult,
+    *,
+    backtest_run_id: int,
+) -> MonteCarloRunRow:
+    """A distributional study, with the seed that reproduces it.
+
+    `monte_carlo_runs` existed with no writer, like the four links before it.
+    Keyed on ``backtest_run_id`` because a Monte Carlo study is **about** a
+    backtest rather than a thing in its own right: the trades it resamples are
+    that run's, and a study whose subject could not be identified would be a
+    distribution of nothing.
+
+    ``seed`` and ``iterations`` come from the spec and are not defaulted here.
+    A resampling study is only reproducible if the seed is recorded, and a
+    recorded distribution without one is a number nobody can check — which this
+    project treats as worse than no number.
+
+    ``iterations_completed`` is stored **separately from** ``iterations``,
+    because they differ when a study is cut short, and a report that showed only
+    the requested count would describe a study that did not happen.
+    """
+    if result.iterations_completed > result.spec.iterations:
+        raise ValueError(
+            f"{result.iterations_completed} iterations completed against "
+            f"{result.spec.iterations} requested; a study cannot overrun its own spec "
+            "and the discrepancy would make the seed useless for reproducing it"
+        )
+    row = MonteCarloRunRow(
+        backtest_run_id=backtest_run_id,
+        method=result.spec.method,
+        iterations=result.spec.iterations,
+        seed=result.spec.seed,
+        parameters={
+            "block_size": result.spec.block_size,
+            "perturbation_pct": result.spec.perturbation_pct,
+        },
+        # Keys stringified explicitly, and this is **cosmetic rather than
+        # load-bearing** -- stated because the first version of this comment
+        # claimed otherwise and a mutant removing the conversion passed every
+        # test, correctly. JSON object keys are strings, so the serialisation
+        # layer converts them whichever way they are handed over; a reader
+        # comparing a loaded `{"5": ...}` against `{5: ...}` finds nothing
+        # either way. The conversion is here so the write matches the read at
+        # the call site, not because it prevents a defect.
+        return_percentiles={str(k): v for k, v in result.return_percentiles.items()},
+        drawdown_percentiles={str(k): v for k, v in result.drawdown_percentiles.items()},
+        ruin_probability=result.ruin_probability,
+        iterations_completed=result.iterations_completed,
+    )
+    session.add(row)
+    return row
+
+
+def record_walk_forward(
+    session: Session,
+    report: WalkForwardReport,
+    spec: BacktestSpec,
+    *,
+    run_manifest_id: int,
+) -> tuple[BacktestRunRow, ...]:
+    """Every fold of a walk-forward, as what the schema already says it is.
+
+    **No new table, and that is a finding rather than a shortcut.**
+    `backtest_runs` already carries ``walk_forward_window`` and
+    ``is_out_of_sample``, which is the schema stating that a walk-forward *is* a
+    series of backtest runs distinguished by their window and which side of the
+    split they sit on. Adding a `walk_forward_runs` table would have duplicated
+    that and given the same fact two homes.
+
+    Two rows per fold -- the in-sample side and the out-of-sample side -- with
+    ``is_out_of_sample`` the only thing distinguishing them. A single row per
+    fold holding both would have had to pick which metrics to store, and the
+    degradation between them is the entire point of the exercise.
+
+    ``name`` carries the mode and the window index, so folds are
+    distinguishable without joining: an anchored and a rolling run of the same
+    strategy are different studies and must not look alike in a listing.
+    """
+    written: list[BacktestRunRow] = []
+    for index, window in enumerate(report.results):
+        for side, result, out_of_sample in (
+            ("is", window.in_sample, False),
+            ("oos", window.out_of_sample, True),
+        ):
+            fold_spec = dataclasses.replace(
+                spec,
+                name=f"{spec.name}/wf-{report.mode}-{index}-{side}",
+                start=window.window.train_start if not out_of_sample else window.window.test_start,
+                end=window.window.train_end if not out_of_sample else window.window.test_end,
+            )
+            row = record_backtest_result(
+                session,
+                fold_spec,
+                result,
+                run_manifest_id=run_manifest_id,
+                is_out_of_sample=out_of_sample,
+            )
+            row.walk_forward_window = index
+            written.append(row)
+    session.flush()
+    return tuple(written)

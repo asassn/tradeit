@@ -24,6 +24,7 @@ from tradeit.execution.base import Fill, OrderRequest
 from tradeit.execution.journal import JournalEntryKind, record_entry
 from tradeit.observability.record import (
     reconstruct,
+    record_backtest_result,
     record_execution,
     record_order,
     record_score,
@@ -868,3 +869,118 @@ def test_a_zero_total_is_explained_by_zero_parts_not_a_division(
     row = db_session.query(OpportunityScore).one()
     assert row.total == 0.0
     assert row.components == {"a": 0.0}
+
+
+def _mc_result(*, iterations: int = 1000, completed: int = 1000, seed: int = 20261020) -> object:
+    from tradeit.backtesting.base import MonteCarloResult, MonteCarloSpec
+
+    return MonteCarloResult(
+        spec=MonteCarloSpec(method="trade_sequence", iterations=iterations, seed=seed),
+        return_percentiles={5: -0.1, 50: 0.3, 95: 0.8},
+        drawdown_percentiles={50: 0.12, 95: 0.31},
+        ruin_probability=0.02,
+        iterations_completed=completed,
+    )
+
+
+def test_a_monte_carlo_study_records_the_seed_that_reproduces_it(
+    db_session: Session,
+) -> None:
+    """A resampling study without its seed is a distribution nobody can check,
+    which this project treats as worse than no number."""
+    from tradeit.observability.record import record_monte_carlo
+    from tradeit.storage.tables import MonteCarloRun
+
+    manifest_id = _persist_manifest_row(db_session)
+    run = record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        _backtest_result(()),  # type: ignore[arg-type]
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+    record_monte_carlo(db_session, _mc_result(), backtest_run_id=run.id)  # type: ignore[arg-type]
+    db_session.flush()
+
+    row = db_session.query(MonteCarloRun).one()
+    assert row.seed == 20261020
+    assert row.backtest_run_id == run.id
+    assert row.method == "trade_sequence"
+    assert row.ruin_probability == pytest.approx(0.02)
+
+
+def test_percentile_keys_are_stored_as_strings(db_session: Session) -> None:
+    """A property of the JSON layer, pinned rather than claimed as a fix.
+
+    JSON object keys are strings, so these arrive back as `{"5": ...}` whether
+    or not the writer converts them -- a mutant removing the explicit
+    conversion passes, correctly. This test documents the round-trip a reader
+    will actually see, so nobody writes a comparison against `{5: ...}`.
+    """
+    from tradeit.observability.record import record_monte_carlo
+    from tradeit.storage.tables import MonteCarloRun
+
+    manifest_id = _persist_manifest_row(db_session)
+    run = record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        _backtest_result(()),  # type: ignore[arg-type]
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+    record_monte_carlo(db_session, _mc_result(), backtest_run_id=run.id)  # type: ignore[arg-type]
+    db_session.flush()
+
+    row = db_session.query(MonteCarloRun).one()
+    assert row.return_percentiles is not None
+    assert set(row.return_percentiles) == {"5", "50", "95"}
+    assert all(isinstance(key, str) for key in row.return_percentiles)
+
+
+def test_more_iterations_completed_than_requested_is_refused(
+    db_session: Session,
+) -> None:
+    """A study cannot overrun its own spec, and the discrepancy would make the
+    seed useless for reproducing it."""
+    from tradeit.observability.record import record_monte_carlo
+
+    manifest_id = _persist_manifest_row(db_session)
+    run = record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        _backtest_result(()),  # type: ignore[arg-type]
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+    with pytest.raises(ValueError, match="cannot overrun"):
+        record_monte_carlo(
+            db_session,
+            _mc_result(iterations=100, completed=101),  # type: ignore[arg-type]
+            backtest_run_id=run.id,
+        )
+
+
+def test_a_cut_short_study_keeps_both_counts(db_session: Session) -> None:
+    """They differ when a study is cut short, and a report showing only the
+    requested count would describe a study that did not happen."""
+    from tradeit.observability.record import record_monte_carlo
+    from tradeit.storage.tables import MonteCarloRun
+
+    manifest_id = _persist_manifest_row(db_session)
+    run = record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        _backtest_result(()),  # type: ignore[arg-type]
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+    record_monte_carlo(
+        db_session,
+        _mc_result(iterations=1000, completed=640),  # type: ignore[arg-type]
+        backtest_run_id=run.id,
+    )
+    db_session.flush()
+
+    row = db_session.query(MonteCarloRun).one()
+    assert row.iterations == 1000
+    assert row.iterations_completed == 640

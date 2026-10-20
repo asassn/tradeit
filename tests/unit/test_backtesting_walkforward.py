@@ -21,6 +21,7 @@ from tradeit.backtesting.base import (
     BacktestSpec,
     BacktestStatus,
     PerformanceMetrics,
+    WalkForwardWindow,
 )
 from tradeit.backtesting.walkforward import (
     ANCHORED,
@@ -135,6 +136,52 @@ def _harness(
         train_sessions=train,
         test_sessions=test,
         gap_sessions=gap,
+    )
+
+
+def _metrics(*, total_return_pct: float, cagr: float) -> PerformanceMetrics:
+    """Only the two fields degradation reads; the rest are inert placeholders.
+
+    Spelled out rather than defaulted because `PerformanceMetrics` has no
+    defaults, and a helper that invented plausible numbers for fourteen other
+    fields would invite a later test to assert on one of them.
+    """
+    return PerformanceMetrics(
+        total_return_pct=total_return_pct,
+        cagr=cagr,
+        max_drawdown_pct=0.0,
+        max_drawdown_duration_sessions=0,
+        sharpe=None,
+        sortino=None,
+        calmar=None,
+        win_rate=0.0,
+        profit_factor=None,
+        expectancy_r=None,
+        average_win_r=None,
+        average_loss_r=None,
+        trade_count=0,
+        exposure_pct=0.0,
+        turnover=0.0,
+    )
+
+
+def _window() -> WalkForwardWindow:
+    return WalkForwardWindow(
+        train_start=dt.date(2003, 1, 2),
+        train_end=dt.date(2018, 1, 5),
+        test_start=dt.date(2018, 1, 8),
+        test_end=dt.date(2019, 1, 8),
+    )
+
+
+def _result(metrics: PerformanceMetrics | None) -> BacktestResult:
+    return BacktestResult(
+        spec=_spec(),
+        manifest=_manifest(),
+        status=BacktestStatus.COMPLETED,
+        metrics=metrics,
+        trades=(),
+        equity_curve=(),
     )
 
 
@@ -253,3 +300,81 @@ class TestReporting:
         assert report.results == ()
         assert report.mean_degradation is None
         assert report.consistency is None
+
+
+def test_raw_degradation_is_dominated_by_span_length_and_annualised_is_not() -> None:
+    """The defect that made ANCHORED mode look severely overfitted.
+
+    `degradation` subtracts two **total** returns, and in anchored mode the
+    in-sample span grows every window while the test span stays fixed.
+    Measured on 2003-2019: window 12 compared a 15-year in-sample span
+    (+66.46%) against a 1-year test (-1.40%), and the +67.86% difference is
+    almost entirely arithmetic. The mean read +34.10% anchored against +2.94%
+    rolling, which a reader would take as evidence about the strategy.
+
+    On CAGR the same window reads +3.45% against -1.40%: a real degradation of
+    4.85 points.
+    """
+    from tradeit.backtesting.walkforward import WindowResult
+
+    long_span = _metrics(total_return_pct=0.6646, cagr=0.0345)
+    short_test = _metrics(total_return_pct=-0.0140, cagr=-0.0140)
+    window = WindowResult(
+        window=_window(),
+        in_sample=_result(long_span),
+        out_of_sample=_result(short_test),
+    )
+
+    assert window.degradation == pytest.approx(0.6786, abs=1e-4)
+    assert window.annualised_degradation == pytest.approx(0.0485, abs=1e-4)
+    assert window.annualised_degradation < window.degradation / 10, (
+        "the two measures agree, so the span-length artefact is not being shown"
+    )
+
+
+def test_out_of_sample_can_beat_in_sample_on_an_annualised_basis() -> None:
+    """Window 0 of the same run: +4.61% in sample against +14.33% out.
+
+    A negative degradation is not a triumph -- it usually means the two periods
+    were different regimes -- but the raw metric hid it entirely, reporting
+    +0.11% because a 3-year total happened to resemble a 1-year total.
+    """
+    from tradeit.backtesting.walkforward import WindowResult
+
+    window = WindowResult(
+        window=_window(),
+        in_sample=_result(_metrics(total_return_pct=0.1443, cagr=0.0461)),
+        out_of_sample=_result(_metrics(total_return_pct=0.1432, cagr=0.1433)),
+    )
+    assert window.degradation == pytest.approx(0.0011, abs=1e-4)
+    assert window.annualised_degradation == pytest.approx(-0.0972, abs=1e-4)
+    assert window.annualised_degradation < 0, "out-of-sample was better and it is hidden"
+
+
+def test_the_annualised_mean_is_reported_beside_the_raw_one_not_instead() -> None:
+    """Both, so the gap between them stays visible -- the gap IS the artefact."""
+    from tradeit.backtesting.walkforward import ANCHORED, WalkForwardReport, WindowResult
+
+    report = WalkForwardReport(
+        mode=ANCHORED,
+        results=(
+            WindowResult(
+                window=_window(),
+                in_sample=_result(_metrics(total_return_pct=0.6646, cagr=0.0345)),
+                out_of_sample=_result(_metrics(total_return_pct=-0.0140, cagr=-0.0140)),
+            ),
+        ),
+    )
+    assert report.mean_degradation is not None
+    assert report.mean_annualised_degradation is not None
+    assert report.mean_degradation != report.mean_annualised_degradation
+
+
+def test_an_undefined_annualised_degradation_is_none_not_zero() -> None:
+    """A window with no metrics has no degradation; zero would read as "no
+    degradation", which is a finding rather than an absence."""
+    from tradeit.backtesting.walkforward import WalkForwardReport, WindowResult
+
+    window = WindowResult(window=_window(), in_sample=_result(None), out_of_sample=_result(None))
+    assert window.annualised_degradation is None
+    assert WalkForwardReport(mode="anchored", results=(window,)).mean_annualised_degradation is None
