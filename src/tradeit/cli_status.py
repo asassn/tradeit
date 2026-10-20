@@ -37,7 +37,7 @@ import argparse
 import datetime as dt
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.config import LIVE_AUTHORIZATION_PATH, get_settings
 from tradeit.readiness import criteria_for
@@ -227,6 +227,41 @@ def cmd_status(args: argparse.Namespace) -> int:
                         "stale-data guards judge against a caller's as_of, never the clock",
                     )
                 )
+
+    print("\n=== the decision record, as a population ===")
+    # Only meaningful against a decision record, not the corpus. Reported as
+    # "not this database" rather than UNKNOWN when the table is absent, because
+    # the corpus legitimately has no opportunity_scores and a reader pointed at
+    # it should not think something is missing.
+    with session:
+        scored = _scalar(session, "select count(*) from opportunity_scores")
+    if not isinstance(scored, int):
+        print(_row("recorded scores", "not this database", "no opportunity_scores table"))
+    elif scored == 0:
+        print(_row("recorded scores", 0, "nothing recorded yet"))
+    else:
+        from tradeit.core.enums import Bartimeframe
+        from tradeit.observability.population import check_recorded_scores
+        from tradeit.portfolio.mandate import Mandate
+
+        with sessionmaker(bind=engine, future=True)() as fresh:
+            result = check_recorded_scores(fresh, mandate=Mandate.SWING, timeframe=Bartimeframe.D1)
+        print(_row("recorded scores", f"{result.total_rows:,}"))
+        print(
+            _row(
+                "certified Swing/1d",
+                result.certified,
+                "the horizon DECLARED here, not inferred from the rows",
+            )
+        )
+        if result.unattributable:
+            print(
+                _row(
+                    "no recorded horizon",
+                    result.unattributable,
+                    "blocks certification; not skipped",
+                )
+            )
 
     print("\n=== controls the repository can install ===")
     print(
