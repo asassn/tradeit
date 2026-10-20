@@ -537,3 +537,178 @@ def test_a_fill_settling_a_later_session_finds_its_earlier_order(
 
     row = db_session.query(Execution).one()
     assert row.order_id == db_session.query(Order).one().id
+
+
+def _backtest_spec() -> object:
+    from tradeit.backtesting.base import BacktestSpec
+
+    return BacktestSpec(
+        name="t",
+        start=dt.date(2015, 1, 2),
+        end=dt.date(2015, 12, 31),
+        universe="AAPL,MSFT",
+        initial_capital=Decimal(100_000),
+        strategy_config_digest="sc",
+        cost_model="participation",
+        fill_model="bar",
+    )
+
+
+def _backtest_trade(**overrides: object) -> object:
+    from tradeit.backtesting.base import BacktestTrade
+
+    base: dict[str, object] = {
+        "instrument_id": 7,
+        "entry_date": dt.date(2015, 3, 2),
+        "entry_price": Decimal(100),
+        "exit_date": dt.date(2015, 4, 1),
+        "exit_price": Decimal(110),
+        "quantity": Decimal(100),
+        "side": "long",
+        "exit_reason": "time_stop",
+        "gross_pnl": Decimal(1000),
+        "net_pnl": Decimal(990),
+        "costs": Decimal(10),
+        "return_pct": 0.099,
+        "r_multiple": 1.2,
+        "holding_sessions": 21,
+    }
+    base.update(overrides)
+    return BacktestTrade(**base)  # type: ignore[arg-type]
+
+
+def _backtest_result(trades: tuple[object, ...]) -> object:
+    from tradeit.backtesting.base import BacktestResult, BacktestStatus
+
+    return BacktestResult(
+        spec=_backtest_spec(),  # type: ignore[arg-type]
+        status=BacktestStatus.COMPLETED,
+        trades=trades,  # type: ignore[arg-type]
+        equity_curve=(),
+        metrics=None,
+        manifest=None,
+    )
+
+
+def _persist_manifest_row(db_session: Session) -> int:
+    """A minimal manifest chain, because backtest_runs.run_manifest_id is a FK
+    with ON DELETE RESTRICT -- a run whose provenance row does not exist is not
+    reproducible."""
+    from tradeit.storage.tables import ArtifactVersion, RunManifest
+
+    for digest, kind in (("sc-digest", "strategy_config"), ("ds-digest", "data_snapshot")):
+        db_session.add(
+            ArtifactVersion(
+                digest=digest,
+                kind=kind,
+                name="t",
+                payload={},
+                created_at=FILLED_AT,
+            )
+        )
+    db_session.flush()
+    row = RunManifest(
+        run_id="t-run",
+        run_kind="backtest",
+        as_of=FILLED_AT,
+        manifest_digest="m-digest",
+        strategy_config_digest="sc-digest",
+        data_snapshot_digest="ds-digest",
+        code_version="t",
+        created_at=FILLED_AT,
+    )
+    db_session.add(row)
+    db_session.flush()
+    return int(row.id)
+
+
+def test_a_backtest_result_writes_its_run_and_every_trade(db_session: Session) -> None:
+    from tradeit.observability.record import record_backtest_result
+    from tradeit.storage.tables import BacktestRun
+    from tradeit.storage.tables import BacktestTrade as BacktestTradeRow
+
+    manifest_id = _persist_manifest_row(db_session)
+    record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        _backtest_result((_backtest_trade(), _backtest_trade(instrument_id=9))),  # type: ignore[arg-type]
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+
+    run = db_session.query(BacktestRun).one()
+    rows = db_session.query(BacktestTradeRow).all()
+    assert len(rows) == 2
+    assert {row.backtest_run_id for row in rows} == {run.id}
+    assert {row.instrument_id for row in rows} == {7, 9}
+
+
+def test_backtest_trades_go_to_backtest_trades_not_to_trades(
+    db_session: Session,
+) -> None:
+    """The distinction is the schema's, not a convenience.
+
+    `trades` has a non-nullable foreign key into `positions`, because a trade
+    there closed a position somebody held. A backtested trade never had one, and
+    inventing a position row per trade to satisfy a foreign key is fabricated
+    provenance.
+    """
+    from tradeit.observability.record import record_backtest_result
+
+    manifest_id = _persist_manifest_row(db_session)
+    record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        _backtest_result((_backtest_trade(),)),  # type: ignore[arg-type]
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+    assert db_session.query(Trade).count() == 0
+
+
+def test_out_of_sample_defaults_to_false(db_session: Session) -> None:
+    """A default of True would quietly mark design-window runs as confirmations,
+    and the ledger discipline depends on that flag meaning what it says."""
+    from tradeit.observability.record import record_backtest_result
+    from tradeit.storage.tables import BacktestRun
+
+    manifest_id = _persist_manifest_row(db_session)
+    record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        _backtest_result(()),  # type: ignore[arg-type]
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+    assert db_session.query(BacktestRun).one().is_out_of_sample is False
+
+
+def test_a_backtest_trade_with_a_negative_holding_period_is_refused(
+    db_session: Session,
+) -> None:
+    from tradeit.observability.record import record_backtest_result
+
+    manifest_id = _persist_manifest_row(db_session)
+    with pytest.raises(ValueError, match="before entering"):
+        record_backtest_result(
+            db_session,
+            _backtest_spec(),  # type: ignore[arg-type]
+            _backtest_result(  # type: ignore[arg-type]
+                (_backtest_trade(exit_date=dt.date(2015, 1, 5)),)
+            ),
+            run_manifest_id=manifest_id,
+        )
+
+
+def test_record_order_cannot_be_called_without_a_submitted_at(
+    db_session: Session,
+) -> None:
+    """The requirement itself, not just the behaviour when it is supplied.
+
+    A mutant that made `submitted_at` optional again passed every other test in
+    this file, because they all pass it explicitly. It was optional for one
+    afternoon and a real run wrote 189 orders with it NULL, which made every
+    session look complete.
+    """
+    with pytest.raises(TypeError, match="submitted_at"):
+        record_order(db_session, _request())  # type: ignore[call-arg]

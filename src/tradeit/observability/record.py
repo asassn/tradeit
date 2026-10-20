@@ -57,16 +57,24 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from tradeit.backtesting.base import BacktestResult, BacktestSpec
 from tradeit.core.enums import OrderStatus
 from tradeit.execution.base import Fill, OrderRequest
 from tradeit.execution.journal import JournalEntryKind, RejectedCandidate, record_entry
 from tradeit.observability.base import RecordedDecision
+from tradeit.storage.tables import (
+    BacktestRun as BacktestRunRow,
+)
+from tradeit.storage.tables import (
+    BacktestTrade as BacktestTradeRow,
+)
 from tradeit.storage.tables import Execution, OpportunityScore, Order, Trade
 
 __all__ = [
     "DatabaseRecorder",
     "DecisionChain",
     "reconstruct",
+    "record_backtest_result",
     "record_execution",
     "record_order",
     "record_score",
@@ -485,3 +493,87 @@ class DatabaseRecorder:
                     for iid, rule in decision.refused
                 ),
             )
+
+
+def record_backtest_result(
+    session: Session,
+    spec: BacktestSpec,
+    result: BacktestResult,
+    *,
+    run_manifest_id: int,
+    is_out_of_sample: bool = False,
+) -> BacktestRunRow:
+    """The last link for a backtest: the run, its metrics, and every trade.
+
+    **Not :func:`record_trade`, and the distinction is the schema's rather than
+    a convenience.** ``trades`` carries a non-nullable foreign key into
+    ``positions``, because a trade there is the closing of a position somebody
+    actually held — that is the live and paper path, and `record_trade` serves
+    it. ``backtest_trades`` keys on ``backtest_run_id`` instead and has no
+    position at all, because a backtested trade never had one. Forcing backtest
+    output into ``trades`` would have required inventing a position row per
+    trade, which is fabricated provenance for the sake of a single foreign key.
+
+    ``is_out_of_sample`` defaults to **False** and is the caller's to set. A
+    default of True would quietly mark design-window runs as confirmations, and
+    the ledger discipline this project runs on depends on that flag meaning what
+    it says.
+
+    Does not commit, like every writer here.
+    """
+    metrics = result.metrics
+    run = BacktestRunRow(
+        name=spec.name,
+        run_manifest_id=run_manifest_id,
+        status=str(result.status),
+        start_date=spec.start,
+        end_date=spec.end,
+        universe=spec.universe[:64],
+        initial_capital=spec.initial_capital,
+        cost_model=spec.cost_model,
+        fill_model=spec.fill_model,
+        is_out_of_sample=is_out_of_sample,
+        total_return_pct=metrics.total_return_pct if metrics else None,
+        cagr=metrics.cagr if metrics else None,
+        max_drawdown_pct=metrics.max_drawdown_pct if metrics else None,
+        sharpe=metrics.sharpe if metrics else None,
+        sortino=metrics.sortino if metrics else None,
+        calmar=metrics.calmar if metrics else None,
+        win_rate=metrics.win_rate if metrics else None,
+        profit_factor=metrics.profit_factor if metrics else None,
+        expectancy_r=metrics.expectancy_r if metrics else None,
+    )
+    session.add(run)
+    session.flush()
+    for trade in result.trades:
+        if trade.exit_date < trade.entry_date:
+            raise ValueError(
+                f"trade on instrument {trade.instrument_id} exits {trade.exit_date} "
+                f"before entering {trade.entry_date}; a negative holding period reaches "
+                "a report as a plausible outlier"
+            )
+        session.add(
+            BacktestTradeRow(
+                backtest_run_id=run.id,
+                instrument_id=trade.instrument_id,
+                side=trade.side,
+                quantity=trade.quantity,
+                entry_date=trade.entry_date,
+                entry_price=trade.entry_price,
+                exit_date=trade.exit_date,
+                exit_price=trade.exit_price,
+                exit_reason=trade.exit_reason,
+                gross_pnl=trade.gross_pnl,
+                costs=trade.costs,
+                net_pnl=trade.net_pnl,
+                return_pct=trade.return_pct,
+                r_multiple=trade.r_multiple,
+                holding_sessions=trade.holding_sessions,
+                mae=trade.mae,
+                mfe=trade.mfe,
+                score_at_entry=trade.score_at_entry,
+                regime_at_entry=trade.regime_at_entry,
+                sector_at_entry=trade.sector,
+            )
+        )
+    return run

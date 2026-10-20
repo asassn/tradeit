@@ -48,7 +48,11 @@ from tradeit.backtesting.corpus import CorpusSessionData
 from tradeit.backtesting.engine import EventDrivenEngine
 from tradeit.backtesting.performance import StandardPerformanceAnalyzer
 from tradeit.execution.simulation import BarFillModel, ParticipationCostModel
-from tradeit.observability.record import DatabaseRecorder, reconstruct
+from tradeit.observability.record import (
+    DatabaseRecorder,
+    reconstruct,
+    record_backtest_result,
+)
 from tradeit.portfolio.allocation import DiversityAwareRanker
 from tradeit.portfolio.cycle import PortfolioCycle
 from tradeit.portfolio.sizing import RiskBasedSizer
@@ -214,12 +218,25 @@ def main() -> int:
     )
     t0 = time.time()
     result = engine.run(spec)
+    # The last link. is_out_of_sample stays False: this window is 2015-2016,
+    # inside the design window, and a default of True would quietly mark it a
+    # confirmation.
+    run_row = record_backtest_result(
+        record, spec, result, run_manifest_id=manifest_id, is_out_of_sample=False
+    )
     record.commit()
     print(f"\n{len(result.trades):,} trades, record committed [{time.time() - t0:.1f}s]")
 
     counts = {
         name: record.execute(text(f"select count(*) from {name}")).scalar()
-        for name in ("opportunity_scores", "orders", "executions", "journal_entries")
+        for name in (
+            "opportunity_scores",
+            "orders",
+            "executions",
+            "journal_entries",
+            "backtest_runs",
+            "backtest_trades",
+        )
     }
     for name, count in counts.items():
         print(f"  {name:<22} {count:>7,}")
@@ -253,10 +270,14 @@ def main() -> int:
         "  to that one."
     )
     print(
-        "\nP&L is deliberately absent: it is a property of a closed trade rather than\n"
-        "of a session, and `record_trade` is its writer. Stated rather than papered\n"
-        "over -- a chain that silently lacked its last link would be the empty-success\n"
-        "failure in a new costume."
+        f"\n  backtest run {run_row.id}: {len(result.trades):,} trades with their P&L,\n"
+        "  written to `backtest_trades` and NOT to `trades`. The distinction is the\n"
+        "  schema's: `trades` carries a non-nullable foreign key into `positions`,\n"
+        "  because a trade there closed a position somebody actually held. A\n"
+        "  backtested trade never had one, and inventing a position row per trade to\n"
+        "  satisfy a foreign key is fabricated provenance.\n"
+        "\n  So `trades` and `positions` still have no writer, and that is correct:\n"
+        "  they belong to the live and paper path, which is `live_shape.py`."
     )
     return 0
 
