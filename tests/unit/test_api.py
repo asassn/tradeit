@@ -87,6 +87,8 @@ def _populate(dsn: str) -> None:
             total=0.42,
             components={"ma_spread": 0.42},
             run_manifest_id=manifest.id,
+            mandate="swing",
+            timeframe="1d",
         )
         record_order(
             session,
@@ -265,3 +267,68 @@ def test_create_app_requires_a_dsn() -> None:
     be configured -- the confusion `tradeit status` had to be fixed for."""
     with pytest.raises(TypeError):
         create_app()  # type: ignore[call-arg]
+
+
+def test_the_panel_keeps_horizons_separate(record: str) -> None:
+    """One security, independent conclusions per horizon.
+
+    *"A stock may be attractive long-term and unattractive as a swing; that is
+    information, not a contradiction."* So the horizons are separate keys and
+    nothing is computed across them.
+    """
+    _populate(record)
+    body = TestClient(create_app(record)).get("/instruments/7/panel").json()
+    assert "swing" in body["horizons"]
+    assert len(body["horizons"]["swing"]) == 1
+    assert body["horizons"]["swing"][0]["timeframe"] == "1d"
+    assert "no score is computed across horizons" in body["note"]
+
+
+def test_an_absent_horizon_carries_its_reason_not_an_empty_list(record: str) -> None:
+    """An empty list reads as "looked and found nothing". Day was never looked
+    at and cannot be: there is no intraday corpus, and scoring Day on Daily
+    bars would collapse it into Swing.
+    """
+    _populate(record)
+    body = TestClient(create_app(record)).get("/instruments/7/panel").json()
+    assert "day" in body["absent"]
+    assert "intraday" in body["absent"]["day"]
+    assert "retirement" in body["absent"]
+    assert "day" not in body["horizons"], "an absent horizon must not appear as empty"
+
+
+def test_the_panel_computes_nothing_across_horizons(record: str) -> None:
+    """The global buy/sell score the architecture exists to prevent."""
+    _populate(record)
+    body = TestClient(create_app(record)).get("/instruments/7/panel").json()
+    assert not any(
+        key in body for key in ("overall", "verdict", "rating", "score", "signal", "consensus")
+    )
+
+
+def test_a_score_with_no_recorded_horizon_is_its_own_bucket(record: str) -> None:
+    """Rows written before migration 0020 say NULL. Folding them into Swing
+    would claim a horizon nobody recorded."""
+    engine = create_engine(record, future=True)
+    _populate(record)
+    with sessionmaker(bind=engine, future=True)() as session:
+        from tradeit.storage.tables import OpportunityScore
+
+        session.add(
+            OpportunityScore(
+                instrument_id=7,
+                session_date=dt.date(2015, 5, 1),
+                direction="long",
+                total=0.3,
+                components={"legacy": 0.3},
+                run_manifest_id=1,
+                mandate=None,
+                timeframe=None,
+            )
+        )
+        session.commit()
+
+    body = TestClient(create_app(record)).get("/instruments/7/panel").json()
+    assert "unrecorded" in body["horizons"]
+    assert body["unrecorded_horizon_rows"] == 1
+    assert len(body["horizons"]["swing"]) == 1, "the NULL row leaked into swing"

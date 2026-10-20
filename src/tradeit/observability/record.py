@@ -91,6 +91,8 @@ def record_score(
     total: float,
     components: Mapping[str, object],
     run_manifest_id: int,
+    mandate: str,
+    timeframe: str,
     features: Mapping[str, object] | None = None,
     rank: int | None = None,
 ) -> OpportunityScore:
@@ -137,6 +139,8 @@ def record_score(
         components=dict(components),
         features=dict(features) if features else None,
         rank=rank,
+        mandate=mandate,
+        timeframe=timeframe,
         run_manifest_id=run_manifest_id,
     )
     session.add(row)
@@ -440,18 +444,52 @@ class DatabaseRecorder:
     #: because rescaling against a range nobody declared is inventing the
     #: scale, which is what ADR-0027 refused for the ranker.
     score_range: tuple[float, float] | None = None
+    #: The horizon this run's scores are conclusions about.
+    #:
+    #: Defaults to Swing/1d because that is what every run this project has
+    #: performed actually is -- and it is a **default on the recorder, set once
+    #: per run by the caller**, not a default on `record_score`, which requires
+    #: it. A per-score default would let a caller forget the argument and get
+    #: Swing silently; a per-run one is a statement the caller makes about the
+    #: whole run and can be read back off the recorder.
+    mandate: str = "swing"
+    timeframe: str = "1d"
 
-    def _scaled(self, total: float) -> float:
-        """The total on the 0-1 scale the schema requires."""
+    def _scaled(
+        self, total: float, components: Mapping[str, object]
+    ) -> tuple[float, dict[str, object]]:
+        """The total on the 0-1 scale the schema requires, **and its components.**
+
+        Both, together, and that is the whole point. A first version scaled the
+        total alone and left the components untouched, so a persisted score read
+        `total 0.0003` beside a single component of `0.000149` — the explanation
+        no longer summing to the number it explains, which is exactly the
+        failure `OpportunityScore.reconciles` exists to catch.
+        `ranking.normalise_total` had already been careful about this for the
+        same reason; this had not.
+
+        Components are scaled by the same factor rather than recomputed, so the
+        shares stay in proportion. A clamped total scales its components by the
+        clamped factor, so they still sum to what is stored.
+        """
         if self.score_range is None:
-            return total
+            return total, dict(components)
         lower, upper = self.score_range
         if upper <= lower:
             raise ValueError(
                 f"score_range upper {upper} must exceed lower {lower}; an inverted "
                 "range maps every score to the same value"
             )
-        return max(0.0, min(1.0, (total - lower) / (upper - lower)))
+        scaled = max(0.0, min(1.0, (total - lower) / (upper - lower)))
+        if total == 0:
+            # Nothing to scale the parts by, and a zero total is explained by
+            # zero-weight parts rather than by dividing by zero.
+            return scaled, {name: 0.0 for name in components}
+        factor = scaled / total
+        rescaled: dict[str, object] = {}
+        for name, value in components.items():
+            rescaled[name] = value * factor if isinstance(value, (int, float)) else value
+        return scaled, rescaled
 
     def _order_by_client_id(self, client_order_id: str) -> Order | None:
         """The order row for an id placed on an earlier session.
@@ -474,14 +512,17 @@ class DatabaseRecorder:
 
     def record(self, decision: RecordedDecision) -> None:
         for instrument_id, direction, total, components in decision.scores:
+            scaled_total, scaled_components = self._scaled(total, components)
             record_score(
                 self.session,
                 instrument_id=instrument_id,
                 session_date=decision.session_date,
                 direction=direction,
-                total=self._scaled(total),
-                components=components,
+                total=scaled_total,
+                components=scaled_components,
                 run_manifest_id=self.run_manifest_id,
+                mandate=self.mandate,
+                timeframe=self.timeframe,
             )
         by_client: dict[str, Order] = {}
         # `submitted_at` is stamped from the session rather than left NULL,

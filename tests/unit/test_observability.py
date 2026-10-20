@@ -72,6 +72,8 @@ def test_a_score_is_recorded_with_the_breakdown_that_explains_it(
         total=0.42,
         components={"ma_spread": 0.42},
         run_manifest_id=1,
+        mandate="swing",
+        timeframe="1d",
         rank=3,
     )
     db_session.flush()
@@ -94,6 +96,8 @@ def test_a_score_with_no_components_is_refused(db_session: Session) -> None:
             total=0.42,
             components={},
             run_manifest_id=1,
+            mandate="swing",
+            timeframe="1d",
         )
 
 
@@ -240,6 +244,8 @@ def test_nothing_commits_so_the_record_cannot_outlive_a_rollback(
         total=0.1,
         components={"a": 0.1},
         run_manifest_id=1,
+        mandate="swing",
+        timeframe="1d",
     )
     db_session.rollback()
     assert db_session.query(Order).count() == 0
@@ -271,6 +277,8 @@ def test_a_fully_recorded_session_walks_end_to_end(db_session: Session) -> None:
         total=0.42,
         components={"ma_spread": 0.42},
         run_manifest_id=1,
+        mandate="swing",
+        timeframe="1d",
     )
     record_execution(db_session, _fill(), order_id=order.id, portfolio_id=1, session_date=SESSION)
     record_trade(
@@ -739,6 +747,8 @@ def test_an_out_of_range_score_is_refused_with_the_value_and_the_reason(
                 total=bad,
                 components={"x": bad},
                 run_manifest_id=1,
+                mandate="swing",
+                timeframe="1d",
             )
 
 
@@ -797,3 +807,64 @@ def test_an_inverted_declared_range_is_refused(db_session: Session) -> None:
                 scores=((7, "long", 0.25, {"s": 0.25}),),
             )
         )
+
+
+def test_a_scaled_score_keeps_its_components_adding_up(db_session: Session) -> None:
+    """The explanation must still sum to the number it explains.
+
+    A first version scaled the total and left the components untouched, so the
+    2003-2019 record held `total 0.0003` beside a single component of
+    `0.000149`. That is exactly the failure `OpportunityScore.reconciles`
+    exists to catch, and `ranking.normalise_total` had already been careful
+    about it for the same reason.
+    """
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    DatabaseRecorder(session=db_session, run_manifest_id=1, score_range=(0.0, 0.5)).record(
+        RecordedDecision(
+            session_date=SESSION,
+            portfolio_id=1,
+            scores=((7, "long", 0.10, {"a": 0.06, "b": 0.04}),),
+        )
+    )
+    db_session.flush()
+    row = db_session.query(OpportunityScore).one()
+    assert row.total == pytest.approx(0.2)
+    assert sum(row.components.values()) == pytest.approx(row.total), (
+        f"components {row.components} do not sum to total {row.total}"
+    )
+
+
+def test_a_clamped_score_still_reconciles(db_session: Session) -> None:
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    DatabaseRecorder(session=db_session, run_manifest_id=1, score_range=(0.0, 0.5)).record(
+        RecordedDecision(
+            session_date=SESSION,
+            portfolio_id=1,
+            scores=((7, "long", 2.0, {"a": 1.5, "b": 0.5}),),
+        )
+    )
+    db_session.flush()
+    row = db_session.query(OpportunityScore).one()
+    assert row.total == pytest.approx(1.0)
+    assert sum(row.components.values()) == pytest.approx(1.0)
+
+
+def test_a_zero_total_is_explained_by_zero_parts_not_a_division(
+    db_session: Session,
+) -> None:
+    from tradeit.observability.base import RecordedDecision
+    from tradeit.observability.record import DatabaseRecorder
+
+    DatabaseRecorder(session=db_session, run_manifest_id=1, score_range=(0.0, 0.5)).record(
+        RecordedDecision(
+            session_date=SESSION, portfolio_id=1, scores=((7, "long", 0.0, {"a": 0.0}),)
+        )
+    )
+    db_session.flush()
+    row = db_session.query(OpportunityScore).one()
+    assert row.total == 0.0
+    assert row.components == {"a": 0.0}

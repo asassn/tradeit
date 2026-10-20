@@ -124,11 +124,22 @@ class _OpRecorder:
 
     def __init__(self) -> None:
         self.tables: dict[str, dict[str, sa.Column[Any]]] = {}
+        #: Tables this chain **creates**, as distinct from ones it touches.
+        #:
+        #: Separate because `add_column` used `setdefault` and so invented an
+        #: entry for any table a migration added a column to -- including
+        #: platform tables created long before 0013. Migration 0020 adds
+        #: `mandate` and `timeframe` to `opportunity_scores`, which is not a
+        #: research-01 table, and the created/touched conflation made that look
+        #: like drift. The guard's own docstring says "every table the
+        #: research-01 migration chain *creates*", and this is that set.
+        self.created: set[str] = set()
 
     # -- schema-shaping operations, replayed --------------------------------
 
     def create_table(self, name: str, *args: Any, **kwargs: Any) -> None:
         self.tables[name] = {a.name: a for a in args if isinstance(a, sa.Column)}
+        self.created.add(name)
 
     def add_column(self, table: str, column: sa.Column[Any], **kwargs: Any) -> None:
         self.tables.setdefault(table, {})[column.name] = column
@@ -169,8 +180,8 @@ class _OpRecorder:
         return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
 
-def _migration_columns() -> dict[str, dict[str, sa.Column[Any]]]:
-    """Replay every research-01 migration in order and collect the result."""
+def _replay() -> _OpRecorder:
+    """Replay every research-01 migration in order and return the recorder."""
     recorder = _OpRecorder()
     for path in MIGRATIONS:
         spec = importlib.util.spec_from_file_location(f"migration_{path.stem}", path)
@@ -179,7 +190,11 @@ def _migration_columns() -> dict[str, dict[str, sa.Column[Any]]]:
         spec.loader.exec_module(module)
         module.op = recorder  # type: ignore[attr-defined]
         module.upgrade()
-    return recorder.tables
+    return recorder
+
+
+def _migration_columns() -> dict[str, dict[str, sa.Column[Any]]]:
+    return _replay().tables
 
 
 def _type_key(type_: Any) -> tuple[Any, ...]:
@@ -201,7 +216,15 @@ def _type_key(type_: Any) -> tuple[Any, ...]:
 
 class TestMigrationOrmDrift:
     def test_the_migrations_create_exactly_the_listed_tables(self) -> None:
-        assert set(_migration_columns()) == RESEARCH01_TABLES
+        """Compares what the chain CREATES, not what it touches.
+
+        A migration adding a column to a table created before 0013 -- 0020 does
+        this to `opportunity_scores`, which is a platform table -- is not
+        creating a research-01 table, and treating it as one made a legitimate
+        change look like drift. Dropping a research-01 table from the ORM still
+        fails here, which is the invariant this guard exists for.
+        """
+        assert _replay().created == RESEARCH01_TABLES
 
     def test_every_new_table_is_in_the_orm(self) -> None:
         assert set(Base.metadata.tables) >= RESEARCH01_TABLES

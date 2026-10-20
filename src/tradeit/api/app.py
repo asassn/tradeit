@@ -273,6 +273,83 @@ def create_app(dsn: str) -> FastAPI:
             ],
         }
 
+    @app.get("/instruments/{instrument_id}/panel")
+    def instrument_panel(
+        instrument_id: int,
+        session: SessionDep,
+        per_horizon: Annotated[int, Query(ge=1, le=100)] = 10,
+    ) -> dict[str, Any]:
+        """The per-ticker panel: one security, each horizon separately.
+
+        The roadmap specifies *"one security, three independent conclusions --
+        Day, Swing and Retirement -- each with its own supporting and
+        contradicting factors"*, and that *"a stock may be attractive long-term
+        and unattractive as a swing; that is information, not a
+        contradiction"*. So the horizons are returned as **separate keys with
+        separate score lists**, and nothing is computed across them.
+
+        **Horizons with no record say so, and why.** Day cannot be scored at
+        all: there is no `intraday-01` corpus, and scoring the Day mandate on
+        Daily bars would collapse it into Swing — the one thing the
+        three-horizon architecture exists to prevent. Retirement is simply
+        unrun. Both are reported as absent with the reason, rather than as
+        empty lists a reader would take for "nothing found".
+
+        A `NULL` horizon is its own bucket, not folded into Swing: those are
+        rows written before migration 0020 and nobody recorded what they were.
+        """
+        rows = (
+            session.execute(
+                select(OpportunityScore)
+                .where(OpportunityScore.instrument_id == instrument_id)
+                .order_by(OpportunityScore.session_date.desc())
+            )
+            .scalars()
+            .all()
+        )
+        by_horizon: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            key = row.mandate or "unrecorded"
+            bucket = by_horizon.setdefault(key, [])
+            if len(bucket) < per_horizon:
+                bucket.append(
+                    {
+                        "session_date": row.session_date.isoformat(),
+                        "timeframe": row.timeframe,
+                        "direction": row.direction,
+                        "total": row.total,
+                        "components": row.components,
+                    }
+                )
+        absent = {
+            name: reason
+            for name, reason in (
+                (
+                    "day",
+                    "no intraday corpus exists; scoring Day on Daily bars would "
+                    "collapse it into Swing",
+                ),
+                ("retirement", "no run has produced Retirement-horizon scores"),
+                ("swing", "no run has produced Swing-horizon scores for this security"),
+            )
+            if name not in by_horizon
+        }
+        return {
+            "instrument_id": instrument_id,
+            "horizons": by_horizon,
+            # Reported as absent-with-a-reason rather than as empty lists. An
+            # empty list reads as "looked and found nothing"; these were never
+            # looked at, and for Day cannot be.
+            "absent": absent,
+            "note": (
+                "each horizon is an independent conclusion. A security may be "
+                "attractive at one and unattractive at another; that is "
+                "information, not a contradiction, and no score is computed "
+                "across horizons."
+            ),
+            "unrecorded_horizon_rows": len(by_horizon.get("unrecorded", [])),
+        }
+
     @app.get("/instruments/{instrument_id}/scores")
     def instrument_scores(
         instrument_id: int,

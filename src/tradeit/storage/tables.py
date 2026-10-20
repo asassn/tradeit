@@ -1386,6 +1386,20 @@ class OpportunityScore(Base):
         ForeignKey("breakout_events.id", ondelete="SET NULL")
     )
     rank: Mapped[int | None] = mapped_column(Integer)
+    #: Which horizon this score is a conclusion about.
+    #:
+    #: Added 0020. Nullable with no default, and that is deliberate: a score
+    #: mislabelled as a horizon it did not come from is worse than one labelled
+    #: NULL, because NULL says *nobody recorded it* and a wrong label says
+    #: something false. The writer requires both; a NULL marks a row written
+    #: before the columns existed.
+    #:
+    #: Without these, `portfolio.mandate.check_population` -- the machinery that
+    #: makes Day, Swing and Retirement three separate statistical populations
+    #: rather than three labels -- cannot be applied to a persisted score at
+    #: all.
+    mandate: Mapped[str | None] = mapped_column(String(16))
+    timeframe: Mapped[str | None] = mapped_column(String(16))
     run_manifest_id: Mapped[int] = mapped_column(
         ForeignKey("run_manifests.id", ondelete="RESTRICT"), nullable=False
     )
@@ -1396,6 +1410,7 @@ class OpportunityScore(Base):
         ),
         Index("ix_score_ranking", "session_date", "total"),
         Index("ix_score_instrument", "instrument_id", "session_date"),
+        Index("ix_score_horizon", "instrument_id", "mandate", "session_date"),
         CheckConstraint("total >= 0 AND total <= 1", name="ck_score_range"),
     )
 
