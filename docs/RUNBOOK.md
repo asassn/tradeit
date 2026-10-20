@@ -110,6 +110,46 @@ backtest by more than sampling noise usually means the backtest was wrong.
 
 ---
 
+## "Why did it do that?"
+
+The decision record answers it, and the read side serves it:
+
+```bash
+.venv/bin/pip install -e ".[api]"
+.venv/bin/uvicorn --factory "tradeit.api:create_app" --host 127.0.0.1 --port 8000
+```
+
+`create_app` takes the record's DSN and has **no default**, so a wrapper is
+needed to pass one — deliberately, because the record and the corpus are
+different databases and a service that defaulted to the configured DSN would
+read whichever happened to be configured.
+
+Fill the record first, or every answer is empty:
+
+```bash
+.venv/bin/python scripts/record_decisions.py --tickers AAPL,MSFT,IBM
+```
+
+**Read `missing` before anything else.** `GET /sessions/{date}` returns the
+links that hold no rows, and that field is the difference between *nothing
+happened* and *nobody wrote it down*. A session with empty lists and no
+`missing` was quiet; one with empty lists **and** `missing` was not recorded.
+
+A decision session showing orders and **no executions is correct** — the engine
+settles yesterday's decisions against today's prices, so the execution belongs
+to the next session.
+
+**The service has no write routes and no trading authority.** A test asserts
+that, and the request session is rolled back on the way out so a route that
+accidentally wrote could not persist it.
+
+**There is no buy/sell verdict and will not be one.** `GET
+/instruments/{id}/scores` returns the scores as recorded and computes nothing
+across them: a single number across horizons is what the three-horizon
+architecture exists to prevent.
+
+---
+
 ## "Can this place a real trade?"
 
 **No, and not by accident.** `trading_mode=live` requires a machine-local
