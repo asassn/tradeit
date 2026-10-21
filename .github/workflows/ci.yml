@@ -44,10 +44,24 @@ jobs:
         with:
           python-version: "3.12"
 
+      # **`api` as well as `dev`.** Installing only `[dev]` left `fastapi`
+      # absent, so `mypy src/tradeit` failed on `tradeit/api/app.py` with
+      # `import-not-found` -- and because Type check runs before Test, the
+      # suite never ran at all. CI was red on every commit of this branch for
+      # that reason, and `tests/unit/test_api.py` imports `fastapi` at module
+      # scope, so collection would have failed next.
+      #
+      # This does not weaken the deliberate optional-ness of `api`: the
+      # research and backtesting path must stay installable without a web
+      # framework, and that claim is now asserted by a test
+      # (`test_the_research_path_imports_no_web_framework`) rather than by
+      # which extras CI happens to install. An install set is a bad place to
+      # keep an invariant -- it only holds while nobody needs the dependency
+      # for something else, which is exactly what happened here.
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,api]"
 
       # `ops` is in all three gates. It holds the unattended daily capture
       # agent, which is the one piece of Python nobody watches run -- and which

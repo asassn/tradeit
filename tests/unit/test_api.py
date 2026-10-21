@@ -35,6 +35,50 @@ SESSION = dt.date(2015, 6, 1)
 STAMP = dt.datetime(2015, 6, 1, 20, tzinfo=dt.UTC)
 
 
+def test_the_research_path_imports_no_web_framework() -> None:
+    """`pyproject.toml` says the research path runs without a web framework.
+
+    That claim had nothing holding it up. The `api` extra is optional on
+    purpose -- the comment above it in `pyproject.toml` says the research and
+    backtesting path must stay installable and runnable without FastAPI -- and
+    the only thing that happened to enforce it was CI installing `[dev]` and
+    not `[dev,api]`. That is not enforcement, it is a coincidence, and it cost
+    more than it protected: `mypy` could not resolve `fastapi`, so the Type
+    check step failed on every commit of this branch, and since it runs before
+    Test, **the suite never ran in CI at all.**
+
+    CI now installs the extra and this test holds the invariant instead. The
+    asymmetry is the point: an install set can only assert an absence, and the
+    moment anything legitimately needs the dependency the assertion
+    disappears silently. A test keeps asserting it afterwards.
+
+    Measured in a subprocess because `sys.modules` is process-wide -- this
+    very file imports `fastapi` at module scope, so an in-process check would
+    pass no matter what the research path imports.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[2] / "src"
+    probe = (
+        f"import sys; sys.path.insert(0, {str(src)!r});"
+        "import tradeit.backtesting.engine;"
+        "import tradeit.research01.importer;"
+        "print(len([m for m in sys.modules if m.split('.')[0] in "
+        "{'fastapi', 'starlette', 'uvicorn'}]))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    count = int(result.stdout.strip())
+    assert count == 0, (
+        f"importing the research path pulled in {count} web-framework modules; "
+        "tradeit.api is meant to be the only thing that imports FastAPI, so the "
+        "research and backtesting path no longer installs without the api extra"
+    )
+
+
 @pytest.fixture
 def record(tmp_path: object) -> str:
     """An empty record on disk, so `create_app` opens a real engine."""
