@@ -225,9 +225,9 @@ unrelated reason.
 
 ```
 .venv/bin/python -m pytest -q
-.venv/bin/python -m ruff check src tests migrations
-.venv/bin/python -m ruff format --check src tests
-.venv/bin/python -m mypy src
+.venv/bin/python -m ruff check src tests migrations ops
+.venv/bin/python -m ruff format --check src tests ops
+.venv/bin/python -m mypy src ops
 ```
 
 **`ruff check` and `ruff format --check` are different questions** and neither
@@ -235,6 +235,14 @@ implies the other: the first is lint, the second is layout, and a file can pass
 one while failing the other. `migrations` is linted but deliberately not
 format-checked, because CI does not format-check it either — mirror CI rather
 than improving on it here, or this list drifts in the opposite direction.
+
+`ops` is in all three gates. It holds the unattended daily capture agent, which
+is the one piece of Python nobody watches run — and which was a shell script
+until macOS TCC made it Python. **`ruff format --check ops` also format-checks
+the code blocks inside `ops/UNIVERSE.md`**, because ruff picks Markdown up from
+a directory argument; that is a real gate and it passes, but it means a
+documentation edit can fail the format job, which is surprising enough to be
+worth knowing before it happens.
 
 CI runs `mypy src/tradeit`; `mypy src` is equivalent because `[tool.mypy]` sets
 `packages = ["tradeit"]`, and both report the same file count — which is *not*

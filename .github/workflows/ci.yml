@@ -49,13 +49,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # `ops` is in all three gates. It holds the unattended daily capture
+      # agent, which is the one piece of Python nobody watches run -- and which
+      # was a shell script until macOS TCC made it Python. Code that only runs at
+      # 22:10 on somebody's laptop is exactly what must not drift unlinted.
+      #
+      # Note that `ruff format --check ops` also formats the code blocks inside
+      # `ops/UNIVERSE.md`; ruff picks Markdown up from a directory argument.
+      # That is a real gate and it passes, but it means a documentation edit
+      # can fail the format job.
       - name: Lint
         run: |
-          ruff check src tests migrations
-          ruff format --check src tests
+          ruff check src tests migrations ops
+          ruff format --check src tests ops
 
       - name: Type check
-        run: mypy src/tradeit
+        run: mypy src/tradeit ops
 
       - name: Test
         env:
