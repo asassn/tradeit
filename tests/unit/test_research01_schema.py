@@ -110,6 +110,19 @@ RESEARCH01_TABLES = frozenset(
         # column and type checks below, which is how a new table can drift
         # unnoticed for exactly as long as nobody adds it.
         "security_split_price_verdicts",
+        # Added by 0021, and listed here although it holds no research-01
+        # evidence: this set is "what the numbered chain creates", and the
+        # forward record's table is created by that chain even though the
+        # forward corpus itself is a separate SQLite database built with
+        # `create_all`. Confusing those two is precisely the mistake that left
+        # it without a migration in the first place -- see
+        # `0021_forward_observations` and `ForwardObservation`'s docstring.
+        #
+        # Listing it also puts it under the column and type checks below, which
+        # is the reason to care: the first spelling of 0021 used
+        # `UTCDateTime()` where the ORM has `DateTime(timezone=True)`, and an
+        # unlisted table would have carried that type mismatch silently.
+        "forward_observations",
     }
 )
 

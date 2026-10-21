@@ -224,11 +224,22 @@ nobody ran it, and the job that would have objected was failing earlier for an
 unrelated reason.
 
 ```
+export TRADEIT_TEST_PG_DSN=postgresql+psycopg://ericsasson@localhost:5432/tradeit_test
 .venv/bin/python -m pytest -q
 .venv/bin/python -m ruff check src tests migrations ops
 .venv/bin/python -m ruff format --check src tests ops
 .venv/bin/python -m mypy src ops
 ```
+
+**`pytest` without that DSN is not the suite.** The integration tests skip
+silently without it, and CI has one. Measured 2026-10-21: without the DSN
+4,536 tests run; with it, 4,581. **The 45-test difference is where three real
+failures were sitting**, including an ORM table with no migration — found only
+because CI's Test step ran for the first time on this branch that day. Postgres
+was already running locally the whole time; the only thing missing was the
+variable, so "the integration tests need a database I do not have" was wrong
+and cost more than the database would have. Create the test database once with
+`createdb tradeit_test`; the suite migrates it.
 
 **`ruff check` and `ruff format --check` are different questions** and neither
 implies the other: the first is lint, the second is layout, and a file can pass

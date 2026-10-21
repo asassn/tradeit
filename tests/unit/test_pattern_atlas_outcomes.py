@@ -149,7 +149,13 @@ def test_an_empty_result_is_an_error_not_a_success() -> None:
         )
         done = subprocess.run(
             [
-                str(repo / ".venv/bin/python"),
+                # `sys.executable`, not `repo/.venv/bin/python`: the hardcoded
+                # path does not exist on a CI runner, where the package is
+                # pip-installed rather than run from a local venv, and this
+                # test failed there with FileNotFoundError the first time CI
+                # reached the Test step. It also has to be the interpreter
+                # running pytest -- any other one may not have the package.
+                sys.executable,
                 str(repo / "scripts/pattern_atlas.py"),
                 "--events",
                 str(work / "events.csv"),

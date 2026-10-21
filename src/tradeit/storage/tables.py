@@ -2134,9 +2134,17 @@ class ForwardObservation(Base):
     no price has no price row to carry a flag, and that day is precisely the one
     survivorship turns on.
 
-    **No migration creates this.** The forward corpus is a separate database
-    built from the ORM, as the decision record is; the numbered migrations are
-    research-01's chain and do not run against it.
+    **The forward corpus is a separate database**, built from this ORM with
+    `create_all`, as the decision record is; the numbered migrations do not run
+    against it.
+
+    This docstring used to end *"No migration creates this"*, and that was
+    wrong in a way worth leaving visible. Both of its premises were true and
+    the conclusion was not: the numbered chain builds the **platform** schema,
+    and the drift guard asserts that the platform schema equals this shared
+    `MetaData`. A table in the metadata and absent from the chain is drift
+    however many other databases also build it. `0021_forward_observations`
+    creates it, where it is empty and comparable rather than missing.
     """
 
     __tablename__ = "forward_observations"
