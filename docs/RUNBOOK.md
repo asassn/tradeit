@@ -110,6 +110,48 @@ backtest by more than sampling noise usually means the backtest was wrong.
 
 ---
 
+## "Is the forward capture still running?"
+
+**This is the question a scheduled job actually fails at.** It does not crash
+loudly; it stops, and the record simply ceases to grow.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m tradeit.cli status \
+  --db sqlite:////Users/ericsasson/Documents/TradeItData/out/forward.sqlite \
+  --as-of $(date -u +%Y-%m-%d)
+```
+
+Read **"most recent ask"** and its age. A few days is a sleeping laptop, which
+the 7-session trailing window recovers on its own. A week or more means the job
+is not running.
+
+Check the agent and its own logs:
+
+```bash
+launchctl list | grep tradeit
+tail -20 /Users/ericsasson/Documents/TradeItData/out/forward_capture.err
+```
+
+`launchctl list` prints the last exit status. A non-zero code there with an
+empty record means the job fired and failed before writing anything — the
+`.err` file is where that lands.
+
+**A rate-limit refusal and a market silence are different rows and must not be
+confused.** A refusal is a fact about the vendor; a silence — `rows_returned =
+0` with status `empty` — is a fact about the security, and it is what a
+delisting is made of. The free Tiingo allowance is roughly 50 unique symbols a
+day, which is why the universe is 48 and why a manual run during the day can
+starve the scheduled one.
+
+To reinstall or stop it:
+
+```bash
+launchctl bootout gui/$(id -u)/com.tradeit.forward-capture
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradeit.forward-capture.plist
+```
+
+---
+
 ## "Why did it do that?"
 
 The decision record answers it, and the read side serves it:

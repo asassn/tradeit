@@ -263,6 +263,39 @@ def cmd_status(args: argparse.Namespace) -> int:
                 )
             )
 
+    print("\n=== the forward record ===")
+    # **Freshness, not just presence.** A daily capture that silently stops
+    # leaves a record that simply ceases to grow, and nothing else says so --
+    # which is the failure mode a scheduled job actually has. The age of the
+    # most recent ask is the one number that catches it.
+    with sessionmaker(bind=engine, future=True)() as fresh:
+        latest = _scalar_raw(fresh, "select max(asked_at) from forward_observations")
+        observed = _scalar(fresh, "select count(*) from forward_observations")
+        silent = _scalar(fresh, "select count(*) from forward_observations where rows_returned = 0")
+    if not isinstance(observed, int):
+        print(_row("forward observations", "not this database", "no forward_observations table"))
+    elif observed == 0:
+        print(_row("forward observations", 0, "the capture has not run against this record"))
+    else:
+        print(_row("forward observations", f"{observed:,}"))
+        print(
+            _row(
+                "of which silent",
+                f"{silent:,}" if isinstance(silent, int) else UNKNOWN,
+                "asked and got nothing: what a delisting is made of",
+            )
+        )
+        print(_row("most recent ask", latest))
+        age = _age_in_days(str(latest), args.as_of) if (latest and args.as_of) else None
+        if age is not None:
+            print(
+                _row(
+                    "age at --as-of",
+                    f"{age} days",
+                    "a daily job that stopped shows up here and nowhere else",
+                )
+            )
+
     print("\n=== controls the repository can install ===")
     print(
         _row("kill switch", "available", "risk/controls.py; installation is per-run"),

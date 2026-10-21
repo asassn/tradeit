@@ -196,3 +196,61 @@ def test_a_failed_raw_probe_also_rolls_back() -> None:
     session = _AbortingSession()
     assert _scalar_raw(session, "select max(session_date) from absent") is None  # type: ignore[arg-type]
     assert session.rollbacks == 1
+
+
+def test_the_forward_record_reports_freshness_not_just_presence(
+    tmp_path: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The failure a scheduled job actually has.
+
+    A daily capture that silently stops leaves a record that simply ceases to
+    grow, with no error anywhere. The age of the most recent ask is the one
+    number that catches it, so `status` reports the timestamp and its age
+    rather than only a row count.
+    """
+    import datetime as dt
+    from decimal import Decimal
+
+    from tradeit.storage.tables import ForwardObservation
+
+    path = tmp_path / "f.sqlite"  # type: ignore[operator]
+    engine = create_engine(f"sqlite:///{path}", future=True)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            ForwardObservation(
+                symbol="AAPL",
+                session_date=dt.date(2026, 10, 20),
+                asked_at=dt.datetime(2026, 10, 20, 22, 10, tzinfo=dt.UTC),
+                status="ok",
+                rows_returned=5,
+            )
+        )
+        session.add(
+            ForwardObservation(
+                symbol="GONE",
+                session_date=dt.date(2026, 10, 20),
+                asked_at=dt.datetime(2026, 10, 20, 22, 10, tzinfo=dt.UTC),
+                status="empty",
+                rows_returned=0,
+            )
+        )
+        session.commit()
+    _ = Decimal
+
+    cmd_status(_args(db=f"sqlite:///{path}", as_of="2026-10-27"))
+    out = capsys.readouterr().out
+    assert "forward observations" in out
+    assert "of which silent" in out
+    assert "most recent ask" in out
+    assert "7 days" in out, "a stale record did not report its age"
+
+
+def test_an_unrun_capture_says_so_rather_than_reading_as_healthy(
+    tmp_path: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "f.sqlite"  # type: ignore[operator]
+    Base.metadata.create_all(create_engine(f"sqlite:///{path}", future=True))
+    cmd_status(_args(db=f"sqlite:///{path}"))
+    out = capsys.readouterr().out
+    assert "has not run against this record" in out
