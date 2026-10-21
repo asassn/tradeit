@@ -4,10 +4,17 @@
 
   Install:
     cp ops/com.tradeit.forward-capture.plist ~/Library/LaunchAgents/
-    launchctl load ~/Library/LaunchAgents/com.tradeit.forward-capture.plist
+    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.tradeit.forward-capture.plist
 
   Remove:
-    launchctl unload ~/Library/LaunchAgents/com.tradeit.forward-capture.plist
+    launchctl bootout gui/$UID/com.tradeit.forward-capture
+
+  Run once now, to check it:
+    launchctl kickstart -k gui/$UID/com.tradeit.forward-capture
+
+  `load`/`unload` are the deprecated spellings and report success on a plist
+  launchd then refuses; `bootstrap` fails loudly instead, which is what an
+  install step should do.
 
   22:10 Eastern is after the US close and after Tiingo has settled the day,
   expressed here in local time because launchd has no timezone field. A run
@@ -25,9 +32,23 @@
     <key>Label</key>
     <string>com.tradeit.forward-capture</string>
 
+    <!--
+      **Python is invoked directly; there is no shell wrapper, and adding one
+      would break the job.** macOS TCC grants file access per executable: in
+      this session `/bin/bash` cannot read a file under ~/Documents while the
+      framework interpreter can, so the shell version of this job failed with
+      `Operation not permitted` before running a line. The reasoning and the
+      measurements are in ops/forward_daily.py; do not condense this back into
+      a .sh.
+
+      `.venv/bin/python` is a symlink to /Library/Frameworks/Python.framework,
+      which is the executable TCC actually evaluates -- hence launchd may exec
+      it even though the symlink is under ~/Documents.
+    -->
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/ericsasson/Documents/GitHub/TradeIt/ops/forward_daily.sh</string>
+        <string>/Users/ericsasson/Documents/GitHub/TradeIt/.venv/bin/python</string>
+        <string>/Users/ericsasson/Documents/GitHub/TradeIt/ops/forward_daily.py</string>
     </array>
 
     <key>StartCalendarInterval</key>
@@ -49,8 +70,11 @@
       moment the install happens: the first run would stamp an asked_at that
       has nothing to do with the schedule, and the operator would be left
       unsure whether the job works or whether that one run was manual.
-      Run ops/forward_daily.sh by hand once to check it, which is a decision
-      rather than a side effect.
+      Run `launchctl kickstart` once to check it, which is a decision rather
+      than a side effect. Running ops/forward_daily.py from a terminal also
+      works and is the right way to debug it -- but note that it then runs
+      under the terminal's TCC grant rather than launchd's, so a terminal pass
+      does not prove the scheduled job can read anything.
     -->
     <key>RunAtLoad</key>
     <false/>

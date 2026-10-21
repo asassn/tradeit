@@ -355,6 +355,33 @@ class TestRegistrationAndCredentials:
         assert SECRET not in credential_hint(SECRET)
         assert credential_hint("") == "not set"
 
+    def test_the_hint_leaks_no_fragment_of_the_key_either(self) -> None:
+        """**No run of the secret appears, not merely the whole secret.**
+
+        The three existing hint tests all asserted `SECRET not in hint`, and
+        every one of them passed against an implementation that appended the
+        key's last two characters to every line it wrote -- because the whole
+        key was indeed absent. The invariant they were reaching for is this
+        one: nothing recoverable from the key reaches a log, whatever its
+        length. Two characters are not a key and this is not a vulnerability
+        fix, but a test that cannot distinguish "logs nothing" from "logs a
+        little" is not testing the rule it was written for.
+
+        **The reported length is removed before searching, not skipped as a
+        digit.** The first version of this test excluded any fragment
+        containing a digit, to avoid tripping over the length the hint
+        legitimately prints -- and `SECRET` ends in `66`, so that exclusion
+        skipped the exact two characters the old implementation leaked and the
+        test passed against the very code it was written to catch. Deleting
+        the one number the hint is allowed to contain leaves every other
+        fragment, digits included, in scope.
+        """
+        hint = credential_hint(SECRET).replace(str(len(SECRET)), "", 1)
+        for size in range(2, len(SECRET) + 1):
+            for start in range(len(SECRET) - size + 1):
+                fragment = SECRET[start : start + size]
+                assert fragment not in hint, f"hint leaks {size} characters of the key"
+
     def test_no_key_means_no_request(self, tmp_path: Path) -> None:
         transport = FakeTransport()
         provider = TwelveDataAcquisition(token="", transport=transport)

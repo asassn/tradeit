@@ -56,15 +56,27 @@ def redact_text(text: str, secret: str = "") -> str:
 
 
 def credential_hint(secret: str) -> str:
-    """A non-secret acknowledgement that a key is present.
+    """A non-secret acknowledgement that a key is present. **Length only.**
 
-    Length and last two characters only. Enough to tell "the variable is set to
-    something" from "the variable is empty", and useless to anyone reading it
-    over a shoulder or in a pasted terminal transcript.
+    Enough to tell "the variable is set to something" from "the variable is
+    empty", which is the entire question this answers.
+
+    It used to append the last two characters, on the reasoning that two
+    characters are useless to someone reading over a shoulder or a pasted
+    terminal transcript. That reasoning was sound for the context it was
+    written in and stopped being sound when the context changed: the daily
+    capture agent writes this line to
+    ``TradeItData/out/forward_capture.log`` on **every scheduled run**, so the
+    fragment stopped being transient and started accumulating in a file that
+    outlives the operator's attention. Two characters of a key are still not a
+    key -- the change is not a vulnerability fix -- but the suffix bought only
+    the ability to tell two keys apart by eye, which nothing here needs, and
+    the rule against logging credentials is cheaper to keep absolute than to
+    keep qualified.
     """
     if not secret:
         return "not set"
-    return f"set ({len(secret)} chars, ends …{secret[-2:]})"
+    return f"set ({len(secret)} chars)"
 
 
 __all__ = ["CREDENTIAL_PARAMS", "credential_hint", "redact_text", "redact_url"]
