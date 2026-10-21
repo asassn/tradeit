@@ -198,3 +198,52 @@ def test_the_fixtures_carry_no_credential() -> None:
         body = path.read_text()
         assert "api_token" not in body
         json.loads(body)
+
+
+def test_the_raw_close_is_read_not_the_adjusted_one() -> None:
+    """Uses the fixture captured for exactly this, and which I nearly ignored.
+
+    `tests/fixtures/eodhd/README.md` says of `eod_aapl_2020_split.json`:
+    *"AAPL's August 2020 4-for-1 split is chosen deliberately: it is the window
+    where `close` and `adjusted_close` diverge sharply, so a test that confused
+    them cannot pass quietly."*
+
+    The fixture I captured myself has `close == adjusted_close` on every row, so
+    a reader that took the adjusted column would have passed against it in
+    silence. This one cannot: on 2020-08-27 the close is 500.04 and the
+    adjusted close is 121.1519.
+
+    **This does not make the basis RAW.** §0.1a's finding stands and
+    `adjustment_policy()` is still UNKNOWN — what is pinned here is only that
+    the adapter reads the column it claims to read.
+    """
+    transport = _StubTransport((FIXTURES / "eod_aapl_2020_split.json").read_bytes())
+    adapter = EodhdAcquisition(token="t", transport=transport)
+    outcome = adapter.fetch(_request(AcquisitionDataset.DAILY_PRICES))
+    rows = adapter.normalize(outcome, {"AAPL": 7}).rows[DatasetKind.DAILY_BARS]
+
+    first = next(row for row in rows if row["session_date"] == "2020-08-27")
+    assert first["close"] == "500.04", "the adjusted close was read instead of the raw one"
+    assert first["close"] != "121.1519"
+
+
+def test_the_split_window_shows_the_price_dropping_fourfold() -> None:
+    """The sanity check that the fixture is what it claims to be.
+
+    A 4-for-1 on 2020-08-31 means the raw close falls from ~499 to ~129 across
+    it. If a future recapture quietly replaced this fixture with an adjusted
+    series, that step would vanish and the test above would stop meaning
+    anything.
+    """
+    transport = _StubTransport((FIXTURES / "eod_aapl_2020_split.json").read_bytes())
+    adapter = EodhdAcquisition(token="t", transport=transport)
+    outcome = adapter.fetch(_request(AcquisitionDataset.DAILY_PRICES))
+    rows = {
+        row["session_date"]: float(row["close"])
+        for row in adapter.normalize(outcome, {"AAPL": 7}).rows[DatasetKind.DAILY_BARS]
+    }
+    before, after = rows["2020-08-28"], rows["2020-08-31"]
+    assert before / after == pytest.approx(4, abs=0.2), (
+        "the raw series does not step across the split; this fixture may have been "
+        "replaced with an adjusted one"
+    )
