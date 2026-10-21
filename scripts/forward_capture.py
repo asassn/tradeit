@@ -54,36 +54,18 @@ import argparse
 import datetime as dt
 import sys
 import time
-from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from tradeit.acquisition.base import AcquisitionDataset
 from tradeit.acquisition.journal import AcquisitionJournal
 from tradeit.acquisition.tiingo import TiingoAcquisition
+from tradeit.forward import capture_forward
 from tradeit.storage.tables import Base
-
-#: One row per symbol per session, recording what we asked for and what came
-#: back -- including nothing. Deliberately its own table rather than a flag on
-#: the price rows: a day with no price has no price row to carry a flag, and
-#: that day is precisely the one survivorship turns on.
-OBSERVATION_DDL = """
-CREATE TABLE IF NOT EXISTS forward_observations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol TEXT NOT NULL,
-    session_date TEXT NOT NULL,
-    asked_at TEXT NOT NULL,
-    status TEXT NOT NULL,
-    rows_returned INTEGER NOT NULL,
-    note TEXT,
-    UNIQUE (symbol, session_date, asked_at)
-)
-"""
 
 
 def main() -> int:
@@ -147,61 +129,39 @@ def main() -> int:
 
     engine = create_engine(f"sqlite:///{args.record}", future=True)
     Base.metadata.create_all(engine)
-    with engine.begin() as connection:
-        connection.execute(text(OBSERVATION_DDL))
     session: Session = sessionmaker(bind=engine, future=True)()
     journal = AcquisitionJournal(path=Path(args.journal))
 
-    counts: Counter[str] = Counter()
+    # The capture itself lives in `tradeit.forward`, not here. It is meant to
+    # run unattended for years, and the behaviour that matters -- every outcome
+    # recorded, including the silent ones -- is invisible when it breaks. A
+    # mutant that skipped silences fails five tests there; in a script it would
+    # have failed nothing.
     asked_at = dt.datetime.now(dt.UTC)
     t0 = time.time()
-    for request in requests:
-        if request.dataset is not AcquisitionDataset.DAILY_PRICES:
-            continue
-        outcome = source.fetch(request)
-        counts[str(outcome.status)] += 1
-        journal.record("tiingo", outcome)
-        rows = len(outcome.rows)
-        # **Every outcome is written, including EMPTY.** A symbol we asked about
-        # and got nothing for is the observation a delisting is made of, and
-        # skipping it would leave an absence indistinguishable from never having
-        # asked -- which is exactly how a historical corpus loses its failures.
-        session.execute(
-            text(
-                "INSERT OR IGNORE INTO forward_observations "
-                "(symbol, session_date, asked_at, status, rows_returned, note) "
-                "VALUES (:symbol, :session_date, :asked_at, :status, :rows, :note)"
-            ),
-            {
-                "symbol": request.symbol,
-                "session_date": end.isoformat(),
-                "asked_at": asked_at.isoformat(),
-                "status": str(outcome.status),
-                "rows": rows,
-                "note": (str(outcome.error)[:200] if outcome.error else None),
-            },
-        )
+    report = capture_forward(
+        session,
+        source,
+        symbols,
+        start=start,
+        end=end,
+        asked_at=asked_at,
+        journal=journal,
+    )
     session.commit()
-    elapsed = time.time() - t0
 
-    print(f"\nfetched in {elapsed:.1f}s:")
-    for status, count in sorted(counts.items(), key=lambda kv: -kv[1]):
-        print(f"  {status:<12} {count:>5}")
-
-    observed = session.execute(
-        text("SELECT COUNT(*) FROM forward_observations WHERE asked_at = :a"),
-        {"a": asked_at.isoformat()},
-    ).scalar()
-    silent = session.execute(
-        text("SELECT COUNT(*) FROM forward_observations WHERE asked_at = :a AND rows_returned = 0"),
-        {"a": asked_at.isoformat()},
-    ).scalar()
-    print(f"\n  {observed:,} observations written, {silent:,} of them silent")
-    if not observed:
+    print(f"\nfetched in {time.time() - t0:.1f}s:")
+    print(report.describe())
+    if not report.recorded:
         raise SystemExit(
             "the run completed and recorded nothing. An empty forward record looks "
             "exactly like a quiet market, which is the one thing it must never be "
             "mistaken for."
+        )
+    if not report.complete:
+        raise SystemExit(
+            "some requests produced no observation at all. That is a hole in the "
+            "record, not a quiet market, and continuing would paper over it."
         )
     print(
         "\n  A silent symbol is **recorded, not skipped.** That row is what a delisting\n"

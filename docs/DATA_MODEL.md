@@ -1,6 +1,6 @@
 # Data Model
 
-**71 tables are defined** in `src/tradeit/storage/tables.py` and created by
+**72 tables are defined** in `src/tradeit/storage/tables.py` and created by
 `migrations/versions/` — measured from the ORM metadata, not counted by hand.
 The schema has been applied to PostgreSQL 16 and is verified by
 `tests/integration/test_phase2_schema.py`, which includes a drift check
@@ -139,6 +139,7 @@ exists to measure in a vendor's data.
 | `macro_observations` | Economic series by `period_end` and `vintage` |
 | `ingestion_runs` | One row per ingestion job: provider, dataset, status, rows written and rejected, code version |
 | `quarantined_rows` | Rows that failed validation, kept verbatim with the reason, stage, file and line |
+| `forward_observations` | One symbol asked about on one session and what came back — **including nothing.** A row with `rows_returned = 0` is the record, not a failure to record: it is what a delisting is made of, written before anyone knew whether the symbol would print again |
 
 ```mermaid
 erDiagram

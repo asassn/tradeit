@@ -2115,6 +2115,53 @@ class JournalEntry(Base):
     )
 
 
+class ForwardObservation(Base):
+    """One symbol asked about on one session, and what came back — including nothing.
+
+    **The silent rows are the point.** A historical corpus must reconstruct its
+    universe, and the companies that failed are the hardest to find — which is
+    why `EDGAR_DELISTING_DENOMINATOR.md` §7be records the denominator as blind
+    before roughly 2002. Forward, the universe is written down before anyone
+    knows which members will fail, so a delisting becomes an **observation**: a
+    symbol we asked about on a dated day and got nothing for.
+
+    A row with ``rows_returned = 0`` is therefore not a failure to record. It
+    *is* the record, and skipping it would leave an absence indistinguishable
+    from never having asked — exactly how a historical corpus loses its
+    failures.
+
+    **Its own table rather than a flag on the price rows**, because a day with
+    no price has no price row to carry a flag, and that day is precisely the one
+    survivorship turns on.
+
+    **No migration creates this.** The forward corpus is a separate database
+    built from the ORM, as the decision record is; the numbered migrations are
+    research-01's chain and do not run against it.
+    """
+
+    __tablename__ = "forward_observations"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    session_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    #: When we asked. Separate from ``session_date`` because the two are
+    #: different facts, and because asking twice about one session is two
+    #: observations rather than a duplicate -- a vendor may revise, and both
+    #: answers are evidence.
+    asked_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    rows_returned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: The endpoint and any error, **credential-redacted by the adapter before
+    #: it reaches here**. Checked rather than assumed on 2026-10-20.
+    note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "session_date", "asked_at", name="uq_forward_observation"),
+        Index("ix_forward_symbol", "symbol", "session_date"),
+        Index("ix_forward_silent", "session_date", "rows_returned"),
+    )
+
+
 class JobRun(Base):
     """Execution record for every scheduled job.
 

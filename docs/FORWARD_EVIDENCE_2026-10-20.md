@@ -74,14 +74,41 @@ text before they reach an outcome, so the stored note for a failed request
 carries the endpoint without its token — checked, not assumed. `.env` is
 git-ignored and nothing has been committed.
 
-## What this is not yet
+## Moved into `src/` with tests, 2026-10-20
 
-**`forward_capture.py` is a working prototype in `scripts/`, not production.**
-Before it becomes a daily job it belongs in `src/` with unit tests, because the
-behaviour that matters — *every outcome written, including the silent ones* — is
-currently demonstrated by a live run rather than pinned by a test. A daily job
-that silently stopped recording silences would reintroduce exactly the
-survivorship defect this exists to prevent, and it would do so invisibly.
+The capture now lives in `tradeit.forward.capture`; the script is a driver that
+parses arguments and calls it. The move was not tidying.
+
+**The behaviour that matters is invisible when it breaks.** If a change made
+the capture skip silent symbols — a plausible *"we only need the rows that have
+data"* — the record would lose exactly the observations that make it
+survivorship-honest, with no error, no failing test and no visible change until
+somebody tried to measure a delisting years later. That is the same defect the
+historical corpus has, which took months to characterise and cannot be fixed.
+Here it is one line away and silent.
+
+So it has a test, and the mutant proves it: **skipping silences fails five
+tests.** In a script it would have failed none.
+
+The source is a **stub** in those tests, deliberately — a live feed cannot be
+made to delist a company on demand, and a capture whose silent path is
+exercised only in production has no test at all.
+
+Six mutants run, six caught: skipping silences, running without a credential,
+reading the clock per row instead of taking one instant, capturing metadata
+requests as price observations, dropping idempotency so a retry doubles the
+record, and withholding outcomes from the journal.
+
+**`ForwardObservation` is an ORM table with no migration.** The forward corpus
+is a separate database built from the ORM, as the decision record is; the
+numbered migrations are research-01's chain and do not run against it. The
+schema drift guard agrees — it compares what that chain *creates*, and this
+table is not part of it.
+
+**Asking twice is two observations, not a duplicate.** `asked_at` is part of
+the key, because a vendor may revise and *"we asked Monday and got nothing, we
+asked Friday and got a price"* is two facts. A retry at the same instant is
+idempotent; a later ask adds a row.
 
 **No scheduled job has been created.** That is standing configuration on the
 owner's machine and is his to approve.
