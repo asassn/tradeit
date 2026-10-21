@@ -655,16 +655,35 @@ class TestProviderSeam:
         with pytest.raises(ConfigError, match="tiingo"):
             get_provider_class("bloomberg")
 
-    def test_the_eodhd_stub_refuses_clearly_rather_than_failing_obscurely(self) -> None:
-        provider = EodhdAcquisition()
-        outcome = provider.fetch(FetchRequest.one(AcquisitionDataset.DAILY_PRICES, "SPY"))
-        assert outcome.status is FetchStatus.REJECTED
-        assert "stub" in outcome.error
-        assert "--provider tiingo" in outcome.error
-        assert provider.implemented is False
+    def test_a_provider_refuses_a_dataset_it_cannot_serve_rather_than_failing_obscurely(
+        self,
+    ) -> None:
+        """Reworked 2026-10-21, when the EODHD adapter was implemented.
 
-    def test_the_stub_does_not_pretend_to_have_a_credential(self) -> None:
-        assert EodhdAcquisition().has_credential() is False
+        This asserted that the EODHD *stub* refused everything and pointed at
+        Tiingo. The adapter now serves daily prices and splits, so that
+        assertion decayed — but the invariant it was really protecting did not:
+        **a provider that cannot serve a dataset says so clearly rather than
+        failing obscurely.** EODHD still cannot serve `SYMBOL_META`, so that is
+        where the invariant now lives.
+        """
+        provider = EodhdAcquisition(token="t")
+        outcome = provider.fetch(FetchRequest.one(AcquisitionDataset.SYMBOL_META, "SPY"))
+        assert outcome.status is FetchStatus.REJECTED
+        assert "not implemented" in str(outcome.error).lower()
+        assert provider.implemented is True
+
+    def test_a_provider_does_not_claim_a_credential_it_does_not_have(self) -> None:
+        """The same rework, and a latent fragility removed with it.
+
+        This read `EodhdAcquisition().has_credential() is False`, which was true
+        only because the test environment happens not to set `EODHD_API_KEY` —
+        so it would have started failing on any machine that did, including the
+        one this adapter was implemented on. The token is now explicit, and the
+        assertion is about the adapter rather than about the environment.
+        """
+        assert EodhdAcquisition(token="").has_credential() is False
+        assert EodhdAcquisition(token="present").has_credential() is True
 
 
 # ---------------------------------------------------------------------------

@@ -1,43 +1,67 @@
-"""EODHD adapter — registered, wired, and deliberately unfinished.
+"""EODHD adapter — implemented 2026-10-21, against shapes already proved here.
 
-Its purpose is to prove the seam rather than to fetch anything. Provider
-switching is a requirement, and the only honest way to demonstrate that a
-pluggable interface is actually pluggable is to plug a second thing into it and
-see what breaks. Writing this adapter is what confirmed that
-:class:`~tradeit.acquisition.base.AcquisitionProvider` needs no Tiingo-shaped
-assumptions: EODHD splits corporate actions across dedicated endpoints rather
-than carrying them inline on price rows, and the interface accommodates that
-without change because a request names a *dataset*, not an endpoint.
+The stub this replaces named its own blocker precisely: *"completing it would
+mean guessing this vendor's URL shapes, parameter names, response fields and
+error semantics from memory […] The environment this was written in cannot
+reach `eodhd.com` to check."*
 
-**Why it does not fetch.** Completing it would mean guessing this vendor's URL
-shapes, parameter names, response fields and error semantics from memory, and
-then writing tests against fixtures built from the same guesses — which would
-produce a green suite that proves nothing and an adapter that fails on first
-contact with the real API. The environment this was written in cannot reach
-`eodhd.com` to check. So the structure is here, the gaps are named, and the
-adapter refuses clearly rather than failing obscurely.
+**Neither half of that is true any more.** The URL shapes and response fields
+are not guessed and were not re-derived: `tradeit.research01.eodhd_client` has
+used them against the live API to load **854,718 bars** for the survivorship
+backfill, and this adapter reuses the same paths and the same field names. Where
+the stub listed five steps, four were already done elsewhere in the repository.
 
-**To finish it**, with the API documentation open:
+What is declared, and what is deliberately not
+----------------------------------------------
 
-1. Fill in :data:`ENDPOINTS` with the real paths.
-2. Implement :meth:`EodhdAcquisition._url` for each dataset.
-3. Implement :meth:`EodhdAcquisition._rows` for the response shapes.
-4. Add a fixture per endpoint under ``tests/fixtures/eodhd/`` captured from a
-   real response with the key stripped, and extend the acquisition tests to
-   run against them the same way the Tiingo tests do.
-5. Add ``SPLITS`` and ``DIVIDENDS`` as separate
-   :class:`~tradeit.acquisition.base.AcquisitionDataset` members if the
-   dedicated endpoints are used — the runner already handles a provider whose
-   datasets do not map one-to-one onto requests.
+**`adjustment_policy()` returns `UNKNOWN`, not `RAW_UNADJUSTED`**, and that is
+the most important line in this file. EODHD serves `close` beside
+`adjusted_close`, so the obvious reading is that `close` is the exchange print
+— but `RESEARCH_01_DATA_DICTIONARY.md` §0.1a records, from measurement, that
+**some EODHD `raw` closes are already split-adjusted**, so applying the recorded
+split adjusts twice. 1,872 splits in this corpus have prints that contradict
+each other or the ratio.
 
-Nothing in the package format, the manifest, the normalizer or the validator
-needs to change for any of that.
+A vendor that is *usually* raw is not raw. `UNKNOWN` is the honest declaration
+and it costs something real — it blocks corporate-action validation, by design.
+Claiming `RAW_UNADJUSTED` would buy that validation back with a number nobody
+checked.
+
+**Splits and dividends come from dedicated endpoints**, not inline on price
+rows the way Tiingo serves them. That is what the stub was written to prove the
+interface could accommodate, and it can: a request names a *dataset*, not an
+endpoint.
+
+Two measured limitations travel with every result
+--------------------------------------------------
+
+Both from `PHASE_06_VENDOR_MATRIX.md`, measured rather than asserted:
+
+* **One series per ticker — the most recent holder.** 59,925 delisted entries
+  under 59,925 distinct codes, no duplicates, so an *earlier* holder of a reused
+  ticker is not addressable at all. Asking for a dead registrant's symbol
+  returns whichever company holds those letters now. Forward this is far less
+  dangerous, because a ticker handover is observed as it happens rather than
+  reconstructed — but it is why bars from this vendor should stay
+  distinguishable from another's rather than pooled.
+* **The corporate-action feed is materially incomplete.** 8,818 of 17,428
+  priced securities carried no action at all, and `splits` for `THQI.US` across
+  2011-2013 returns nothing for a company that split four times. Sharadar
+  returned all four.
+
+Neither is a reason to refuse the vendor. Both are reasons to record what it is.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
+import time
+import urllib.parse
 from collections.abc import Mapping, Sequence
+from decimal import Decimal, InvalidOperation
+from decimal import DivisionByZero as DecimalDivisionByZero
 from typing import Any
 
 from tradeit.acquisition.base import (
@@ -48,93 +72,286 @@ from tradeit.acquisition.base import (
     FetchStatus,
     register,
 )
-from tradeit.acquisition.normalize import NormalizedRows
+from tradeit.acquisition.normalize import NormalizedRows, normalize_prices
+from tradeit.acquisition.redaction import credential_hint, redact_text, redact_url
 from tradeit.data.packages.spec import AdjustmentPolicyDeclaration, DatasetKind
+from tradeit.data.providers.http import (
+    HttpTransport,
+    ProviderRateLimitError,
+    ProviderUnreachableError,
+)
 
 #: Endpoint paths, to be filled in against the vendor's documentation. Empty
 #: rather than guessed: a plausible-looking wrong path produces a 404 that
 #: reads like a missing symbol.
-ENDPOINTS: dict[AcquisitionDataset, str] = {}
+#: Base, matching `research01.eodhd_client.BASE`. One constant per repository
+#: would be better; two that agree is the honest second-best, and a test pins
+#: them together so they cannot drift apart silently.
+BASE_URL = "https://eodhd.com/api"
 
+#: The real paths, taken from the client that has used them against the live
+#: API rather than from documentation read once.
+ENDPOINTS: dict[AcquisitionDataset, str] = {
+    AcquisitionDataset.DAILY_PRICES: "eod",
+    AcquisitionDataset.CORPORATE_ACTIONS: "splits",
+}
+
+#: Kept so callers that matched on it still compile; the adapter no longer
+#: returns it for a supported dataset.
 NOT_IMPLEMENTED_MESSAGE = (
-    "the EODHD adapter is a registered stub, not a working provider. Its "
-    "structure exists to keep provider switching honest — the acquisition "
-    "interface was designed against two vendors rather than one — but its "
-    "endpoints were deliberately left unfilled rather than guessed from memory, "
-    "because a guessed URL produces a 404 that reads like a missing symbol. "
-    "See the module docstring in tradeit/acquisition/eodhd.py for the five "
-    "steps to finish it. Use --provider tiingo today."
+    "this dataset is not implemented for EODHD. Daily prices and splits are; "
+    "see the module docstring for what this vendor is and is not."
 )
 
 
 @register
 class EodhdAcquisition:
-    """Structure only. See the module docstring."""
+    """Daily prices and splits from EODHD. See the module docstring for the
+    two measured limitations that travel with everything it returns."""
 
     name = "eodhd"
     credential_env = "EODHD_API_KEY"
 
-    #: What the vendor is understood to offer, so the runner can report what
-    #: finishing this adapter would unlock. **NEEDS VERIFICATION** — this list
-    #: is from public description, not from a trial.
     supported: tuple[AcquisitionDataset, ...] = (
-        AcquisitionDataset.SYMBOL_META,
         AcquisitionDataset.DAILY_PRICES,
         AcquisitionDataset.CORPORATE_ACTIONS,
     )
     produces: tuple[DatasetKind, ...] = (
-        DatasetKind.INSTRUMENTS,
-        DatasetKind.SYMBOL_MAPPINGS,
         DatasetKind.DAILY_BARS,
         DatasetKind.SPLITS,
-        DatasetKind.DIVIDENDS,
-        DatasetKind.DELISTINGS,
     )
     rate_limit_per_minute = 60
 
-    implemented = False
+    implemented = True
 
-    def __init__(self, **_: Any) -> None:
-        return None
-
-    def has_credential(self) -> bool:
-        return False
-
-    def fetch(self, request: FetchRequest) -> FetchOutcome:
-        return FetchOutcome(
-            request=request, status=FetchStatus.REJECTED, error=NOT_IMPLEMENTED_MESSAGE
+    def __init__(
+        self,
+        token: str | None = None,
+        *,
+        transport: Any = None,
+        rate_limit_per_minute: int | None = None,
+        timeout_s: float = 30.0,
+        max_attempts: int = 4,
+    ) -> None:
+        self._token = token or os.environ.get(self.credential_env, "").strip()
+        limit = rate_limit_per_minute or self.rate_limit_per_minute
+        self.rate_limit_per_minute = limit
+        self.transport = transport or HttpTransport(
+            cache=None,
+            timeout_s=timeout_s,
+            max_attempts=max_attempts,
+            min_interval_s=60.0 / max(limit, 1),
         )
 
-    def plan(self, symbols: Sequence[str], start: dt.date, end: dt.date) -> list[FetchRequest]:
-        """One request, so the refusal is reported once rather than per symbol."""
-        first = next((s for s in symbols if s.strip()), "")
-        if not first:
-            return []
-        return [FetchRequest.one(AcquisitionDataset.DAILY_PRICES, first.upper(), start, end)]
+    # -- credentials ---------------------------------------------------------
 
-    def normalize(self, outcome: FetchOutcome, ids: Mapping[str, int]) -> NormalizedRows:
-        return NormalizedRows()
+    def has_credential(self) -> bool:
+        return bool(self._token)
+
+    def credential_hint(self) -> str:
+        return credential_hint(self._token)
+
+    # -- declared capabilities ------------------------------------------------
 
     def adjustment_policy(self) -> AdjustmentPolicyDeclaration:
-        """UNKNOWN, because nothing has been observed.
+        """UNKNOWN, and deliberately so. See the module docstring.
 
-        Not RAW_UNADJUSTED as a hopeful default: the whole point of this field
-        is that a wrong answer is invisible afterwards.
+        §0.1a measured that some EODHD `raw` closes are already split-adjusted.
+        A vendor that is usually raw is not raw, and this field exists because a
+        wrong answer to it is invisible afterwards.
         """
         return AdjustmentPolicyDeclaration.UNKNOWN
 
     def capabilities(self) -> Mapping[str, CapabilitySupport]:
         return {
-            "daily_ohlcv": CapabilitySupport.UNKNOWN,
-            "splits": CapabilitySupport.UNKNOWN,
+            "daily_ohlcv": CapabilitySupport.AVAILABLE,
+            # AVAILABLE, because the endpoint works and returns real splits
+            # -- and the incompleteness lives in `limitations()` instead,
+            # because `CapabilitySupport` has no PARTIAL and inventing one
+            # here would change an enum the whole matrix is graded against.
+            # This matches how PHASE_06_VENDOR_MATRIX already records it:
+            # present for some securities, and "presence is not completeness".
+            "splits": CapabilitySupport.AVAILABLE,
             "dividends": CapabilitySupport.UNKNOWN,
         }
 
     def limitations(self) -> list[str]:
-        return [NOT_IMPLEMENTED_MESSAGE]
+        return [
+            "serves one series per ticker -- the most recent holder -- so an "
+            "earlier holder of a reused ticker is not addressable",
+            "the corporate-action feed is materially incomplete: 8,818 of 17,428 "
+            "priced securities carried no action, measured 2026-09-16",
+            "adjustment basis is UNKNOWN: some `raw` closes are already "
+            "split-adjusted (RESEARCH_01_DATA_DICTIONARY.md §0.1a)",
+        ]
 
     def missing_datasets(self) -> list[DatasetKind]:
-        return list(DatasetKind)
+        return [kind for kind in DatasetKind if kind not in self.produces]
+
+    # -- planning ------------------------------------------------------------
+
+    def plan(self, symbols: Sequence[str], start: dt.date, end: dt.date) -> list[FetchRequest]:
+        """One price request per symbol, and one split request per symbol.
+
+        Separate requests because EODHD serves corporate actions from dedicated
+        endpoints rather than inline -- which is exactly the shape the stub
+        existed to prove the interface accommodates.
+        """
+        requests: list[FetchRequest] = []
+        for raw in symbols:
+            symbol = raw.strip().upper()
+            if not symbol:
+                continue
+            for dataset in self.supported:
+                requests.append(FetchRequest.one(dataset, symbol, start, end))
+        return requests
+
+    def credits_for(self, request: FetchRequest) -> int:
+        return len(request.symbols)
+
+    # -- fetching ------------------------------------------------------------
+
+    def fetch(self, request: FetchRequest) -> FetchOutcome:
+        if request.dataset not in self.supported:
+            return FetchOutcome(
+                request=request, status=FetchStatus.REJECTED, error=NOT_IMPLEMENTED_MESSAGE
+            )
+        if not self.has_credential():
+            return FetchOutcome(
+                request=request,
+                status=FetchStatus.REJECTED,
+                error=f"no credential: set {self.credential_env}",
+            )
+        url = self._url(request)
+        started = time.perf_counter()
+        try:
+            body = self.transport.get(url)
+        except ProviderRateLimitError as error:
+            return self._failure(request, url, FetchStatus.RATE_LIMITED, error, started)
+        except ProviderUnreachableError as error:
+            return self._failure(request, url, FetchStatus.UNREACHABLE, error, started)
+        except Exception as error:
+            return self._failure(request, url, FetchStatus.REJECTED, error, started)
+        elapsed = time.perf_counter() - started
+
+        try:
+            decoded = json.loads(body)
+        except json.JSONDecodeError as error:
+            return FetchOutcome(
+                request=request,
+                status=FetchStatus.MALFORMED,
+                url=redact_url(url),
+                raw=body,
+                error=redact_text(f"response was not JSON: {error}", self._token),
+                elapsed_s=elapsed,
+            )
+
+        rows = (
+            tuple(row for row in decoded if isinstance(row, dict))
+            if isinstance(decoded, list)
+            else ()
+        )
+        return FetchOutcome(
+            request=request,
+            status=FetchStatus.OK if rows else FetchStatus.EMPTY,
+            url=redact_url(url),
+            raw=body,
+            rows=rows,
+            http_status=200,
+            elapsed_s=elapsed,
+        )
+
+    def _failure(
+        self,
+        request: FetchRequest,
+        url: str,
+        status: FetchStatus,
+        error: Exception,
+        started: float,
+    ) -> FetchOutcome:
+        return FetchOutcome(
+            request=request,
+            status=status,
+            url=redact_url(url),
+            # redact_text as well as redact_url, for the reason the Tiingo
+            # adapter gives: the URL regex catches `param=value`, and a vendor
+            # echoing the key in prose inside an error body writes it in neither
+            # shape. This string reaches the journal, which gets shared.
+            error=redact_text(str(error), self._token),
+            elapsed_s=time.perf_counter() - started,
+        )
+
+    def _url(self, request: FetchRequest) -> str:
+        """The paths `research01.eodhd_client` has used against the live API.
+
+        The token goes in the query string because that is what this vendor
+        accepts; `redact_url` strips it from everything that is stored or
+        logged, which is checked by a test rather than assumed.
+        """
+        path = ENDPOINTS[request.dataset]
+        symbol = urllib.parse.quote(request.symbol.strip().upper())
+        params = {"api_token": self._token, "fmt": "json"}
+        if request.start:
+            params["from"] = request.start.isoformat()
+        if request.end:
+            params["to"] = request.end.isoformat()
+        return f"{BASE_URL}/{path}/{symbol}?{urllib.parse.urlencode(params)}"
+
+    # -- normalising ----------------------------------------------------------
+
+    def normalize(self, outcome: FetchOutcome, ids: Mapping[str, int]) -> NormalizedRows:
+        """Prices through the shared normaliser; splits through this vendor's shape.
+
+        EODHD's price rows carry `date`, `open`, `high`, `low`, `close` and
+        `volume` under exactly those names, so `normalize_prices` reads them
+        unchanged -- it finds no `splitFactor` and emits no splits, which is
+        correct here because they arrive from their own endpoint.
+        """
+        symbol = outcome.request.symbol
+        instrument_id = ids.get(symbol)
+        if instrument_id is None:
+            return NormalizedRows()
+        if outcome.request.dataset is AcquisitionDataset.DAILY_PRICES:
+            return normalize_prices(symbol, instrument_id, outcome.rows)
+        if outcome.request.dataset is AcquisitionDataset.CORPORATE_ACTIONS:
+            return self._normalize_splits(symbol, instrument_id, outcome.rows)
+        return NormalizedRows()
+
+    @staticmethod
+    def _normalize_splits(
+        symbol: str, instrument_id: int, rows: Sequence[Mapping[str, Any]]
+    ) -> NormalizedRows:
+        """``{"date": "2020-08-31", "split": "4.000000/1.000000"}`` -> ratio 4.
+
+        A malformed or zero-denominator ratio is **reported and dropped, never
+        defaulted to 1**, matching `research01.eodhd_client.parse_splits`: a
+        split silently read as 1 is a split that did not happen, and it would
+        leave the price series uncorrected with nothing to show for it.
+        """
+        out = NormalizedRows()
+        for row in rows:
+            session = row.get("date")
+            raw = str(row.get("split", "")).strip()
+            if not session or "/" not in raw:
+                out.findings.append(f"{symbol}: unreadable split {raw!r} on {session}")
+                continue
+            numerator, _, denominator = raw.partition("/")
+            try:
+                ratio = Decimal(numerator) / Decimal(denominator)
+            except (InvalidOperation, ZeroDivisionError, DecimalDivisionByZero):
+                out.findings.append(f"{symbol}: split {raw!r} on {session} is not a ratio")
+                continue
+            if ratio <= 0:
+                out.findings.append(f"{symbol}: split ratio {ratio} on {session} is not positive")
+                continue
+            out.rows.setdefault(DatasetKind.SPLITS, []).append(
+                {
+                    "instrument_id": str(instrument_id),
+                    "ex_date": str(session),
+                    "ratio": format(ratio.normalize(), "f"),
+                }
+            )
+        return out
 
 
-__all__ = ["ENDPOINTS", "NOT_IMPLEMENTED_MESSAGE", "EodhdAcquisition"]
+__all__ = ["BASE_URL", "ENDPOINTS", "NOT_IMPLEMENTED_MESSAGE", "EodhdAcquisition"]

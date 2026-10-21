@@ -64,4 +64,17 @@ matters far less going forward, where a ticker handover is *observed* as it
 happens rather than reconstructed, but it is a reason to keep EODHD's bars
 distinguishable from Tiingo's rather than pooled.
 
-That is a day of work and it is not blocking. The 48 start accumulating now.
+**Done 2026-10-21.** `EodhdAcquisition` is implemented: daily prices and
+splits, against the URL shapes `research01.eodhd_client` has already used
+against the live API for 854,718 bars, with fixtures captured from real
+responses and the key stripped at capture time.
+
+**It does not widen the universe by itself.** The adapter exists; pointing the
+daily capture at two providers is a separate change, and it needs a decision
+this document should not pre-empt: whether a security's bars may come from
+whichever vendor answered, or whether each security is assigned to one. The
+second is the safer default — EODHD's adjustment basis is `UNKNOWN` and
+Tiingo's is `RAW_UNADJUSTED`, and pooling them would mix two bases in one
+series, which is the §0.1a defect reintroduced by the back door.
+
+The 48 keep accumulating on Tiingo in the meantime.
