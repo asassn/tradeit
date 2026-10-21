@@ -22,6 +22,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
@@ -32,6 +33,7 @@ from tradeit.acquisition.base import (
     FetchRequest,
     FetchStatus,
 )
+from tradeit.acquisition.normalize import NormalizedRows, normalize_prices
 from tradeit.forward import NoCredential, capture_forward
 from tradeit.storage.tables import ForwardObservation
 
@@ -61,6 +63,13 @@ class _StubSource:
             for symbol in symbols
         ]
 
+    def normalize(self, outcome: FetchOutcome, ids) -> NormalizedRows:  # type: ignore[no-untyped-def]
+        symbol = outcome.request.symbol
+        instrument_id = ids.get(symbol)
+        if instrument_id is None:
+            return NormalizedRows()
+        return normalize_prices(symbol, instrument_id, outcome.rows)
+
     def fetch(self, request: FetchRequest) -> FetchOutcome:
         symbol = request.symbol
         self.fetched.append(symbol)
@@ -75,7 +84,16 @@ class _StubSource:
         return FetchOutcome(
             request=request,
             status=FetchStatus.OK,
-            rows=({"date": "2026-10-20", "close": 100.0},),
+            rows=(
+                {
+                    "date": "2026-10-20",
+                    "open": 99.0,
+                    "high": 101.0,
+                    "low": 98.5,
+                    "close": 100.0,
+                    "volume": 1_000_000,
+                },
+            ),
         )
 
 
@@ -218,3 +236,91 @@ def test_the_journal_receives_every_outcome_when_one_is_given(
     spy = _SpyJournal()
     _capture(db_session, _StubSource(silent={"GONE"}), ["AAPL", "GONE"], journal=spy)
     assert sorted(status for _, status in spy.seen) == ["empty", "ok"]
+
+
+def test_prices_are_written_when_the_symbol_has_an_id(db_session: Session) -> None:
+    """A capture that records only observations stores no data to trade on."""
+    from tradeit.storage.tables import OhlcvBar
+
+    _capture(db_session, _StubSource(), ["AAPL"], instrument_ids={"AAPL": 7})
+    db_session.flush()
+
+    bar = db_session.query(OhlcvBar).one()
+    assert bar.instrument_id == 7
+    assert bar.close == Decimal("100.0")
+    assert bar.source == "tiingo", "a bar that cannot name its vendor cannot be rechecked"
+    assert bar.knowledge_source == "vendor_ingest"
+
+
+def test_knowledge_time_is_when_we_asked_not_when_the_session_closed(
+    db_session: Session,
+) -> None:
+    """Different facts, and the distinction is the whole bitemporal point: a
+    price learned three days late is still a price for its session."""
+    from tradeit.storage.tables import OhlcvBar
+
+    late = dt.datetime(2026, 10, 23, 12, tzinfo=dt.UTC)
+    _capture(db_session, _StubSource(), ["AAPL"], instrument_ids={"AAPL": 7}, asked_at=late)
+    db_session.flush()
+
+    bar = db_session.query(OhlcvBar).one()
+    assert bar.knowledge_time == late
+    assert bar.session_date == dt.date(2026, 10, 20)
+    assert bar.event_time.date() == dt.date(2026, 10, 20)
+
+
+def test_an_unmapped_symbol_still_gets_its_observation(db_session: Session) -> None:
+    """The survivorship record does not depend on having an id, and a symbol
+    whose prices had nowhere to go is counted rather than dropped quietly."""
+    from tradeit.storage.tables import OhlcvBar
+
+    report = _capture(db_session, _StubSource(), ["AAPL"], instrument_ids={})
+    db_session.flush()
+
+    assert db_session.query(ForwardObservation).count() == 1
+    assert db_session.query(OhlcvBar).count() == 0
+    assert report.unmapped == ("AAPL",)
+    assert "no known id" in report.describe()
+
+
+def test_re_running_writes_no_duplicate_bars(db_session: Session) -> None:
+    """A later ask adds an observation and must not add a second price for a
+    session already held."""
+    from tradeit.storage.tables import OhlcvBar
+
+    _capture(db_session, _StubSource(), ["AAPL"], instrument_ids={"AAPL": 7})
+    db_session.flush()
+    later = _capture(
+        db_session,
+        _StubSource(),
+        ["AAPL"],
+        instrument_ids={"AAPL": 7},
+        asked_at=ASKED + dt.timedelta(days=1),
+    )
+    db_session.flush()
+
+    assert db_session.query(OhlcvBar).count() == 1
+    assert later.bars_written == 0
+    assert db_session.query(ForwardObservation).count() == 2
+
+
+def test_a_row_the_vendor_sent_that_cannot_be_read_is_reported(
+    db_session: Session,
+) -> None:
+    """Carried out rather than logged: "the vendor sent a row we could not
+    parse" is evidence about the vendor."""
+
+    @dataclass
+    class _BadRowSource(_StubSource):
+        def fetch(self, request: FetchRequest) -> FetchOutcome:
+            return FetchOutcome(
+                request=request,
+                status=FetchStatus.OK,
+                rows=({"date": "2026-10-20", "close": 100.0},),  # no open/high/low
+            )
+
+    report = _capture(db_session, _BadRowSource(), ["AAPL"], instrument_ids={"AAPL": 7})
+    db_session.flush()
+    assert report.bars_written == 0
+    assert report.findings, "an unreadable row was dropped without a finding"
+    assert "missing" in report.findings[0]

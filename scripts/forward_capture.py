@@ -59,12 +59,14 @@ from pathlib import Path
 sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 
+from backtest_research01 import _universe
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.acquisition.journal import AcquisitionJournal
 from tradeit.acquisition.tiingo import TiingoAcquisition
 from tradeit.forward import capture_forward
+from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import Base
 
 
@@ -91,6 +93,14 @@ def main() -> int:
         type=int,
         default=None,
         help="stop after this many, to stay inside a free tier on the first run",
+    )
+    ap.add_argument(
+        "--corpus",
+        default="sqlite:///research01.sqlite",
+        help=(
+            "read only, and only to resolve tickers to the ids their bars are "
+            "stored under, so the forward record joins to the corpus"
+        ),
     )
     ap.add_argument("--dry-run", action="store_true", help="plan and count credits, fetch nothing")
     args = ap.parse_args()
@@ -127,6 +137,23 @@ def main() -> int:
         print("\n--dry-run: nothing fetched, nothing written.")
         return 0
 
+    # Resolved from the corpus, read-only, so a forward bar lands under the same
+    # id as its history. Without this the two records could never be joined and
+    # the forward data would start a second, parallel universe of identifiers.
+    corpus: Session = sessionmaker(
+        bind=install_sqlite_busy_timeout(create_engine(args.corpus, future=True)),
+        future=True,
+    )()
+    with corpus:
+        instrument_ids = _universe(corpus, symbols)
+    missing = sorted(set(symbols) - set(instrument_ids))
+    print(f"ids      : {len(instrument_ids)} of {len(symbols)} resolved from the corpus")
+    if missing:
+        # Named, not counted. A symbol with no id still gets its observation
+        # recorded -- the survivorship record does not depend on having an id --
+        # but its prices have nowhere to go, and that is worth seeing.
+        print(f"  no id for: {', '.join(missing[:10])}{' ...' if len(missing) > 10 else ''}")
+
     engine = create_engine(f"sqlite:///{args.record}", future=True)
     Base.metadata.create_all(engine)
     session: Session = sessionmaker(bind=engine, future=True)()
@@ -146,6 +173,7 @@ def main() -> int:
         start=start,
         end=end,
         asked_at=asked_at,
+        instrument_ids=instrument_ids,
         journal=journal,
     )
     session.commit()

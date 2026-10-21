@@ -38,15 +38,19 @@ from __future__ import annotations
 
 import datetime as dt
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tradeit.acquisition.base import AcquisitionDataset, FetchOutcome, FetchRequest
-from tradeit.storage.tables import ForwardObservation
+from tradeit.acquisition.normalize import NormalizedRows
+from tradeit.core.enums import Bartimeframe, KnowledgeTimeSource
+from tradeit.data.packages.spec import DatasetKind
+from tradeit.storage.tables import ForwardObservation, OhlcvBar
 
 __all__ = ["CaptureReport", "CaptureSource", "capture_forward"]
 
@@ -66,6 +70,8 @@ class CaptureSource(Protocol):
 
     def fetch(self, request: FetchRequest) -> FetchOutcome: ...
 
+    def normalize(self, outcome: FetchOutcome, ids: Mapping[str, int]) -> NormalizedRows: ...
+
 
 class NoCredential(RuntimeError):
     """Refused rather than run, because a day not captured cannot be caught up."""
@@ -80,6 +86,16 @@ class CaptureReport:
     requested: int
     recorded: int
     silent: int
+    bars_written: int = 0
+    #: Symbols that returned rows but whose id is unknown, so their prices were
+    #: not written. **Counted, never silently dropped**: a symbol whose
+    #: observation exists while its prices do not is a hole that reads like a
+    #: halt.
+    unmapped: tuple[str, ...] = ()
+    #: What the normaliser reported about rows it could not read. Carried out
+    #: rather than logged, because "the vendor sent a row we could not parse"
+    #: is evidence about the vendor.
+    findings: tuple[str, ...] = ()
     by_status: dict[str, int] = field(default_factory=dict)
 
     @property
@@ -96,8 +112,16 @@ class CaptureReport:
             f"{self.session_date}: {self.requested} requested, "
             f"{self.recorded} recorded, {self.silent} silent",
         ]
+        lines.append(f"  {self.bars_written} bars written")
         for status, count in sorted(self.by_status.items(), key=lambda kv: -kv[1]):
             lines.append(f"  {status:<12} {count:>5}")
+        if self.unmapped:
+            lines.append(
+                f"  {len(self.unmapped)} symbol(s) returned rows with no known id, so "
+                f"their prices were not written: {', '.join(sorted(self.unmapped)[:8])}"
+            )
+        for finding in self.findings[:5]:
+            lines.append(f"  finding: {finding}")
         if not self.complete:
             lines.append(
                 f"  {self.requested - self.recorded} request(s) produced no observation "
@@ -114,6 +138,7 @@ def capture_forward(
     start: dt.date,
     end: dt.date,
     asked_at: dt.datetime,
+    instrument_ids: Mapping[str, int] | None = None,
     journal: object | None = None,
     provider: str = "tiingo",
 ) -> CaptureReport:
@@ -125,10 +150,18 @@ def capture_forward(
     clock per row could not be tested for the idempotency its unique
     constraint provides.
 
+    ``instrument_ids`` maps each symbol to the id its bars are stored under.
+    **Without it the observations are still recorded and no prices are
+    written**, which is a deliberate split rather than a half-failure: knowing
+    *that* a symbol printed is the survivorship record and is worth keeping even
+    when the prices have nowhere to go. A symbol that returned rows and has no
+    id is counted in :attr:`CaptureReport.unmapped`, never dropped quietly.
+
     Raises :class:`NoCredential` rather than recording an empty run. An empty
     forward record is indistinguishable from a quiet market, and that is the one
     thing it must never be mistaken for.
     """
+    ids = dict(instrument_ids or {})
     if not source.has_credential():
         raise NoCredential(
             "no credential for the forward source. A day not captured cannot be "
@@ -144,6 +177,9 @@ def capture_forward(
     statuses: Counter[str] = Counter()
     recorded = 0
     silent = 0
+    bars_written = 0
+    unmapped: list[str] = []
+    findings: list[str] = []
 
     for request in requests:
         outcome = source.fetch(request)
@@ -185,6 +221,17 @@ def capture_forward(
             # **Counted, and the row is written either way.** This is the
             # observation a delisting is made of.
             silent += 1
+            continue
+
+        instrument_id = ids.get(request.symbol)
+        if instrument_id is None:
+            unmapped.append(request.symbol)
+            continue
+        normalized = source.normalize(outcome, {request.symbol: instrument_id})
+        findings.extend(normalized.findings)
+        bars_written += _write_bars(
+            session, normalized, instrument_id, asked_at=asked_at, provider=provider
+        )
 
     return CaptureReport(
         session_date=end,
@@ -192,5 +239,70 @@ def capture_forward(
         requested=len(requests),
         recorded=recorded,
         silent=silent,
+        bars_written=bars_written,
+        unmapped=tuple(unmapped),
+        findings=tuple(findings),
         by_status=dict(statuses),
     )
+
+
+def _write_bars(
+    session: Session,
+    normalized: NormalizedRows,
+    instrument_id: int,
+    *,
+    asked_at: dt.datetime,
+    provider: str,
+) -> int:
+    """Persist the bars a response normalised to, skipping ones already held.
+
+    ``knowledge_time`` is the instant we **asked**, not the session's close.
+    They are different facts and the distinction is the whole bitemporal point:
+    a price learned three days late is still a price for its session, and a
+    strategy may only use what was knowable at the time.
+
+    ``knowledge_source`` is ``VENDOR_INGEST`` rather than ``REPORTED``, because
+    an exchange reported the print and a vendor relayed it; recording the relay
+    as the report would overstate what we know about the chain.
+
+    Bars already held for the same session are **left alone rather than
+    updated**. A later ask that disagrees should add a revision, not overwrite
+    one -- but writing that revision needs a decision about which vendor wins,
+    and this does not invent one. The disagreement is visible in the
+    observation rows either way.
+    """
+    rows = normalized.rows.get(DatasetKind.DAILY_BARS, [])
+    written = 0
+    for row in rows:
+        session_date = dt.date.fromisoformat(row["session_date"])
+        existing = session.execute(
+            select(OhlcvBar.id).where(
+                OhlcvBar.instrument_id == instrument_id,
+                OhlcvBar.session_date == session_date,
+                OhlcvBar.timeframe == str(Bartimeframe.D1),
+            )
+        ).first()
+        if existing is not None:
+            continue
+        session.add(
+            OhlcvBar(
+                instrument_id=instrument_id,
+                timeframe=str(Bartimeframe.D1),
+                session_date=session_date,
+                event_time=dt.datetime.combine(session_date, dt.time(20, 0), tzinfo=dt.UTC),
+                knowledge_time=asked_at,
+                knowledge_source=str(KnowledgeTimeSource.VENDOR_INGEST),
+                open=Decimal(row["open"]),
+                high=Decimal(row["high"]),
+                low=Decimal(row["low"]),
+                close=Decimal(row["close"]),
+                volume=Decimal(row["volume"]),
+                # NOT NULL in the schema, and rightly so: a bar that cannot
+                # name where it came from cannot be re-checked against the
+                # vendor that sent it. The first version omitted it and the
+                # constraint refused the insert.
+                source=provider,
+            )
+        )
+        written += 1
+    return written
