@@ -59,15 +59,20 @@ from pathlib import Path
 sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 
-from backtest_research01 import _universe
-from sqlalchemy import create_engine
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.acquisition.journal import AcquisitionJournal
 from tradeit.acquisition.tiingo import TiingoAcquisition
 from tradeit.forward import capture_forward
+from tradeit.forward.identity import TickerAlias, resolve_as_of
 from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import Base
+
+
+def _as_date(raw: object) -> dt.date:
+    """SQLite returns a DATE column as a string; Postgres returns a date."""
+    return raw if isinstance(raw, dt.date) else dt.date.fromisoformat(str(raw)[:10])
 
 
 def main() -> int:
@@ -130,13 +135,6 @@ def main() -> int:
     print(f"journal  : {args.journal}")
     print(f"window   : {start} .. {end}   symbols: {len(symbols)}")
 
-    requests = source.plan(symbols, start, end)
-    credits = sum(source.credits_for(request) for request in requests)
-    print(f"planned  : {len(requests)} requests, {credits} credits")
-    if args.dry_run:
-        print("\n--dry-run: nothing fetched, nothing written.")
-        return 0
-
     # Resolved from the corpus, read-only, so a forward bar lands under the same
     # id as its history. Without this the two records could never be joined and
     # the forward data would start a second, parallel universe of identifiers.
@@ -144,19 +142,96 @@ def main() -> int:
         bind=install_sqlite_busy_timeout(create_engine(args.corpus, future=True)),
         future=True,
     )()
+    # **Resolved as of `end`, not by ticker.** `_universe` is still what the
+    # backtest scripts use and it has no date filter: it returns the *earliest*
+    # holder of a ticker, which for 1,471 of the corpus's 17,342 reused tickers
+    # answers a question nobody asked. It also returned an id for `ABAX` and
+    # `AUTO`, which no security has held since 2018 and 2022 -- so the capture
+    # asked Tiingo about them daily and wrote `empty`, which is a dated 2026
+    # delisting claim about tickers that were already gone. See
+    # `tradeit.forward.identity` for the measurement and the reasoning.
     with corpus:
-        instrument_ids = _universe(corpus, symbols)
-    missing = sorted(set(symbols) - set(instrument_ids))
-    print(f"ids      : {len(instrument_ids)} of {len(symbols)} resolved from the corpus")
-    if missing:
-        # Named, not counted. A symbol with no id still gets its observation
-        # recorded -- the survivorship record does not depend on having an id --
-        # but its prices have nowhere to go, and that is worth seeing.
-        print(f"  no id for: {', '.join(missing[:10])}{' ...' if len(missing) > 10 else ''}")
-
+        aliases = [
+            TickerAlias(
+                ticker=str(row[0]),
+                security_id=int(row[1]),
+                valid_from=_as_date(row[2]),
+                valid_to=_as_date(row[3]) if row[3] else None,
+            )
+            for row in corpus.execute(
+                text(
+                    "select alias_value, security_id, valid_from, valid_to "
+                    "from symbol_aliases where alias_kind='ticker' and alias_value in :t"
+                ).bindparams(bindparam("t", value=list(symbols), expanding=True))
+            ).all()
+        ]
+    # The record is opened *before* resolution, because the exclusion rule below
+    # has to consult what has already been observed.
     engine = create_engine(f"sqlite:///{args.record}", future=True)
     Base.metadata.create_all(engine)
     session: Session = sessionmaker(bind=engine, future=True)()
+    ever_printed = {
+        str(row[0])
+        for row in session.execute(
+            text("select distinct symbol from forward_observations where rows_returned > 0")
+        ).all()
+    }
+
+    instrument_ids, unresolved = resolve_as_of(aliases, symbols, as_of=end)
+
+    # **A symbol that has already printed is never excluded**, whatever the
+    # corpus now says about its ticker.
+    #
+    # Without this the guard becomes a trap. `research-01` is a frozen corpus,
+    # so it will not learn that a company delisted next year -- but the moment
+    # it is refreshed, a ticker whose alias has just been closed would start
+    # resolving to nothing, and the capture would stop asking about it **exactly
+    # as its exit was being observed.** The delisting would vanish from the
+    # record as a gap rather than appear in it as a silence, which is the one
+    # outcome this entire record exists to prevent, and it would do so quietly.
+    #
+    # So the rule is narrower than "resolvable": a symbol with no bar ever
+    # recorded has no baseline, and its silence says nothing. A symbol that
+    # printed and then went quiet is an observation, and it keeps being asked
+    # about under the id it already has.
+    # No id is recovered for a kept symbol, and none is needed: the case being
+    # protected is a symbol that has gone *silent*, and a silence produces no
+    # bar to file. If it prints again the existing "no id for" report names it,
+    # and `forward_observations` does not carry an instrument id at all -- the
+    # observation is the evidence, and it stands on the symbol and the date.
+    kept = sorted(s for s in unresolved if s in ever_printed)
+    for symbol in kept:
+        del unresolved[symbol]
+
+    print(f"ids      : {len(instrument_ids)} of {len(symbols)} resolved as of {end}")
+    for symbol in kept:
+        print(f"  kept     : {symbol} (already printed; its silence is evidence)")
+    if unresolved:
+        # **Dropped from the ask, not asked and recorded.** A ticker nobody
+        # holds on this date is a fact about neither the vendor nor the market,
+        # so there is no honest observation to write for it. Reported here,
+        # where a universe problem belongs.
+        for ticker, reason in sorted(unresolved.items()):
+            print(f"  not asked: {ticker} ({reason})")
+        symbols = [s for s in symbols if s not in unresolved]
+        print(f"  asking   : {len(symbols)} symbols after exclusions")
+    if not symbols:
+        print("no resolvable symbols; refusing to record a capture of nothing")
+        return 2
+
+    # **Planned after resolution**, so the count is what will actually be
+    # asked. It used to be computed first and `--dry-run` returned before the
+    # corpus was touched, which meant a dry run could not show an excluded
+    # ticker -- the one thing it most needs to show, since an exclusion is a
+    # universe defect and the whole point of a dry run is to find those for
+    # free.
+    requests = source.plan(symbols, start, end)
+    credits = sum(source.credits_for(request) for request in requests)
+    print(f"planned  : {len(requests)} requests, {credits} credits")
+    if args.dry_run:
+        print("\n--dry-run: nothing fetched, nothing written.")
+        return 0
+
     journal = AcquisitionJournal(path=Path(args.journal))
 
     # The capture itself lives in `tradeit.forward`, not here. It is meant to

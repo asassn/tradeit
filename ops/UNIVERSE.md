@@ -78,3 +78,64 @@ Tiingo's is `RAW_UNADJUSTED`, and pooling them would mix two bases in one
 series, which is the §0.1a defect reintroduced by the back door.
 
 The 48 keep accumulating on Tiingo in the meantime.
+
+## 46 names, not 48 — two were already dead when the universe was written
+
+**Measured 2026-10-22, after the first two scheduled runs.** Both runs reported
+exactly two silent symbols, and `ABAX` and `AUTO` had **never returned a bar**.
+They are not forward delistings. Resolved per date against the corpus, as
+`RESEARCH_01_DATA_DICTIONARY.md` §0.2 requires:
+
+| ticker | last held | `security_id` |
+|---|---|---|
+| `ABAX` | 2018-08-10 | 3377 |
+| `AUTO` | 2022-09-12 | 4535, and 1914 before it to 2013-05-01 |
+
+Independently cross-checked: resolving all 48 per date says 46 hold their
+ticker today, and the two that do not are precisely the two the vendor was
+silent about. The corpus and Tiingo agree without being asked to.
+
+### Why they were in the list, which is the part worth fixing
+
+The selection above is recorded as *"the first 48 of the same SIC-classified
+list, ordered by price coverage over 2010–2019"*, and defended as
+deterministic and reproducible. It is both. **It also selects for historical
+data richness and says nothing whatever about whether a company still exists**
+— a ticker with dense 2010–2019 coverage is, if anything, *more* likely to
+belong to something since acquired. The ordering was not wrong; using it
+unfiltered for a *forward* universe was.
+
+The two slots are **not refilled.** The source 195-name list is not a committed
+artifact, so there is no deterministic next-in-order to promote, and picking
+two replacements by eye would violate this document's own rule that a universe
+picked by eye is a selection nobody can check. 46 names, honestly 46.
+
+### The read rule for the record
+
+**`ABAX` and `AUTO` observations dated 2026-10-21 and 2026-10-22 are not
+exits.** Four rows, `status = empty`, `rows_returned = 0`. They are a true
+record of what was asked and what came back, so they stay — this record does
+not delete its own history — but a reader counting silences as delistings will
+count two companies as having left the market in October 2026, one of which
+left in 2018. The rows before 2026-10-22 for those two symbols carry no
+survivorship information.
+
+### What stops it recurring
+
+`tradeit.forward.identity.resolve_as_of` resolves per date and returns
+`NO_HOLDER_AT_DATE` or `AMBIGUOUS` instead of an id. The capture drops those
+from the ask and names them, rather than asking and recording a silence about a
+ticker nobody holds. The old resolver,
+`scripts/backtest_research01._universe`, has no date filter and returns the
+*earliest* holder; 1,471 of the corpus's 17,342 tickers are held by more than
+one security, so for 8.5% of tickers it answers a question nobody asked.
+
+**The exclusion is deliberately narrower than "unresolvable".** A symbol that
+has already printed a bar is never excluded, whatever the corpus later says
+about its ticker. `research-01` is frozen and will not learn about a 2027
+delisting — but on a refresh, a ticker whose alias had just been closed would
+start resolving to nothing and the capture would stop asking **exactly as the
+exit was being observed**, turning the delisting into a gap instead of a
+silence. That is the one failure this record exists to prevent, so the rule is:
+no bar ever recorded means no baseline and no information; printed-then-silent
+is an observation and keeps being asked about.
