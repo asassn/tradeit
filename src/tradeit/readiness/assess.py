@@ -59,6 +59,7 @@ __all__ = [
     "VerdictOutcome",
     "assess_demotion",
     "assess_promotion",
+    "hurdle_evidence",
 ]
 
 
@@ -240,3 +241,35 @@ def assess_demotion(current: StrategyState, evidence: Mapping[str, object]) -> R
 
 def _ladder_position(state: StrategyState) -> int:  # pragma: no cover - helper
     return LADDER.index(state)
+
+
+def hurdle_evidence(out_of_sample_t: float, *, hurdle: float) -> dict[str, float]:
+    """``out_of_sample_t_over_hurdle``: the held-out t as a multiple of the bar.
+
+    `out_of_sample_clears_hurdle` compares this against **1.0**, so the bar is
+    "clears the hurdle the ledger computed for this test" and no constant is
+    encoded anywhere. Rejected alternative: a standing minimum. The hurdle
+    *rises* with the trial count — 2.6563 at 144 trials — so any fixed number
+    becomes weaker than the ledger as trials accumulate and would eventually
+    pass a result the ledger rejects.
+
+    ``hurdle`` must come from
+    :func:`tradeit.backtesting.overfitting.small_sample_hurdle` for the trials
+    and blocks of **this** test. It is passed in rather than computed here so
+    `readiness` keeps depending on nothing but `strategy.lifecycle`: importing
+    `overfitting` would pull `backtesting.base` and
+    `reproducibility.versioning` into a module whose thinness is the point —
+    the same coupling-by-convenience that made the observability seam useless
+    for a while.
+
+    **Refuses a non-positive hurdle** rather than dividing by it. A zero or
+    negative bar would make every ratio infinite or sign-flipped, and a
+    criterion that passes everything looks identical to one that is working.
+    """
+    if hurdle <= 0:
+        raise ValueError(
+            f"a hurdle of {hurdle} is not a bar; small_sample_hurdle is positive for "
+            "every trial count, so this is a miscomputed or defaulted value and "
+            "dividing by it would pass every result"
+        )
+    return {"out_of_sample_t_over_hurdle": out_of_sample_t / hurdle}

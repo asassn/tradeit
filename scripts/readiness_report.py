@@ -41,10 +41,15 @@ EVIDENCE: dict[str, object] = {
     # PHASE_11_AUDIT third addendum: 143,331.79 from 100,000 with no drawdown
     # anywhere near the halt. Max drawdown from the backtester's own metrics.
     "max_drawdown_pct": 0.03,
-    # Not measured. The cost-sensitivity run has never been done, and
-    # market_impact is inert in every backtest this project has produced
-    # (PHASE_11_AUDIT second addendum), so a doubling test today would double
-    # only spread and slippage.
+    # Not measured. The cost-sensitivity run has never been done.
+    #
+    # **This comment used to say more and is now less of an excuse.** It read
+    # that market_impact was inert in every backtest this project had produced
+    # (PHASE_11_AUDIT second addendum), so a doubling test would double only
+    # spread and slippage. ADR-0028 switched impact on as of 2026-10-23, so a
+    # doubling test now doubles the size penalty too and is worth more than it
+    # would have been -- which makes this absence a thing to go and measure
+    # rather than a thing to explain.
     # "survives_double_costs": deliberately absent
     # ADR-0004: no authorisation file exists on this machine.
     "live_authorised": False,

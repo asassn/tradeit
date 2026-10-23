@@ -25,6 +25,7 @@ from tradeit.readiness.assess import (
     VerdictOutcome,
     assess_demotion,
     assess_promotion,
+    hurdle_evidence,
 )
 from tradeit.readiness.criteria import (
     DEMOTION_CRITERIA,
@@ -62,4 +63,5 @@ __all__ = [
     "assess_promotion",
     "criteria_for",
     "demotion_criteria_for",
+    "hurdle_evidence",
 ]

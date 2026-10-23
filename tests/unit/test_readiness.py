@@ -26,11 +26,13 @@ from tradeit.readiness import (
     Decision,
     Threshold,
     ThresholdSource,
+    Verdict,
     VerdictOutcome,
     assess_demotion,
     assess_promotion,
     criteria_for,
     demotion_criteria_for,
+    hurdle_evidence,
 )
 from tradeit.strategy.lifecycle import LADDER, StrategyState
 
@@ -72,15 +74,31 @@ def test_an_unresolved_criterion_blocks_exactly_as_a_failure_does() -> None:
 
 
 def test_an_unapproved_threshold_blocks_and_says_no_measurement_will_help() -> None:
-    """The roadmap's rule, enforced structurally rather than by discipline."""
+    """The roadmap's rule, enforced structurally rather than by discipline.
+
+    The example moved from `out_of_sample_clears_hurdle` to
+    `walk_forward_consistency` when the first was approved: it now compares
+    against the ledger hurdle as a ratio, so it is no longer an unapproved
+    threshold and could not demonstrate one. The invariant is unchanged and
+    `walk_forward_consistency` is still owed -- deliberately, since choosing it
+    now would fit a bar to walk-forward results that already exist.
+    """
     report = assess_promotion(
         StrategyState.OUT_OF_SAMPLE_TESTING,
         StrategyState.PAPER_TRADING,
-        CLEAN | {"out_of_sample_t": 9.0, "walk_forward_consistency": 1.0, "degradation": 0.0},
+        CLEAN
+        | {
+            "out_of_sample_t_over_hurdle": 4.0,
+            "walk_forward_consistency": 1.0,
+            "degradation": 0.0,
+        },
     )
     owed = {v.criterion.name for v in report.blocked_on_unapproved_thresholds}
-    assert "out_of_sample_clears_hurdle" in owed
     assert "walk_forward_consistency" in owed
+    assert "out_of_sample_clears_hurdle" not in owed, (
+        "the hurdle criterion is approved now (ratio against the ledger hurdle); "
+        "if it is unapproved again, something reverted"
+    )
     assert report.decision is Decision.HOLD, (
         "an excellent measurement passed an unapproved threshold, which is the "
         "after-the-fact judgement the framework exists to prevent"
@@ -92,9 +110,9 @@ def test_a_passing_measurement_cannot_rescue_an_unapproved_threshold() -> None:
     report = assess_promotion(
         StrategyState.OUT_OF_SAMPLE_TESTING,
         StrategyState.PAPER_TRADING,
-        CLEAN | {"out_of_sample_t": 99.0},
+        CLEAN | {"walk_forward_consistency": 99.0},
     )
-    verdict = next(v for v in report.verdicts if v.criterion.name == "out_of_sample_clears_hurdle")
+    verdict = next(v for v in report.verdicts if v.criterion.name == "walk_forward_consistency")
     assert verdict.outcome is VerdictOutcome.UNRESOLVED
     assert verdict.measured == 99.0, "the measurement is still reported, just not judged"
 
@@ -242,3 +260,76 @@ def test_the_report_names_what_is_owed_in_its_description() -> None:
     assert "HOLD" in text
     assert "APPROVED THRESHOLD" in text
     assert "OWED" in text
+
+
+# ---------------------------------------------------------------------------
+# The hurdle criterion: a ratio against the ledger, not a constant.
+# ---------------------------------------------------------------------------
+
+
+def _hurdle_verdict(t: float, *, hurdle: float) -> Verdict:
+    report = assess_promotion(
+        StrategyState.OUT_OF_SAMPLE_TESTING,
+        StrategyState.PAPER_TRADING,
+        CLEAN | hurdle_evidence(t, hurdle=hurdle),
+    )
+    return next(v for v in report.verdicts if v.criterion.name == "out_of_sample_clears_hurdle")
+
+
+def test_clearing_the_ledger_hurdle_passes_and_missing_it_fails() -> None:
+    """1.0 means exactly "equal to the hurdle the ledger computed"."""
+    assert _hurdle_verdict(2.6563, hurdle=2.6563).outcome is VerdictOutcome.PASS
+    assert _hurdle_verdict(2.6562, hurdle=2.6563).outcome is VerdictOutcome.FAIL
+
+
+def test_the_ratio_is_stricter_than_any_standing_minimum_would_have_been() -> None:
+    """**The reason this is a ratio and not a number.**
+
+    The hurdle rises with the trial count, so a fixed bar that looked
+    conservative when written becomes weaker than the ledger as trials
+    accumulate. Measured against the real `small_sample_hurdle` rather than a
+    remembered figure: a t of 2.3 clears a plausible standing minimum of 2.0
+    and clears the hurdle at a handful of trials, and **fails it at this
+    project's actual trial count** -- so a constant would have promoted a
+    result the ledger rejects.
+    """
+    from tradeit.backtesting.overfitting import small_sample_hurdle
+
+    blocks = 12
+    early = small_sample_hurdle(trials=3, blocks=blocks)
+    now = small_sample_hurdle(trials=144, blocks=blocks)
+    assert now > early, "the hurdle must rise with trials or this criterion is pointless"
+
+    t = 2.3
+    assert t > 2.0, "the standing minimum this test contrasts against"
+    assert _hurdle_verdict(t, hurdle=early).outcome is VerdictOutcome.PASS
+    assert _hurdle_verdict(t, hurdle=now).outcome is VerdictOutcome.FAIL, (
+        f"t={t} passed against a hurdle of {now:.4f} at 144 trials; the criterion is "
+        "not comparing against the ledger"
+    )
+
+
+def test_a_negative_t_cannot_clear_the_hurdle() -> None:
+    """A result in the wrong direction is not rescued by a small hurdle."""
+    assert _hurdle_verdict(-5.0, hurdle=2.6563).outcome is VerdictOutcome.FAIL
+
+
+def test_a_non_positive_hurdle_is_refused_rather_than_divided_by() -> None:
+    """A zero bar would pass everything and look identical to one that works."""
+    with pytest.raises(ValueError, match="is not a bar"):
+        hurdle_evidence(9.0, hurdle=0.0)
+    with pytest.raises(ValueError, match="is not a bar"):
+        hurdle_evidence(9.0, hurdle=-1.0)
+
+
+def test_the_hurdle_threshold_is_approved_and_names_its_parent() -> None:
+    """DERIVED, not WRITTEN: it is only as good as the ledger hurdle."""
+    criterion = next(
+        c
+        for c in criteria_for(StrategyState.PAPER_TRADING)
+        if c.name == "out_of_sample_clears_hurdle"
+    )
+    assert criterion.threshold.usable
+    assert criterion.threshold.value == 1.0
+    assert criterion.threshold.source is ThresholdSource.DERIVED
+    assert "small_sample_hurdle" in criterion.threshold.citation

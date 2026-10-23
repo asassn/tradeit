@@ -194,16 +194,29 @@ PROMOTION_CRITERIA: tuple[Criterion, ...] = (
     Criterion(
         name="out_of_sample_clears_hurdle",
         question="Does the held-out result clear the trial-ledger hurdle?",
-        metric="out_of_sample_t",
+        metric="out_of_sample_t_over_hurdle",
         comparison=Comparison.AT_LEAST,
         threshold=Threshold(
-            value=0.0,
-            source=ThresholdSource.UNAPPROVED,
+            value=1.0,
+            source=ThresholdSource.DERIVED,
             citation=(
-                "OWED: the hurdle is small_sample_hurdle(trials, blocks) and is "
-                "computed per test, not fixed. Encoding a constant here would "
-                "contradict the ledger. Needs a decision on whether readiness asks "
-                "for the ledger hurdle at assessment time or a standing minimum."
+                "The ledger hurdle at assessment time, expressed as a ratio. The "
+                "metric is t divided by small_sample_hurdle(trials, blocks), so "
+                "1.0 means exactly 'clears the hurdle the ledger computed for this "
+                "test' and **no constant is encoded** -- which is what the question "
+                "recorded here required, since a fixed number would contradict the "
+                "ledger. DERIVED, not WRITTEN: the parent is the ledger hurdle, "
+                "and this threshold is only as good as that. "
+                "`readiness.hurdle_evidence` does the division and refuses a "
+                "non-positive hurdle. "
+                "Rejected: a standing minimum. The hurdle RISES with trials -- it "
+                "reads 2.6563 at 144 -- so any fixed bar becomes weaker than the "
+                "ledger as trials accumulate, and would eventually pass a result "
+                "the ledger rejects. That is the failure mode this criterion "
+                "exists to prevent, arrived at by a constant that looked "
+                "conservative when it was written. This is a wiring decision "
+                "rather than a new bar: it declines to choose any bar other than "
+                "the one already written down."
             ),
         ),
         applies_from=StrategyState.OUT_OF_SAMPLE_TESTING,
