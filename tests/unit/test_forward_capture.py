@@ -170,15 +170,26 @@ def test_a_later_ask_about_the_same_session_is_a_second_observation(
 ) -> None:
     """A vendor may revise. "We asked Monday and got nothing; we asked Friday
     and got a price" is two facts, both evidence."""
+    # `MSFT` prints and is otherwise irrelevant. It is here because a silence
+    # is only interpretable against a session that demonstrably happened: with
+    # `AAPL` alone and silent, nothing establishes that the session exists, and
+    # the capture withholds the observation rather than writing a false exit.
+    # Production universes always have a printing majority; a one-symbol
+    # universe was a convenience of this test, not its subject.
     silent_source = _StubSource(silent={"AAPL"})
-    _capture(db_session, silent_source, ["AAPL"], asked_at=ASKED)
+    _capture(db_session, silent_source, ["AAPL", "MSFT"], asked_at=ASKED)
     db_session.flush()
 
     later = ASKED + dt.timedelta(days=4)
-    _capture(db_session, _StubSource(), ["AAPL"], asked_at=later)
+    _capture(db_session, _StubSource(), ["AAPL", "MSFT"], asked_at=later)
     db_session.flush()
 
-    rows = db_session.query(ForwardObservation).order_by(ForwardObservation.asked_at).all()
+    rows = (
+        db_session.query(ForwardObservation)
+        .filter(ForwardObservation.symbol == "AAPL")
+        .order_by(ForwardObservation.asked_at)
+        .all()
+    )
     assert len(rows) == 2
     assert rows[0].rows_returned == 0
     assert rows[1].rows_returned == 1
@@ -217,11 +228,15 @@ def test_only_daily_price_requests_are_captured(db_session: Session) -> None:
                 out.append(FetchRequest.one(AcquisitionDataset.DAILY_PRICES, symbol, start, end))
             return out
 
-    report = _capture(db_session, _MixedSource(silent={"GONE"}), ["GONE"])
+    # `HERE` prints, so the session is established and `GONE`'s silence means
+    # what it says. See the note in
+    # `test_a_later_ask_about_the_same_session_is_a_second_observation`.
+    report = _capture(db_session, _MixedSource(silent={"GONE"}), ["GONE", "HERE"])
     db_session.flush()
-    assert report.requested == 1
-    assert db_session.query(ForwardObservation).count() == 1
-    assert db_session.query(ForwardObservation).one().rows_returned == 0
+    assert report.requested == 2, "one DAILY_PRICES request per symbol, no SYMBOL_META"
+    gone = db_session.query(ForwardObservation).filter(ForwardObservation.symbol == "GONE").all()
+    assert len(gone) == 1, "a metadata request was recorded as a price observation"
+    assert gone[0].rows_returned == 0
 
 
 def test_the_journal_receives_every_outcome_when_one_is_given(
@@ -334,7 +349,11 @@ def test_a_row_the_vendor_sent_that_cannot_be_read_is_reported(
     db_session.flush()
     assert report.bars_written == 0
     assert report.findings, "an unreadable row was dropped without a finding"
-    assert "missing" in report.findings[0]
+    # Searched across findings rather than pinned to index 0. The capture may
+    # also report that no symbol printed for the session -- which is true here,
+    # since the only symbol's only row was unreadable and therefore undatable --
+    # and an index made this test depend on which finding came first.
+    assert any("missing" in finding for finding in report.findings), report.findings
 
 
 def test_a_bar_carries_the_vendor_that_was_actually_asked(db_session: Session) -> None:
@@ -367,3 +386,146 @@ def test_a_bar_carries_the_vendor_that_was_actually_asked(db_session: Session) -
         f"bars were written as {sources} after asking eodhd; a provider label that "
         "does not match the vendor asked makes the adjustment basis unknowable"
     )
+
+
+# ---------------------------------------------------------------------------
+# `rows_returned` counts the session asked about, not the window fetched.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _StoppedMidWindow(_StubSource):
+    """Prints two sessions before `end`, and nothing on `end` itself.
+
+    This is the ordinary shape of an exit: a security trades on Monday and
+    Tuesday, stops, and the capture still asks about a window that contains
+    both. A live feed will not produce it to order, which is why it is stubbed.
+    """
+
+    stopped: set[str] = field(default_factory=set)
+
+    def fetch(self, request: FetchRequest) -> FetchOutcome:
+        if request.symbol not in self.stopped:
+            return super().fetch(request)
+        self.fetched.append(request.symbol)
+        return FetchOutcome(
+            request=request,
+            status=FetchStatus.OK,
+            rows=(
+                {
+                    "date": str(SESSION - dt.timedelta(days=2)),
+                    "open": 99.0,
+                    "high": 101.0,
+                    "low": 98.5,
+                    "close": 100.0,
+                    "volume": 1_000_000,
+                },
+            ),
+        )
+
+
+def test_a_symbol_that_stopped_printing_mid_window_is_recorded_silent(
+    db_session: Session,
+) -> None:
+    """**The defect this replaced, and it affected every exit.**
+
+    `rows_returned` was `len(outcome.rows)` -- the count for the whole
+    `start..end` window. Measured on the live record 2026-10-23: every covered
+    symbol read 5 or 6 against a 7-day window, so "session 2026-10-21,
+    rows_returned=5" never meant "this session printed".
+
+    A security that stopped trading therefore kept returning the previous six
+    sessions and was recorded `ok`, **not silent**, for six more days. The
+    silence a delisting is made of only appeared once the entire window
+    emptied, dated to that later run rather than to the session the security
+    actually stopped. `ABAX` and `AUTO` were caught only because they had no
+    data anywhere in the window.
+
+    Here `GONE` printed two sessions ago and not on `end`, while `HERE` printed
+    on `end`. The old code recorded `GONE` as `ok` with one row.
+    """
+    source = _StoppedMidWindow(stopped={"GONE"})
+    report = _capture(db_session, source, ["GONE", "HERE"], instrument_ids={"GONE": 7, "HERE": 8})
+    db_session.flush()
+
+    gone = db_session.query(ForwardObservation).filter(ForwardObservation.symbol == "GONE").one()
+    assert gone.rows_returned == 0, (
+        "a symbol that did not print on the session asked about was recorded as "
+        "having printed; rows_returned is counting the window, not the session"
+    )
+    assert gone.session_date == SESSION
+    assert report.silent == 1
+
+
+def test_the_earlier_bars_of_a_stopped_symbol_are_still_written(db_session: Session) -> None:
+    """The fix must not become a different kind of data loss.
+
+    A symbol silent on `end` may have printed earlier in the window, and those
+    bars are real. An early `continue` after counting the silence would have
+    discarded them -- trading a wrong observation for a missing price.
+    """
+    from tradeit.storage.tables import OhlcvBar
+
+    source = _StoppedMidWindow(stopped={"GONE"})
+    _capture(db_session, source, ["GONE", "HERE"], instrument_ids={"GONE": 7, "HERE": 8})
+    db_session.flush()
+
+    bars = db_session.query(OhlcvBar).filter(OhlcvBar.instrument_id == 7).all()
+    assert len(bars) == 1, "the stopped symbol's earlier bar was dropped"
+    assert bars[0].session_date == SESSION - dt.timedelta(days=2)
+
+
+def test_a_session_nobody_printed_records_no_silence_at_all(db_session: Session) -> None:
+    """**195 false exits in one night, avoided.**
+
+    If no symbol printed for the session, the session is not evidence about any
+    symbol: either the vendor has not published it, or the calendar is wrong
+    about it being a session. Writing a silence per symbol would be one false
+    exit for every name in the universe.
+
+    Fails closed with no universe-size threshold: with no cross-sectional
+    evidence that the session happened, a silence is uninterpretable whether
+    the universe holds one name or a thousand.
+    """
+    source = _StoppedMidWindow(stopped={"A", "B", "C"})
+    report = _capture(db_session, source, ["A", "B", "C"], instrument_ids={"A": 1, "B": 2, "C": 3})
+    db_session.flush()
+
+    assert db_session.query(ForwardObservation).count() == 0
+    assert report.silent == 0
+    assert report.recorded == 0
+    assert any("no symbol printed" in finding for finding in report.findings), report.findings
+    # The bars are still written: they are real data about sessions that did
+    # happen, and withholding them would make the fix a data-loss bug.
+    assert report.bars_written == 3
+
+    # **And the report must not call this a hole.** The first live run after
+    # this distinction existed said "149 requests produced no observation at
+    # all, which is a hole in the record" about the one outcome that was
+    # correct. A report that cries wolf on correct behaviour trains the
+    # operator to ignore the warning that matters.
+    assert report.session_unobserved
+    assert report.complete, "declining to record a silence about an unpublished session"
+    assert "nothing to be silent about" in report.describe()
+    assert "hole in the record" not in report.describe()
+
+
+def test_a_rejection_is_recorded_even_when_nobody_printed(db_session: Session) -> None:
+    """Only *successful* zero-row observations are suppressed.
+
+    `EMPTY` is a success -- the vendor answered and the answer was empty -- and
+    that is the row a reader takes for "this security did not trade". A
+    `REJECTED` outcome carries its own explanation and no reader could mistake
+    it for an exit, so suppressing it would lose the distinction between a
+    refusal and a silence, which the whole design turns on.
+    """
+    source = _StoppedMidWindow(stopped={"QUIET"}, rejected={"NOPE"})
+    _capture(db_session, source, ["QUIET", "NOPE"], instrument_ids={"QUIET": 1})
+    db_session.flush()
+
+    rows = {r.symbol: r for r in db_session.query(ForwardObservation).all()}
+    assert set(rows) == {"NOPE"}, (
+        "a vendor refusal was suppressed along with the silences, or a silence "
+        "survived a session nobody printed in"
+    )
+    assert rows["NOPE"].status == str(FetchStatus.REJECTED)

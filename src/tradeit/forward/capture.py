@@ -97,14 +97,29 @@ class CaptureReport:
     #: is evidence about the vendor.
     findings: tuple[str, ...] = ()
     by_status: dict[str, int] = field(default_factory=dict)
+    #: Whether no symbol printed for ``session_date``, so no observation was
+    #: owed. **Distinct from recording nothing by accident**, which is what
+    #: this flag exists to stop the report calling it: declining to write 195
+    #: silences about a session the vendor has not published is the capture
+    #: working, and a report that labels it "a hole in the record" trains the
+    #: operator to ignore the warning that matters.
+    session_unobserved: bool = False
 
     @property
     def complete(self) -> bool:
-        """Whether every request produced a recorded observation.
+        """Whether every observation that was owed was recorded.
 
         **Not whether every request returned data.** A silence is a successful
         observation; an unrecorded request is a hole in the record.
+
+        When the session itself was never observed -- no symbol printed -- no
+        observation was owed, so a capture that recorded none is complete. The
+        first live run after this distinction existed reported *"149 requests
+        produced no observation at all, which is a hole in the record"* about
+        the one outcome that was correct.
         """
+        if self.session_unobserved:
+            return self.recorded == 0
         return self.recorded == self.requested
 
     def describe(self) -> str:
@@ -122,12 +137,35 @@ class CaptureReport:
             )
         for finding in self.findings[:5]:
             lines.append(f"  finding: {finding}")
+        if self.session_unobserved:
+            lines.append(
+                f"  no observation is owed for {self.session_date}: nothing printed, so "
+                "there is nothing to be silent about. Bars for earlier sessions in the "
+                "window were written."
+            )
         if not self.complete:
             lines.append(
                 f"  {self.requested - self.recorded} request(s) produced no observation "
                 "at all, which is a hole in the record rather than a quiet market"
             )
         return "\n".join(lines)
+
+
+def _row_session(row: Mapping[str, object]) -> dt.date | None:
+    """A normalised row's session date, or ``None`` if it has not got one.
+
+    Returns ``None`` rather than raising: a row the adapter could not date is a
+    row that cannot count towards "did this session print", and the normaliser
+    has already reported it as a finding. Raising here would turn one unreadable
+    row into a failed capture, and a day not captured cannot be caught up.
+    """
+    value = row.get("session_date")
+    if isinstance(value, dt.date):
+        return value
+    try:
+        return dt.date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
 
 
 def capture_forward(
@@ -192,12 +230,81 @@ def capture_forward(
     unmapped: list[str] = []
     findings: list[str] = []
 
+    # **Fetched before anything is recorded, because one question has to be
+    # answered first: did this session happen at all?**
+    #
+    # `rows_returned` used to be `len(outcome.rows)` -- the row count for the
+    # whole `start..end` window. Measured on the live record 2026-10-23: every
+    # covered symbol read 5 or 6 against a 7-day window, so "session
+    # 2026-10-21, rows_returned=5" never meant "this session printed".
+    #
+    # That defeated the one thing this record exists for. **A security that
+    # stops trading today still returns the previous six sessions**, so it was
+    # recorded `ok` rather than silent for six more days, and the silence that
+    # constitutes the exit only appeared once the entire window emptied --
+    # dated to that later run's `end` rather than to the session the security
+    # actually stopped. It affected every exit, not an unlucky few. `ABAX` and
+    # `AUTO` were caught only because they had no data anywhere in the window.
+    #
+    # So the count is now rows dated `end`, and the window keeps doing the job
+    # it was designed for: recovering sessions a sleeping laptop missed, whose
+    # bars are written per row date regardless.
+    fetched: list[tuple[FetchRequest, FetchOutcome, NormalizedRows, int]] = []
     for request in requests:
         outcome = source.fetch(request)
         statuses[str(outcome.status)] += 1
-        rows = len(outcome.rows)
         if journal is not None:
             journal.record(provider, outcome)  # type: ignore[attr-defined]
+        # Normalised via the adapter so the session date is canonical rather
+        # than read out of a vendor-specific raw field. `normalize` returns
+        # nothing for a symbol with no id, so an unmapped symbol is counted
+        # against a placeholder that is **never persisted** -- its rows are
+        # re-normalised with the real id below before any bar is written.
+        probe = source.normalize(outcome, {request.symbol: ids.get(request.symbol, 0)})
+        on_session = sum(
+            1 for row in probe.rows.get(DatasetKind.DAILY_BARS, []) if _row_session(row) == end
+        )
+        fetched.append((request, outcome, probe, on_session))
+
+    # **If no symbol printed, the session is not evidence about any symbol.**
+    # Either it has not been published yet, or the calendar is wrong about it
+    # being a session at all. Writing a silence per symbol would be one false
+    # exit for every name in the universe -- 195 of them -- which is what the
+    # two dead tickers were a two-row preview of.
+    #
+    # **Only *successful* zero-row observations are suppressed.** `EMPTY` is a
+    # success -- the vendor answered and the answer was empty -- and that is
+    # the row that reads as "this security did not trade". A `REJECTED`,
+    # `RATE_LIMITED` or `MALFORMED` outcome is recorded regardless, because its
+    # status already says it is a fact about the vendor and no reader could
+    # mistake it for an exit. Suppressing those would lose the distinction
+    # between a refusal and a silence, which the whole design turns on.
+    #
+    # **No universe-size threshold**, deliberately: with no cross-sectional
+    # evidence that the session happened, a silence is uninterpretable whether
+    # the universe holds one name or a thousand. Bars for earlier sessions in
+    # the window are written either way -- they are real data about sessions
+    # that did happen.
+    session_unobserved = bool(requests) and not any(count for _, _, _, count in fetched)
+    if session_unobserved:
+        findings.append(
+            f"no symbol printed for {end}, so no silence is recorded against it: a "
+            "session nothing traded in is a fact about the vendor or the calendar "
+            "rather than about any security"
+        )
+
+    for request, outcome, _probe, rows in fetched:
+        if session_unobserved and outcome.status.is_success:
+            # Bars from earlier sessions in the window still belong in the
+            # record; only the observation is withheld.
+            instrument_id = ids.get(request.symbol)
+            if instrument_id is not None and outcome.rows:
+                normalized = source.normalize(outcome, {request.symbol: instrument_id})
+                findings.extend(normalized.findings)
+                bars_written += _write_bars(
+                    session, normalized, instrument_id, asked_at=asked_at, provider=provider
+                )
+            continue
         existing = session.execute(
             select(ForwardObservation).where(
                 ForwardObservation.symbol == request.symbol,
@@ -230,13 +337,21 @@ def capture_forward(
         recorded += 1
         if rows == 0:
             # **Counted, and the row is written either way.** This is the
-            # observation a delisting is made of.
+            # observation a delisting is made of: the symbol did not print on
+            # *this* session, on a day when other symbols did.
             silent += 1
-            continue
+            # No `continue`. A symbol silent on `end` may still have printed
+            # earlier in the window -- that is the ordinary shape of an exit
+            # mid-window -- and those bars are real and must be written.
+            # Returning early here is what would turn the fix into a different
+            # kind of data loss.
 
         instrument_id = ids.get(request.symbol)
         if instrument_id is None:
-            unmapped.append(request.symbol)
+            if outcome.rows:
+                unmapped.append(request.symbol)
+            continue
+        if not outcome.rows:
             continue
         normalized = source.normalize(outcome, {request.symbol: instrument_id})
         findings.extend(normalized.findings)
@@ -254,6 +369,7 @@ def capture_forward(
         unmapped=tuple(unmapped),
         findings=tuple(findings),
         by_status=dict(statuses),
+        session_unobserved=session_unobserved,
     )
 
 

@@ -238,3 +238,102 @@ Friday and says so.
 describe sessions 2026-10-21 and 2026-10-22. The 2026-10-21 rows are correct —
 that run was manual, at midday, when UTC and New York agreed, which is exactly
 why the bug survived its first test. Bars are unaffected at every date.
+
+## 195 names, which is the number originally approved
+
+**EODHD's capacity was measured on 2026-10-23 and the probe was sized against a
+guess.** Asking the vendor's own `/user` endpoint rather than inferring a limit
+from refusals:
+
+| | |
+|---|---|
+| `dailyRateLimit` | **100,000** |
+| `apiRequests` (that day) | 28 |
+| `subscriptionType` | monthly |
+
+So the "undocumented free-tier allowance" the ten-name probe was hedging
+against does not exist — the figure matches the 100k/day already recorded in
+`PHASE_06_VENDOR_MATRIX.md` §5, now measured rather than stated. **Nothing is
+inferred here about licence class**: the quota is a quota, and the use class is
+the owner's correction recorded in §1.3.
+
+The owner approved **195 names** on 2026-10-20; Tiingo's free tier forced the
+trim to 48. EODHD carries the remainder:
+
+| vendor | names | requests/day |
+|---|---|---|
+| Tiingo | 46 | 92 |
+| EODHD | 149 | 298 |
+| | **195** | **390 of 100,000** |
+
+Selected by the rule already recorded above — holding their ticker as of the
+run date per §0.2, at least 2,000 price rows, not already covered, ordered by
+rows desc then ticker asc. **4,663 candidates met the filter**, so 195 is the
+approved number rather than the ceiling; widening past it needs the owner, not
+more capacity.
+
+Proved live the same day: 149 symbols, 298 requests, **755 bars on 149
+instruments**, no instrument carrying bars from two vendors, and the journal
+labelling `eodhd` correctly for the first time.
+
+## `rows_returned` counted the window, not the session — every exit was affected
+
+**Measured 2026-10-23 on the live record**, which is how it was found: every
+covered symbol read `rows_returned` of 5 or 6 against a 7-day window. So
+*"session 2026-10-21, rows_returned=5"* never meant "this session printed".
+
+`rows = len(outcome.rows)` was the count for the whole `start..end` window,
+stored against `session_date = end`. The consequence is the one thing this
+record exists to prevent: **a security that stops trading still returns the
+previous six sessions**, so it was recorded `ok` rather than silent for six more
+days, and the silence a delisting is made of appeared only once the entire
+window emptied — dated to that later run's `end` rather than to the session the
+security actually stopped.
+
+This affected **every** exit, not an unlucky few. `ABAX` and `AUTO` were caught
+only because they had no data anywhere in the window, which is why the defect
+survived the two fixes before it.
+
+The count is now rows dated `end`. The window keeps doing its real job —
+recovering sessions a sleeping laptop missed — and those bars are written per
+row date regardless, so a symbol silent on `end` still has its earlier bars
+stored. An early return after counting the silence would have traded a wrong
+observation for a missing price.
+
+### The companion rule, without which the fix writes 195 false exits
+
+A session the vendor has not published yet returns no rows for `end` for
+**any** symbol. Counting rows-dated-`end` would then mark the whole universe
+silent: one false exit per name.
+
+So: **if no symbol printed for the session, no silence is recorded against
+it.** A session nothing traded in is a fact about the vendor or the calendar,
+not about any security. Fails closed with **no universe-size threshold** —
+without cross-sectional evidence that the session happened, a silence is
+uninterpretable whether the universe holds one name or a thousand.
+
+Only *successful* zero-row observations are suppressed. `EMPTY` is a success —
+the vendor answered and the answer was empty — and that is the row a reader
+takes for "this security did not trade". A `REJECTED` or `RATE_LIMITED` outcome
+is recorded regardless, because its status already says it is a fact about the
+vendor and no reader could mistake it for an exit. Suppressing those would lose
+the refusal-versus-silence distinction the whole design turns on.
+
+Exercised live within the hour, mid-session: 149 symbols, 695 bars written for
+completed sessions, **0 observations recorded** for the unpublished one.
+
+**And the report had to learn the difference.** That same run printed *"149
+requests produced no observation at all, which is a hole in the record"* about
+the one outcome that was correct. `CaptureReport.session_unobserved` now
+distinguishes "recorded nothing because nothing was owed" from "recorded
+nothing by accident" — a report that cries wolf on correct behaviour trains the
+operator to ignore the warning that matters.
+
+### The read rule for rows already written
+
+**Observations dated 2026-10-21, 2026-10-22 and 2026-10-23 carry window counts,
+not session counts.** A `rows_returned` of 5 or 6 in those rows means "the
+7-day window held 5 or 6 bars", not "this session printed five times". They
+remain a true record of what was asked and what came back, and they are **not**
+evidence that any symbol traded on the session they are dated to. Rows written
+from 2026-10-24 onward count the session. Bars are unaffected at every date.
