@@ -120,3 +120,56 @@ engineering effort — it is elapsed time**, because a day not captured is a day
 of out-of-sample evidence permanently lost. That is the one deadline that
 cannot be shortened by working faster, and it is the argument for starting the
 capture now rather than when a strategy is ready.
+
+---
+
+## Addendum, 2026-10-23: the job exists, and the record has been wrong three times
+
+The line above — *"No scheduled job has been created"* — was true when written
+and is not now. The owner approved it, and it runs unattended at 22:10 from
+`ops/com.tradeit.forward-capture.plist`. `ops/UNIVERSE.md` holds the operational
+detail; this addendum records only what bears on the argument above.
+
+**The universe is back to the 195 the owner approved.** Tiingo's free tier had
+forced it down to 48; EODHD's capacity, measured from the vendor's own endpoint
+rather than inferred, is 100,000 calls a day, so 46 names run on Tiingo and 149
+on EODHD for 390 requests a day. Each security takes bars from exactly one
+vendor, because Tiingo declares `RAW_UNADJUSTED` and EODHD declares `UNKNOWN`
+and a series fed by whichever answered first would have an adjustment basis
+that varies by day.
+
+**Three defects in six days, each of which made the record claim something
+false**, and all three found by reading the record rather than by a test:
+
+1. Two universe members had been delisted for years, so their daily silence was
+   recorded as a 2026 exit. The resolver now works per date and refuses to
+   guess.
+2. Every scheduled observation was dated one day late — `end` came from UTC
+   while the job fires at 22:10 New York — and a Friday run would have stamped
+   Saturday with a price.
+3. `rows_returned` counted the whole seven-day window rather than the session,
+   so **a security that stopped trading was recorded as trading for six more
+   days.** That one affected every exit, not an unlucky few, and the two above
+   had masked it: they were caught only because they had no data anywhere in
+   the window.
+
+### What that does to the argument above
+
+**It sharpens it rather than weakening it.** The claim is that forward evidence
+is worth more per observation because a future that has not happened cannot be
+data-mined. That remains true — and it is now clear that the claim depends on
+the record being *correct*, not merely *forward*. A forward record that
+mislabels exits is not cheaper evidence than a historical one; it is a
+survivorship-biased corpus being built in real time, with the bias arriving
+silently and no vendor to blame for it.
+
+So the binding constraint is still elapsed time, with one condition attached:
+**elapsed time only accrues evidence while the capture is correct.** Six days
+of observations have been kept and are honest about what was asked, but the
+sessions they are dated to carry read rules recorded in `ops/UNIVERSE.md`
+rather than conclusions. The first capture whose observations mean what they
+say is the one that has not run yet.
+
+That is the real cost of the three defects, and it is small only because they
+were found in the first week. A year of them would have been a year of
+fiction that looked exactly like data.
