@@ -182,6 +182,16 @@ class MandateSpec:
 
 #: Day: intraday moves, hours. Draws on the intraday corpus, whose survivorship
 #: posture is declared by that corpus and is expected to be biased (§6.4).
+#: Day: hours. **Deferred by the owner on 2026-10-23 (ADR-0030)** -- its
+#: ``primary_corpus`` does not exist, building it needs paid intraday data, and
+#: no further data spend is authorised. Deferred rather than deleted: this spec
+#: is what keeps Day a separate statistical population from Swing, and the
+#: system declines to score Day with a stated reason rather than falling back to
+#: Daily bars. **Do not repoint ``primary_corpus`` at ``research-01`` to make
+#: Day scoreable** -- that collapses it into Swing, which is the one thing the
+#: three-horizon architecture exists to prevent, and
+#: ``test_day_survives_its_deferral_and_still_refuses_the_eod_corpus`` fails if
+#: anyone tries.
 _DAY = MandateSpec(
     mandate=Mandate.DAY,
     hierarchy=TimeframeHierarchy(

@@ -100,6 +100,43 @@ def test_the_day_mandate_reads_the_intraday_corpus() -> None:
     assert spec(Mandate.RETIREMENT).primary_corpus is Corpus.RESEARCH_01
 
 
+def test_day_survives_its_deferral_and_still_refuses_the_eod_corpus() -> None:
+    """**The invariant that deferring Day makes load-bearing.** ADR-0030.
+
+    The owner deferred Day on 2026-10-23: `intraday-01` is not a deliverable
+    on the path to paper trading, because building it needs paid intraday data
+    and no further data spend is authorised. **Deferred, not deleted** -- the
+    mandate, its hierarchy and the system's honest refusal to score it all
+    stay, because the three-horizon separation is the architecture's organising
+    claim and the system already declines Day with a stated reason rather than
+    faking one.
+
+    That creates a new risk the previous state did not have. A horizon nobody
+    is working on is a horizon somebody later "enables" the cheap way: by
+    scoring it on the daily bars that already exist. **That would collapse Day
+    into Swing**, which is the single thing the three-horizon design exists to
+    prevent, and it would look like progress.
+
+    So this pins the two halves together: Day is still declared, and its
+    primary corpus is still **not** the EOD corpus. Repointing it at
+    `research-01` to make it scoreable fails here, with the reason.
+    """
+    entry = spec(Mandate.DAY)
+    assert entry.primary_corpus is not Corpus.RESEARCH_01, (
+        "the Day mandate now reads the EOD corpus, which collapses it into Swing; "
+        "Day is deferred (ADR-0030), and deferring a horizon is not the same as "
+        "scoring it on whatever data happens to exist"
+    )
+    # Still a real mandate, not a stub: deleting it would also satisfy an
+    # assertion about its corpus, so the hierarchy is checked too.
+    assert entry.hierarchy.trigger, "the Day hierarchy has been emptied, not deferred"
+    assert Bartimeframe.M1 in entry.eligible, "Day no longer admits minute bars"
+    assert {Mandate.DAY, Mandate.SWING, Mandate.RETIREMENT} <= set(Mandate), (
+        "a horizon has been removed from the mandate registry; ADR-0030 defers Day, "
+        "it does not delete it"
+    )
+
+
 def test_swing_treats_intraday_as_supporting_not_primary() -> None:
     """Entries only. Making it a second primary corpus would license swing
     research on a survivorship-biased sample."""

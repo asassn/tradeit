@@ -58,7 +58,24 @@ universe passes** (`DOTCOM_CONTROL_UNIVERSE.md`). If it does not, the corpus is
 still usable — under its measured label, with the same discipline `full-01`
 already receives.
 
-## `intraday-01` — NOT YET BUILT
+## `intraday-01` — NOT BUILT, AND DEFERRED
+
+> **Deferred by the owner on 2026-10-23**
+> ([ADR-0030](adr/0030-day-is-deferred-not-deleted.md)). Building this needs
+> paid intraday data and no further data spend is authorised, so it is **not a
+> deliverable on the path to paper trading** and no phase is blocked on it. The
+> contract below stands unchanged and is what must be met if it is ever built —
+> including the declared survivorship posture.
+>
+> **The Day mandate is kept, not deleted.** It still declares `intraday-01` as
+> its primary corpus and still declines to be scored, rather than falling back
+> to Daily bars, which would collapse Day into Swing. Repointing it at
+> `research-01` fails a test by design.
+>
+> **Swing is affected too, and less obviously.** `intraday-01` also serves
+> Swing's trigger layer (`H1`, `M15`). Swing's primary corpus is `research-01`,
+> so Swing remains fully workable, but its triggers run at the coarser end of
+> its declared hierarchy until an intraday corpus exists.
 
 The 1-minute corpus serving the **Day** mandate and the **Swing** mandate's
 trigger layer. Separate from `research-01` in base timeframe, depth, vendor and
