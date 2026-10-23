@@ -329,11 +329,38 @@ distinguishes "recorded nothing because nothing was owed" from "recorded
 nothing by accident" — a report that cries wolf on correct behaviour trains the
 operator to ignore the warning that matters.
 
-### The read rule for rows already written
+### The read rule for rows already written — keyed on `asked_at`, not `session_date`
 
-**Observations dated 2026-10-21, 2026-10-22 and 2026-10-23 carry window counts,
-not session counts.** A `rows_returned` of 5 or 6 in those rows means "the
-7-day window held 5 or 6 bars", not "this session printed five times". They
-remain a true record of what was asked and what came back, and they are **not**
-evidence that any symbol traded on the session they are dated to. Rows written
-from 2026-10-24 onward count the session. Bars are unaffected at every date.
+**CORRECTED 2026-10-23.** The first version of this rule said *"observations
+dated 2026-10-21, 2026-10-22 and 2026-10-23 carry window counts"*, which keyed
+on `session_date` and **became wrong within the hour**: the verification run
+wrote 149 correct rows dated 2026-10-22, so that session now holds both
+semantics and a rule keyed on the date cannot tell them apart. The
+discriminator is `asked_at`, and the two defects have **different cutoffs**.
+The whole record is five asks:
+
+| `asked_at` (UTC) | `session_date` | rows | `rows_returned` means | session date |
+|---|---|---|---|---|
+| 2026-10-21 16:39:16 | 2026-10-21 | 48 | the **window** | correct (manual midday run) |
+| 2026-10-22 02:10:01 | 2026-10-22 | 48 | the **window** | **one day late** — describes 2026-10-21 |
+| 2026-10-23 02:10:02 | 2026-10-23 | 46 | the **window** | **one day late** — describes 2026-10-22 |
+| 2026-10-23 02:17:08 | 2026-10-22 | 10 | the **window** | correct |
+| 2026-10-23 17:50:02 | 2026-10-22 | 149 | the **session** | correct |
+
+So, precisely:
+
+* **`rows_returned` is a session count only for asks at or after
+  `2026-10-23 17:50 UTC`.** Everything earlier is a window count: a 5 or a 6
+  means "the 7-day window held 5 or 6 bars", never "this session printed".
+  Those rows are **not** evidence that any symbol traded on the session they
+  are dated to.
+* **`session_date` is one day late for exactly two asks** — the 22:10 runs
+  recorded at `2026-10-22 02:10` and `2026-10-23 02:10`, which describe
+  sessions 2026-10-21 and 2026-10-22. The midday manual ask and both later
+  asks are correctly dated.
+* **Bars are unaffected throughout**, at every date and from both vendors:
+  `_write_bars` has always taken each row's own session date from the vendor.
+
+A reader wanting only rows that mean what they say should filter
+`asked_at >= '2026-10-23 17:50'`. That is 149 rows on one session, and it is
+the honest size of this record's interpretable evidence as of today.
