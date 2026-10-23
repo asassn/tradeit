@@ -106,7 +106,15 @@ def load_env(path: Path) -> int:
     return count
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    # **`--dry-run` is passed straight through**, so the scheduled job can be
+    # proved end to end without spending a vendor's daily allowance. Without
+    # it the only way to check this file was to let it run for real, which
+    # costs credits and writes rows -- so in practice nobody checked it, and
+    # the first proof of a change was the unattended 22:10 run. A dry run
+    # resolves tickers against the corpus and reports exactly what each vendor
+    # would be asked, which is where the mistakes have actually been.
+    dry_run = "--dry-run" in (argv if argv is not None else sys.argv[1:])
     os.chdir(REPO)  # forward_capture.py puts a relative "src" on sys.path
     stamp = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
     print(f"=== forward capture {stamp} ===", flush=True)
@@ -147,6 +155,8 @@ def main() -> int:
             "--journal",
             str(OUT / "forward_journal.jsonl"),
         ]
+        if dry_run:
+            sys.argv.append("--dry-run")
         try:
             code = int(module.main())
         except SystemExit as exit_code:
