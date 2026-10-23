@@ -48,6 +48,26 @@ __all__ = ["add_status_commands", "cmd_status"]
 
 UNKNOWN = "UNKNOWN"
 
+#: The instant `forward_observations.rows_returned` started counting the
+#: **session** rather than the whole fetch window.
+#:
+#: Before this, `rows = len(outcome.rows)` was the row count for the entire
+#: `start..end` window, stored against `session_date = end` -- so a security
+#: that stopped trading still returned the previous six sessions and was
+#: recorded as having printed. Measured on the live record 2026-10-23 and fixed
+#: the same day; the read rule and the record's five asks are tabulated in
+#: `ops/UNIVERSE.md`.
+#:
+#: **A literal date, deliberately.** It is a historical instant and cannot rot,
+#: which is what distinguishes it from the counts this repository keeps out of
+#: prose. The alternative -- a semantics version stamped on each row -- needs a
+#: migration to label 152 legacy rows and would carry the same constant anyway,
+#: in the migration instead of here.
+#:
+#: Keyed on `asked_at`, never on `session_date`: one session holds rows of both
+#: kinds, because the verification run re-asked about it correctly.
+SESSION_COUNTS_FROM = "2026-10-23 17:50"
+
 
 def _redact(dsn: str) -> str:
     """A DSN safe to print.
@@ -271,18 +291,51 @@ def cmd_status(args: argparse.Namespace) -> int:
     with sessionmaker(bind=engine, future=True)() as fresh:
         latest = _scalar_raw(fresh, "select max(asked_at) from forward_observations")
         observed = _scalar(fresh, "select count(*) from forward_observations")
-        silent = _scalar(fresh, "select count(*) from forward_observations where rows_returned = 0")
+        interpretable = _scalar(
+            fresh,
+            f"select count(*) from forward_observations where asked_at >= '{SESSION_COUNTS_FROM}'",
+        )
+        silent = _scalar(
+            fresh,
+            "select count(*) from forward_observations "
+            f"where rows_returned = 0 and asked_at >= '{SESSION_COUNTS_FROM}'",
+        )
     if not isinstance(observed, int):
         print(_row("forward observations", "not this database", "no forward_observations table"))
     elif observed == 0:
         print(_row("forward observations", 0, "the capture has not run against this record"))
     else:
-        print(_row("forward observations", f"{observed:,}"))
+        print(_row("forward observations", f"{observed:,}", "every row ever written"))
+        # **The interpretable subset, reported separately.** Before
+        # `SESSION_COUNTS_FROM`, `rows_returned` counted the whole fetch window
+        # rather than the session, so a zero meant "nothing in seven days" and
+        # said nothing about the session the row is dated to. This command used
+        # to print the total beside "of which silent: what a delisting is made
+        # of", which handed a reader delisting evidence the record did not hold
+        # -- and two of the four zeros were tickers dead since 2018 and 2022.
+        legacy = observed - interpretable if isinstance(interpretable, int) else None
         print(
             _row(
-                "of which silent",
+                "of which interpretable",
+                f"{interpretable:,}" if isinstance(interpretable, int) else UNKNOWN,
+                f"asked at or after {SESSION_COUNTS_FROM}; rows_returned counts the session",
+            )
+        )
+        if legacy:
+            print(
+                _row(
+                    "earlier rows",
+                    f"{legacy:,}",
+                    "rows_returned counts the fetch window, not the session; "
+                    "see the read rule in ops/UNIVERSE.md",
+                )
+            )
+        print(
+            _row(
+                "silent, interpretable only",
                 f"{silent:,}" if isinstance(silent, int) else UNKNOWN,
-                "asked and got nothing: what a delisting is made of",
+                "asked about a session others printed in, and got nothing: "
+                "what a delisting is made of",
             )
         )
         print(_row("most recent ask", latest))

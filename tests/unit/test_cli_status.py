@@ -8,10 +8,11 @@ protect the three things that made the first version of it misleading.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.cli_status import _age_in_days, _redact, _scalar, _scalar_raw, cmd_status
 from tradeit.storage.tables import Base
@@ -241,7 +242,12 @@ def test_the_forward_record_reports_freshness_not_just_presence(
     cmd_status(_args(db=f"sqlite:///{path}", as_of="2026-10-27"))
     out = capsys.readouterr().out
     assert "forward observations" in out
-    assert "of which silent" in out
+    # These rows are dated 2026-10-20, before `SESSION_COUNTS_FROM`, so they
+    # are window-count rows and the command must say so rather than counting
+    # their zero as a delisting. The label changed from "of which silent" when
+    # that distinction arrived; the subject of this test is the age below.
+    assert "earlier rows" in out
+    assert "silent, interpretable only" in out
     assert "most recent ask" in out
     assert "7 days" in out, "a stale record did not report its age"
 
@@ -254,3 +260,66 @@ def test_an_unrun_capture_says_so_rather_than_reading_as_healthy(
     cmd_status(_args(db=f"sqlite:///{path}"))
     out = capsys.readouterr().out
     assert "has not run against this record" in out
+
+
+def test_a_pre_cutoff_silence_is_not_reported_as_delisting_evidence(
+    tmp_path: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**The number this command used to assert and the record did not hold.**
+
+    It printed the total observation count beside *"of which silent: asked and
+    got nothing: what a delisting is made of"*. Before
+    `SESSION_COUNTS_FROM`, `rows_returned` counted the whole fetch window, so a
+    zero there meant "nothing in seven days" and said nothing about the session
+    the row is dated to -- and two of the record's four zeros were tickers dead
+    since 2018 and 2022, carrying no survivorship information at all.
+
+    So a reader was being handed delisting evidence that did not exist, by the
+    one command written to report the system honestly.
+
+    The silence count is now taken from interpretable rows only. Here the
+    pre-cutoff row is silent and the post-cutoff row is not, so a command that
+    still counted everything would report one silence where the honest answer
+    is zero.
+    """
+    from tradeit.cli_status import SESSION_COUNTS_FROM
+    from tradeit.storage.tables import ForwardObservation
+
+    path = tmp_path / "fwd.sqlite"  # type: ignore[operator]
+    engine = create_engine(f"sqlite:///{path}", future=True)
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine, future=True)() as session:
+        session.add_all(
+            [
+                # Window-count era: zero rows across seven days.
+                ForwardObservation(
+                    symbol="OLD",
+                    session_date=dt.date(2026, 10, 21),
+                    asked_at=dt.datetime(2026, 10, 21, 16, 39, tzinfo=dt.UTC),
+                    status="empty",
+                    rows_returned=0,
+                ),
+                # Session-count era: the session printed.
+                ForwardObservation(
+                    symbol="NEW",
+                    session_date=dt.date(2026, 10, 22),
+                    asked_at=dt.datetime(2026, 10, 24, 2, 10, tzinfo=dt.UTC),
+                    status="ok",
+                    rows_returned=1,
+                ),
+            ]
+        )
+        session.commit()
+
+    assert cmd_status(_args(db=f"sqlite:///{path}")) == 0
+    out = capsys.readouterr().out
+
+    assert "forward observations" in out
+    assert "of which interpretable" in out
+    assert "earlier rows" in out, "the window-count rows must be named, not folded into the total"
+    assert SESSION_COUNTS_FROM in out, "a reader cannot apply the rule without the cutoff"
+
+    silent_line = next(line for line in out.splitlines() if "silent" in line)
+    assert "0" in silent_line.split(), (
+        f"a pre-cutoff window silence was counted as delisting evidence: {silent_line!r}"
+    )
