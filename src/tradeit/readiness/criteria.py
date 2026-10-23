@@ -376,18 +376,45 @@ DEMOTION_CRITERIA: tuple[Criterion, ...] = (
         metric="live_vs_expected",
         comparison=Comparison.AT_LEAST,
         threshold=Threshold(
-            value=0.0,
-            source=ThresholdSource.UNAPPROVED,
+            value=-2.0,
+            source=ThresholdSource.DERIVED,
             citation=(
-                "OWED: strategy-decay detection is a named Phase 12 requirement and "
-                "no written decision says how far live may fall below expectation "
-                "before a strategy comes down. It is the single most consequential "
-                "number in this module and the one most obviously wrong to invent. "
-                "The MEASUREMENT now exists -- readiness/decay.py produces the z of "
-                "realised against expected, so `live_vs_expected` can be fed. What is "
-                "owed is the bar, in units of that z: at -2 a strategy comes down on "
-                "ordinary noise roughly one time in forty, and at -4 it may bleed for "
-                "a long while first. That trade-off is the owner's."
+                "ADR-0029, approved by the owner 2026-10-23. Derived, not chosen: "
+                "-2.0 is the same `confidence_z` that `readiness/decay.py` already "
+                "uses to define 'more than sampling noise', so the bar on the "
+                "strategy and the function measuring it cannot disagree. The z is "
+                "computed against the LIVE sample's own spread, so the number comes "
+                "from the data at assessment time rather than from a figure fitted "
+                "to results already seen. At -2 a working strategy comes down on "
+                "ordinary noise roughly one time in forty; the zero floor below is "
+                "what covers the opposite failure, a bleed too slow to reach "
+                "significance."
+            ),
+        ),
+        applies_from=StrategyState.LIVE,
+    ),
+    Criterion(
+        name="live_is_not_losing_money",
+        question="Over a verdict-sized live record, is the mean trade return above zero?",
+        metric="live_mean_trade_return",
+        comparison=Comparison.AT_LEAST,
+        threshold=Threshold(
+            value=0.0,
+            source=ThresholdSource.WRITTEN,
+            citation=(
+                "ADR-0029, approved by the owner 2026-10-23. **Zero is a natural "
+                "boundary, not an invented threshold** -- the only number on this "
+                "ladder that needs no justification beyond its own meaning, which "
+                "is why it can be set without the after-the-fact problem that keeps "
+                "`walk_forward_consistency` and `out_of_sample_degradation` "
+                "UNAPPROVED. It exists because the statistical test above is slow "
+                "on a noisy strategy: a strategy can lose money for a long time "
+                "without the shortfall becoming significant. A strategy that is "
+                "losing money live, over a verdict-sized record, comes down whether "
+                "or not the loss is distinguishable from noise. "
+                "`decay.demotion_evidence` omits this metric below "
+                "MIN_TRADES_FOR_A_VERDICT trades, so it reports UNRESOLVED rather "
+                "than demoting on a handful of trades."
             ),
         ),
         applies_from=StrategyState.LIVE,

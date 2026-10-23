@@ -16,7 +16,10 @@ from __future__ import annotations
 import pytest
 
 from tradeit.readiness import DecayVerdict, Expectation, assess_decay
-from tradeit.readiness.decay import MIN_TRADES_FOR_A_VERDICT
+from tradeit.readiness.assess import Decision, VerdictOutcome, assess_demotion
+from tradeit.readiness.criteria import demotion_criteria_for
+from tradeit.readiness.decay import MIN_TRADES_FOR_A_VERDICT, demotion_evidence
+from tradeit.strategy.lifecycle import StrategyState
 
 EXPECTED = Expectation(
     mean_trade_return=0.012,
@@ -159,3 +162,88 @@ def test_the_confidence_width_sets_both_the_verdict_and_the_detectable_floor() -
     assert strict.minimum_detectable_shortfall is not None
     assert lax.minimum_detectable_shortfall is not None
     assert strict.minimum_detectable_shortfall > lax.minimum_detectable_shortfall
+
+
+# ---------------------------------------------------------------------------
+# Demotion, per ADR-0029: a statistically real shortfall OR a mean at or below
+# zero. The two cover opposite failures, so each needs a case that the other
+# cannot carry.
+# ---------------------------------------------------------------------------
+
+
+def test_a_statistically_real_shortfall_demotes() -> None:
+    """The z test, which is the half that refuses to fire on noise."""
+    assessment = assess_decay(EXPECTED, _spread(-0.05, 60, width=0.02))
+    report = assess_demotion(StrategyState.LIVE, demotion_evidence(assessment))
+
+    assert assessment.z is not None and assessment.z < -2.0
+    assert report.decision is Decision.DEMOTE
+    failed = {v.criterion.name for v in report.verdicts if v.outcome is VerdictOutcome.FAIL}
+    assert "live_matches_expectation" in failed
+
+
+def test_a_slow_bleed_demotes_on_the_zero_floor_alone() -> None:
+    """**The case the z test cannot catch, and the reason the floor exists.**
+
+    A strategy losing money with a wide enough spread never reaches
+    significance against its expectation -- the standard error swallows the
+    shortfall. Here the mean is negative and the z is **inside** the band, so
+    `live_matches_expectation` passes and only the floor objects. Without the
+    floor this strategy stays live indefinitely while losing money.
+    """
+    assessment = assess_decay(EXPECTED, _spread(-0.002, 40, width=0.25))
+    evidence = demotion_evidence(assessment)
+    report = assess_demotion(StrategyState.LIVE, evidence)
+
+    assert assessment.z is not None and assessment.z > -2.0, (
+        "this sample is meant to be statistically indistinguishable from "
+        "expectation; the z test must not be what demotes it"
+    )
+    assert evidence["live_mean_trade_return"] < 0
+    assert report.decision is Decision.DEMOTE
+    failed = {v.criterion.name for v in report.verdicts if v.outcome is VerdictOutcome.FAIL}
+    assert failed == {"live_is_not_losing_money"}
+
+
+def test_a_handful_of_losing_trades_does_not_demote() -> None:
+    """**The one way a zero threshold could do real damage.**
+
+    A floor at zero applied to four trades would take a working strategy down
+    on its first bad week. `demotion_evidence` emits nothing below
+    `MIN_TRADES_FOR_A_VERDICT`, so both criteria report `not measured`, and
+    `assess_demotion` holds on UNRESOLVED rather than demoting -- the gap being
+    visible in the report rather than acted on.
+    """
+    assessment = assess_decay(EXPECTED, _spread(-0.08, 4))
+    evidence = demotion_evidence(assessment)
+    report = assess_demotion(StrategyState.LIVE, evidence)
+
+    assert assessment.verdict is DecayVerdict.INSUFFICIENT_EVIDENCE
+    assert evidence == {}, "a verdict-less assessment must not supply a measurement"
+    assert report.decision is Decision.HOLD
+    assert all(v.outcome is VerdictOutcome.UNRESOLVED for v in report.verdicts)
+
+
+def test_a_healthy_live_record_holds() -> None:
+    """Both criteria must be satisfiable, or the ladder has no top rung."""
+    assessment = assess_decay(EXPECTED, _spread(0.012, 60, width=0.02))
+    report = assess_demotion(StrategyState.LIVE, demotion_evidence(assessment))
+
+    assert report.decision is Decision.HOLD
+    assert not [v for v in report.verdicts if v.outcome is VerdictOutcome.FAIL]
+
+
+def test_both_demotion_thresholds_are_approved_and_cited() -> None:
+    """They were the two UNAPPROVED entries that blocked live promotion.
+
+    `out_of_sample_clears_hurdle` and `out_of_sample_degradation` and
+    `walk_forward_consistency` remain unapproved **deliberately** -- choosing
+    them now would fit a bar to results already seen -- and their own tests
+    cover that. These two are settled, so an UNAPPROVED source here would mean
+    ADR-0029 was recorded and never wired in.
+    """
+    live = {c.name: c for c in demotion_criteria_for(StrategyState.LIVE)}
+    for name in ("live_matches_expectation", "live_is_not_losing_money"):
+        threshold = live[name].threshold
+        assert threshold.usable, f"{name} is still unapproved"
+        assert "ADR-0029" in threshold.citation

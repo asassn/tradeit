@@ -55,6 +55,7 @@ __all__ = [
     "DecayVerdict",
     "Expectation",
     "assess_decay",
+    "demotion_evidence",
 ]
 
 #: Below this many live trades, no verdict is offered at all.
@@ -240,3 +241,34 @@ def assess_decay(
         minimum_detectable_shortfall=detectable,
         note=note,
     )
+
+
+def demotion_evidence(assessment: DecayAssessment) -> dict[str, float]:
+    """The two demotion metrics `criteria.py` asks for, or neither of them.
+
+    ADR-0029 demotes a live strategy on **either** a statistically real
+    shortfall (`live_vs_expected`, the z, against a bar of -2.0) **or** a mean
+    trade return at or below zero (`live_mean_trade_return`). The two cover
+    opposite failures: the z test refuses to demote on noise, and the zero
+    floor catches a bleed too slow to ever reach significance.
+
+    **The minimum-trade gate is structural here rather than remembered.** A key
+    this returns is a measurement; a key it omits reports as `not measured`,
+    which `assess_demotion` treats as UNRESOLVED and therefore HOLD. So below
+    `MIN_TRADES_FOR_A_VERDICT` trades neither metric is emitted and the floor
+    cannot demote a strategy on a handful of trades -- the one way a zero
+    threshold could do real damage. Building the mapping by hand at the call
+    site would put that gate in whoever remembered it.
+
+    `realised_mean` survives on an `INSUFFICIENT_EVIDENCE` assessment (it is
+    the mean of whatever trades exist), so testing the verdict rather than the
+    field is what makes the gate hold.
+    """
+    if assessment.verdict is DecayVerdict.INSUFFICIENT_EVIDENCE:
+        return {}
+    evidence: dict[str, float] = {}
+    if assessment.z is not None:
+        evidence["live_vs_expected"] = assessment.z
+    if assessment.realised_mean is not None:
+        evidence["live_mean_trade_return"] = assessment.realised_mean
+    return evidence
