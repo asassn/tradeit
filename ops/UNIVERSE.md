@@ -139,3 +139,102 @@ exit was being observed**, turning the delisting into a gap instead of a
 silence. That is the one failure this record exists to prevent, so the rule is:
 no bar ever recorded means no baseline and no information; printed-then-silent
 is an observation and keeps being asked about.
+
+## Two vendors, one per security — 46 on Tiingo, 10 on EODHD
+
+**Live as of 2026-10-22.** `EodhdAcquisition` works against the real key
+(HTTP 200, `adjustment_policy() = unknown`), and the daily job now runs the
+capture once per vendor from two committed files:
+
+| file | vendor | names | basis |
+|---|---|---|---|
+| `forward_universe.txt` | Tiingo | 46 | `RAW_UNADJUSTED` |
+| `forward_universe_eodhd.txt` | EODHD | 10 | `UNKNOWN` |
+
+**Each security takes bars from exactly one vendor.** This was the open
+question this document declined to pre-empt, and the answer is the one it
+already recommended: pooling would make a price whose adjustment state depends
+on which vendor happened to answer that day, which is the §0.1a defect
+reintroduced through the back door. An empty or absent file turns a vendor off,
+and one vendor's refusal does not cancel the other's capture — half a day's
+evidence is worth more than none, and a day not captured is gone.
+
+`tests/unit/test_forward_universe.py` keeps the two files disjoint, one line,
+upper case and duplicate-free, with no corpus needed so it runs in CI.
+
+### How the ten were chosen
+
+Reproducible, and stated so it can be re-derived: securities holding their
+ticker **as of today** per §0.2, with at least 2,000 price rows in the corpus,
+excluding the 46 already covered, ordered by row count descending then ticker
+ascending, first ten. 394 candidates met the filter.
+
+Ordering by coverage is the same ordering that put two dead tickers in the
+original 48 — but the per-date liveness filter is what that selection lacked,
+and with it in place, richer history is a genuine advantage: it gives a forward
+observation a baseline to be measured against.
+
+**Those row counts are raw rows, not sessions.** §0.1: every trading day is
+stored twice, so 18,474 rows is roughly 9,237 sessions. The threshold is a
+filter, not a reported quantity.
+
+**Ten is a probe, not a chosen universe.** EODHD's daily allowance on this key
+is not documented and has not been measured, and measuring it directly means
+deliberately exhausting it. The journal separates a vendor refusal from a
+market silence, so capacity will show itself over the next few runs and the
+slice can be widened on evidence instead of on a guess.
+
+### The provenance bug this found, which the obvious test could not
+
+The first live EODHD capture wrote 60 bars — **all of them labelled
+`tiingo`.** `capture_forward` took `provider: str = "tiingo"` and the only
+caller never passed it. A mislabelled bar is not cosmetic: it makes a series
+whose adjustment basis is *unknowable* rather than merely unknown, and
+ADR-0005 cannot be enforced on it.
+
+Both of the checks that should have caught it passed. The two universe files
+really were disjoint, and no instrument really did carry two vendors —
+**because every label was the same wrong one.** Two true statements about a
+corrupt record.
+
+`provider` now has no default, so a caller cannot omit it;
+`test_a_bar_carries_the_vendor_that_was_actually_asked` asserts the label
+equals the vendor asked, and fails against a hardcoded one. The existing test
+that asserted `bar.source == "tiingo"` was pinning the default rather than the
+invariant — it passed no provider at all — and now passes the one it asserts.
+
+The 60 bars were **relabelled, not deleted**: the prices are correct EODHD
+data on ten instruments the Tiingo universe does not touch, so only the one
+wrong field needed fixing. A copy was taken first. The journal's 20 entries
+from that run still say `tiingo`; it is append-only diagnostic output and
+rewriting it would be worse than the inaccuracy.
+
+## Every scheduled observation was dated one day late
+
+**Measured 2026-10-22 at 22:13 EDT: bars landed on 2026-10-22, observations on
+2026-10-23.** `end` defaulted to `dt.datetime.now(dt.UTC).date()` and the job
+fires at 22:10 America/New_York — already tomorrow in UTC. So each run asked
+for a window ending tomorrow, received today's bar, and recorded the
+observation under tomorrow's date. The comment defending the UTC choice had the
+reasoning backwards.
+
+The bars were always right: `_write_bars` takes each row's own `session_date`
+from the vendor. Only the observation carried the request's `end` — which is
+the one field a delisting is made of.
+
+**A Friday-night run would have stamped Saturday.** The vendor still returns
+Friday's bar for a window ending Saturday, so the record would have asserted a
+Saturday session that had a price, and on a universe with a genuine exit, a
+non-existent session in which a company was silent.
+
+`end` is now the latest trading session at or before the **market-local** date,
+taken from `research-01`'s `trading_sessions` (1990-01-02 to 2030-12-31), and
+it **fails closed** if the calendar cannot answer. A weekend run walks back to
+Friday and says so.
+
+### The read rule
+
+**Observation rows dated 2026-10-22 and 2026-10-23 are one day late.** They
+describe sessions 2026-10-21 and 2026-10-22. The 2026-10-21 rows are correct —
+that run was manual, at midday, when UTC and New York agreed, which is exactly
+why the bug survived its first test. Bars are unaffected at every date.

@@ -105,6 +105,10 @@ def _capture(session: Session, source: _StubSource, symbols: Sequence[str], **kw
         start=SESSION - dt.timedelta(days=5),
         end=SESSION,
         asked_at=kw.pop("asked_at", ASKED),  # type: ignore[arg-type]
+        # Named explicitly because `capture_forward` no longer defaults it. The
+        # default was `"tiingo"`, and it silently stamped a second vendor's bars
+        # with the first vendor's name.
+        provider=kw.pop("provider", "tiingo"),  # type: ignore[arg-type]
         **kw,  # type: ignore[arg-type]
     )
 
@@ -242,12 +246,19 @@ def test_prices_are_written_when_the_symbol_has_an_id(db_session: Session) -> No
     """A capture that records only observations stores no data to trade on."""
     from tradeit.storage.tables import OhlcvBar
 
-    _capture(db_session, _StubSource(), ["AAPL"], instrument_ids={"AAPL": 7})
+    _capture(db_session, _StubSource(), ["AAPL"], instrument_ids={"AAPL": 7}, provider="tiingo")
     db_session.flush()
 
     bar = db_session.query(OhlcvBar).one()
     assert bar.instrument_id == 7
     assert bar.close == Decimal("100.0")
+    # Asserted against the provider this call passed, not the literal "tiingo".
+    # The literal was true for the wrong reason: `capture_forward` defaulted
+    # `provider` to "tiingo", this test passed none, and so it pinned the
+    # default rather than the invariant -- which is why it stayed green while a
+    # second vendor's bars were being stamped with the first vendor's name.
+    # `test_a_bar_carries_the_vendor_that_was_actually_asked` covers the other
+    # vendor.
     assert bar.source == "tiingo", "a bar that cannot name its vendor cannot be rechecked"
     assert bar.knowledge_source == "vendor_ingest"
 
@@ -324,3 +335,35 @@ def test_a_row_the_vendor_sent_that_cannot_be_read_is_reported(
     assert report.bars_written == 0
     assert report.findings, "an unreadable row was dropped without a finding"
     assert "missing" in report.findings[0]
+
+
+def test_a_bar_carries_the_vendor_that_was_actually_asked(db_session: Session) -> None:
+    """**The defect this was written for, and why the obvious test missed it.**
+
+    `capture_forward` took ``provider: str = "tiingo"`` and the only caller
+    never passed it. When EODHD was added as a second vendor its 60 bars were
+    written with ``source = "tiingo"``, which is not a cosmetic mislabel:
+    Tiingo declares `RAW_UNADJUSTED` and EODHD declares `UNKNOWN`, so a bar
+    wearing the wrong vendor's name has an adjustment basis that is
+    *unknowable* rather than merely unknown, and ADR-0005 is unenforceable on
+    it.
+
+    `tests/unit/test_forward_universe.py` asserts the two vendor universes stay
+    disjoint, and it passed throughout -- the files were disjoint. A separate
+    check that no instrument carried bars from two vendors also passed, because
+    **every label was the same wrong one.** Both were true statements about a
+    corrupt record. This asserts the thing neither could: the label equals what
+    was asked.
+    """
+    from tradeit.storage.tables import OhlcvBar
+
+    report = _capture(
+        db_session, _StubSource(), ["AAPL"], instrument_ids={"AAPL": 7}, provider="eodhd"
+    )
+    db_session.commit()
+    assert report.bars_written >= 1
+    sources = {bar.source for bar in db_session.query(OhlcvBar).all()}
+    assert sources == {"eodhd"}, (
+        f"bars were written as {sources} after asking eodhd; a provider label that "
+        "does not match the vendor asked makes the adjustment basis unknowable"
+    )

@@ -140,9 +140,20 @@ def capture_forward(
     asked_at: dt.datetime,
     instrument_ids: Mapping[str, int] | None = None,
     journal: object | None = None,
-    provider: str = "tiingo",
+    provider: str,
 ) -> CaptureReport:
     """Ask about every symbol and record every answer, including silence.
+
+    ``provider`` is **required and has no default.** It used to default to
+    ``"tiingo"`` and the only caller never passed it, so when a second vendor
+    was added every EODHD bar was written with ``source = "tiingo"`` -- 60 of
+    them, before anyone looked. That defeats the entire reason the two vendors
+    are kept apart: Tiingo declares ``RAW_UNADJUSTED`` and EODHD declares
+    ``UNKNOWN``, and a mislabelled bar makes a series whose adjustment basis is
+    unknowable rather than merely unknown. Worse, the test asserting *"no
+    instrument carries bars from two vendors"* passed -- because every label
+    was the same wrong one. A default on a provenance field is a lie waiting
+    for a second caller.
 
     ``asked_at`` is **required and passed in**, never read from the clock here.
     A capture replayed over history, or one crossing midnight UTC mid-run, must

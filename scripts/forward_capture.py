@@ -62,10 +62,12 @@ sys.path.insert(0, "scripts")
 from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from tradeit.acquisition.eodhd import EodhdAcquisition
 from tradeit.acquisition.journal import AcquisitionJournal
 from tradeit.acquisition.tiingo import TiingoAcquisition
 from tradeit.forward import capture_forward
 from tradeit.forward.identity import TickerAlias, resolve_as_of
+from tradeit.forward.sessions import latest_session_at_or_before, market_today
 from tradeit.storage.session import install_sqlite_busy_timeout
 from tradeit.storage.tables import Base
 
@@ -86,6 +88,12 @@ def main() -> int:
         "--journal", default="/Users/ericsasson/Documents/TradeItData/out/forward_journal.jsonl"
     )
     ap.add_argument("--tickers", required=True)
+    ap.add_argument(
+        "--source",
+        default="tiingo",
+        choices=("tiingo", "eodhd"),
+        help="which vendor to ask; one per run, because their adjustment bases differ",
+    )
     ap.add_argument(
         "--start",
         default=None,
@@ -113,27 +121,37 @@ def main() -> int:
     if Path(args.record).resolve() == Path("research01.sqlite").resolve():
         raise SystemExit("the forward record must not be written into the corpus")
 
-    # UTC explicitly: a capture run near midnight local time must not disagree
-    # with the session it says it asked about.
-    end = dt.date.fromisoformat(args.end) if args.end else dt.datetime.now(dt.UTC).date()
-    start = (
-        dt.date.fromisoformat(args.start) if args.start else end - dt.timedelta(days=args.lookback)
-    )
+    # **The exchange's calendar, not UTC.** This line used to read
+    # `dt.datetime.now(dt.UTC).date()`, with a comment saying UTC was chosen so
+    # that "a capture run near midnight local time must not disagree with the
+    # session it says it asked about". The reasoning was inverted: the job fires
+    # at 22:10 America/New_York, which is already tomorrow in UTC, so every
+    # scheduled run asked for a window ending tomorrow, got today's bar, and
+    # recorded the observation under tomorrow's date. Measured 2026-10-22 at
+    # 22:13 EDT -- bars on 2026-10-22, observations on 2026-10-23.
+    #
+    # Snapped to a real session below, once the corpus calendar is open.
+    requested_end = dt.date.fromisoformat(args.end) if args.end else market_today()
     symbols = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     if args.max_symbols:
         symbols = symbols[: args.max_symbols]
 
-    source = TiingoAcquisition()
+    # **One vendor per run, never pooled.** Tiingo declares `RAW_UNADJUSTED`
+    # and EODHD declares `UNKNOWN`, and a series mixing the two bases is the
+    # §0.1a defect reintroduced through the back door -- a price whose
+    # adjustment state depends on which vendor happened to answer that day.
+    # Each security is assigned to exactly one vendor in `ops/`, the bars carry
+    # `source`, and the two records stay separable forever.
+    source = {"tiingo": TiingoAcquisition, "eodhd": EodhdAcquisition}[args.source]()
     if not source.has_credential():
         raise SystemExit(
-            "no Tiingo credential. The forward record is the one thing that cannot be "
-            "caught up later -- a day not captured is gone -- so this refuses rather "
-            "than writing an empty run that looks like a quiet market."
+            f"no {args.source} credential. The forward record is the one thing that "
+            "cannot be caught up later -- a day not captured is gone -- so this "
+            "refuses rather than writing an empty run that looks like a quiet market."
         )
-    print(f"source   : tiingo ({source.credential_hint()}), {source.adjustment_policy()}")
+    print(f"source   : {args.source} ({source.credential_hint()}), {source.adjustment_policy()}")
     print(f"record   : {args.record}")
     print(f"journal  : {args.journal}")
-    print(f"window   : {start} .. {end}   symbols: {len(symbols)}")
 
     # Resolved from the corpus, read-only, so a forward bar lands under the same
     # id as its history. Without this the two records could never be joined and
@@ -151,6 +169,35 @@ def main() -> int:
     # delisting claim about tickers that were already gone. See
     # `tradeit.forward.identity` for the measurement and the reasoning.
     with corpus:
+        # **Snapped to the latest real session at or before the market-local
+        # date.** On a Saturday the vendor still returns Friday's bar for a
+        # window ending Saturday, so an unsnapped run would assert a Saturday
+        # session that had a price -- and, on a universe with a genuine exit, a
+        # non-existent session in which a company was silent. `trading_sessions`
+        # is a materialised table precisely because an exchange calendar cannot
+        # be expressed in SQL (§3a); it spans 1990-01-02 to 2030-12-31.
+        end = latest_session_at_or_before(
+            (
+                dt.date.fromisoformat(str(row[0])[:10])
+                for row in corpus.execute(
+                    text(
+                        "select session_date from trading_sessions "
+                        "where session_date <= :d order by session_date desc limit 1"
+                    ),
+                    {"d": requested_end.isoformat()},
+                ).all()
+            ),
+            requested_end,
+        )
+        if end != requested_end:
+            print(f"session  : {requested_end} is not a session; using {end}")
+        start = (
+            dt.date.fromisoformat(args.start)
+            if args.start
+            else end - dt.timedelta(days=args.lookback)
+        )
+        print(f"window   : {start} .. {end}   symbols: {len(symbols)}")
+
         aliases = [
             TickerAlias(
                 ticker=str(row[0]),
@@ -250,6 +297,7 @@ def main() -> int:
         asked_at=asked_at,
         instrument_ids=instrument_ids,
         journal=journal,
+        provider=args.source,
     )
     session.commit()
 

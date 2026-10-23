@@ -61,6 +61,17 @@ REPO = Path(__file__).resolve().parent.parent
 OUT = Path("/Users/ericsasson/Documents/TradeItData/out")
 LOOKBACK = 7
 
+#: **One vendor per security, never pooled.** Tiingo declares `RAW_UNADJUSTED`
+#: and EODHD declares `UNKNOWN`; a series mixing the two bases would be a price
+#: whose adjustment state depends on which vendor happened to answer that day,
+#: which is the §0.1a defect reintroduced through the back door. The split is a
+#: pair of committed files so the assignment is checkable, and
+#: `tests/unit/test_forward_universe.py` asserts they stay disjoint.
+VENDORS = (
+    ("tiingo", "forward_universe.txt"),
+    ("eodhd", "forward_universe_eodhd.txt"),
+)
+
 #: ``KEY=value``, and nothing else. The ``.env`` file is **parsed, never
 #: sourced**: the shell version of this job executed it and died on a value
 #: containing parentheses, which is shell syntax. Executing a config file is
@@ -101,26 +112,9 @@ def main() -> int:
     print(f"=== forward capture {stamp} ===", flush=True)
     print(f"credentials loaded: {load_env(REPO / '.env')} names", flush=True)
 
-    universe = (REPO / "ops" / "forward_universe.txt").read_text(encoding="utf-8").strip()
-    if not universe:
-        print("no universe: ops/forward_universe.txt is empty", file=sys.stderr)
-        return 2
-    print(f"universe: {universe.count(',') + 1} symbols", flush=True)
-
-    sys.argv = [
-        "forward_capture.py",
-        "--tickers",
-        universe,
-        "--lookback",
-        str(LOOKBACK),
-        "--record",
-        str(OUT / "forward.sqlite"),
-        "--journal",
-        str(OUT / "forward_journal.jsonl"),
-    ]
-
     # Imported from its path rather than by name: `scripts/` is not a package
-    # and must not become one just to be scheduled.
+    # and must not become one just to be scheduled. Loaded once and called per
+    # vendor, so the two runs share an interpreter but nothing else.
     spec = importlib.util.spec_from_file_location(
         "forward_capture", REPO / "scripts" / "forward_capture.py"
     )
@@ -129,7 +123,41 @@ def main() -> int:
         return 2
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return int(module.main())
+
+    worst = 0
+    for source, filename in VENDORS:
+        path = REPO / "ops" / filename
+        universe = path.read_text(encoding="utf-8").strip() if path.exists() else ""
+        if not universe:
+            # Not an error. An empty or absent file is how a vendor is turned
+            # off, and a vendor being off must not take the other one down.
+            print(f"\n--- {source}: {filename} is empty or absent; skipping", flush=True)
+            continue
+        print(f"\n--- {source}: {universe.count(',') + 1} symbols", flush=True)
+        sys.argv = [
+            "forward_capture.py",
+            "--source",
+            source,
+            "--tickers",
+            universe,
+            "--lookback",
+            str(LOOKBACK),
+            "--record",
+            str(OUT / "forward.sqlite"),
+            "--journal",
+            str(OUT / "forward_journal.jsonl"),
+        ]
+        try:
+            code = int(module.main())
+        except SystemExit as exit_code:
+            # `forward_capture` refuses by raising SystemExit -- a missing
+            # credential, for instance. **One vendor's refusal must not cancel
+            # the other's capture**, because a day not captured is gone and
+            # half a day is worth more than none.
+            code = int(exit_code.code or 1)
+            print(f"{source}: {exit_code}", file=sys.stderr, flush=True)
+        worst = max(worst, code)
+    return worst
 
 
 if __name__ == "__main__":
