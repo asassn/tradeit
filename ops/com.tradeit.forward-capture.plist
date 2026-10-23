@@ -18,14 +18,23 @@
 
   22:10 Eastern is after the US close and after Tiingo has settled the day,
   expressed here in local time because launchd has no timezone field. A run
-  that fires before the data exists records a silence, which is not wrong --
-  the observation is honest -- but it is a silence about the vendor rather than
+  that fires before the data exists records a silence, which is not wrong —
+  the observation is honest — but it is a silence about the vendor rather than
   about the market, and those should not be confused.
 
   **StandardError is a file, not /dev/null.** A daily job that fails quietly is
   worse than one that never ran: the record simply stops growing and nothing
   says so. `tradeit status` reads the capture's own record, and this file is
   where a crash before that record is written ends up.
+-->
+<!--
+  **No double hyphen inside these comments** — the sequence cannot be written
+  here at all, which is why this rule is stated in words. XML forbids it within a
+  comment, and this file had three. `plutil -lint` accepts them because Apple's
+  parser is lenient, and launchd runs the job quite happily — which is why it
+  went unnoticed — but every strict XML reader rejects the file outright.
+  Found 2026-10-23 by reading the installed copy with Python's parser while
+  checking something else. Use an em dash instead.
 -->
 <plist version="1.0">
 <dict>
@@ -42,7 +51,7 @@
       a .sh.
 
       `.venv/bin/python` is a symlink to /Library/Frameworks/Python.framework,
-      which is the executable TCC actually evaluates -- hence launchd may exec
+      which is the executable TCC actually evaluates — hence launchd may exec
       it even though the symlink is under ~/Documents.
     -->
     <key>ProgramArguments</key>
@@ -72,7 +81,7 @@
       unsure whether the job works or whether that one run was manual.
       Run `launchctl kickstart` once to check it, which is a decision rather
       than a side effect. Running ops/forward_daily.py from a terminal also
-      works and is the right way to debug it -- but note that it then runs
+      works and is the right way to debug it — but note that it then runs
       under the terminal's TCC grant rather than launchd's, so a terminal pass
       does not prove the scheduled job can read anything.
     -->

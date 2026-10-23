@@ -68,3 +68,40 @@ def test_a_universe_file_is_a_bare_comma_separated_line(filename: str) -> None:
 def test_at_least_one_vendor_has_a_universe() -> None:
     """Both files empty means the scheduled job captures nothing, silently."""
     assert any(_names(f) for f in FILES)
+
+
+def test_the_launch_agent_is_well_formed_xml() -> None:
+    """**Apple's parser is lenient; XML is not.**
+
+    `plutil -lint` accepted this file while it contained three double hyphens
+    inside XML comments, which XML forbids outright, and launchd ran the job
+    quite happily for days. Python's parser rejected it at the first attempt to
+    read it — found 2026-10-23 while checking something else entirely.
+
+    That combination is the hazard: the one consumer that matters tolerates the
+    defect, so nothing complains until a reboot, a reload, or any other tool
+    that reads the file with a strict parser. A scheduled job that fails to
+    load is the quietest failure in this repository — the record simply stops
+    growing.
+
+    So the file is parsed here with `plistlib`, strictly, and the keys the
+    agent depends on are read back rather than assumed present.
+    """
+    import plistlib
+
+    path = OPS / "com.tradeit.forward-capture.plist"
+    with path.open("rb") as handle:
+        plist = plistlib.load(handle)
+
+    program = plist["ProgramArguments"]
+    assert len(program) == 2, "python plus the script, with no shell wrapper (see ADR note)"
+    assert program[0].endswith("/.venv/bin/python"), (
+        "the agent must exec the venv interpreter directly; a shell wrapper cannot "
+        "read this repository under launchd's TCC grant"
+    )
+    assert program[1].endswith("ops/forward_daily.py")
+    assert plist["StartCalendarInterval"] == {"Hour": 22, "Minute": 10}
+    assert plist["RunAtLoad"] is False, "installing the job must not fire a capture"
+    # StandardError is a file, not /dev/null: a daily job that fails quietly is
+    # worse than one that never ran.
+    assert plist["StandardErrorPath"].endswith(".err")
