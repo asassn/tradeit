@@ -155,6 +155,56 @@ been requested and has not been received. The remainder of the reply is **not
 transcribed into this repository**; do not restate it from memory, and quote it
 verbatim if it is ever recorded here.
 
+#### MEASURED 2026-10-23 — the "from Jan 2000" delisted start date understates EODHD, and so does its own documentation
+
+**Two claims tested, both moving, in opposite directions.** Row 1 records
+EODHD as stating *"almost all delisted companies from Jan 2000", 26,000+
+names*, and this file concluded from it that *"1998–1999 would be survivors
+only, which fails `RESEARCH_01_DATA_CONTRACT` §7.1"*. Measured against the live
+API on the control universe — `MANUAL_VERIFIED` identities with known exit
+dates, which is the one instrument that works in the window §7be says the
+denominator cannot see:
+
+| control | result | first bar held |
+|---|---|---|
+| `EXDS` Exodus, delisted 2001 | 885 bars | **1998-03-19** |
+| `GCTY` GeoCities, acquired 1999 | 201 bars | **1998-08-12** |
+| `MPPP` MP3.com, acquired 2001 | 532 bars | **1999-07-21** |
+| `LEH` Lehman, delisted 2008 | 2,695 bars | **1997-12-31** |
+| `ENE` Enron | HTTP **404** | — symbol unknown to the vendor |
+| `WCOM` WorldCom | HTTP 200, **0 rows** | — addressable, no history |
+| `BCST` Broadcast.com | HTTP 200, **0 rows** | — |
+| `PSIX` PSINet | HTTP 200, **0 rows** | — |
+| `CC` Circuit City | HTTP 200, **0 rows** | — |
+
+**The depth claim understates the product.** All four covered delisted controls
+hold history *before* January 2000, one of them before 1998. So the stated
+delisted start date is not a wall, and this file's inference that 1998–1999
+would be survivors only is **wrong as stated** — for the delisted names EODHD
+covers, it covers them into 1998. Separately, five long-lived actives (`AAPL`,
+`IBM`, `GE`, `KO`, `T`) each return 3,280 bars from **1990-01-02**, so the
+documentation's *"from January 2000"* is wrong for actives too and the
+*"30+ years"* phrasing is the accurate one. That resolves the EODHD-specific
+question §1.3 records as asked and unanswered — **by measurement, without the
+vendor answering it.**
+
+**The completeness claim is not supported, and was not news.** Five of nine are
+absent. `MEASURED 2026-09-12` below already settled that at far better scale —
+11 of 105 dead registrants landed data — and nothing here revises it.
+
+**4 of 9 is not a coverage rate, and must not be read as one.** These controls
+were chosen *because they are hard*, and they are also **famous**: a vendor's
+history is more likely to contain Enron than an arbitrary 1997 small-cap. That
+the 2026-09-12 sample of ordinary dead registrants landed 10% while this
+sample of household names landed 44% is the selection effect, not a
+contradiction. **This measures these nine.**
+
+**One grading distinction kept, because the framework encodes it.** `ENE`
+returned HTTP 404 — the vendor does not know the symbol — while `WCOM`, `BCST`,
+`PSIX` and `CC` returned HTTP 200 with an empty array: addressable, no history.
+`FetchStatus.REJECTED` and `FetchStatus.EMPTY` are different answers, and
+collapsing them would turn "not in the universe" into "no data this window".
+
 #### MEASURED 2026-09-12 — EODHD cannot represent a reused ticker
 
 **The first EODHD capability measured rather than stated**, and it bears
@@ -825,7 +875,7 @@ are not a criterion and no row records them.
 
 | # | criterion | **Kibot** | **Sharadar** | **EODHD** | **Polygon / Massive** | **Twelve Data** |
 |---|---|---|---|---|---|---|
-| 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | **Two populations, two answers — VENDOR-STATED. ACTIVE US: "from the beginning" / "30+ years". DELISTED US: "almost all delisted companies from Jan 2000", 26,000+ names.** So 1998–1999 would be survivors only, which fails `RESEARCH_01_DATA_CONTRACT` §7.1 pending the owner's decision (§1.3). Fundamentals for delisted names only since 2018 | not established | "back to the first trading date" — CORROBORATED |
+| 1 | price history start | "up to 64 years" daily EOD; 1998 coverage claimed — USER-VERIFIED (vendor claim) | "deep history to 1998" — CORROBORATED | **Two populations, two answers — VENDOR-STATED. ACTIVE US: "from the beginning" / "30+ years". DELISTED US: "almost all delisted companies from Jan 2000", 26,000+ names.** **CORRECTED 2026-10-23 by measurement (§1.3):** the inference that followed here — *"so 1998–1999 would be survivors only, which fails `RESEARCH_01_DATA_CONTRACT` §7.1"* — **is wrong as stated.** All four delisted controls EODHD covers hold pre-2000 history (`LEH` from 1997-12-31, `EXDS` 1998-03-19, `GCTY` 1998-08-12, `MPPP` 1999-07-21), and five long-lived actives return bars from 1990-01-02, so the stated start date is not a wall and the documentation's "from January 2000" is wrong in both populations. What *does* fail §7.1 is **completeness, not depth**: five of those nine controls are absent, consistent with 11 of 105 at better scale. Fundamentals for delisted names only since 2018 | not established | "back to the first trading date" — CORROBORATED |
 | 2 | active **and** delisted | **active + delisted rosters, and a delisted-only roster — USER-VERIFIED (vendor claim); completeness UNTESTED** | yes — CORROBORATED | **existence YES — VENDOR-STATED in writing 2026-08-29, with separate dividends and splits endpoints. Completeness for the 1998+ US universe EXPLICITLY NOT CERTIFIED absent a paid requirements review (§1.3)** | **"spotty at best" — CORROBORATED** | not established |
 | 3 | delisted history truly downloadable | **UNTESTED — probe item A** | claimed — CORROBORATED | claimed — CORROBORATED | doubtful | unknown |
 | 4 | permanent identifier | **UNTESTED — probe item D. Expect none; expect ticker-keyed files** | `permaticker` — UNVERIFIED | **ID Mapping API: CUSIP/ISIN/FIGI/LEI/CIK ↔ symbol — VENDOR-STATED.** A lead for the 33 unestablished ticker intervals, and categorically short of `MANUAL_VERIFIED`: a vendor reference file may suggest an interval, never supply one | not established | not established |
