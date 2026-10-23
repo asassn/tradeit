@@ -364,3 +364,36 @@ So, precisely:
 A reader wanting only rows that mean what they say should filter
 `asked_at >= '2026-10-23 17:50'`. That is 149 rows on one session, and it is
 the honest size of this record's interpretable evidence as of today.
+
+## Why 22:10 stays, measured rather than assumed
+
+**2026-10-23 16:40 EDT, forty minutes after the close.** One symbol asked of
+each vendor:
+
+| vendor | latest session held |
+|---|---|
+| EODHD | **2026-10-23** — close 347.725 |
+| Tiingo | 2026-10-22 |
+
+So the two vendors settle at different speeds, and an operator tempted to move
+the job earlier "to get the data sooner" would be making two mistakes at once.
+
+**Tiingo would lose the day outright.** Its free tier allows roughly 50 unique
+symbol-requests a day and the universe is 46, so an early run consumes the
+allowance, the 22:10 run is throttled from its first request, and the capture
+that would have worked never happens. A day not captured cannot be bought back.
+
+**EODHD would lock in a price that may not be final.** `_write_bars` leaves an
+existing bar alone rather than updating it — deliberately, because a later
+disagreement should become a revision and writing one needs a decision about
+which vendor wins that this system has not made. The consequence is that
+**whatever is captured first is kept forever.** A bar published forty minutes
+after the close, before the vendor has settled the day, would be the permanent
+record of that session with no path to the corrected value.
+
+That second point is the one worth remembering, because it is invisible: the
+early bar looks exactly like a late one. It is also why running the capture
+early "just to check" is not free, and why the verification of 2026-10-23 was
+done against the **previous** completed session rather than the current one.
+
+22:10 Eastern is after the close and after both vendors have settled. It stays.
