@@ -454,7 +454,12 @@ class PaperBroker:
             intent=resting.request.intent,
             parent_position_id=resting.request.parent_position_id,
         )
-        cost = self.costs.estimate(probe, resting.reference_bar or bar)
+        # Participation passed here too, per ADR-0028. **The paper venue must
+        # not be cheaper than the backtest it exists to validate**: a strategy
+        # promoted on paper fills that paid no size penalty would be promoted on
+        # exactly the flattered number the backtest no longer uses.
+        reference = resting.reference_bar or bar
+        cost = self.costs.estimate(probe, reference, reference.close * reference.volume)
         simulated = self.fills.simulate(probe, bar, cost)
         if simulated is None:
             return None

@@ -213,7 +213,10 @@ restate any of them from memory or from a document.
    found.**
 4. [`docs/EDGAR_DELISTING_DENOMINATOR.md`](docs/EDGAR_DELISTING_DENOMINATOR.md)
    §4 — the identity and evidence rules. Normative.
-5. [`docs/adr/`](docs/adr/) — 26 decisions that constrain later phases.
+5. [`docs/adr/`](docs/adr/) — the decisions that constrain later phases. **The
+   count is deliberately not written here**, per this file's own rule: it said
+   26 while the directory held 28, having rotted the moment an ADR was added.
+   `ls docs/adr/*.md | wc -l` answers it and cannot go stale.
 
 ## Validation baseline for any production change
 

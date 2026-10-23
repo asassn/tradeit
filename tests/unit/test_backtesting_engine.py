@@ -131,6 +131,7 @@ def _engine(
     delisting_after: int = 20,
     recovery: str = "1",
     recovery_by: dict[int, Decimal] | None = None,
+    costs: CostConfig | None = None,
 ) -> EventDrivenEngine:
     sizing = SizingConfig()
     risk = RiskConfig()
@@ -150,7 +151,7 @@ def _engine(
             ),
             ladder=StopLadder(config=exits or ExitConfig()),
         ),
-        costs=ParticipationCostModel(config=CostConfig()),
+        costs=ParticipationCostModel(config=costs or CostConfig()),
         fills=BarFillModel(max_participation=Decimal("0.10")),
         data=data,
         analyzer=StandardPerformanceAnalyzer(annualisation_factor=252, risk_free_rate=0.0),
@@ -195,6 +196,65 @@ class TestNoLookAhead:
         # Filled at day 1's open, not day 0's close.
         assert result.trades[0].entry_price >= Decimal(150)
         assert result.trades[0].entry_date == days[1]
+
+    def test_the_engine_charges_market_impact_on_an_entry(self) -> None:
+        """**The term the whole archive was priced without.**
+
+        `_settle` called `costs.estimate(order, reference_bar)` and omitted the
+        third argument, so `ParticipationCostModel` -- which computes impact
+        only when handed a dollar volume -- returned zero impact on every fill
+        the backtester ever produced. The coefficient was configured at 0.1 and
+        simply unreachable, so every result on `SIGNAL_SCOREBOARD.md` priced
+        orders with no size penalty: 6.5 bps per side where the model intended
+        26.5 at the 2% participation cap, a factor of 4.1. Switched on by the
+        owner's approval of 2026-10-23, recorded as ADR-0028.
+
+        Asserted by **difference**, against the same run with the coefficient
+        zeroed, rather than against a literal cost. A literal would pin today's
+        commission and spread settings as well, and would need editing whenever
+        either changed -- which is how a cost assertion stops being about the
+        thing it was written for.
+        """
+        days = _days(4)
+        # **The bar needs range, and the volume needs to be thin enough to
+        # matter.** Two false starts worth recording. Flat bars (OHLC all 100)
+        # make this test pass against broken code, because `BarFillModel`
+        # clamps the cost-adjusted price back into the bar's range and a range
+        # of zero clamps it to the close exactly. And at a $1bn dollar volume
+        # participation is about 5e-6, so the impact is real but rounds below
+        # the sixth decimal -- true to the model and useless as a test.
+        bars = {
+            day: {7: _bar(7, day, open_="100", high="110", low="90", close="100", volume="50000")}
+            for day in days[:4]
+        }
+
+        def _entry_price(coefficient: float) -> Decimal:
+            data = _Script(bars, {days[0]: [_candidate(7, "100", "95")]})
+            result = _engine(data, costs=CostConfig(market_impact_coefficient=coefficient)).run(
+                _spec()
+            )
+            assert result.trades, "no trade, so the test says nothing about costs"
+            return result.trades[0].entry_price
+
+        charged = _entry_price(0.1)
+        free = _entry_price(0.0)
+
+        # The entry price, not `trade.costs`: that field carries commission
+        # only -- $1.00, the configured minimum -- while spread and impact are
+        # expressed as the price the fill actually happened at. Asserting on
+        # `costs` passes against broken code for that reason alone, which is
+        # how the first version of this test went green.
+        assert charged > free, (
+            "zeroing the impact coefficient did not change the entry price, so the "
+            "engine is still not passing a dollar volume and the size penalty is "
+            "unreachable -- which is the state every archived result was measured in"
+        )
+        # Sanity on the magnitude: the free price is the 6.5 bps of spread and
+        # slippage the archive did pay, and nothing more.
+        assert free == Decimal("100.0650"), (
+            "the no-impact entry price is not 6.5 bps above the reference, so this "
+            "test is no longer measuring what the decision document measured"
+        )
 
     def test_a_candidate_on_the_final_session_never_trades(self) -> None:
         """There is no next session to execute against."""

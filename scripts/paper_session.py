@@ -154,7 +154,13 @@ def main() -> int:
                 bar = bars.get(item.order.instrument_id)
                 if bar is None:
                     continue
-                estimate = self.costs.estimate(item.order, item.reference_bar)
+                # Participation passed, per ADR-0028, so this script agrees with
+                # the engine and the paper broker rather than quietly pricing
+                # the same order three different ways.
+                reference = item.reference_bar
+                estimate = self.costs.estimate(
+                    item.order, reference, reference.close * reference.volume
+                )
                 simulated = self.fills.simulate(item.order, bar, estimate)
                 if simulated is not None:
                     engine_fills[item.order.client_order_id] = simulated

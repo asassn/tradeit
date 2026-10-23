@@ -97,3 +97,54 @@ impact on does not depend on that and should not wait for it.
 **If the answer is no**, the honest consequence is that every future result
 carries the same caveat the archive now does, and the caveat should be stated
 wherever a number appears rather than left in this file.
+
+---
+
+## Answered: switched on, 2026-10-23
+
+**The owner approved the recommendation.** Impact is charged. The decision is
+recorded as [ADR-0028](adr/0028-market-impact-is-charged.md); this section
+records what was actually done and two things the implementation found.
+
+Three call sites passed the dollar volume, not one: `engine._settle` as
+described, and also `PaperBroker._fill_resting` and
+`scripts/paper_session.py`. **The paper venue mattered more than the document
+allowed for** — a strategy promoted on paper fills that paid no size penalty
+would have been promoted on exactly the flattered number the backtest had
+stopped using, so a paper venue cheaper than its own backtest is worse than
+none.
+
+**The 6.5 bps figure is confirmed against the code**, not just the table:
+`CostConfig()` carries `spread_bps = 3.0` and `slippage_bps = 5.0`, so friction
+is `3/2 + 5 = 6.5`, and a no-impact entry on a $100 reference fills at exactly
+`100.0650`. That value is now asserted in
+`test_the_engine_charges_market_impact_on_an_entry`, so the number this decision
+was made on cannot drift without a test objecting.
+
+### Two things the tests found that the measurement did not
+
+**`trade.costs` is commission only.** Spread and impact are expressed in the
+fill *price*, not in that field — it reads `$1.00`, the configured commission
+minimum, whatever the coefficient is. The first version of the engine test
+asserted on `trade.costs` and passed against unchanged code. Anyone reading a
+per-trade cost out of the archive is reading commission.
+
+**Impact is invisible at index-scale volumes, which is correct and worth
+knowing.** At a $1bn dollar volume, participation is about 5e-6 and the impact
+lands below the sixth decimal of the fill price. The term only bites where the
+document said it would — concentrated positions in thinner names — so a test
+built on a liquid bar proves nothing, and neither would a spot-check of a
+large-cap backtest.
+
+### The residual, stated rather than left to be rediscovered
+
+Impact is zero when a bar's volume is zero, and **6.339% of raw corpus bars
+carry volume 0** — 86.5% of those being flat copies of the previous close
+(`RESEARCH_01_DATA_DICTIONARY.md` §0.7: a bar can have a price and no trade
+behind it). Those are precisely the illiquid bars where impact would be
+largest, so the cost model remains optimistic there. Refusing to fill on a
+zero-volume bar is a change to *fill* behaviour rather than to cost and needs
+its own proposition.
+
+Measuring the coefficient itself against realised paper slippage also remains
+open, as the recommendation said it should.

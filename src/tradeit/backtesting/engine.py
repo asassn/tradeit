@@ -303,7 +303,33 @@ class EventDrivenEngine:
                 # carried, because a halted session is not a decision.
                 state.pending.append(item)
                 continue
-            estimate = self.costs.estimate(item.order, item.reference_bar)
+            # **Participation is passed, so market impact is actually charged.**
+            # Approved by the owner 2026-10-23; the measurement and the
+            # alternatives are in
+            # `docs/COST_MODEL_IMPACT_DECISION_2026-10-19.md`, and the decision
+            # is ADR-0028.
+            #
+            # `ParticipationCostModel` has always computed impact as
+            # `notional x coefficient x (notional / dollar_volume)`, and this
+            # call site omitted the third argument -- so the term was
+            # unreachable and every archived result priced orders with **no size
+            # penalty at all.** At the configured 2% participation cap that is
+            # 6.5 bps per side where the model intended 26.5, a factor of 4.1.
+            #
+            # The reference bar, not the fill bar: `notional` is computed from
+            # `reference_bar.close`, so participation has to be measured against
+            # the same bar or the ratio mixes two sessions.
+            #
+            # `close * volume` is one bar's dollar volume, which is what the
+            # parameter means here despite being named `average_` -- it is the
+            # convention already used by `baselines.py` and `factor.py` where
+            # the sizer's own participation cap is applied, and the two must
+            # agree or the sizer and the cost model would disagree about the
+            # same order.
+            reference = item.reference_bar
+            estimate = self.costs.estimate(
+                item.order, reference, reference.close * reference.volume
+            )
             fill = self.fills.simulate(item.order, bar, estimate)
             if fill is None:
                 continue

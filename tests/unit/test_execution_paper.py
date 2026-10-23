@@ -415,10 +415,13 @@ def test_cost_is_estimated_against_the_decision_bar_not_the_filling_bar() -> Non
     passed all twenty-five other tests in this file.
 
     **A first version of this test varied the bar's VOLUME and failed against
-    correct code.** Market impact is the only volume-sensitive term and it
-    requires `average_dollar_volume`, which this venue does not pass -- see
-    `test_market_impact_is_inert_without_average_dollar_volume`. The close is
-    what the reference bar actually feeds through.
+    correct code**, because market impact is the only volume-sensitive term and
+    the venue did not pass `average_dollar_volume`. That is no longer true --
+    ADR-0028 switched impact on, so volume now flows through the reference bar
+    as well. The close is still what this test varies, because it isolates the
+    reference bar from the fill bar without depending on the cost model's
+    newest term; `test_the_venue_charges_market_impact_and_it_scales_with_size`
+    covers volume.
     """
     decided_on = _bar(open_=100, close=101)
     filled_on = _bar(open_=200, close=205, session_date=NEXT)
@@ -442,30 +445,70 @@ def test_cost_is_estimated_against_the_decision_bar_not_the_filling_bar() -> Non
     )
 
 
-def test_market_impact_is_inert_without_average_dollar_volume() -> None:
-    """A finding, pinned rather than fixed.
+def test_the_venue_charges_market_impact_and_it_scales_with_size() -> None:
+    """**Reworked, not re-pinned.** The finding this replaced has been fixed.
 
-    `ParticipationCostModel` computes market impact only when handed an
-    `average_dollar_volume`, and **neither this venue nor the backtester's
-    `_settle` passes one** -- so `market_impact` is zero on every fill either
-    produces, and `participation_rate` is 0.0. The impact coefficient in
-    `CostConfig` has no effect on any backtest this project has run.
+    This test used to be `test_market_impact_is_inert_without_average_dollar_volume`
+    and asserted `market_impact == 0`, recording that neither this venue nor
+    the backtester's `_settle` passed an `average_dollar_volume` -- so the
+    configured coefficient had no effect on any backtest this project had run.
+    It said explicitly that it was pinning the finding rather than fixing it,
+    because cost assumptions are a scoped proposition here.
 
-    Not changed here: cost assumptions are explicitly a scoped proposition in
-    this project, and quietly switching impact on would move every published
-    result. Pinned so the next reader finds it stated rather than assuming
-    impact was modelled and found not to matter -- the same mistake
-    `correlation_weight=0.0` invited for a year.
+    The owner approved the proposition on 2026-10-23 (ADR-0028), so the
+    invariant that test was reaching for is now the true one: **a configured
+    impact coefficient has an effect.** Asserting zero would now pin the bug.
+
+    Two assertions, because either alone can pass on broken code. That impact
+    is non-zero would pass on a constant, and that it scales would pass on a
+    term computed from the wrong bar -- so the test also checks the direction:
+    impact is **super-linear in quantity**, since it is notional times
+    participation and participation is itself proportional to notional.
     """
-    broker = _broker()
-    broker.submit_order(_order(quantity=100), "c-1")
-    fills = broker.advance(NEXT, {1: _bar()})
-
-    assert len(fills) == 1
     config = StrategyConfig(name="ma_cross_baseline")
     assert config.costs.market_impact_coefficient > 0, (
-        "the coefficient is configured, which is what makes its inertness worth pinning"
+        "the coefficient must be configured for this test to mean anything"
     )
-    estimate = ParticipationCostModel(config=config.costs).estimate(_order(quantity=100), _bar())
-    assert estimate.market_impact == 0
-    assert estimate.participation_rate == 0.0
+    model = ParticipationCostModel(config=config.costs)
+    bar = _bar()
+    dollar_volume = bar.close * bar.volume
+
+    small = model.estimate(_order(quantity=100), bar, dollar_volume)
+    large = model.estimate(_order(quantity=400), bar, dollar_volume)
+
+    assert small.market_impact > 0, "the configured coefficient is inert again"
+    assert small.participation_rate > 0
+    # Four times the quantity is four times the notional and four times the
+    # participation, so sixteen times the impact. A linear term would give 4.
+    ratio = large.market_impact / small.market_impact
+    assert ratio == pytest.approx(16, rel=1e-6), (
+        f"impact grew {ratio}x for 4x the size; it should be quadratic in quantity, "
+        "because it is notional multiplied by a participation that is itself "
+        "proportional to notional"
+    )
+
+    # And it arrives through the venue, not only from the model directly --
+    # which is the half that was actually broken.
+    #
+    # Compared against the same venue with the coefficient zeroed, rather than
+    # against `expected_fill_price`: `BarFillModel` does not return the cost
+    # model's expected price unchanged, so an equality check there fails on
+    # correct code. What must be true is that **the coefficient moves the
+    # venue's fill price at all** -- if the venue still dropped the dollar
+    # volume, these two would be identical.
+    free = StrategyConfig(name="ma_cross_baseline").costs.model_copy(
+        update={"market_impact_coefficient": 0.0}
+    )
+    charged_broker = _broker()
+    charged_broker.submit_order(_order(quantity=100), "c-1")
+    charged = charged_broker.advance(NEXT, {1: bar})
+
+    free_broker = _broker(costs=ParticipationCostModel(config=free))
+    free_broker.submit_order(_order(quantity=100), "c-1")
+    uncharged = free_broker.advance(NEXT, {1: bar})
+
+    assert len(charged) == 1 and len(uncharged) == 1
+    assert charged[0].price > uncharged[0].price, (
+        "zeroing the impact coefficient did not change the venue's buy fill price, "
+        "so the venue is still not passing a dollar volume to the cost model"
+    )

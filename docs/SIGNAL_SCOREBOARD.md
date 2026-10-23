@@ -5,6 +5,22 @@
 reasoning. **Every number here is measured and every one will rot**; re-run the
 studies rather than quoting this later.
 
+> **And read every section below with this, 2026-10-23.** Every result here was
+> measured with **market impact never charged.** `ParticipationCostModel`
+> computes impact only when handed a dollar volume and no call site passed one,
+> so the configured coefficient was unreachable and orders were priced at 6.5
+> bps per side where the model intended **26.5 at the 2% participation cap — a
+> factor of 4.1.** The sizer's liquidity cap worked throughout, which is why
+> nothing looked wrong. Switched on by the owner's approval of 2026-10-23
+> ([ADR-0028](adr/0028-market-impact-is-charged.md)).
+>
+> Nothing here is retracted — each number was correct under the assumption in
+> force — but **a comparison across that boundary is invalid**, and §46's exact
+> reproduction a month later is a property that ends at it. The understatement
+> is largest exactly where it matters: concentrated positions in thinner names.
+> At index-scale dollar volumes the term is below the sixth decimal of a fill
+> price, so a large-cap spot-check would wrongly suggest it changes nothing.
+
 > **Read every section below with this, 2026-09-15.** Sections up to and
 > including §28 read prices through `price_series` and `CorpusSessionData`
 > **before** those paths learned that some EODHD `raw` closes are already
