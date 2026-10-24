@@ -194,3 +194,48 @@ def test_a_superseded_count_cannot_return_as_a_current_claim(stale: int) -> None
     assert f"**A {stale}-table schema**" not in readme
     assert f"**{stale} tables are defined**" not in data_model
     assert f"{stale} indicators under the shipped" not in readme
+
+
+def test_an_audited_phase_is_not_described_as_not_started() -> None:
+    """**The same rot as a stale count, in a column no count could catch.**
+
+    Measured 2026-10-23: `ROADMAP.md` said Phases 8 through 12 were *"Not
+    started"* while Phase 8 and Phase 9 each had a closure document, Phases 11
+    and 12 each had an audit, and Phase 12 had two ADRs from that same week.
+    Every one of those statuses had been correct when written, which is exactly
+    why nobody noticed -- the failure this module exists for.
+
+    The cause is structural rather than careless: a phase gets audited, the
+    audit document is written, and **nothing makes the roadmap read it.** So
+    this makes the document read it.
+
+    Deliberately weak in one direction. It does not assert what a status says,
+    only that a phase with written evidence of having been worked is not
+    described as untouched -- a phase can be audited and still be mostly
+    missing, which is what Phases 11 and 12 are, and the status column must
+    stay free to say so.
+    """
+    import re
+
+    roadmap = (REPO / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    worked = {
+        int(match.group(1))
+        for path in (REPO / "docs").glob("PHASE_*.md")
+        if (match := re.match(r"PHASE_(\d{2})_", path.name))
+    }
+    assert worked, "no phase documents found at all, so this test is vacuous"
+
+    rows = {
+        int(match.group(1)): match.group(2)
+        for line in roadmap.splitlines()
+        if (match := re.match(r"\|\s*(\d+)\s*\|.*?\|(.*)\|\s*$", line))
+    }
+    for phase in sorted(worked):
+        status = rows.get(phase)
+        if status is None:
+            continue  # a document for a phase the table does not list is its own problem
+        assert "not started" not in status.lower(), (
+            f"Phase {phase} has a PHASE_{phase:02d}_* document in docs/ but the roadmap "
+            "still calls it not started; the audit was written and the roadmap was not "
+            "told, which is how this column rotted five phases deep"
+        )
