@@ -212,8 +212,20 @@ def test_an_audited_phase_is_not_described_as_not_started() -> None:
     Deliberately weak in one direction. It does not assert what a status says,
     only that a phase with written evidence of having been worked is not
     described as untouched -- a phase can be audited and still be mostly
-    missing, which is what Phases 11 and 12 are, and the status column must
-    stay free to say so.
+    missing, and the status column must stay free to say so.
+
+    **What this test cannot catch, stated so nobody trusts it too far.** The
+    first correction of that column, made the same day, then got Phases 7 and
+    11 wrong in the *opposite* direction: it quoted each audit's opening as if
+    it were the verdict, and Phase 11's audit opens by finding its named
+    components absent and ends -- three addenda later -- with the phase closed
+    three days early. This test passed throughout, because "part-built" is not
+    "not started".
+
+    Automating that would mean parsing which of several status sections is
+    current, which is a worse bet than the reading rule now recorded in
+    `ROADMAP.md`: **read a phase document's last status section, not its
+    first.**
     """
     import re
 
