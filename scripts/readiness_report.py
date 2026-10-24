@@ -41,15 +41,22 @@ EVIDENCE: dict[str, object] = {
     # PHASE_11_AUDIT third addendum: 143,331.79 from 100,000 with no drawdown
     # anywhere near the halt. Max drawdown from the backtester's own metrics.
     "max_drawdown_pct": 0.03,
-    # Not measured. The cost-sensitivity run has never been done.
+    # **Measured 2026-10-23, and still deliberately absent** --
+    # docs/COST_SENSITIVITY_2026-10-23.md. The run exists now: every modelled
+    # cost doubled costs `ma_cross_baseline` 9 basis points of CAGR and 0.05 of
+    # Sharpe.
     #
-    # **This comment used to say more and is now less of an excuse.** It read
-    # that market_impact was inert in every backtest this project had produced
-    # (PHASE_11_AUDIT second addendum), so a doubling test would double only
-    # spread and slippage. ADR-0028 switched impact on as of 2026-10-23, so a
-    # doubling test now doubles the size penalty too and is worth more than it
-    # would have been -- which makes this absence a thing to go and measure
-    # rather than a thing to explain.
+    # It is left out because the criterion asks whether *the edge* survives, and
+    # **there is no edge to stress**: the baseline is already `below_hurdle`
+    # with a Sharpe of -0.84 at the declared model. Recording False would be
+    # true in letter and misleading in substance -- it would read as "costs
+    # destroyed the edge" when the edge was never there. A question that is
+    # ill-posed for a candidate gets no answer rather than a convenient one.
+    #
+    # The transferable result is in that document: sensitivity is a function of
+    # turnover, and at 1.18 turns a year a doubling is worth almost nothing. The
+    # criterion will only bite on a candidate that trades often, so a pass from
+    # a low-turnover strategy is not evidence the cost model is conservative.
     # "survives_double_costs": deliberately absent
     # ADR-0004: no authorisation file exists on this machine.
     "live_authorised": False,

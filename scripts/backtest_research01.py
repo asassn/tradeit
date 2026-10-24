@@ -163,6 +163,24 @@ def main() -> int:
     ap.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     ap.add_argument("--participation", type=Decimal, default=Decimal("0.02"))
     ap.add_argument("--risk-free", type=float, default=0.02)
+    # Defaults match the other backtest scripts exactly; see the note at the
+    # engine construction for why they are copied rather than chosen.
+    ap.add_argument("--delisting-after", type=int, default=10)
+    ap.add_argument("--delisting-recovery", type=Decimal, default=Decimal(1))
+    ap.add_argument(
+        "--cost-multiplier",
+        type=float,
+        default=1.0,
+        help=(
+            "scale every modelled cost. 1.0 is the declared model; 2.0 is the "
+            "stress test `cost_sensitivity` asks for -- 'does the edge survive a "
+            "doubling of modelled costs?' -- which had no way to be run before "
+            "this flag existed, which is why the criterion sat unmeasured. It "
+            "scales commission, spread, slippage and the impact coefficient "
+            "together, because halving one while doubling another would answer a "
+            "question nobody asked"
+        ),
+    )
     args = ap.parse_args()
 
     start = dt.date.fromisoformat(args.start)
@@ -179,6 +197,32 @@ def main() -> int:
         print(f"  not found: {', '.join(missing)}")
 
     config = StrategyConfig(name="ma_cross_baseline")
+    if args.cost_multiplier != 1.0:
+        # **Scaled here rather than in CostConfig's defaults.** The declared
+        # model stays what ADR-0028 charges; this run says explicitly that it
+        # is asking a different question, and prints the fact so a reader
+        # cannot mistake a stress run's equity curve for the real one.
+        if args.cost_multiplier <= 0:
+            raise SystemExit("--cost-multiplier must be positive; 0 would model free trading")
+        k = args.cost_multiplier
+        costs = config.costs
+        config = config.model_copy(
+            update={
+                "costs": costs.model_copy(
+                    update={
+                        "commission_per_share": costs.commission_per_share * k,
+                        "commission_minimum": costs.commission_minimum * k,
+                        "spread_bps": costs.spread_bps * k,
+                        "slippage_bps": costs.slippage_bps * k,
+                        "market_impact_coefficient": costs.market_impact_coefficient * k,
+                    }
+                )
+            }
+        )
+        print(
+            f"COST STRESS RUN: every modelled cost x{k}. This is not the declared "
+            "model and its numbers are not comparable to a normal run."
+        )
     rule = MovingAverageCross(fast=args.fast, slow=args.slow, stop_pct=args.stop_pct)
 
     print(f"loading bars {start} to {end} ...")
@@ -235,6 +279,22 @@ def main() -> int:
             risk_free_rate=args.risk_free,
         ),
         manifest=_manifest(config, dt.datetime.now(dt.UTC), loaded),
+        # **This script could not run at all without these.**
+        # `EventDrivenEngine` made them required and seven of its eight callers
+        # were updated; this one -- the primary single-run harness -- was not,
+        # and nothing caught it: `scripts/` is outside CI's type-check scope and
+        # no test constructs the engine from here. It failed with a TypeError
+        # before loading a bar, discovered 2026-10-23 on the first attempt to
+        # run the cost-sensitivity stress test.
+        #
+        # The values are **copied from the other seven callers, not chosen**:
+        # these are delisting assumptions and inventing one here would be a
+        # scoped proposition. `backtest_walkforward.py` records the reasoning --
+        # recovery 1.0 says a delisted holding was sold at its last print,
+        # optimistic in general and inert on a survivor universe, with §50
+        # measuring the real mix at 73% paid and 6.1% wiped out.
+        delisting_after_sessions=args.delisting_after,
+        delisting_recovery=args.delisting_recovery,
     )
 
     print("running ...")
