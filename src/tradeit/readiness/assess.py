@@ -40,6 +40,7 @@ inputs could also quietly choose them.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -53,12 +54,14 @@ from tradeit.readiness.criteria import (
 from tradeit.strategy.lifecycle import LADDER, StrategyState
 
 __all__ = [
+    "MIN_WINDOWS_FOR_A_VERDICT",
     "Decision",
     "ReadinessReport",
     "Verdict",
     "VerdictOutcome",
     "assess_demotion",
     "assess_promotion",
+    "consistency_evidence",
     "hurdle_evidence",
 ]
 
@@ -273,3 +276,57 @@ def hurdle_evidence(out_of_sample_t: float, *, hurdle: float) -> dict[str, float
             "dividing by it would pass every result"
         )
     return {"out_of_sample_t_over_hurdle": out_of_sample_t / hurdle}
+
+
+#: Below this many walk-forward windows the chance test cannot reject anything,
+#: so no verdict is offered. At ``n`` windows a perfect record scores
+#: ``sqrt(n)``, so four windows is the smallest ``n`` at which even 4-of-4 can
+#: reach the framework's 2.0 — the same shape as
+#: ``decay.MIN_TRADES_FOR_A_VERDICT``, and the same reason: a comparison that
+#: cannot distinguish a working strategy from a lucky one would be believed
+#: anyway.
+MIN_WINDOWS_FOR_A_VERDICT = 4
+
+
+def consistency_evidence(positive_windows: int, *, total_windows: int) -> dict[str, float]:
+    """``walk_forward_consistency_z``: positive windows against chance.
+
+    `walkforward.consistency` is the share of walk-forward windows whose
+    out-of-sample return was positive -- *"the number that distinguishes a
+    strategy that works from one that had a very good year"*. What was owed was
+    the bar, and `criteria.py` recorded why picking one was forbidden: choosing
+    a fraction now, after this project's walk-forward results exist, is the
+    after-the-fact threshold the roadmap rules out.
+
+    So no fraction is chosen. This standardises the observed share against what
+    chance would produce and the criterion compares it to **2.0**, the same
+    `confidence_z` the decay monitor uses (ADR-0029). The bar in
+    consistency-units then comes from the window count at assessment time
+    rather than from a number someone picked: ``z = (2k - n) / sqrt(n)``, so the
+    default 2003-2019 span's 14 windows require **11 positive**, and seven
+    windows would require all seven. **The bar rises as evidence thins**, which
+    is the right direction and the opposite of what a fixed fraction does.
+
+    **The assumption, stated rather than buried: the null is a coin flip.** A
+    strategy with no edge is taken to produce positive windows half the time.
+    That is the natural null and is **not fitted to our data**, which is the
+    property the roadmap's rule protects — but it is an assumption, and a
+    return distribution skewed enough would break it. The alternative
+    considered and rejected was estimating the null share from this project's
+    own windows, which is precisely the fitting the criterion exists to
+    prevent.
+    """
+    if total_windows < MIN_WINDOWS_FOR_A_VERDICT:
+        raise ValueError(
+            f"{total_windows} walk-forward windows cannot support a verdict; at n "
+            f"windows a perfect record scores only sqrt(n), so below "
+            f"{MIN_WINDOWS_FOR_A_VERDICT} even a flawless record cannot clear the "
+            "framework's confidence and reporting a z would imply otherwise"
+        )
+    if not 0 <= positive_windows <= total_windows:
+        raise ValueError(
+            f"{positive_windows} positive of {total_windows} windows is not a count; "
+            "a share outside the range means the caller is passing something else"
+        )
+    z = (2 * positive_windows - total_windows) / math.sqrt(total_windows)
+    return {"walk_forward_consistency_z": z}

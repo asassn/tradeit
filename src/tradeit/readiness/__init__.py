@@ -19,12 +19,14 @@ still requires a machine-local authorisation file, and the owner still decides.
 """
 
 from tradeit.readiness.assess import (
+    MIN_WINDOWS_FOR_A_VERDICT,
     Decision,
     ReadinessReport,
     Verdict,
     VerdictOutcome,
     assess_demotion,
     assess_promotion,
+    consistency_evidence,
     hurdle_evidence,
 )
 from tradeit.readiness.criteria import (
@@ -46,6 +48,7 @@ from tradeit.readiness.decay import (
 
 __all__ = [
     "DEMOTION_CRITERIA",
+    "MIN_WINDOWS_FOR_A_VERDICT",
     "PROMOTION_CRITERIA",
     "Comparison",
     "Criterion",
@@ -61,6 +64,7 @@ __all__ = [
     "assess_decay",
     "assess_demotion",
     "assess_promotion",
+    "consistency_evidence",
     "criteria_for",
     "demotion_criteria_for",
     "hurdle_evidence",

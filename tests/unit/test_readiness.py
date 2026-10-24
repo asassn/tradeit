@@ -20,6 +20,7 @@ import pytest
 
 from tradeit.readiness import (
     DEMOTION_CRITERIA,
+    MIN_WINDOWS_FOR_A_VERDICT,
     PROMOTION_CRITERIA,
     Comparison,
     Criterion,
@@ -30,10 +31,12 @@ from tradeit.readiness import (
     VerdictOutcome,
     assess_demotion,
     assess_promotion,
+    consistency_evidence,
     criteria_for,
     demotion_criteria_for,
     hurdle_evidence,
 )
+from tradeit.readiness.assess import _evaluate
 from tradeit.strategy.lifecycle import LADDER, StrategyState
 
 CLEAN: dict[str, object] = {
@@ -73,48 +76,68 @@ def test_an_unresolved_criterion_blocks_exactly_as_a_failure_does() -> None:
     )
 
 
-def test_an_unapproved_threshold_blocks_and_says_no_measurement_will_help() -> None:
+def test_an_unapproved_threshold_blocks_whatever_is_measured() -> None:
     """The roadmap's rule, enforced structurally rather than by discipline.
 
-    The example moved from `out_of_sample_clears_hurdle` to
-    `walk_forward_consistency` when the first was approved: it now compares
-    against the ledger hurdle as a ratio, so it is no longer an unapproved
-    threshold and could not demonstrate one. The invariant is unchanged and
-    `walk_forward_consistency` is still owed -- deliberately, since choosing it
-    now would fit a bar to walk-forward results that already exist.
+    **Built on a synthetic criterion rather than on whichever one happens to be
+    owed.** This test twice named a live criterion as its example --
+    `out_of_sample_clears_hurdle`, then `walk_forward_consistency` -- and twice
+    had to move when that criterion was approved. Only
+    `out_of_sample_degradation` is still unapproved, so a third move would
+    leave the test one approval away from having no example at all and going
+    vacuous, which CLAUDE.md records as having happened here twice before.
+
+    So the mechanism is tested directly: a criterion whose threshold nobody
+    approved returns UNRESOLVED however good the measurement is, and still
+    reports what was measured.
     """
-    report = assess_promotion(
-        StrategyState.OUT_OF_SAMPLE_TESTING,
-        StrategyState.PAPER_TRADING,
-        CLEAN
-        | {
-            "out_of_sample_t_over_hurdle": 4.0,
-            "walk_forward_consistency": 1.0,
-            "degradation": 0.0,
-        },
+    owed = Criterion(
+        name="synthetic_owed",
+        question="does a bar nobody set judge anything?",
+        metric="synthetic_metric",
+        comparison=Comparison.AT_LEAST,
+        threshold=Threshold(
+            value=0.0,
+            source=ThresholdSource.UNAPPROVED,
+            citation="OWED: constructed by a test to exercise the blocking path",
+        ),
+        applies_from=StrategyState.BACKTESTING,
     )
-    owed = {v.criterion.name for v in report.blocked_on_unapproved_thresholds}
-    assert "walk_forward_consistency" in owed
-    assert "out_of_sample_clears_hurdle" not in owed, (
-        "the hurdle criterion is approved now (ratio against the ledger hurdle); "
-        "if it is unapproved again, something reverted"
-    )
-    assert report.decision is Decision.HOLD, (
-        "an excellent measurement passed an unapproved threshold, which is the "
-        "after-the-fact judgement the framework exists to prevent"
-    )
-
-
-def test_a_passing_measurement_cannot_rescue_an_unapproved_threshold() -> None:
-    """Even a perfect number is not judged against a bar nobody set."""
-    report = assess_promotion(
-        StrategyState.OUT_OF_SAMPLE_TESTING,
-        StrategyState.PAPER_TRADING,
-        CLEAN | {"walk_forward_consistency": 99.0},
-    )
-    verdict = next(v for v in report.verdicts if v.criterion.name == "walk_forward_consistency")
+    verdict = _evaluate(owed, {"synthetic_metric": 99.0})
     assert verdict.outcome is VerdictOutcome.UNRESOLVED
+    assert verdict.reason == "threshold not approved"
     assert verdict.measured == 99.0, "the measurement is still reported, just not judged"
+
+
+def test_whatever_is_still_owed_is_reported_as_owed() -> None:
+    """The live set, asserted generically rather than by name.
+
+    Says nothing about *which* thresholds are unapproved -- that changes as
+    decisions are taken, and three have been taken this week. It asserts the
+    relationship: an unapproved threshold appears in
+    `blocked_on_unapproved_thresholds` and holds the decision, and if none are
+    unapproved it says so rather than passing silently.
+    """
+    unapproved = {
+        c.name for c in PROMOTION_CRITERIA if c.threshold.source is ThresholdSource.UNAPPROVED
+    }
+    if not unapproved:
+        pytest.skip("every promotion threshold is approved; this test has nothing to exercise")
+
+    report = assess_promotion(
+        StrategyState.OUT_OF_SAMPLE_TESTING, StrategyState.PAPER_TRADING, CLEAN
+    )
+    reported = {v.criterion.name for v in report.blocked_on_unapproved_thresholds}
+    applicable = {
+        c.name
+        for c in criteria_for(StrategyState.PAPER_TRADING)
+        if c.threshold.source is ThresholdSource.UNAPPROVED
+    }
+    assert reported == applicable, (
+        "a threshold nobody approved was not reported as owed, so a reader would "
+        "take it for a measurement that is merely missing"
+    )
+    assert report.decision is Decision.HOLD
 
 
 def test_every_criterion_must_pass_for_promotion() -> None:
@@ -333,3 +356,87 @@ def test_the_hurdle_threshold_is_approved_and_names_its_parent() -> None:
     assert criterion.threshold.value == 1.0
     assert criterion.threshold.source is ThresholdSource.DERIVED
     assert "small_sample_hurdle" in criterion.threshold.citation
+
+
+# ---------------------------------------------------------------------------
+# Walk-forward consistency: tested against chance, not against a fraction.
+# ---------------------------------------------------------------------------
+
+
+def _consistency_verdict(positive: int, *, total: int) -> Verdict:
+    report = assess_promotion(
+        StrategyState.OUT_OF_SAMPLE_TESTING,
+        StrategyState.PAPER_TRADING,
+        CLEAN | consistency_evidence(positive, total_windows=total),
+    )
+    return next(v for v in report.verdicts if v.criterion.name == "walk_forward_consistency")
+
+
+def test_the_consistency_bar_rises_as_the_windows_thin() -> None:
+    """**The property a fixed fraction cannot have, and the reason for this design.**
+
+    The criterion's earlier citation said picking a fraction now -- after this
+    project's walk-forward results exist -- was the after-the-fact threshold the
+    roadmap forbids. So no fraction is picked: the share is standardised against
+    chance and compared to the framework's existing 2.0.
+
+    The bar in consistency-units then falls out of the window count. Fourteen
+    windows need 11 positive (79%); seven need all seven (100%). **Less
+    evidence demands a cleaner record**, which is the right direction and
+    exactly backwards from what a constant like "60% of windows" would do.
+    """
+    assert _consistency_verdict(11, total=14).outcome is VerdictOutcome.PASS
+    assert _consistency_verdict(10, total=14).outcome is VerdictOutcome.FAIL
+    assert _consistency_verdict(7, total=7).outcome is VerdictOutcome.PASS
+    assert _consistency_verdict(6, total=7).outcome is VerdictOutcome.FAIL, (
+        "six of seven windows passed; at that little evidence the bar should be perfect"
+    )
+
+
+def test_a_coin_flip_record_does_not_pass_at_any_size() -> None:
+    """Half the windows positive is what no edge looks like.
+
+    Checked across sizes because a z that drifted with n would let a bigger
+    sample launder a 50% record into a pass.
+    """
+    for total in (4, 10, 14, 40, 100):
+        assert _consistency_verdict(total // 2, total=total).outcome is VerdictOutcome.FAIL
+
+
+def test_too_few_windows_is_refused_rather_than_scored() -> None:
+    """At n windows a perfect record scores only sqrt(n).
+
+    Below four, even a flawless record cannot reach 2.0, so a z would imply a
+    verdict was available when none is. Refused, mirroring
+    `decay.MIN_TRADES_FOR_A_VERDICT`.
+    """
+    assert MIN_WINDOWS_FOR_A_VERDICT == 4
+    with pytest.raises(ValueError, match="cannot support a verdict"):
+        consistency_evidence(3, total_windows=3)
+    # Four is the boundary and a perfect record there scores exactly 2.0.
+    assert consistency_evidence(4, total_windows=4)["walk_forward_consistency_z"] == 2.0
+
+
+def test_a_count_outside_the_window_total_is_refused() -> None:
+    """More positives than windows means the caller is passing a share."""
+    with pytest.raises(ValueError, match="is not a count"):
+        consistency_evidence(15, total_windows=14)
+    with pytest.raises(ValueError, match="is not a count"):
+        consistency_evidence(-1, total_windows=14)
+
+
+def test_the_consistency_threshold_names_its_parent_and_its_assumption() -> None:
+    """DERIVED from the decay monitor's z, with the coin-flip null declared.
+
+    The assumption is the one thing here that could be wrong, so the citation
+    has to carry it: a sufficiently skewed return distribution would not
+    produce positive windows half the time under no edge.
+    """
+    criterion = next(
+        c for c in criteria_for(StrategyState.PAPER_TRADING) if c.name == "walk_forward_consistency"
+    )
+    assert criterion.threshold.usable
+    assert criterion.threshold.value == 2.0
+    assert criterion.threshold.source is ThresholdSource.DERIVED
+    assert "coin flip" in criterion.threshold.citation
+    assert "ADR-0029" in criterion.threshold.citation

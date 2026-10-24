@@ -254,16 +254,29 @@ PROMOTION_CRITERIA: tuple[Criterion, ...] = (
     Criterion(
         name="walk_forward_consistency",
         question="Does it hold up across walk-forward windows rather than one?",
-        metric="walk_forward_consistency",
+        metric="walk_forward_consistency_z",
         comparison=Comparison.AT_LEAST,
         threshold=Threshold(
-            value=0.0,
-            source=ThresholdSource.UNAPPROVED,
+            value=2.0,
+            source=ThresholdSource.DERIVED,
             citation=(
-                "OWED: backtesting/walkforward.py computes `consistency`; no written "
-                "decision says what value is good enough. Picking one now, after "
-                "this project's walk-forward results exist, is exactly the "
-                "after-the-fact threshold the roadmap forbids."
+                "The positive-window share standardised against chance, compared "
+                "to 2.0 -- the same `confidence_z` the decay monitor uses "
+                "(ADR-0029), so the framework has one definition of 'more than "
+                "sampling noise'. **No fraction is chosen**, which is what this "
+                "criterion's earlier citation said was forbidden: the bar in "
+                "consistency-units comes from the window count at assessment "
+                "time, so the 2003-2019 span's 14 windows require 11 positive "
+                "and seven windows would require all seven. The bar RISES as "
+                "evidence thins, where a fixed fraction would not. "
+                "`readiness.consistency_evidence` computes it and refuses fewer "
+                "than MIN_WINDOWS_FOR_A_VERDICT windows. "
+                "**Assumption, declared: the null is a coin flip** -- a strategy "
+                "with no edge produces positive windows half the time. Natural, "
+                "and not fitted to our data, which is the property the rule "
+                "protects; a sufficiently skewed return distribution would break "
+                "it. Rejected: estimating the null share from this project's own "
+                "windows, which is the fitting the criterion exists to prevent."
             ),
         ),
         applies_from=StrategyState.PAPER_TRADING,
@@ -277,10 +290,24 @@ PROMOTION_CRITERIA: tuple[Criterion, ...] = (
             value=0.0,
             source=ThresholdSource.UNAPPROVED,
             citation=(
-                "OWED. Measured twice: SIGNAL_SCOREBOARD §52 and §53 both kept their "
-                "direction and lost roughly two thirds of magnitude. Two observations "
-                "describe what happened; they do not establish an acceptable limit, "
-                "and setting one from them would be fitting the bar to the data."
+                "OWED, and **the last of the four still owed** -- the other three "
+                "were settled on 2026-10-23 by expressing each as a test against "
+                "something already written rather than as a number somebody chose "
+                "(ADR-0029; the hurdle ratio; the consistency z). "
+                "**That move is not available here, and the reason is the point.** "
+                "Measured twice: SIGNAL_SCOREBOARD §52 and §53 both kept their "
+                "direction and lost roughly two thirds of magnitude. Two "
+                "observations describe what happened; they do not establish an "
+                "acceptable limit, and setting one from them would be fitting the "
+                "bar to the data. There is no chance baseline to standardise "
+                "against either -- a no-edge strategy has no characteristic "
+                "degradation, because it has no edge to lose. "
+                "**What would discharge it**: pre-registering a limit before the "
+                "next out-of-sample test, which is a decision the owner takes when "
+                "that test is designed rather than work anybody can do now. Note "
+                "that `out_of_sample_clears_hurdle` already requires the held-out "
+                "result to clear the ledger after whatever degradation occurred, so "
+                "what is missing is a bar on **fragility**, not on profitability."
             ),
         ),
         applies_from=StrategyState.PAPER_TRADING,
