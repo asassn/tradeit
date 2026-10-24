@@ -199,7 +199,15 @@ def main() -> int:
             # so the ATR handed to it must be mirrored when the series is.
             shaped = mirror_bars(raw) if short else raw
             with np.errstate(divide="ignore", invalid="ignore"):
-                atr_abs = k.atr(
+                # `call-arg` ignored, and it is a false positive rather than a
+                # silenced defect: the starred tuple is always three series, so
+                # this is three series plus a period, which is `atr`'s arity.
+                # mypy cannot see arity through an unpacked conditional tuple.
+                # Narrowly scoped because `call-arg` is now gated -- it is the
+                # error that would have caught `backtest_research01.py` calling
+                # `EventDrivenEngine` without its two required arguments, which
+                # left the primary harness unrunnable and unnoticed.
+                atr_abs = k.atr(  # type: ignore[call-arg]
                     *((1.0 / low, 1.0 / high, 1.0 / close) if short else (high, low, close)),
                     14,
                 )

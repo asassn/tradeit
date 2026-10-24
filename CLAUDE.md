@@ -250,6 +250,21 @@ one while failing the other. `migrations` is linted but deliberately not
 format-checked, because CI does not format-check it either — mirror CI rather
 than improving on it here, or this list drifts in the opposite direction.
 
+**`scripts` is gated on one error code, not type-checked.** It holds 113
+modules and 192 mypy findings, most of them strictness, and cleaning them is on
+nobody's critical path — but on 2026-10-23 the primary backtest harness was
+found **unrunnable**: `EventDrivenEngine` had made two parameters required,
+seven of its eight callers were updated, and the eighth raised `TypeError`
+before loading a bar. Nothing complained, because scripts are untyped in CI and
+no test constructs the engine from there.
+
+So `tests/unit/test_script_call_arity.py` runs mypy over `scripts/` and fails
+only on **`call-arg`** — a call missing a required argument, or passing one that
+does not exist, fails at run time for certain, where the other findings are
+about precision. It costs one scoped suppression and under a second. The test
+to apply before adding another code: *does this error mean the line cannot
+run?*
+
 `ops` is in all three gates. It holds the unattended daily capture agent, which
 is the one piece of Python nobody watches run — and which was a shell script
 until macOS TCC made it Python. **`ruff format --check ops` also format-checks
