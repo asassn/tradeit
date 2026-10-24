@@ -200,7 +200,7 @@ PROMOTION_CRITERIA: tuple[Criterion, ...] = (
             value=1.0,
             source=ThresholdSource.DERIVED,
             citation=(
-                "The ledger hurdle at assessment time, expressed as a ratio. The "
+                "ADR-0031. The ledger hurdle at assessment time, expressed as a ratio. The "
                 "metric is t divided by small_sample_hurdle(trials, blocks), so "
                 "1.0 means exactly 'clears the hurdle the ledger computed for this "
                 "test' and **no constant is encoded** -- which is what the question "
@@ -260,7 +260,7 @@ PROMOTION_CRITERIA: tuple[Criterion, ...] = (
             value=2.0,
             source=ThresholdSource.DERIVED,
             citation=(
-                "The positive-window share standardised against chance, compared "
+                "ADR-0031. The positive-window share standardised against chance, compared "
                 "to 2.0 -- the same `confidence_z` the decay monitor uses "
                 "(ADR-0029), so the framework has one definition of 'more than "
                 "sampling noise'. **No fraction is chosen**, which is what this "
@@ -293,7 +293,7 @@ PROMOTION_CRITERIA: tuple[Criterion, ...] = (
                 "OWED, and **the last of the four still owed** -- the other three "
                 "were settled on 2026-10-23 by expressing each as a test against "
                 "something already written rather than as a number somebody chose "
-                "(ADR-0029; the hurdle ratio; the consistency z). "
+                "(ADR-0029 for demotion, ADR-0031 for the other two). "
                 "**That move is not available here, and the reason is the point.** "
                 "Measured twice: SIGNAL_SCOREBOARD §52 and §53 both kept their "
                 "direction and lost roughly two thirds of magnitude. Two "

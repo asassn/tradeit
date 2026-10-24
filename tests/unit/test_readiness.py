@@ -439,4 +439,9 @@ def test_the_consistency_threshold_names_its_parent_and_its_assumption() -> None
     assert criterion.threshold.value == 2.0
     assert criterion.threshold.source is ThresholdSource.DERIVED
     assert "coin flip" in criterion.threshold.citation
-    assert "ADR-0029" in criterion.threshold.citation
+    assert "ADR-0029" in criterion.threshold.citation, "names the z it inherits"
+    assert "ADR-0031" in criterion.threshold.citation, (
+        "a derived threshold must cite the decision record, not only explain itself; "
+        "a justification that lives in a citation alone is a written decision nobody "
+        "can find"
+    )
