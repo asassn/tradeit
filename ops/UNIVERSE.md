@@ -397,3 +397,54 @@ early "just to check" is not free, and why the verification of 2026-10-23 was
 done against the **previous** completed session rather than the current one.
 
 22:10 Eastern is after the close and after both vendors have settled. It stays.
+
+## The weekend, observed rather than predicted — and what it does to the counts
+
+**Three scheduled runs, 2026-10-24 to 2026-10-26, all exit 0.** The snap-back
+works in production: Saturday's and Sunday's runs each asked about **Friday
+2026-10-23**, not about a weekend date, and neither wrote a false silence.
+
+| asked (UTC) | local | session asked about |
+|---|---|---|
+| 2026-10-24 02:10 | Fri 22:10 | 2026-10-23 |
+| 2026-10-25 02:10 | **Sat** 22:10 | 2026-10-23 |
+| 2026-10-26 02:10 | **Sun** 22:10 | 2026-10-23 |
+
+All 195 symbols printed on every run, `rows_returned = 1` throughout.
+
+### Rows are asks. Evidence is symbol-sessions.
+
+The consequence took a measurement to see. `forward.sqlite` now holds **585
+rows for session 2026-10-23 across six asks**, and `tradeit status` was
+reporting *"734 interpretable observations"* for a record covering **two
+sessions**. That overstates the evidence by more than double, and it compounds:
+a holiday week would multiply one session's rows five times over.
+
+**This is the 2026-10-23 defect in a new form.** The cutoff fixed what a row
+*means*; it did not stop rows being counted as though each were a distinct
+observation. The honest measure is the **symbol-session** — one security
+observed on one dated session — and no amount of re-asking adds another:
+
+```
+forward asks                  886   every row ever written
+symbol-sessions observed      344   across 2 session(s) -- THE evidence count
+interpretable asks            734   more than the above, because a repeat is kept
+silent symbol-sessions          0
+```
+
+Silences are counted per symbol-session too, or one security quiet across a
+weekend would read as three delistings.
+
+**The repeated ask is deliberately kept.** `capture_forward` records it because
+a vendor may revise and both answers are evidence. What changed is the headline
+measure, not the capture.
+
+### A consequence of the never-overwrite rule, recorded not fixed
+
+Because `_write_bars` leaves an existing bar alone, a weekend re-ask cannot
+actually capture a revision to a bar it already holds — so those rows add an
+*observation* but no price information. That is a real limitation of re-asking
+rather than an argument against it: the trailing window exists to recover
+sessions a sleeping laptop missed, and that recovery is what the re-ask buys.
+Changing it would need a decision about which vendor wins a disagreement, which
+this system has not made.

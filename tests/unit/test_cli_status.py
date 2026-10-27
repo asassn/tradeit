@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import re
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -241,13 +242,13 @@ def test_the_forward_record_reports_freshness_not_just_presence(
 
     cmd_status(_args(db=f"sqlite:///{path}", as_of="2026-10-27"))
     out = capsys.readouterr().out
-    assert "forward observations" in out
+    assert "forward asks" in out  # renamed: rows are asks, evidence is symbol-sessions
     # These rows are dated 2026-10-20, before `SESSION_COUNTS_FROM`, so they
     # are window-count rows and the command must say so rather than counting
     # their zero as a delisting. The label changed from "of which silent" when
     # that distinction arrived; the subject of this test is the age below.
     assert "earlier rows" in out
-    assert "silent, interpretable only" in out
+    assert "silent symbol-sessions" in out
     assert "most recent ask" in out
     assert "7 days" in out, "a stale record did not report its age"
 
@@ -314,8 +315,8 @@ def test_a_pre_cutoff_silence_is_not_reported_as_delisting_evidence(
     assert cmd_status(_args(db=f"sqlite:///{path}")) == 0
     out = capsys.readouterr().out
 
-    assert "forward observations" in out
-    assert "of which interpretable" in out
+    assert "forward asks" in out  # renamed: rows are asks, evidence is symbol-sessions
+    assert "interpretable asks" in out
     assert "earlier rows" in out, "the window-count rows must be named, not folded into the total"
     assert SESSION_COUNTS_FROM in out, "a reader cannot apply the rule without the cutoff"
 
@@ -323,3 +324,70 @@ def test_a_pre_cutoff_silence_is_not_reported_as_delisting_evidence(
     assert "0" in silent_line.split(), (
         f"a pre-cutoff window silence was counted as delisting evidence: {silent_line!r}"
     )
+
+
+def test_a_weekend_of_repeated_asks_does_not_inflate_the_evidence(
+    tmp_path: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**Rows are asks. Evidence is symbol-sessions.**
+
+    Measured 2026-10-26, after the first weekend the capture ran through. The
+    trailing window re-asks about the last real session every night, so
+    Saturday and Sunday each repeated Friday's answer and `forward.sqlite`
+    accumulated 585 rows for session 2026-10-23 across six asks. This command
+    reported 734 "interpretable observations" covering **two sessions** --
+    overstating the evidence by more than double, and compounding: a holiday
+    week would multiply one session's rows five times over.
+
+    That is the same defect this command carried on 2026-10-23, in a new form.
+    The cutoff fixed what a row *means*; it did not stop rows being counted as
+    though each were a distinct observation.
+
+    A repeated ask is **deliberately kept** -- `capture_forward` records it
+    because a vendor may revise and both answers are evidence -- so the fix is
+    the headline measure, not the capture.
+
+    Here one symbol is asked about the same session three times. The evidence
+    is one symbol-session; a command counting rows would say three.
+    """
+    from tradeit.storage.tables import ForwardObservation
+
+    path = tmp_path / "weekend.sqlite"  # type: ignore[operator]
+    engine = create_engine(f"sqlite:///{path}", future=True)
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine, future=True)() as session:
+        session.add_all(
+            [
+                ForwardObservation(
+                    symbol="AAPL",
+                    session_date=dt.date(2026, 10, 23),
+                    asked_at=dt.datetime(2026, 10, 24 + offset, 2, 10, tzinfo=dt.UTC),
+                    status="ok",
+                    rows_returned=1,
+                )
+                for offset in range(3)  # Friday, Saturday, Sunday
+            ]
+        )
+        session.commit()
+
+    assert cmd_status(_args(db=f"sqlite:///{path}")) == 0
+    out = capsys.readouterr().out
+
+    # **Values are read by regex anchored on the label, not by substring.**
+    # The first version of this test asserted `"1" in evidence.split()` and
+    # passed against a mutant that counted rows -- because the note on that
+    # line reads "across 1 session(s)", so a stray "1" was always present. A
+    # loose assertion on a line that contains several numbers tests nothing.
+    def _value(label: str) -> str:
+        line = next(line for line in out.splitlines() if label in line)
+        match = re.search(rf"{re.escape(label)}\s+([\d,]+)", line)
+        assert match, f"no value found on {line!r}"
+        return match.group(1)
+
+    assert _value("forward asks") == "3", "the three asks should be reported as asks"
+    assert _value("symbol-sessions observed") == "1", (
+        "three asks about one session were counted as three observations, which "
+        "overstates what the record knows"
+    )
+    evidence = next(line for line in out.splitlines() if "symbol-sessions observed" in line)
+    assert "across 1 session" in evidence

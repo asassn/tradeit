@@ -295,17 +295,59 @@ def cmd_status(args: argparse.Namespace) -> int:
             fresh,
             f"select count(*) from forward_observations where asked_at >= '{SESSION_COUNTS_FROM}'",
         )
+        # **Symbol-sessions, which is the evidence; rows are only asks.**
+        #
+        # Measured 2026-10-26, after the first weekend: 734 interpretable rows
+        # covering **2 sessions**. `--lookback` re-asks about the last real
+        # session every night, so Saturday and Sunday each added 195 rows that
+        # repeated Friday's answer, and `forward.sqlite` now holds 585 rows for
+        # session 2026-10-23 across six asks.
+        #
+        # Reporting the row count as "observations" therefore overstated the
+        # evidence by more than 2x, and it compounds: a holiday week would
+        # multiply one session's rows five times over. This is the same defect
+        # this command carried on 2026-10-23 -- a count that is true about rows
+        # and false about what the record knows -- which the cutoff fixed for
+        # semantics and not for duplication.
+        #
+        # A repeated ask is **deliberately kept** as a row: `capture_forward`
+        # records it because a vendor may revise and both answers are evidence.
+        # What changes here is only the headline measure.
+        symbol_sessions = _scalar(
+            fresh,
+            "select count(*) from (select distinct symbol, session_date "
+            f"from forward_observations where asked_at >= '{SESSION_COUNTS_FROM}')",
+        )
+        sessions = _scalar(
+            fresh,
+            "select count(distinct session_date) from forward_observations "
+            f"where asked_at >= '{SESSION_COUNTS_FROM}'",
+        )
+        # Silences counted per symbol-session too, or one security quiet across
+        # a weekend would read as three delistings.
         silent = _scalar(
             fresh,
-            "select count(*) from forward_observations "
-            f"where rows_returned = 0 and asked_at >= '{SESSION_COUNTS_FROM}'",
+            "select count(*) from (select distinct symbol, session_date "
+            "from forward_observations where rows_returned = 0 "
+            f"and asked_at >= '{SESSION_COUNTS_FROM}')",
         )
     if not isinstance(observed, int):
         print(_row("forward observations", "not this database", "no forward_observations table"))
     elif observed == 0:
         print(_row("forward observations", 0, "the capture has not run against this record"))
     else:
-        print(_row("forward observations", f"{observed:,}", "every row ever written"))
+        print(_row("forward asks", f"{observed:,}", "every row ever written"))
+        # The evidence measure, printed above the row counts because it is the
+        # one a reader should quote: a symbol-session is a security observed on
+        # a dated session, and no amount of re-asking adds another.
+        print(
+            _row(
+                "symbol-sessions observed",
+                f"{symbol_sessions:,}" if isinstance(symbol_sessions, int) else UNKNOWN,
+                f"across {sessions} session(s) -- THE evidence count; rows below are asks, "
+                "and a weekend re-asks the same session",
+            )
+        )
         # **The interpretable subset, reported separately.** Before
         # `SESSION_COUNTS_FROM`, `rows_returned` counted the whole fetch window
         # rather than the session, so a zero meant "nothing in seven days" and
@@ -316,9 +358,10 @@ def cmd_status(args: argparse.Namespace) -> int:
         legacy = observed - interpretable if isinstance(interpretable, int) else None
         print(
             _row(
-                "of which interpretable",
+                "interpretable asks",
                 f"{interpretable:,}" if isinstance(interpretable, int) else UNKNOWN,
-                f"asked at or after {SESSION_COUNTS_FROM}; rows_returned counts the session",
+                f"asked at or after {SESSION_COUNTS_FROM}; rows_returned counts the session. "
+                "More than the symbol-sessions above, because a repeated ask is kept",
             )
         )
         if legacy:
@@ -332,7 +375,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             )
         print(
             _row(
-                "silent, interpretable only",
+                "silent symbol-sessions",
                 f"{silent:,}" if isinstance(silent, int) else UNKNOWN,
                 "asked about a session others printed in, and got nothing: "
                 "what a delisting is made of",
