@@ -344,13 +344,34 @@ class EodhdAcquisition:
             if ratio <= 0:
                 out.findings.append(f"{symbol}: split ratio {ratio} on {session} is not positive")
                 continue
-            out.rows.setdefault(DatasetKind.SPLITS, []).append(
-                {
-                    "instrument_id": str(instrument_id),
-                    "ex_date": str(session),
-                    "ratio": format(ratio.normalize(), "f"),
-                }
-            )
+            split_row = {
+                "instrument_id": str(instrument_id),
+                "ex_date": str(session),
+                "ratio": format(ratio.normalize(), "f"),
+            }
+            # The vendor's own two numbers are kept beside the derived ratio.
+            # The ratio alone cannot settle an argument about direction -- 0.1
+            # is a 1-for-10 or a 2-for-20 -- and `spec.py` declares both
+            # columns for exactly that reason, citing a vendor that served
+            # Apple's 7-for-1 as its reciprocal. This parser already had the
+            # pair in hand and discarded it, keeping the inference and
+            # throwing away the evidence it was drawn from.
+            #
+            # Both are declared `int`, and `coerce_int` enforces that on
+            # import, so a share count the vendor did not state as a whole
+            # number is **reported and omitted rather than rounded**. The
+            # ratio still lands; only the provenance pair is withheld, which
+            # is the honest direction to fail in.
+            top, bottom = Decimal(numerator), Decimal(denominator)
+            if top == top.to_integral_value() and bottom == bottom.to_integral_value():
+                split_row["numerator"] = str(int(top))
+                split_row["denominator"] = str(int(bottom))
+            else:
+                out.findings.append(
+                    f"{symbol}: split {raw!r} on {session} states a fractional share "
+                    "count, so numerator and denominator are omitted; the ratio is kept"
+                )
+            out.rows.setdefault(DatasetKind.SPLITS, []).append(split_row)
         return out
 
 

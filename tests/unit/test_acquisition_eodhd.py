@@ -95,14 +95,61 @@ def test_prices_normalise_through_the_shared_normaliser() -> None:
     assert rows[0]["session_date"] == "2026-10-13"
 
 
-def test_a_real_split_parses_to_its_ratio() -> None:
-    """AAPL's 4-for-1 of 2020-08-31, as the vendor actually returned it."""
+def test_a_real_split_parses_to_its_ratio_and_keeps_the_vendors_own_numbers() -> None:
+    """AAPL's 4-for-1 of 2020-08-31, as the vendor actually returned it.
+
+    **The ratio was always asserted; the pair it was derived from was not,
+    because it was being discarded.** `spec.py` declares `numerator` and
+    `denominator` precisely so a later argument about direction can be settled
+    against what the vendor actually sent — its own comment cites a vendor
+    that served Apple's 7-for-1 as the reciprocal, `0.142857142857`, which
+    those columns would have caught and a bare ratio could not.
+
+    This parser read `"4.000000/1.000000"`, divided, and threw the operands
+    away: it kept the inference and dropped the evidence. The invariant the
+    older assertion was really holding — a real payload for a known 4-for-1
+    yields ratio 4 — is unchanged and still checked here.
+    """
     adapter, _ = _adapter("splits_aapl_2020.json")
     outcome = adapter.fetch(_request(AcquisitionDataset.CORPORATE_ACTIONS))
     normalized = adapter.normalize(outcome, {"AAPL": 7})
     rows = normalized.rows[DatasetKind.SPLITS]
-    assert rows == [{"instrument_id": "7", "ex_date": "2020-08-31", "ratio": "4"}]
+    assert rows == [
+        {
+            "instrument_id": "7",
+            "ex_date": "2020-08-31",
+            "ratio": "4",
+            "numerator": "4",
+            "denominator": "1",
+        }
+    ]
     assert not normalized.findings
+
+
+def test_a_fractional_share_count_omits_the_pair_and_still_keeps_the_ratio() -> None:
+    """`numerator` and `denominator` are declared `int`, so they fail closed.
+
+    `coerce_int` enforces the declared kind at import, so emitting `"1.5"`
+    into an int column would move the failure downstream to a reader who
+    cannot tell what the vendor said. Rounding would be worse still: it would
+    invent a share count the vendor never stated, in the exact columns that
+    exist to record what it did state.
+
+    So the pair is **omitted and reported**, and the ratio — which carries the
+    full information either way — still lands. A split is not dropped for
+    being awkwardly expressed.
+    """
+    payload = json.dumps([{"date": "2020-08-31", "split": "1.5/1.0"}]).encode()
+    adapter = EodhdAcquisition(token="test-token", transport=_StubTransport(payload))
+    outcome = adapter.fetch(_request(AcquisitionDataset.CORPORATE_ACTIONS))
+    normalized = adapter.normalize(outcome, {"AAPL": 7})
+
+    assert normalized.rows[DatasetKind.SPLITS] == [
+        {"instrument_id": "7", "ex_date": "2020-08-31", "ratio": "1.5"}
+    ]
+    assert any("fractional share count" in f for f in normalized.findings), (
+        f"the omission must be reported, not silent: {normalized.findings!r}"
+    )
 
 
 def test_no_split_in_the_window_is_empty_not_an_error() -> None:
