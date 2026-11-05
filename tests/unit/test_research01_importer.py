@@ -139,7 +139,13 @@ class TestKnowledgeTimePolicy:
 
     def test_an_adjusted_bar_ignores_a_vendor_dissemination_stamp(self) -> None:
         """That stamp describes the print, not the adjustment. Accepting it
-        would backdate a value computed today, which is the whole failure."""
+        would backdate a value computed today, which is the whole failure.
+
+        **Mutation-verified 2026-11-04**: swapping the precedence in
+        `knowledge_time_for` so `disseminated_at` is checked first fails this
+        test and only this test. The ordering the docstring there calls
+        deliberate is held open by nothing else.
+        """
         kt, basis = knowledge_time_for(
             adjustment_basis="split",
             session_date=SESSION,

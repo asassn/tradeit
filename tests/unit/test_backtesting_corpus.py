@@ -132,7 +132,14 @@ class TestRawPricesOnly:
 
 class TestPointInTime:
     def test_a_revision_learned_later_is_not_visible(self, db_session: Session) -> None:
-        """A 2024 correction to a 2020 bar did not exist in 2020."""
+        """A 2024 correction to a 2020 bar did not exist in 2020.
+
+        **Mutation-verified 2026-11-04**: deleting the `continue` that enforces
+        the bound in `backtesting/corpus.py::_rows` fails this test and only
+        this test. It is the sole guard on the platform's anti-look-ahead
+        promise in the backtest read path, so it is load-bearing rather than
+        illustrative -- do not weaken it to make an unrelated fixture simpler.
+        """
         sid = _security(db_session)
         _bar(db_session, sid, DAY, close="100")
         _bar(db_session, sid, DAY, close="999", known=_close(dt.date(2024, 1, 1)))
