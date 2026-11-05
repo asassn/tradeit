@@ -14,9 +14,11 @@ somebody re-downloads a decade of history over a hotel connection.
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import gzip
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +35,11 @@ from tradeit.acquisition.base import (
 from tradeit.acquisition.cache import RawCache
 from tradeit.acquisition.eodhd import EodhdAcquisition
 from tradeit.acquisition.journal import AcquisitionJournal
-from tradeit.acquisition.normalize import assign_instrument_ids, normalize_prices
+from tradeit.acquisition.normalize import (
+    SPLIT_FACTOR_CONVENTION,
+    assign_instrument_ids,
+    normalize_prices,
+)
 from tradeit.acquisition.runner import (
     AcquisitionOptions,
     AcquisitionRunner,
@@ -494,9 +500,62 @@ class TestNormalization:
         output = tmp_path / "pkg"
         report = run_acquisition(output, ["SPY"], FakeTransport(rows=price_rows(split_at=5)))
         assert report.rows[str(DatasetKind.SPLITS)] == 1
-        text = (output / "splits.csv").read_text()
-        assert "ratio" in text
-        assert "2" in text
+        rows = list(csv.DictReader((output / "splits.csv").read_text().splitlines()))
+        assert [r["ratio"] for r in rows] == ["2"]
+
+    def test_the_tiingo_ratio_is_the_share_count_multiplier_not_its_reciprocal(
+        self, tmp_path: Path
+    ) -> None:
+        """**A 2-for-1 is 2, never 0.5 — and nothing else was checking.**
+
+        Measured 2026-11-04 by mutation. Replacing `_plain(split)` in
+        `normalize.py` with `_plain(1 / split)` — the exact error the comment
+        above that line warns of, *"the same field name means the reciprocal at
+        another vendor and that mistake is invisible in the output"* — left the
+        **entire suite of 4,630 tests passing**.
+
+        The assertion that should have caught it was `assert "2" in text`
+        against the whole CSV, and the row reads
+        `1,2010-01-11,2,tiingo,2,share_count_multiplier`: the **ex-date supplies
+        a `2`**, so the check passed on the date and never looked at the ratio.
+        Same shape as the `"1" in evidence.split()` defect of 2026-10-26, and
+        the reason both are recorded is that the loose assertion looked like
+        coverage.
+
+        **Tiingo is the only vendor on the unconverted path.** Twelve Data and
+        FMP normalize through `to_share_count_multiplier`, and inverting that
+        function fails 23 tests; EODHD divides its own ratio and is caught by
+        one. Tiingo passes the vendor's factor straight through under a
+        declared convention, so no shared guard stands behind it — which is
+        precisely why it needs its own.
+
+        An inverted factor is not a loud failure. It yields a plausible series
+        at half or double the true pre-split level, which is the failure mode
+        `to_share_count_multiplier` refuses to guess at for `UNKNOWN`.
+        """
+        output = tmp_path / "pkg"
+        # `price_rows` halves the price at `split_at` and sends splitFactor 2.0,
+        # i.e. a 2-for-1: one share becomes two.
+        run_acquisition(output, ["SPY"], FakeTransport(rows=price_rows(split_at=5)))
+        rows = list(csv.DictReader((output / "splits.csv").read_text().splitlines()))
+        assert len(rows) == 1, f"expected exactly one split, got {rows!r}"
+        row = rows[0]
+
+        assert Decimal(row["ratio"]) == Decimal(2), (
+            f"a 2-for-1 must be recorded as the share-count multiplier 2; got {row['ratio']!r}"
+        )
+        assert Decimal(row["ratio"]) != Decimal(1) / Decimal(2), (
+            "the ratio is the reciprocal — every price before the ex-date will be "
+            "adjusted the wrong way, and the resulting series looks plausible"
+        )
+        # The convention must travel with the number. Tiingo is passed through
+        # unconverted, so the only thing making that legible downstream is this
+        # column saying which convention the number is already in.
+        assert row["vendor_convention"] == str(SPLIT_FACTOR_CONVENTION)
+        assert row["vendor_factor"] == row["ratio"], (
+            "Tiingo's factor is already the canonical multiplier; if these ever "
+            "differ a conversion has been introduced and must be declared"
+        )
 
     def test_an_ordinary_session_is_not_a_split_or_a_dividend(self) -> None:
         rows = normalize_prices(
