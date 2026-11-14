@@ -15,7 +15,14 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from tradeit.cli_status import _age_in_days, _redact, _scalar, _scalar_raw, cmd_status
+from tradeit.cli_status import (
+    _age_in_days,
+    _redact,
+    _scalar,
+    _scalar_raw,
+    _sqlite_slash_hint,
+    cmd_status,
+)
 from tradeit.storage.tables import Base
 
 
@@ -391,3 +398,48 @@ def test_a_weekend_of_repeated_asks_does_not_inflate_the_evidence(
     )
     evidence = next(line for line in out.splitlines() if "symbol-sessions observed" in line)
     assert "across 1 session" in evidence
+
+
+class TestSqliteSlashHint:
+    """**Three slashes is a relative path; four is absolute.**
+
+    Written 2026-11-14 after the error cost a real round trip. A command was
+    given as `--db sqlite:///Users/.../forward.sqlite`, SQLAlchemy read that
+    as a path relative to the working directory, and the failure printed was
+    `unable to open database file` -- which says nothing about the cause and
+    sends the reader to check the file, the disk and the permissions, all of
+    which were fine. The database was fine too; only the URL was wrong.
+    """
+
+    def test_it_names_the_trap_when_the_four_slash_file_is_really_there(
+        self, tmp_path: object
+    ) -> None:
+        real = tmp_path / "forward.sqlite"  # type: ignore[operator]
+        real.write_bytes(b"")
+        hint = _sqlite_slash_hint(f"sqlite:///{str(real).lstrip('/')}")
+        assert hint is not None
+        assert "RELATIVE" in hint
+        assert f"sqlite:////{str(real).lstrip('/')}" in hint, (
+            "the hint must spell the corrected URL out, not describe it"
+        )
+
+    def test_it_stays_silent_when_no_such_file_exists(self) -> None:
+        """A confident wrong suggestion costs more than silence.
+
+        If the four-slash path is not there either, the problem is something
+        else and guessing would send the reader down the wrong road -- the
+        same failure shape as the message this hint replaces.
+        """
+        assert _sqlite_slash_hint("sqlite:///definitely/not/a/real/path.sqlite") is None
+
+    def test_it_stays_silent_for_a_url_that_is_already_absolute(self, tmp_path: object) -> None:
+        real = tmp_path / "forward.sqlite"  # type: ignore[operator]
+        real.write_bytes(b"")
+        assert _sqlite_slash_hint(f"sqlite:////{str(real).lstrip('/')}") is None
+
+    @pytest.mark.parametrize(
+        "dsn",
+        ["postgresql+psycopg://user@localhost:5432/db", "sqlite://", "sqlite:///"],
+    )
+    def test_it_stays_silent_for_anything_that_is_not_the_trap(self, dsn: str) -> None:
+        assert _sqlite_slash_hint(dsn) is None

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -67,6 +68,36 @@ UNKNOWN = "UNKNOWN"
 #: Keyed on `asked_at`, never on `session_date`: one session holds rows of both
 #: kinds, because the verification run re-asked about it correctly.
 SESSION_COUNTS_FROM = "2026-10-23 17:50"
+
+
+def _sqlite_slash_hint(dsn: str) -> str | None:
+    """Name the three-vs-four slash trap, but only when the file is really there.
+
+    ``sqlite:///x`` is a **relative** path; an absolute one needs four slashes.
+    So ``sqlite:///Users/me/out/forward.sqlite`` is read relative to the working
+    directory and fails with "unable to open database file" -- which says
+    nothing about the cause and sends the reader looking at the file, the disk
+    and the permissions, all of which are fine.
+
+    The hint is offered **only when the four-slash path exists**, so it is a
+    measurement rather than a guess: if that file is not there the problem is
+    something else and a confident wrong suggestion would cost more than
+    silence.
+    """
+    prefix = "sqlite:///"
+    if not dsn.startswith(prefix):
+        return None
+    remainder = dsn[len(prefix) :]
+    if not remainder or remainder.startswith("/"):
+        return None  # already absolute, or no path at all
+    candidate = Path("/") / remainder
+    if not candidate.is_file():
+        return None
+    return (
+        f"    `sqlite:///` takes a RELATIVE path; {candidate} exists and is\n"
+        f"    almost certainly what you meant. Absolute paths need four slashes:\n"
+        f"    sqlite:////{remainder}"
+    )
 
 
 def _redact(dsn: str) -> str:
@@ -182,6 +213,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         session = Session(engine)
     except Exception as problem:
         print(f"  unreachable: {problem}")
+        hint = _sqlite_slash_hint(dsn)
+        if hint:
+            print(hint)
         print(
             "    Pass --db to point at another database. The corpus the research\n"
             "    scripts use is not the configured DSN."
