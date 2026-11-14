@@ -32,6 +32,37 @@ going-private transaction and a bankruptcy all produce this same signature in a
 price feed. The job was to establish which, from filings, and to say
 `UNEXPLAINED` where the filings do not reach.
 
+### 0.1 Addendum 2026-11-14 — the capture dates above are now measured
+
+Added by the commissioning session, which holds the capture record this
+document could not see. **§4 item 10 is closed**: the dates in the table above
+are no longer *reported*, they are measured, and they are unchanged.
+
+Measured directly against `forward.sqlite` (`forward_observations`), not read
+from the `tradeit status` summary, because the number that summary prints was
+itself the subject of a defect fix on 2026-10-26 and taking it on trust would
+repeat the error:
+
+| measurement | value |
+|---|---|
+| rows in the record | 4,591 |
+| symbol-sessions at/after the 2026-10-23 17:50 cutoff | 3,269 |
+| distinct sessions | 17 |
+| distinct symbols | 195 |
+| silent symbol-sessions | 9 |
+| most recent ask | 2026-11-14 03:11 |
+
+The silent nine are exactly the nine in the table above — ELME ×6, MGPI ×3 —
+and the arithmetic closes twice independently: `149 + 195×16 = 3,269` for the
+symbol-sessions, and `4,439 + 152 = 4,591` for the asks. The status vocabulary
+across all 4,591 rows is `ok` (4,576) and `empty` (15); the four `empty` rows
+outside the nine are the pre-cutoff `ABAX`/`AUTO` rows that
+[`ops/UNIVERSE.md`](../ops/UNIVERSE.md) already records as **not** exits.
+
+**What this addendum does not touch:** every `UNRESOLVED` in §4 items 1–9 and
+11 stands. The capture dates were the one thing this session could settle, and
+settling them changes nothing about the filings, which remain unread.
+
 ---
 
 ## 1. What this session could and could not reach — read this first
