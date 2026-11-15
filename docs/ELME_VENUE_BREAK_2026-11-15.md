@@ -132,3 +132,20 @@ the day*. What is added is the rule for reading them.
   session to compare answers would find revisions, but it needs a decision
   about which answer wins — the same which-vendor-wins decision the
   never-overwrite rule defers, and it is not taken here.
+
+## What was built in response, the same day
+
+The subset of the above that needs no deferred decision is now part of the
+nightly job, per
+[ADR-0032](adr/0032-a-move-too-large-to-be-trading-is-reported-not-judged.md):
+`forward_daily.py` scans the record after each capture and reports
+single-session moves of 2× or more in either direction — **report only, no cause
+claimed, never blocking, never overwriting.** The threshold is derived from §5's
+distribution rather than chosen: above the largest trading move measured
+(1.490×) and at or below the smallest ratio a corporate action produces (2:1).
+It would have printed §1's move on 2026-10-26 rather than leaving it for a
+question asked three weeks later.
+
+**It closes §4 only for the shape in §1.** §2's re-mapping leaves no trace in a
+close series when no price moves with it, and §3's revisions are visible only by
+re-asking. Both stay open, and both still wait on which-vendor-wins.

@@ -174,6 +174,53 @@ def snapshot_record() -> None:
         print(f"SNAPSHOT FAILED, continuing with the capture: {exc}", file=sys.stderr, flush=True)
 
 
+def report_discontinuities() -> None:
+    """Report single-session moves too large to be trading. **Never gates.**
+
+    Added 2026-11-15, from `docs/ELME_VENUE_BREAK_2026-11-15.md`. ELME left the
+    NYSE after 2026-10-23 and traded OTC as ``ELMES`` from 2026-10-26; the
+    vendor served both venues as one series with a -97.6% move at the join and
+    no marker, the capture got ``ok`` sixteen times, and **a person found it
+    three weeks later by asking a question nobody had scheduled.** This prints
+    it on the night.
+
+    It runs *after* the captures and reads what they wrote, which is the whole
+    design: a check inside the write path would have to decide what to do about
+    a disagreeing bar, and that needs the which-vendor-wins decision
+    `_write_bars` deliberately defers. This decides nothing.
+
+    **Never raises and never changes the exit code.** Same rule as
+    `snapshot_record`, for a sharper reason: a report that failed the job would
+    make the capture report failure for a *correct observation*, and a job that
+    goes red when it is working is a job whose output gets ignored. A finding
+    here is information for a person, not an error.
+    """
+    try:
+        # **Put `src` on the path here rather than relying on the capture
+        # having done it.** `forward_capture` inserts a relative "src" as a
+        # side effect of being imported, so this would usually work without the
+        # line -- but both vendors can be skipped (an empty universe file turns
+        # one off), and a report that only runs when a capture ran is not a
+        # check on the record. Guarded so a second run does not duplicate it.
+        src = str(REPO / "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        from tradeit.forward.discontinuity import scan_record
+
+        record = OUT / "forward.sqlite"
+        if not record.exists():
+            return
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        engine = create_engine(f"sqlite:////{record.as_posix().lstrip('/')}", future=True)
+        with sessionmaker(bind=engine, future=True)() as session:
+            scan = scan_record(session)
+        print(f"\n--- {scan.describe()}", flush=True)
+    except Exception as exc:
+        print(f"discontinuity scan failed, the capture stands: {exc}", file=sys.stderr, flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     # **`--dry-run` is passed straight through**, so the scheduled job can be
     # proved end to end without spending a vendor's daily allowance. Without
@@ -236,6 +283,9 @@ def main(argv: list[str] | None = None) -> int:
             code = int(exit_code.code or 1)
             print(f"{source}: {exit_code}", file=sys.stderr, flush=True)
         worst = max(worst, code)
+    # After the captures, never before: it reads what they wrote. Its findings
+    # do not touch `worst` -- see the docstring.
+    report_discontinuities()
     return worst
 
 

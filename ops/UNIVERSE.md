@@ -481,5 +481,28 @@ security identity are kept as separate questions.
 
 A scan of all 4,327 bars across 195 instruments for single-session moves of 30%
 or more finds **only three**, and ELME's is an order of magnitude beyond the
-other two. The shape is confined to one instrument — worth re-running whenever
-the record is relied on.
+other two. The shape is confined to one instrument.
+
+### The nightly check this produced
+
+**The scan is no longer something to remember to run.** `forward_daily.py` runs
+it after each capture and prints the result, per
+[ADR-0032](../docs/adr/0032-a-move-too-large-to-be-trading-is-reported-not-judged.md).
+On demand:
+
+```
+PYTHONPATH=src .venv/bin/python -m tradeit.cli forward discontinuities
+```
+
+It reports single-session moves of **2× or more in either direction** — a
+threshold derived from this record rather than chosen, above the largest trading
+move measured (1.490×) and at or below the smallest ratio a corporate action
+produces (2:1), so no routine split escapes. It **names no cause**: a splice, a
+venue change, a re-mapping and an unrecorded split all look alike in a close
+series, and a flag that named one would be right about ELME for the wrong
+reason.
+
+It writes nothing, blocks nothing and never fails the job. It would have printed
+ELME on 2026-10-26 instead of 2026-11-15. It is still blind to the other two
+defects above — a re-mapping with no price move leaves no trace, and a revision
+to a bar already held is only visible by re-asking.
