@@ -448,3 +448,38 @@ rather than an argument against it: the trailing window exists to recover
 sessions a sleeping laptop missed, and that recovery is what the re-ask buys.
 Changing it would need a decision about which vendor wins a disagreement, which
 this system has not made.
+
+## `instrument_id = 1700` holds two venues — read rule
+
+**Measured 2026-11-15**, in full in
+[`ELME_VENUE_BREAK_2026-11-15.md`](../docs/ELME_VENUE_BREAK_2026-11-15.md).
+
+ELME was suspended from the NYSE after 2026-10-23 and traded OTC as `ELMES`
+from 2026-10-26. The capture asked for `ELME` throughout and got `ok` sixteen
+times, so instrument 1700 now holds:
+
+| sessions | what they are |
+|---|---|
+| 2026-10-15 → 2026-10-23 | NYSE prints |
+| 2026-10-26 → 2026-11-05 | **OTC prints**, captured under `ELME` before the vendor re-mapped them to `ELMES` |
+
+**They are not one price series and must not be read as one.** The −97.6% move
+between them (1.77 → 0.0419) is a venue change and a dissolution confounded,
+and this data cannot separate the two. Three of the nine OTC bars have since
+been revised by the vendor; we keep the first-seen values, which is right
+bitemporally and means our copy diverges from the vendor's with nothing in the
+record saying so.
+
+**`ELME.US` today returns only the seven NYSE sessions.** The vendor moved the
+whole history to `ELMES` and back-filled the NYSE period under it, so the
+ticker these bars were acquired under no longer resolves to them.
+
+**The capture cannot detect this**, and that is a boundary rather than a bug: a
+venue change, a vendor-side re-mapping and a silent revision all look like `ok`
+when you ask for a ticker. It is why ticker identity, listing venue and
+security identity are kept as separate questions.
+
+A scan of all 4,327 bars across 195 instruments for single-session moves of 30%
+or more finds **only three**, and ELME's is an order of magnitude beyond the
+other two. The shape is confined to one instrument — worth re-running whenever
+the record is relied on.

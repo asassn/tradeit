@@ -54,11 +54,19 @@ import datetime as dt
 import importlib.util
 import os
 import re
+import shutil
+import sqlite3
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 OUT = Path("/Users/ericsasson/Documents/TradeItData/out")
+#: Snapshots of the forward record, taken before each capture.
+BACKUPS = Path("/Users/ericsasson/Documents/TradeItData/backups")
+#: How many snapshots to keep. Fourteen is a fortnight of daily runs at roughly
+#: 3 MB each, which is nothing, and it is long enough that a corruption
+#: introduced on a Friday is still recoverable after a week of not looking.
+KEEP_BACKUPS = 14
 LOOKBACK = 7
 
 #: **One vendor per security, never pooled.** Tiingo declares `RAW_UNADJUSTED`
@@ -106,6 +114,66 @@ def load_env(path: Path) -> int:
     return count
 
 
+def snapshot_record() -> None:
+    """Copy the forward record aside before the capture writes to it.
+
+    **This is the one dataset in the project that cannot be rebuilt.** The
+    corpus can be reconstructed from EDGAR and vendor pulls given time and
+    money; a session not captured is gone at any price, which is the whole
+    argument the forward programme rests on. On 2026-11-15 it held 17 sessions
+    and 3,269 symbol-sessions in a single 3 MB file, **with no backup of any
+    kind** -- not in git, and `tmutil` reported no Time Machine destination
+    configured on the machine at all.
+
+    Uses sqlite's own backup API rather than copying the file. A plain copy of
+    a database with a writer mid-transaction can be torn; this one is
+    consistent by construction, and a torn backup is worse than none because it
+    looks like a backup.
+
+    **Never fails the capture.** A backup problem must not cost a session --
+    that would trade the thing being protected for the protection. Any error is
+    reported and the run continues.
+
+    Not committed to git, deliberately: the bars are vendor data and this
+    repository is public, so committing them would be redistribution. An
+    off-machine backup moves that data off this machine and is the owner's call,
+    not mine.
+    """
+    try:
+        BACKUPS.mkdir(parents=True, exist_ok=True)
+        record = OUT / "forward.sqlite"
+        if not record.exists():
+            print("no record to snapshot yet", flush=True)
+            return
+        stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+        target = BACKUPS / f"forward-{stamp}.sqlite"
+        source = sqlite3.connect(f"file:{record}?mode=ro", uri=True)
+        try:
+            destination = sqlite3.connect(target)
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
+        finally:
+            source.close()
+
+        journal = OUT / "forward_journal.jsonl"
+        if journal.exists():
+            shutil.copy2(journal, BACKUPS / f"forward_journal-{stamp}.jsonl")
+
+        kept = 0
+        for pattern in ("forward-*.sqlite", "forward_journal-*.jsonl"):
+            snapshots = sorted(BACKUPS.glob(pattern))
+            for stale in snapshots[:-KEEP_BACKUPS]:
+                stale.unlink()
+            kept = max(kept, len(snapshots[-KEEP_BACKUPS:]))
+        print(f"snapshot: {target.name} ({kept} kept)", flush=True)
+    except Exception as exc:
+        # Reported, never raised. See the docstring: a backup failure must not
+        # cost a capture.
+        print(f"SNAPSHOT FAILED, continuing with the capture: {exc}", file=sys.stderr, flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     # **`--dry-run` is passed straight through**, so the scheduled job can be
     # proved end to end without spending a vendor's daily allowance. Without
@@ -116,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     # would be asked, which is where the mistakes have actually been.
     dry_run = "--dry-run" in (argv if argv is not None else sys.argv[1:])
     os.chdir(REPO)  # forward_capture.py puts a relative "src" on sys.path
+    snapshot_record()
     stamp = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
     print(f"=== forward capture {stamp} ===", flush=True)
     print(f"credentials loaded: {load_env(REPO / '.env')} names", flush=True)
