@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 
 from tradeit.forward.silence import (
+    RENAME_WINDOW_DAYS,
     SilenceVerdict,
     classify_silence,
     classify_silences,
@@ -200,3 +201,58 @@ def test_index_age_is_measured_from_the_rows_not_a_header() -> None:
     """
     assert index_through(ELME) == dt.date(2026, 11, 6)
     assert index_through([]) is None
+
+
+#: ELME's registrant renamed in 2022, four years before its dissolution.
+#: Measured 2026-11-15 from the index: CIK 104894 files as
+#: `WASHINGTON REAL ESTATE INVESTMENT TRUST` until 2022-10-03 and as
+#: `Elme Communities` from 2022-10-17.
+OLD_RENAME = [
+    ("10-K", dt.date(2022, 2, 18), "WASHINGTON REAL ESTATE INVESTMENT TRUST"),
+    ("8-K", dt.date(2022, 10, 3), "WASHINGTON REAL ESTATE INVESTMENT TRUST"),
+    ("8-K", dt.date(2022, 10, 17), "Elme Communities"),
+    ("10-Q", dt.date(2026, 7, 31), "Elme Communities"),
+    ("8-K", dt.date(2026, 11, 12), "Elme Communities"),
+]
+
+
+def test_a_rename_years_before_the_stop_is_not_evidence_about_it() -> None:
+    """**The bound that keeps the rename signal from firing on everything.**
+
+    A caller passing a few years of filings sees a name change in almost every
+    window: measured 2026-11-15, ELME's own registrant renamed in October 2022.
+    An unbounded comparison would read a 2026 silence as a 2022 ticker move.
+
+    ELME survives that only because the exit check runs first. **A company that
+    renamed years ago, kept filing, and went quiet with no Form 25 or 15 would
+    not** -- it would be reported as a probable ticker move on four-year-old
+    evidence, which is a confident wrong answer.
+
+    So the comparison is bounded to `RENAME_WINDOW_DAYS` before the stop. The
+    verdict here is `STILL_FILING`: the registrant is alive, and *why* the
+    prices stopped is genuinely not in these forms.
+
+    Mutant: compare across all filings passed rather than the window. Caught.
+    """
+    finding = classify_silence(
+        "XXXX", 104894, dt.date(2026, 11, 5), OLD_RENAME, index_through=THROUGH
+    )
+
+    assert finding.verdict is SilenceVerdict.STILL_FILING
+    assert finding.verdict.contradicts_an_exit, "still a registrant that is plainly alive"
+
+
+def test_the_window_is_wide_enough_for_the_case_it_exists_for() -> None:
+    """The bound must not reintroduce the bug it sits beside.
+
+    MGPI's rename landed 2026-11-06 and its last print was 2026-11-10 -- four
+    days. A window too narrow to hold that would be the straddle bug again in a
+    different disguise.
+
+    Mutant: `RENAME_WINDOW_DAYS = 1`. Caught.
+    """
+    assert RENAME_WINDOW_DAYS >= 30, "a ticker can lag a rename by weeks"
+
+    finding = classify_silence("MGPI", 835011, dt.date(2026, 11, 10), MGPI, index_through=THROUGH)
+
+    assert finding.verdict is SilenceVerdict.RENAMED_AND_STILL_FILING

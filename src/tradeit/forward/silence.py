@@ -55,9 +55,12 @@ from enum import StrEnum
 __all__ = [
     "EXIT_FORM_PREFIXES",
     "EXIT_WINDOW",
+    "RENAME_WINDOW_DAYS",
     "SilenceFinding",
     "SilenceVerdict",
     "classify_silence",
+    "load_index_filings",
+    "quarters_covering",
 ]
 
 #: Forms that certify a security leaving the public market. ``25`` and
@@ -66,6 +69,20 @@ __all__ = [
 #: several variants and **quoted form types are never normalised** -- `10-K` is
 #: not `10-K405`, and the same rule applies here.
 EXIT_FORM_PREFIXES = ("25", "15")
+
+#: How far back from the stop a filer-name change still counts as bearing on
+#: *this* silence. **Not unbounded, and the bound is load-bearing.** Measured
+#: 2026-11-15: CIK 104894 files as `WASHINGTON REAL ESTATE INVESTMENT TRUST`
+#: until 2022-10-03 and as `Elme Communities` from 2022-10-17. A caller passing
+#: a few years of filings would therefore see a rename in every ELME window and
+#: read a 2026 dissolution as a 2022 ticker move. ELME itself survives that only
+#: because the exit check runs first -- a company that renamed years ago, kept
+#: filing and went quiet without a Form 25 or 15 would not.
+#:
+#: 180 days is generous for the thing being detected: a ticker follows a rename
+#: by days or weeks. It is not a claim that renames older than that never matter,
+#: only that they are not evidence about *this* stop.
+RENAME_WINDOW_DAYS = 180
 
 #: How far from the stop an exit filing still counts, in days either side. A
 #: Form 25 precedes the last print and a Form 15 follows it, so the window is
@@ -134,6 +151,7 @@ def classify_silence(
     *,
     index_through: dt.date | None,
     window: tuple[int, int] = EXIT_WINDOW,
+    rename_window: int = RENAME_WINDOW_DAYS,
 ) -> SilenceFinding:
     """Classify one symbol that stopped printing on ``stop``.
 
@@ -212,10 +230,16 @@ def classify_silence(
         #
         # A ticker follows a rename by days or weeks; it does not change on the
         # same morning. Any test anchored on the stop therefore misses the
-        # ordinary case, and the honest comparison is earliest name in the
-        # window against latest.
-        ordered = sorted(filings, key=lambda f: f[1])
-        first_name, last_name = ordered[0][2].strip(), ordered[-1][2].strip()
+        # ordinary case, and the honest comparison is earliest name against
+        # latest **within `rename_window` days of the stop** -- bounded, because
+        # an unbounded comparison reports a years-old rename as evidence about
+        # today. See `RENAME_WINDOW_DAYS`.
+        recent = sorted(
+            (f for f in filings if f[1] >= stop - dt.timedelta(days=rename_window)),
+            key=lambda f: f[1],
+        )
+        first_name = recent[0][2].strip() if recent else ""
+        last_name = recent[-1][2].strip() if recent else ""
         renamed = bool(first_name) and first_name.casefold() != last_name.casefold()
         evidence = tuple(
             f"{form} filed {day} by {name}"
@@ -291,3 +315,64 @@ def index_through(rows: Iterable[tuple[str, dt.date, str]]) -> dt.date | None:
         if newest is None or day > newest:
             newest = day
     return newest
+
+
+def quarters_covering(since: dt.date, until: dt.date) -> list[tuple[int, int]]:
+    """Every ``(year, quarter)`` touching ``since..until``, inclusive.
+
+    The index is one file per quarter and the whole archive is 32 years, about
+    1.3 GB of text. A silence is days old, so reading more than the quarters
+    that could hold its filings is wasted work -- and a nightly job that takes
+    minutes is a nightly job somebody turns off.
+    """
+    if until < since:
+        since, until = until, since
+    out: list[tuple[int, int]] = []
+    year, quarter = since.year, (since.month - 1) // 3 + 1
+    while (year, quarter) <= (until.year, (until.month - 1) // 3 + 1):
+        out.append((year, quarter))
+        quarter += 1
+        if quarter == 5:
+            year, quarter = year + 1, 1
+    return out
+
+
+def load_index_filings(
+    index_root: object,
+    *,
+    since: dt.date,
+    until: dt.date,
+    ciks: Iterable[int] | None = None,
+) -> tuple[dict[int, list[tuple[str, dt.date, str]]], dt.date | None]:
+    """Read the quarters covering a window and return filings plus the index's age.
+
+    Returns ``(filings_by_cik, index_through)``. ``index_through`` is the newest
+    filing date seen **across every row read**, not per registrant: it answers
+    *"how current is this index"*, which is the question
+    :func:`classify_silence` checks before it will say anything at all.
+
+    ``ciks`` narrows what is kept. Rows for other registrants are still read --
+    they are what establishes ``index_through`` -- but not retained, because a
+    quarter holds 300,000 rows and the caller wants four.
+
+    A missing quarter is not an error here; it is the coverage fact that makes
+    ``index_through`` older, which is exactly how the staleness that hid for
+    three months becomes visible.
+    """
+    from tradeit.edgar.index import IndexQuarter, LocalFullIndexSource
+
+    wanted = set(ciks) if ciks is not None else None
+    covering = quarters_covering(since, until)
+    if not covering:
+        return {}, None
+    source = LocalFullIndexSource(root=index_root)  # type: ignore[arg-type]
+    first, last = covering[0], covering[-1]
+    by_cik: dict[int, list[tuple[str, dt.date, str]]] = {}
+    newest: dt.date | None = None
+    for row in source.rows(IndexQuarter(*first), IndexQuarter(*last)):
+        if newest is None or row.filed_at > newest:
+            newest = row.filed_at
+        if wanted is not None and row.cik not in wanted:
+            continue
+        by_cik.setdefault(row.cik, []).append((row.form_type, row.filed_at, row.company_name))
+    return by_cik, newest

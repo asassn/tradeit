@@ -221,6 +221,45 @@ def report_discontinuities() -> None:
         print(f"discontinuity scan failed, the capture stands: {exc}", file=sys.stderr, flush=True)
 
 
+def report_silences() -> None:
+    """Say whether each silent symbol really stopped trading. **Never gates.**
+
+    Added 2026-11-15, from `docs/FORWARD_SILENCE_CLASSIFICATION_2026-11-15.md`.
+    A security that stops printing is recorded as silent, and silence is how
+    this record observes a delisting -- but **a company that renames and changes
+    ticker also stops printing under the old symbol.** MGPI did exactly that
+    inside the record's first month, and recording it as an exit would put a
+    false delisting into the one dataset built to be survivorship-honest.
+
+    **It prints the filing index's own age every run, not only on failure.** The
+    index was three months stale on 2026-11-15 and nothing said so, so every
+    answer it gave was confident and wrong by omission. An age in the nightly
+    output is the cheapest guard against that recurring, and it costs one line
+    on the good nights.
+
+    Never raises and never changes the exit code, for the same reason as
+    `report_discontinuities`: a finding here is information for a person, not an
+    error, and a job that goes red when it is working gets switched off.
+    """
+    try:
+        src = str(REPO / "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        from tradeit.cli import build_parser
+
+        record = OUT / "forward.sqlite"
+        corpus = REPO / "research01.sqlite"
+        if not record.exists() or not corpus.exists():
+            return
+        print("\n--- silences", flush=True)
+        args = build_parser().parse_args(
+            ["forward", "silences", "--record", str(record), "--corpus", str(corpus)]
+        )
+        args.func(args)
+    except Exception as exc:
+        print(f"silence report failed, the capture stands: {exc}", file=sys.stderr, flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     # **`--dry-run` is passed straight through**, so the scheduled job can be
     # proved end to end without spending a vendor's daily allowance. Without
@@ -283,9 +322,10 @@ def main(argv: list[str] | None = None) -> int:
             code = int(exit_code.code or 1)
             print(f"{source}: {exit_code}", file=sys.stderr, flush=True)
         worst = max(worst, code)
-    # After the captures, never before: it reads what they wrote. Its findings
-    # do not touch `worst` -- see the docstring.
+    # After the captures, never before: they read what the captures wrote.
+    # Neither touches `worst` -- see their docstrings.
     report_discontinuities()
+    report_silences()
     return worst
 
 

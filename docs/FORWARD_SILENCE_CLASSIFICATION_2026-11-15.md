@@ -90,8 +90,23 @@ stop and the straddle test saw no change.
 
 **A ticker follows a rename by days or weeks; it does not move the same
 morning.** Any test anchored on the stop misses the ordinary case. The
-comparison is earliest name in the window against latest, and there is a test
-pinning it.
+comparison is earliest name against latest, and there is a test pinning it.
+
+### And the bound that keeps it from firing on everything
+
+The comparison is **restricted to 180 days before the stop**, which is not a
+detail. Measured 2026-11-15, ELME's own registrant renamed four years before it
+dissolved: CIK 104894 files as `WASHINGTON REAL ESTATE INVESTMENT TRUST` until
+2022-10-03 and as `Elme Communities` from 2022-10-17. An unbounded comparison
+sees a rename in almost any multi-year window and would read a 2026 dissolution
+as a 2022 ticker move.
+
+ELME survives that only because the exit check runs first. **A company that
+renamed years ago, kept filing, and went quiet with no Form 25 or 15 would
+not** — it would be reported as a probable ticker move on four-year-old
+evidence. 180 days is generous for a ticker that lags a rename by weeks, and it
+is not a claim that older renames never matter, only that they are not evidence
+about *this* stop.
 
 ## 5. What this does not settle
 
@@ -101,6 +116,43 @@ pinning it.
 - **It does not find the new ticker.** It says MGPI's registrant renamed; it
   does not establish that `CASK` is the successor. The 2026-11-14 adjudication
   left that `UNRESOLVED` on primary evidence and this does not improve on it.
-- **It is not yet wired into the nightly job**, and the index is not yet
-  refreshed on a schedule. A stale index is exactly as useless as no index for
-  forward work, and this one went stale for three months without a word.
+- **The index is not yet refreshed on a schedule.** It is now read nightly and
+  its age is printed nightly, so a repeat of the three-month gap becomes visible
+  within a day — but nothing yet *fixes* it. Refreshing is two HTTP requests and
+  free; automating it is the obvious next step and is not done here.
+
+## 6. Wired in, 2026-11-15
+
+`forward_daily.py` runs it after each capture, alongside the discontinuity scan.
+Report only; it never changes the exit code, because a job that goes red on a
+correct observation is a job whose output gets switched off.
+
+```
+PYTHONPATH=src .venv/bin/python -m tradeit.cli forward silences
+```
+
+**The index's age is printed every run, not only when something fails.** That
+line is the whole lesson of this document reduced to its cheapest form: a stale
+input produced confident answers for three months and nothing complained.
+
+Live output, 2026-11-15:
+
+```
+filing index reaches 2026-11-13 (2 day(s) old)
+
+MGPI  renamed_and_still_filing  ... 'MGP INGREDIENTS INC' to 'SEMPREON, INC' ...
+ABAX  unresolved                the symbol never printed, so there is no stop to explain
+AUTO  unresolved                no CIK resolves for this symbol
+ELME  exit_corroborated         25-NSE 2026-10-26, 15-12G 2026-11-06
+```
+
+`AUTO` is worth reading twice. It resolves to **two** securities under two
+issuers — a reused ticker — so no CIK is claimed and the verdict is
+`UNRESOLVED`. Picking either would attach one company's filings to another's
+silence, which is the worst available failure for a check whose entire job is
+identity. Fail closed.
+
+Two path bugs were found wiring this up, and both are pinned by tests: reading
+the whole 32-year archive instead of the quarters covering the window, and
+`sqlite:////research01.sqlite` resolving to the filesystem root rather than the
+working directory — an error whose message never names the path it tried.
