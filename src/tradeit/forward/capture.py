@@ -52,7 +52,7 @@ from tradeit.core.enums import Bartimeframe, KnowledgeTimeSource
 from tradeit.data.packages.spec import DatasetKind
 from tradeit.storage.tables import ForwardObservation, OhlcvBar
 
-__all__ = ["CaptureReport", "CaptureSource", "capture_forward"]
+__all__ = ["BarsWritten", "CaptureReport", "CaptureSource", "capture_forward"]
 
 
 class CaptureSource(Protocol):
@@ -78,6 +78,25 @@ class NoCredential(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class BarsWritten:
+    """What one response added to the price record.
+
+    New bars and revisions are counted apart because they are different facts.
+    A new bar is a session we did not have; a revision is **the vendor changing
+    its mind about one we did**, which is evidence about the vendor and was
+    invisible until 2026-11-15.
+    """
+
+    written: int = 0
+    revised: int = 0
+    #: One line per revision, saying which fields moved. Carried out rather
+    #: than logged, because a count alone buries the interesting case: ELME's
+    #: 2026-11-05 bar moved 53% on volume while its close moved a tenth of a
+    #: cent.
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CaptureReport:
     """What one capture asked for and what it recorded."""
 
@@ -87,6 +106,13 @@ class CaptureReport:
     recorded: int
     silent: int
     bars_written: int = 0
+    #: Sessions where a later ask returned different numbers for a bar already
+    #: held. **Both rows are kept** -- see :func:`_write_bars`. Counted
+    #: separately from `bars_written` because a vendor revising a price is a
+    #: fact about the vendor, not a session newly acquired.
+    bars_revised: int = 0
+    #: One line per revision, naming the fields that moved.
+    revisions: tuple[str, ...] = ()
     #: Symbols that returned rows but whose id is unknown, so their prices were
     #: not written. **Counted, never silently dropped**: a symbol whose
     #: observation exists while its prices do not is a hole that reads like a
@@ -128,6 +154,14 @@ class CaptureReport:
             f"{self.recorded} recorded, {self.silent} silent",
         ]
         lines.append(f"  {self.bars_written} bars written")
+        if self.bars_revised:
+            lines.append(
+                f"  {self.bars_revised} bar(s) the vendor has since revised; both the "
+                "first answer and the new one are kept, and a reader sees whichever its "
+                "clock reaches"
+            )
+            for note in self.revisions[:5]:
+                lines.append(f"    revision: {note}")
         for status, count in sorted(self.by_status.items(), key=lambda kv: -kv[1]):
             lines.append(f"  {status:<12} {count:>5}")
         if self.unmapped:
@@ -227,6 +261,8 @@ def capture_forward(
     recorded = 0
     silent = 0
     bars_written = 0
+    bars_revised = 0
+    revisions: list[str] = []
     unmapped: list[str] = []
     findings: list[str] = []
 
@@ -301,9 +337,12 @@ def capture_forward(
             if instrument_id is not None and outcome.rows:
                 normalized = source.normalize(outcome, {request.symbol: instrument_id})
                 findings.extend(normalized.findings)
-                bars_written += _write_bars(
+                added = _write_bars(
                     session, normalized, instrument_id, asked_at=asked_at, provider=provider
                 )
+                bars_written += added.written
+                bars_revised += added.revised
+                revisions.extend(added.notes)
             continue
         existing = session.execute(
             select(ForwardObservation).where(
@@ -355,9 +394,12 @@ def capture_forward(
             continue
         normalized = source.normalize(outcome, {request.symbol: instrument_id})
         findings.extend(normalized.findings)
-        bars_written += _write_bars(
+        added = _write_bars(
             session, normalized, instrument_id, asked_at=asked_at, provider=provider
         )
+        bars_written += added.written
+        bars_revised += added.revised
+        revisions.extend(added.notes)
 
     return CaptureReport(
         session_date=end,
@@ -366,6 +408,8 @@ def capture_forward(
         recorded=recorded,
         silent=silent,
         bars_written=bars_written,
+        bars_revised=bars_revised,
+        revisions=tuple(revisions),
         unmapped=tuple(unmapped),
         findings=tuple(findings),
         by_status=dict(statuses),
@@ -380,8 +424,8 @@ def _write_bars(
     *,
     asked_at: dt.datetime,
     provider: str,
-) -> int:
-    """Persist the bars a response normalised to, skipping ones already held.
+) -> BarsWritten:
+    """Persist the bars a response normalised to. **Append-only, never updated.**
 
     ``knowledge_time`` is the instant we **asked**, not the session's close.
     They are different facts and the distinction is the whole bitemporal point:
@@ -392,25 +436,94 @@ def _write_bars(
     an exchange reported the print and a vendor relayed it; recording the relay
     as the report would overstate what we know about the chain.
 
-    Bars already held for the same session are **left alone rather than
-    updated**. A later ask that disagrees should add a revision, not overwrite
-    one -- but writing that revision needs a decision about which vendor wins,
-    and this does not invent one. The disagreement is visible in the
-    observation rows either way.
+    Revisions: both answers are kept, and neither vendor wins
+    ---------------------------------------------------------
+
+    **A bar already held is never modified.** When a later ask returns different
+    numbers for a session we already have, the new answer is written as an
+    *additional* row carrying its own ``knowledge_time``. Nothing is overwritten
+    and nothing is discarded.
+
+    This is not a new decision. ``OhlcvBar``'s unique key has been
+    ``(instrument_id, timeframe, session_date, knowledge_time)`` since
+    ``0001_initial`` -- its docstring reads *"Append-only; revisions are new
+    rows"* -- and `OhlcvBarRepository.history` has always resolved them with
+    ``row_number() over (partition by session_date order by knowledge_time
+    desc)`` bounded by ``knowledge_time <= clock.as_of``. **The architecture
+    answered this in ADR-0005 and this function was simply not using it:** until
+    2026-11-15 it skipped any session it already held, so no revision was ever
+    written and every one of the 4,327 bars in the forward record held exactly
+    one. The path was latent, not working.
+
+    What that bounded read gives for free is the thing the never-overwrite rule
+    was protecting by hand. A backtest dated before a revision sees the
+    **first-seen** value, because the revision's ``knowledge_time`` is outside
+    its clock; a reader asking today sees the latest. No vendor is declared
+    authoritative, no price is chosen over another, and the disagreement is
+    recorded rather than silently resolved -- which is exactly what
+    `ELME_VENUE_BREAK_2026-11-15.md` §3 found missing, where three of sixteen
+    bars had been revised and *"nothing in the record says so"*.
+
+    **Identical numbers are not a revision.** The capture re-asks a seven-session
+    window every night, so writing a row per ask regardless of content would add
+    roughly 1,350 rows a night that carry no information and bury the ones that
+    do. A row is written only when a value actually differs from the newest
+    revision held.
+
+    **The same ask at the same instant is idempotent**, so a capture retried
+    after a crash does not double the record -- the same guarantee the
+    observation rows already give.
     """
     rows = normalized.rows.get(DatasetKind.DAILY_BARS, [])
     written = 0
+    revised = 0
+    notes: list[str] = []
     for row in rows:
         session_date = dt.date.fromisoformat(row["session_date"])
-        existing = session.execute(
-            select(OhlcvBar.id).where(
-                OhlcvBar.instrument_id == instrument_id,
-                OhlcvBar.session_date == session_date,
-                OhlcvBar.timeframe == str(Bartimeframe.D1),
-            )
-        ).first()
-        if existing is not None:
+        held = list(
+            session.execute(
+                select(OhlcvBar)
+                .where(
+                    OhlcvBar.instrument_id == instrument_id,
+                    OhlcvBar.session_date == session_date,
+                    OhlcvBar.timeframe == str(Bartimeframe.D1),
+                )
+                .order_by(OhlcvBar.knowledge_time.desc())
+            ).scalars()
+        )
+        same_instant = next((bar for bar in held if bar.knowledge_time == asked_at), None)
+        if same_instant is not None:
+            # **This exact ask, replayed.** Not a revision and not a new bar, so
+            # a retry after a crash does not double the record.
+            #
+            # If the vendor's answer has *changed* since, the record cannot hold
+            # it: `knowledge_time` is part of the unique key, so two different
+            # answers stamped the same instant are unrepresentable, and
+            # inserting would raise. The first answer stands -- but the
+            # contradiction is reported rather than dropped, because silently
+            # discarding evidence about a vendor is the one thing this record
+            # exists not to do.
+            clash = _difference(same_instant, row)
+            if clash is not None:
+                notes.append(
+                    f"{session_date}: a replay at the same knowledge_time returned "
+                    f"{clash}. The first answer is kept -- two answers cannot share one "
+                    "knowledge_time -- so re-ask at a later instant to record the change"
+                )
             continue
+        is_revision = False
+        if held:
+            difference = _difference(held[0], row)
+            if difference is None:
+                # Same numbers, later ask. The vendor confirmed what we hold,
+                # which is worth nothing as a row and would bury what is.
+                continue
+            is_revision = True
+            notes.append(
+                f"{session_date}: the vendor now says {difference}, first seen "
+                f"{held[0].knowledge_time:%Y-%m-%d}; both rows kept, the newer one "
+                "visible only to a reader whose clock reaches it"
+            )
         session.add(
             OhlcvBar(
                 instrument_id=instrument_id,
@@ -431,5 +544,42 @@ def _write_bars(
                 source=provider,
             )
         )
-        written += 1
-    return written
+        if is_revision:
+            revised += 1
+        else:
+            written += 1
+    return BarsWritten(written=written, revised=revised, notes=tuple(notes))
+
+
+#: The fields a vendor can revise that this capture writes. ``trade_count`` and
+#: ``vwap`` are deliberately absent: the capture never sets them, so comparing
+#: them would read ``None`` against ``None`` forever and add nothing.
+_REVISABLE = ("open", "high", "low", "close", "volume")
+
+
+def _difference(held: OhlcvBar, row: Mapping[str, object]) -> str | None:
+    """How the vendor's answer differs from the row held, or ``None`` if it does not.
+
+    Compared as :class:`~decimal.Decimal`, so ``0.05`` and ``0.050000`` are the
+    same number rather than two strings. That matters because the database
+    returns a fixed scale and the vendor does not: comparing the text would
+    report a revision on every bar whose trailing zeros the vendor dropped, and
+    a detector that fires on everything is read as firing on nothing.
+
+    Returns a description rather than a bool so the capture can say *what*
+    changed. ELME's 2026-11-05 bar differed by 53% on volume while its close
+    moved by a tenth of a cent, and a report saying only "revised" would have
+    buried that.
+    """
+    parts: list[str] = []
+    for field_name in _REVISABLE:
+        try:
+            fresh = Decimal(str(row[field_name]))
+        except (KeyError, ArithmeticError, TypeError, ValueError):
+            # An unreadable field is the normaliser's finding to report, not a
+            # revision to claim. Fail closed: say nothing rather than guess.
+            continue
+        current = getattr(held, field_name)
+        if current is not None and fresh != current:
+            parts.append(f"{field_name} {current} -> {fresh}")
+    return ", ".join(parts) if parts else None

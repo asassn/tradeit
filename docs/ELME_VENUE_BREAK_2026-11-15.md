@@ -146,6 +146,26 @@ distribution rather than chosen: above the largest trading move measured
 It would have printed §1's move on 2026-10-26 rather than leaving it for a
 question asked three weeks later.
 
-**It closes §4 only for the shape in §1.** §2's re-mapping leaves no trace in a
-close series when no price moves with it, and §3's revisions are visible only by
-re-asking. Both stay open, and both still wait on which-vendor-wins.
+§3 is closed too, by a different route: the capture now writes a revision as an
+additional row with its own `knowledge_time` rather than skipping a session it
+already holds, per
+[ADR-0033](adr/0033-a-revision-is-a-new-row-and-neither-answer-wins.md). The
+which-vendor-wins question it was waiting on turned out to be already answered —
+`OhlcvBar` has been keyed on `knowledge_time` since `0001_initial` and
+`BarRepository.history` has always resolved revisions against the reader's clock.
+**Neither answer wins; the record holds the disagreement and each reader resolves
+it against its own clock.** The path was latent, not working: every one of the
+4,327 bars held exactly one `knowledge_time` until today.
+
+**ELME's own three revisions are not captured by it, and will not be.** The
+nightly window reaches back seven sessions; ELME's last print was 2026-11-05 and
+the vendor no longer serves those bars under the ticker we ask for. The
+mechanism catches the *next* vendor revision inside the window, not this one.
+Backfilling these three would mean asking for `ELMES` and writing the answer
+under instrument 1700 — which is §2's identity question, and is not settled by
+§3's being closed.
+
+**§2 stays open.** A vendor re-mapping a ticker with no price move leaves no
+trace in a close series and none in a revision either, because the bars arrive
+under a symbol we have stopped asking about. That is an identity question, not a
+price question.

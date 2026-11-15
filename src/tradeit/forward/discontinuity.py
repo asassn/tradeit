@@ -194,12 +194,22 @@ class DiscontinuityScan:
     #: **no finding here can be explained by one**, and a report that said
     #: "unexplained" without saying that would overstate itself.
     actions_available: bool = False
+    #: Bars set aside because a later ask superseded them. Reported so the
+    #: counts above are readable: a scan over a record holding revisions looks
+    #: at fewer bars than the record contains, and a reader comparing this
+    #: against `select count(*)` should not have to guess why.
+    superseded_revisions: int = 0
 
     def describe(self) -> str:
         lines = [
             f"discontinuity scan: {self.bars} bars, {self.instruments} instruments, "
             f"{self.pairs} session pairs, threshold {self.ratio}x"
         ]
+        if self.superseded_revisions:
+            lines.append(
+                f"  reading the newest of {self.superseded_revisions} superseded "
+                "revision(s); the earlier answers are kept and are not price moves"
+            )
         if not self.findings:
             lines.append("  no single-session move beyond the threshold")
             return "\n".join(lines)
@@ -268,6 +278,17 @@ def find_discontinuities(
     for instrument_id, series in sorted(by_instrument.items()):
         series.sort(key=lambda bar: bar.session_date)
         for earlier, later in itertools.pairwise(series):
+            if earlier.session_date == later.session_date:
+                # **Two answers about one session, not a move.** Bars are
+                # append-only and a revision is a new row carrying its own
+                # `knowledge_time`, so a caller that reads the table without
+                # resolving revisions hands this two rows for one date. The
+                # difference between them is the vendor changing its mind,
+                # which `_write_bars` records and this does not measure.
+                # `scan_record` resolves them before calling; this guard is for
+                # every other caller, because a revision read as a price move
+                # is a confident wrong answer and those are the expensive ones.
+                continue
             magnitude = _ratio(earlier.close, later.close)
             if magnitude is None or magnitude < ratio:
                 continue
@@ -303,15 +324,29 @@ def scan_record(
     second, and `ELME_VENUE_BREAK_2026-11-15.md` §5 says to re-run it whenever
     the record is relied on.
     """
-    bars: Sequence[OhlcvBar] = (
+    # **Ordered by `knowledge_time` last, so the newest revision of a session
+    # is the one kept.** `OhlcvBar` is append-only -- its unique key includes
+    # `knowledge_time` and a revision is a new row -- so reading the table flat
+    # yields two rows for a revised session, and pairing them would report the
+    # revision as a price move. `OhlcvBarRepository.history` resolves this with
+    # a window function bounded by the caller's clock; here a linear pass is
+    # equivalent and has fewer moving parts, because this scan has no clock to
+    # respect: it asks *what does the record say now*, which is the latest
+    # revision of every session.
+    rows: Sequence[OhlcvBar] = (
         session.execute(
             select(OhlcvBar)
             .where(OhlcvBar.timeframe == str(Bartimeframe.D1))
-            .order_by(OhlcvBar.instrument_id, OhlcvBar.session_date)
+            .order_by(OhlcvBar.instrument_id, OhlcvBar.session_date, OhlcvBar.knowledge_time)
         )
         .scalars()
         .all()
     )
+    newest: dict[tuple[int, dt.date], OhlcvBar] = {}
+    for row in rows:
+        newest[(row.instrument_id, row.session_date)] = row
+    bars = list(newest.values())
+    revised = len(rows) - len(bars)
     actions: Sequence[CorporateAction] = session.execute(select(CorporateAction)).scalars().all()
     findings = find_discontinuities(bars, ratio=ratio, actions=actions)
     if since is not None:
@@ -323,4 +358,5 @@ def scan_record(
         ratio=ratio,
         findings=tuple(findings),
         actions_available=bool(actions),
+        superseded_revisions=revised,
     )

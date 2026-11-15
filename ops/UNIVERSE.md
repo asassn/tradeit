@@ -506,3 +506,46 @@ It writes nothing, blocks nothing and never fails the job. It would have printed
 ELME on 2026-10-26 instead of 2026-11-15. It is still blind to the other two
 defects above — a re-mapping with no price move leaves no trace, and a revision
 to a bar already held is only visible by re-asking.
+
+## A session can hold more than one bar — read rule
+
+**Measured 2026-11-15:** every one of the 4,327 bars in the record held exactly
+one `knowledge_time`, because `_write_bars` skipped any session it already had.
+That changed the same day, per
+[ADR-0033](../docs/adr/0033-a-revision-is-a-new-row-and-neither-answer-wins.md).
+
+When a later ask returns different numbers for a session already held, the new
+answer is written as an **additional row** with its own `knowledge_time`.
+Nothing is overwritten and nothing is discarded, so
+
+```sql
+select close from ohlcv_bars where instrument_id = ? and session_date = ?
+```
+
+**can return more than one row, and the count will grow over time.** It was safe
+until 2026-11-15 and is not safe now.
+
+**The correct read takes the newest revision the reader's clock can see:**
+
+```sql
+-- newest revision as of a point in time
+select * from ohlcv_bars
+where instrument_id = ? and timeframe = '1d' and knowledge_time <= ?
+order by session_date, knowledge_time desc
+```
+
+or, better, use `BarRepository.history(clock, instrument_id)`, which has always
+done this with a window function and needed no change.
+
+**This is why it is the right shape rather than a complication.** A backtest
+dated before a revision sees the value that was knowable on the day; a reader
+asking today sees the vendor's current answer. Both are true about different
+instants. The alternative — overwriting — would make a 2026-11-15 correction
+tradeable on 2026-10-26, which is the look-ahead leak the whole bitemporal
+design exists to prevent.
+
+**Identical numbers at a later ask write nothing.** The capture re-asks seven
+sessions a night; a row per ask would add ~1,350 rows nightly carrying no
+information. A row appears only when a value actually moved, so a second row for
+a session always means *the vendor changed its mind* — and the nightly output
+names which field.
