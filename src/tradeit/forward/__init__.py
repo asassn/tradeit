@@ -6,10 +6,17 @@ statistically stronger position rather than a compromise.
 """
 
 from tradeit.forward.capture import (
+    BarsWritten,
     CaptureReport,
     CaptureSource,
     NoCredential,
     capture_forward,
 )
 
-__all__ = ["CaptureReport", "CaptureSource", "NoCredential", "capture_forward"]
+__all__ = [
+    "BarsWritten",
+    "CaptureReport",
+    "CaptureSource",
+    "NoCredential",
+    "capture_forward",
+]
