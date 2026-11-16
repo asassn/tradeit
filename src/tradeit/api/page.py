@@ -73,10 +73,16 @@ PAGE = """<!doctype html>
   header { border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 22px; }
   h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: -0.01em; }
   h2 { font-size: 15px; margin: 0 0 10px; letter-spacing: -0.01em; }
-  .sub { color: var(--soft); font-size: 13px; }
+  /* The record label is a full DSN and the owner reads this on a phone, so it
+     wraps mid-path rather than pushing the page sideways. */
+  .sub { color: var(--soft); font-size: 13px; overflow-wrap: anywhere; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  /* Each panel scrolls its own wide table rather than letting the page scroll
+     sideways. Measured at 375px: without this the runs table's last columns and
+     the components cell sit off-screen with no indication they are there. */
   section { background: var(--panel); border: 1px solid var(--line);
-            border-radius: 10px; padding: 16px; margin-bottom: 18px; }
+            border-radius: 10px; padding: 16px; margin-bottom: 18px;
+            overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line);
            vertical-align: top; }
@@ -106,7 +112,13 @@ PAGE = """<!doctype html>
   .pill { display: inline-block; border: 1px solid var(--line); border-radius: 999px;
           padding: 1px 8px; font-size: 11.5px; color: var(--soft); margin-right: 4px; }
   .empty { color: var(--soft); font-size: 13px; }
-  @media (max-width: 620px) { .wrap { padding: 16px; } table { font-size: 12.5px; } }
+  @media (max-width: 620px) {
+    .wrap { padding: 16px; }
+    table { font-size: 12.5px; }
+    /* The JSON breakdown is the widest thing on the page. Capped so it cannot
+       stretch the table past the panel; it still scrolls into view. */
+    td.mono { max-width: 46vw; overflow-wrap: anywhere; }
+  }
 </style>
 </head>
 <body>
