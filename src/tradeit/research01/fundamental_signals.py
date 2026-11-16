@@ -89,6 +89,7 @@ class FundamentalHistory:
         self._by: dict[tuple[str, int], list[Fact]] = {}
         for fact in facts:
             self._by.setdefault((fact.metric, fact.duration), []).append(fact)
+        self._derived: dict[str, list[Fact]] = {}
         self._quarters = self._quarterly("NetIncomeLoss")
 
     def _facts(self, metric: str, duration: int, on: dt.date) -> list[Fact]:
@@ -101,7 +102,18 @@ class FundamentalHistory:
 
         Where a period has both a stand-alone value and a derived one, the one
         known EARLIER is kept -- for a Q4 that is the derivation.
+
+        Cached per metric since 2026-11-16, when :mod:`tradeit.valuation` became
+        a second caller. The Q4 derivation is the expensive part of this class
+        to get right -- it is why Apple's FY2012 Q4 is knowable six months
+        before the stand-alone figure was printed -- and a trailing-twelve-month
+        earnings figure that skipped it would be wrong for one quarter in four
+        on every company that files this way. Reusing it was the whole reason
+        not to write a second one.
         """
+        cached = self._derived.get(metric)
+        if cached is not None:
+            return cached
         quarters: dict[dt.date, Fact] = {f.period_end: f for f in self._by.get((metric, 1), [])}
         nine_months = self._by.get((metric, 3), [])
         for annual in self._by.get((metric, 4), []):
@@ -118,7 +130,36 @@ class FundamentalHistory:
             existing = quarters.get(annual.period_end)
             if existing is None or derived.known < existing.known:
                 quarters[annual.period_end] = derived
-        return sorted(quarters.values(), key=lambda f: f.period_end)
+        out = sorted(quarters.values(), key=lambda f: f.period_end)
+        self._derived[metric] = out
+        return out
+
+    # -- public reads, for callers outside this module --------------------
+
+    def quarters_known_by(self, metric: str, on: dt.date) -> list[Fact]:
+        """Stand-alone quarters of ``metric`` a reader could have used on ``on``.
+
+        Public because :mod:`tradeit.valuation` needs the same series this
+        module's own signals use. ``known < on`` rather than ``<=`` for the
+        reason stated at the top of this file: ``knowledge_time`` is stamped at
+        midnight and a filing can arrive after the close.
+        """
+        return [f for f in self._quarterly(metric) if f.known < on]
+
+    def instant_known_by(self, metric: str, on: dt.date) -> Fact | None:
+        """The latest balance-sheet value of ``metric`` usable on ``on``.
+
+        ``duration`` 0 is an instant -- a balance rather than a flow -- which
+        is what shares outstanding and shareholders' equity are. Returns the
+        one with the latest ``period_end``, not the latest filing: a filing
+        restating an older period must not displace a newer balance.
+        """
+        facts = self._facts(metric, 0, on)
+        return max(facts, key=lambda f: f.period_end) if facts else None
+
+    def latest_annual(self, metric: str, on: dt.date) -> Fact | None:
+        """Public alias of the staleness-checked annual read."""
+        return self._latest_annual(metric, on)
 
     def sue(self, on: dt.date) -> float | None:
         """Standardised unexpected earnings, seasonal random walk, as of ``on``."""
