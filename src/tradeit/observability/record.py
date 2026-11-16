@@ -608,6 +608,25 @@ def record_backtest_result(
     the ledger discipline this project runs on depends on that flag meaning what
     it says.
 
+    ``trade_count`` is taken from ``len(result.trades)`` rather than from
+    ``metrics``, and that is the fix for a defect rather than a preference.
+    **The column was never written at all** until 2026-11-16: nine metric
+    fields were copied across and this one was not, and because it is
+    ``NOT NULL DEFAULT 0`` the omission was silent. Every run in all three
+    decision records on this machine therefore claims **zero trades** while its
+    ``backtest_trades`` rows exist — 1,402 for the 2003-2019 run, 106 for the
+    first, 17,392 across the 53 robustness runs. Found by pointing Phase 10's
+    read side at a real record and reading what it would have displayed, which
+    is the whole argument for building the dashboard: nothing else had ever
+    looked at this column.
+
+    The count comes from the trade list because that list is what the loop
+    below writes, so the column and the rows cannot disagree by construction —
+    where ``metrics.trade_count`` is a second opinion that is ``None`` on a
+    failed run, exactly when the number of recorded trades is most worth
+    knowing. ``exposure_pct`` and ``benchmark_return_pct`` were omitted the
+    same way and are now copied too.
+
     Does not commit, like every writer here.
     """
     metrics = result.metrics
@@ -631,6 +650,9 @@ def record_backtest_result(
         win_rate=metrics.win_rate if metrics else None,
         profit_factor=metrics.profit_factor if metrics else None,
         expectancy_r=metrics.expectancy_r if metrics else None,
+        trade_count=len(result.trades),
+        exposure_pct=metrics.exposure_pct if metrics else None,
+        benchmark_return_pct=metrics.benchmark_return_pct if metrics else None,
     )
     session.add(run)
     session.flush()

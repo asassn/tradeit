@@ -49,18 +49,29 @@ from collections.abc import Iterator
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from sqlalchemy import create_engine, select
+from fastapi.responses import HTMLResponse
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from tradeit.api.page import PAGE
 from tradeit.observability.record import reconstruct
 from tradeit.storage.tables import (
     BacktestRun,
     BacktestTrade,
     JournalEntry,
     OpportunityScore,
+    SymbolMapping,
 )
 
 __all__ = ["create_app"]
+
+#: Why an instrument may have no ticker in a response. Spelled out rather than
+#: returned as ``null``, because the two readings of a bare null -- "this
+#: security has no ticker" and "nobody recorded one here" -- are different
+#: facts and only the second is ever true. Measured 2026-11-16: all three
+#: decision records on this machine hold **zero** ``symbol_mappings`` rows, so
+#: this is the normal answer rather than an edge case.
+NO_TICKER = "no symbol_mappings row in this record; the ticker is unrecorded, not absent"
 
 
 def _get_session(request: Request) -> Iterator[Session]:
@@ -91,6 +102,67 @@ def _get_session(request: Request) -> Iterator[Session]:
 SessionDep = Annotated[Session, Depends(_get_session)]
 
 
+def _tickers_for(session: Session, ids: list[int]) -> dict[int, str]:
+    """Resolve instrument ids to tickers, and leave out what cannot be resolved.
+
+    **Absence from the returned mapping is the signal**, which is why this
+    returns only what it found rather than a dict of ``id -> str | None``. The
+    caller attaches :data:`NO_TICKER` to the gaps, so a reader is told the
+    ticker is *unrecorded* rather than shown a blank that reads as *untickered*.
+
+    **An instrument with more than one mapping is left unresolved.** That is
+    the fail-closed rule the rest of the system runs on applied to a display
+    field: a security whose ticker changed, or whose ticker was reused, has
+    several rows here and picking one --- the newest, say --- would put a
+    confident wrong label on a chart. Labelling a 2004 score with a ticker the
+    security only carried in 2019 is precisely the splice the identity
+    architecture exists to prevent, and a dashboard is where somebody would
+    believe it. Interval-correct resolution needs the session date of the row
+    being labelled, which is a per-row question this per-instrument helper
+    cannot answer; until a route needs it, ambiguity is reported instead.
+    """
+    if not ids:
+        return {}
+    rows = session.execute(
+        select(SymbolMapping.instrument_id, SymbolMapping.ticker).where(
+            SymbolMapping.instrument_id.in_(ids)
+        )
+    ).all()
+    found: dict[int, str] = {}
+    ambiguous: set[int] = set()
+    for instrument_id, ticker in rows:
+        key = int(instrument_id)
+        if key in found and found[key] != ticker:
+            ambiguous.add(key)
+        found[key] = ticker
+    for key in ambiguous:
+        del found[key]
+    return found
+
+
+def _horizons_for(session: Session, ids: list[int]) -> dict[int, list[str]]:
+    """Which horizons each instrument has a recorded conclusion at.
+
+    A ``NULL`` mandate becomes ``"unrecorded"`` rather than being dropped or
+    folded into Swing: those rows predate migration 0020 and nobody wrote down
+    what they were. Dropping them would under-report what the record holds;
+    folding them into Swing would be an invention.
+    """
+    if not ids:
+        return {}
+    rows = session.execute(
+        select(OpportunityScore.instrument_id, OpportunityScore.mandate)
+        .where(OpportunityScore.instrument_id.in_(ids))
+        .distinct()
+    ).all()
+    out: dict[int, list[str]] = {}
+    for instrument_id, mandate in rows:
+        out.setdefault(int(instrument_id), []).append(mandate or "unrecorded")
+    for value in out.values():
+        value.sort()
+    return out
+
+
 def create_app(dsn: str) -> FastAPI:
     """Build the service over one decision record.
 
@@ -102,6 +174,12 @@ def create_app(dsn: str) -> FastAPI:
     """
     engine = create_engine(dsn, future=True)
     factory = sessionmaker(bind=engine, future=True)
+    # Rendered through SQLAlchemy's own URL rather than printed, because the
+    # page displays it and a Postgres DSN carries a password. `hide_password`
+    # is the library's redaction and is used instead of a hand-rolled one: the
+    # rule that no credential is ever printed or logged does not get a weaker
+    # implementation just because this one goes to a local browser.
+    record_label = engine.url.render_as_string(hide_password=True)
 
     app = FastAPI(
         title="TradeIt research interface",
@@ -112,6 +190,15 @@ def create_app(dsn: str) -> FastAPI:
         version="0.1.0",
     )
     app.state.session_factory = factory
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def index() -> str:
+        """The screen. Served from this process, so it needs no network at all.
+
+        ``include_in_schema=False`` keeps the page out of the OpenAPI document:
+        it is a view over the routes below, not a route anything should call.
+        """
+        return PAGE
 
     @app.get("/health")
     def health(session: SessionDep) -> dict[str, Any]:
@@ -125,6 +212,11 @@ def create_app(dsn: str) -> FastAPI:
         runs = session.execute(select(BacktestRun)).first() is not None
         return {
             "reachable": True,
+            # Which record this is. There are several on this machine and they
+            # hold different runs; a screen that did not say which one it was
+            # reading would let a reader attribute one record's results to
+            # another. Password-redacted at construction.
+            "record": record_label,
             "has_scores": scores,
             "has_runs": runs,
             "note": (
@@ -136,29 +228,164 @@ def create_app(dsn: str) -> FastAPI:
 
     @app.get("/runs")
     def runs(session: SessionDep) -> list[dict[str, Any]]:
-        """Every recorded run, with its metrics and whether it was out of sample."""
+        """Every recorded run, with its metrics and whether it was out of sample.
+
+        **Two trade counts, reported separately and never reconciled here.**
+        ``trades_recorded`` is counted from ``backtest_trades``;
+        ``trade_count_column`` is what the run row claims. They agree for
+        anything written after 2026-11-16, when the writer was fixed to
+        populate the column at all --- it is ``NOT NULL DEFAULT 0``, so for
+        every run recorded before then it reads **0 beside real trade rows**
+        (1,402, 106 and 17,392 across the three records on this machine).
+
+        Substituting the counted value silently would have been the easier
+        move and the wrong one: it would repair the display of a record that
+        is still wrong on disk, and the next reader to query the table
+        directly would get the old answer with nothing to warn them.
+        ``trade_count_disagrees`` names it instead.
+        """
         rows = session.execute(select(BacktestRun).order_by(BacktestRun.id)).scalars().all()
-        return [
-            {
-                "id": row.id,
-                "name": row.name,
-                "status": row.status,
-                "start": row.start_date.isoformat(),
-                "end": row.end_date.isoformat(),
-                "universe": row.universe,
-                "is_out_of_sample": row.is_out_of_sample,
-                "run_manifest_id": row.run_manifest_id,
-                "metrics": {
-                    "total_return_pct": row.total_return_pct,
-                    "cagr": row.cagr,
-                    "max_drawdown_pct": row.max_drawdown_pct,
-                    "sharpe": row.sharpe,
-                    "win_rate": row.win_rate,
-                    "profit_factor": row.profit_factor,
-                },
-            }
-            for row in rows
-        ]
+        counted: dict[int, int] = {
+            int(run_id): int(n)
+            for run_id, n in session.execute(
+                select(BacktestTrade.backtest_run_id, func.count())
+                .group_by(BacktestTrade.backtest_run_id)
+                .where(BacktestTrade.backtest_run_id.in_([row.id for row in rows]))
+            ).all()
+        }
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            recorded = int(counted.get(row.id, 0))
+            out.append(
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "status": row.status,
+                    "start": row.start_date.isoformat(),
+                    "end": row.end_date.isoformat(),
+                    "universe": row.universe,
+                    "is_out_of_sample": row.is_out_of_sample,
+                    "run_manifest_id": row.run_manifest_id,
+                    "trades_recorded": recorded,
+                    "trade_count_column": row.trade_count,
+                    "trade_count_disagrees": (
+                        None
+                        if row.trade_count == recorded
+                        else (
+                            f"the run row claims {row.trade_count} trades and "
+                            f"{recorded} backtest_trades rows reference it; the "
+                            "column was not written before 2026-11-16"
+                        )
+                    ),
+                    "metrics": {
+                        "total_return_pct": row.total_return_pct,
+                        "cagr": row.cagr,
+                        "max_drawdown_pct": row.max_drawdown_pct,
+                        "sharpe": row.sharpe,
+                        "win_rate": row.win_rate,
+                        "profit_factor": row.profit_factor,
+                        "exposure_pct": row.exposure_pct,
+                        "benchmark_return_pct": row.benchmark_return_pct,
+                    },
+                    # `statistically_meaningful` is `trade_count >= 30`. Applied
+                    # to the counted rows, never to the column, or a repaired
+                    # record would still read "not enough trades to interpret".
+                    "statistically_meaningful": recorded >= 30,
+                }
+            )
+        return out
+
+    @app.get("/instruments")
+    def instruments(
+        session: SessionDep,
+        limit: Annotated[int, Query(ge=1, le=2000)] = 200,
+    ) -> dict[str, Any]:
+        """Which securities this record has anything to say about.
+
+        **Added because the service could not be navigated.** Every other
+        per-security route keys on ``instrument_id``, and nothing returned one:
+        a reader had to already know the id of the thing they wanted to look
+        up, which means the only way in was a direct SQL query against the
+        record the service exists to stand in front of.
+
+        Ordered by how much is recorded, not alphabetically. A list sorted by
+        id puts the emptiest rows first and buries the securities with
+        something to show.
+        """
+        rows = session.execute(
+            select(
+                OpportunityScore.instrument_id,
+                func.count().label("scores"),
+                func.min(OpportunityScore.session_date),
+                func.max(OpportunityScore.session_date),
+            )
+            .group_by(OpportunityScore.instrument_id)
+            .order_by(func.count().desc(), OpportunityScore.instrument_id)
+            .limit(limit)
+        ).all()
+        ids = [int(row[0]) for row in rows]
+        tickers = _tickers_for(session, ids)
+        horizons = _horizons_for(session, ids)
+        return {
+            "returned": len(rows),
+            "instruments": [
+                {
+                    "instrument_id": int(row[0]),
+                    "ticker": tickers.get(int(row[0])),
+                    "ticker_note": None if int(row[0]) in tickers else NO_TICKER,
+                    "scores": int(row[1]),
+                    "first_session": row[2].isoformat(),
+                    "last_session": row[3].isoformat(),
+                    # Which horizons this security has a conclusion at, and no
+                    # aggregate across them. The list is the answer; a count
+                    # would invite "3 of 3" being read as agreement.
+                    "horizons": horizons.get(int(row[0]), []),
+                }
+                for row in rows
+            ],
+            "note": (
+                "securities with at least one recorded score, most-recorded "
+                "first. No ranking is implied: this orders by how much the "
+                "record holds, not by how attractive anything is."
+            ),
+        }
+
+    @app.get("/sessions")
+    def sessions(
+        session: SessionDep,
+        limit: Annotated[int, Query(ge=1, le=2000)] = 200,
+    ) -> dict[str, Any]:
+        """Which sessions this record has anything to say about, newest first.
+
+        The companion to ``/instruments`` and added for the same reason:
+        ``GET /sessions/{date}`` needed a date nothing would tell you.
+
+        **This lists sessions that produced scores, which is not the same as
+        sessions that can be walked end to end.** A date appearing here says
+        only that something was recorded on it; whether the chain from score
+        to execution is complete is what ``/sessions/{date}`` answers, through
+        ``missing``. Folding that in would mean running the full
+        reconstruction for every date to build a menu, and would let an
+        incomplete session disappear from the list rather than be found and
+        shown as incomplete.
+        """
+        rows = session.execute(
+            select(OpportunityScore.session_date, func.count())
+            .group_by(OpportunityScore.session_date)
+            .order_by(OpportunityScore.session_date.desc())
+            .limit(limit)
+        ).all()
+        return {
+            "returned": len(rows),
+            "sessions": [
+                {"session_date": row[0].isoformat(), "scores": int(row[1])} for row in rows
+            ],
+            "note": (
+                "sessions with at least one recorded score. Presence here is "
+                "not a claim that the session can be walked end to end; read "
+                "`missing` on the session itself for that."
+            ),
+        }
 
     @app.get("/runs/{run_id}/trades")
     def run_trades(

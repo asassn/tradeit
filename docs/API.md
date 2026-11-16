@@ -1,7 +1,46 @@
 # API Specification
 
-FastAPI service, built in Phase 9. This document is the contract it will
-implement; nothing here is running yet.
+FastAPI service. **This document is the contract the service will grow into,
+and most of it is not implemented.** It is kept as the target rather than
+trimmed to what exists, because the conventions below — manifests on every
+decision response, `as_of` as a first-class parameter, no order placement over
+HTTP in any mode — are decisions, not aspirations, and each new route is held
+to them.
+
+**"Built in Phase 9" was wrong and is corrected here**: the service is Phase
+10's, and the sentence *"nothing here is running yet"* stopped being true on
+2026-11-16.
+
+## What is actually running
+
+Measured, not planned. `src/tradeit/api/app.py`, started with:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard --record <path>
+```
+
+| route | answers |
+|---|---|
+| `GET /` | the screen — one self-contained page over the routes below |
+| `GET /health` | is the record reachable, which record is it, does it hold anything |
+| `GET /runs` | every recorded run, with trades **counted from the rows** |
+| `GET /runs/{id}/trades` | one run's trades, with the total so a page cannot pass for the whole |
+| `GET /sessions` | which sessions the record can speak about |
+| `GET /sessions/{date}` | what was decided, and **`missing`** — read that first |
+| `GET /instruments` | which securities the record can speak about |
+| `GET /instruments/{id}/panel` | one security, each horizon separately, absent ones with a reason |
+| `GET /instruments/{id}/scores` | one security's scores as recorded, unaggregated |
+
+**There are no write routes**, so the "writes are narrow and audited" section
+below describes none of what exists. The constraints the running service
+enforces are in
+[ADR-0035](adr/0035-the-dashboard-shows-what-the-record-holds.md).
+
+**Not implemented, and each for a stated reason:** the valuation callout (the
+reasoning that must ship with it does not exist), live news and attention
+(gated on a source with honest publication timestamps), and the onboard
+assistant (only as honest as the record beneath it, which is one backtest and
+eighteen forward sessions deep).
 
 ## Principles
 

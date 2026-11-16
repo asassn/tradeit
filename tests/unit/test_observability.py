@@ -652,6 +652,152 @@ def test_a_backtest_result_writes_its_run_and_every_trade(db_session: Session) -
     assert {row.instrument_id for row in rows} == {7, 9}
 
 
+def _metrics_with(**overrides: object) -> object:
+    from tradeit.backtesting.base import PerformanceMetrics
+
+    base: dict[str, object] = {
+        "total_return_pct": 0.5,
+        "cagr": 0.02,
+        "max_drawdown_pct": 0.3,
+        "max_drawdown_duration_sessions": 40,
+        "sharpe": 0.09,
+        "sortino": 0.1,
+        "calmar": 0.08,
+        "win_rate": 0.5,
+        "profit_factor": 1.18,
+        "expectancy_r": 0.33,
+        "average_win_r": 1.1,
+        "average_loss_r": -0.8,
+        "trade_count": 2,
+        "exposure_pct": 0.42,
+        "turnover": 3.0,
+        "benchmark_return_pct": 0.21,
+    }
+    base.update(overrides)
+    return PerformanceMetrics(**base)  # type: ignore[arg-type]
+
+
+def test_the_run_records_how_many_trades_it_recorded(db_session: Session) -> None:
+    """`trade_count` was never written, so every persisted run claimed zero.
+
+    The column is `NOT NULL DEFAULT 0`, so omitting it from the writer was
+    silent: nine metric fields were copied across and this one was not. All
+    three decision records on this machine carry runs reading **0 trades**
+    beside 1,402, 106 and 17,392 real `backtest_trades` rows. Nothing had ever
+    read the column, which is why it survived; pointing Phase 10's read side at
+    a real record is what surfaced it.
+
+    The invariant under test is **agreement between the summary and the rows**,
+    not the literal number: a run may not claim a trade count its own trade
+    rows contradict. Asserting the two against each other is what keeps this
+    test meaningful if the fixture's trade list ever changes.
+    """
+    from tradeit.observability.record import record_backtest_result
+    from tradeit.storage.tables import BacktestRun
+    from tradeit.storage.tables import BacktestTrade as BacktestTradeRow
+
+    manifest_id = _persist_manifest_row(db_session)
+    record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        _backtest_result((_backtest_trade(), _backtest_trade(instrument_id=9))),  # type: ignore[arg-type]
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+
+    run = db_session.query(BacktestRun).one()
+    written = db_session.query(BacktestTradeRow).filter_by(backtest_run_id=run.id).count()
+    assert written == 2, "fixture changed; the agreement below is what matters"
+    assert run.trade_count == written
+
+
+def test_a_run_that_produced_no_trades_records_zero_rather_than_defaulting_to_it(
+    db_session: Session,
+) -> None:
+    """Zero must be a measurement here, not the column default showing through.
+
+    This is the case the previous test cannot cover: before the fix, a run with
+    no trades also read 0, and it read 0 for the wrong reason. The two tests
+    together say the number tracks the trade list in both directions.
+    """
+    from tradeit.observability.record import record_backtest_result
+    from tradeit.storage.tables import BacktestRun
+
+    manifest_id = _persist_manifest_row(db_session)
+    record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        _backtest_result(()),  # type: ignore[arg-type]
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+    assert db_session.query(BacktestRun).one().trade_count == 0
+
+
+def test_the_trade_count_is_the_rows_written_not_the_metrics_opinion(
+    db_session: Session,
+) -> None:
+    """Two sources could answer this, and the schema only tolerates one.
+
+    `metrics.trade_count` is a second opinion computed elsewhere, and it is
+    `None` for a failed run -- exactly when the number of recorded trades is
+    most worth knowing. The count therefore comes from the trade list the
+    writer itself iterates, so the summary and the rows cannot drift apart.
+    Here the metrics deliberately disagree with the trade list, and the rows
+    win.
+    """
+    from tradeit.backtesting.base import BacktestResult, BacktestStatus
+    from tradeit.observability.record import record_backtest_result
+    from tradeit.storage.tables import BacktestRun
+
+    manifest_id = _persist_manifest_row(db_session)
+    result = BacktestResult(
+        spec=_backtest_spec(),  # type: ignore[arg-type]
+        status=BacktestStatus.COMPLETED,
+        trades=(_backtest_trade(),),  # type: ignore[arg-type]
+        equity_curve=(),
+        metrics=_metrics_with(trade_count=999),  # type: ignore[arg-type]
+        manifest=None,
+    )
+    record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        result,
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+    assert db_session.query(BacktestRun).one().trade_count == 1
+
+
+def test_exposure_and_benchmark_return_are_persisted(db_session: Session) -> None:
+    """Omitted by the same oversight as `trade_count`, and nullable, so they
+    simply read NULL rather than reading wrong. Both are measured in
+    `PerformanceMetrics` and both were dropped on the way to the row."""
+    from tradeit.backtesting.base import BacktestResult, BacktestStatus
+    from tradeit.observability.record import record_backtest_result
+    from tradeit.storage.tables import BacktestRun
+
+    manifest_id = _persist_manifest_row(db_session)
+    result = BacktestResult(
+        spec=_backtest_spec(),  # type: ignore[arg-type]
+        status=BacktestStatus.COMPLETED,
+        trades=(_backtest_trade(),),  # type: ignore[arg-type]
+        equity_curve=(),
+        metrics=_metrics_with(),  # type: ignore[arg-type]
+        manifest=None,
+    )
+    record_backtest_result(
+        db_session,
+        _backtest_spec(),  # type: ignore[arg-type]
+        result,
+        run_manifest_id=manifest_id,
+    )
+    db_session.flush()
+    run = db_session.query(BacktestRun).one()
+    assert run.exposure_pct == pytest.approx(0.42)
+    assert run.benchmark_return_pct == pytest.approx(0.21)
+
+
 def test_backtest_trades_go_to_backtest_trades_not_to_trades(
     db_session: Session,
 ) -> None:

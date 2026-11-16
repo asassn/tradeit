@@ -158,13 +158,29 @@ The decision record answers it, and the read side serves it:
 
 ```bash
 .venv/bin/pip install -e ".[api]"
-.venv/bin/uvicorn --factory "tradeit.api:create_app" --host 127.0.0.1 --port 8000
+PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard \
+  --record ~/Documents/TradeItData/out/decision_record_2003_2019.sqlite
 ```
 
-`create_app` takes the record's DSN and has **no default**, so a wrapper is
-needed to pass one — deliberately, because the record and the corpus are
-different databases and a service that defaulted to the configured DSN would
-read whichever happened to be configured.
+Then open <http://127.0.0.1:8000/>. The screen is served from that same
+process, so it needs no network at all.
+
+**This block used to read
+`uvicorn --factory "tradeit.api:create_app"` and could not work.** `create_app`
+takes the record's DSN and has **no default** — deliberately, because the
+record and the corpus are different databases and a service that defaulted to
+the configured DSN would read whichever happened to be configured — and the
+wrapper this page said was needed to pass one had never been written, so the
+command raised `TypeError` before binding a port. `tradeit dashboard` is that
+wrapper ([ADR-0035](adr/0035-the-dashboard-shows-what-the-record-holds.md)).
+
+`--record` is required for the same reason, and **a path that does not exist
+is refused rather than created**: SQLite makes an empty database on connect, so
+a mistyped path would otherwise start a service that answers every route with
+nothing — which reads exactly like a record in which nothing happened.
+
+`--host` defaults to loopback and warns when it is changed. The service is
+read-only and cannot trade, but nothing authenticates it.
 
 Fill the record first, or every answer is empty:
 

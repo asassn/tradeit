@@ -20,7 +20,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.api import create_app
@@ -28,7 +28,13 @@ from tradeit.core.enums import OrderSide, OrderType
 from tradeit.execution.base import OrderRequest
 from tradeit.execution.journal import JournalEntryKind, record_entry
 from tradeit.observability.record import record_order, record_score
-from tradeit.storage.tables import ArtifactVersion, BacktestRun, Base, RunManifest
+from tradeit.storage.tables import (
+    ArtifactVersion,
+    BacktestRun,
+    Base,
+    RunManifest,
+    SymbolMapping,
+)
 from tradeit.storage.tables import BacktestTrade as BacktestTradeRow
 
 SESSION = dt.date(2015, 6, 1)
@@ -376,3 +382,235 @@ def test_a_score_with_no_recorded_horizon_is_its_own_bucket(record: str) -> None
     assert "unrecorded" in body["horizons"]
     assert body["unrecorded_horizon_rows"] == 1
     assert len(body["horizons"]["swing"]) == 1, "the NULL row leaked into swing"
+
+
+# ---------------------------------------------------------------------------
+# The screen, and the routes that make the service navigable.
+#
+# Added 2026-11-16 with Phase 10's first milestone. Everything above this line
+# tested a service nothing could open: `create_app` required a DSN, the runbook
+# documented a start command that raised `TypeError` for want of a wrapper, and
+# every per-security route keyed on an `instrument_id` that no route returned.
+# ---------------------------------------------------------------------------
+
+
+def test_the_page_is_served_and_needs_no_network(record: str) -> None:
+    """The screen is served from this process, with no CDN and no build step.
+
+    The assertion is about *self-containment*, not about markup: a page that
+    pulled a script or a stylesheet from elsewhere would be a page that stops
+    working on a machine with no network, and this one is meant to open over a
+    local record with the wifi off.
+    """
+    client = TestClient(create_app(record))
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    body = response.text
+    assert "<title>TradeIt research interface</title>" in body
+    assert 'src="http' not in body
+    assert 'href="http' not in body
+    assert "cdn" not in body.lower()
+
+
+def test_the_page_is_not_in_the_api_schema(record: str) -> None:
+    """It is a view over the routes, not a route anything should call."""
+    client = TestClient(create_app(record))
+    assert "/" not in client.get("/openapi.json").json()["paths"]
+
+
+def test_health_names_which_record_it_is_reading(record: str) -> None:
+    """There are several records on this machine and they hold different runs.
+
+    A screen that did not say which one it was reading would let a reader
+    attribute one record's results to another, which is the confusion
+    `tradeit status` had to be fixed for.
+    """
+    assert record in TestClient(create_app(record)).get("/health").json()["record"]
+
+
+def test_the_record_label_never_carries_a_password() -> None:
+    """The rule that no credential is printed or logged does not get a weaker
+    implementation because this one goes to a local browser."""
+    dsn = "postgresql+psycopg://someone:hunter2@localhost:5432/record"
+    app = create_app(dsn)
+    client = TestClient(app)
+    # The engine is never connected -- only the rendered label is under test,
+    # and `/health` would need a live Postgres.
+    label = app.state.session_factory.kw["bind"].url.render_as_string(hide_password=True)
+    assert "hunter2" not in label
+    assert "***" in label
+    del client
+
+
+def test_instruments_lists_what_the_record_can_speak_about(record: str) -> None:
+    """Without this the service could not be navigated: every per-security
+    route keys on an id and nothing returned one, so the only way in was a
+    direct SQL query against the record the service stands in front of."""
+    _populate(record)
+    body = TestClient(create_app(record)).get("/instruments").json()
+    assert body["returned"] == 1
+    row = body["instruments"][0]
+    assert row["instrument_id"] == 7
+    assert row["scores"] == 1
+    assert row["horizons"] == ["swing"]
+    assert row["first_session"] == SESSION.isoformat()
+
+
+def test_an_unresolvable_ticker_is_named_as_unrecorded_not_left_blank(record: str) -> None:
+    """A blank reads as "this security has no ticker"; the truth is "nobody
+    wrote one down". Measured 2026-11-16: all three decision records on this
+    machine hold zero `symbol_mappings` rows, so this is the normal answer."""
+    _populate(record)
+    row = TestClient(create_app(record)).get("/instruments").json()["instruments"][0]
+    assert row["ticker"] is None
+    assert "unrecorded, not absent" in row["ticker_note"]
+
+
+def test_a_ticker_resolves_when_the_record_holds_exactly_one(record: str) -> None:
+    """The companion to the test above, so neither can go vacuous: without it,
+    a helper that resolved nothing at all would still pass."""
+    _populate(record)
+    engine = create_engine(record, future=True)
+    with sessionmaker(bind=engine, future=True)() as session:
+        session.add(
+            SymbolMapping(
+                instrument_id=7, ticker="AAPL", valid_from=dt.date(2000, 1, 1), source="t"
+            )
+        )
+        session.commit()
+    row = TestClient(create_app(record)).get("/instruments").json()["instruments"][0]
+    assert row["ticker"] == "AAPL"
+    assert row["ticker_note"] is None
+
+
+def test_two_tickers_for_one_security_resolve_to_neither(record: str) -> None:
+    """Fail closed on identity, applied to a display field.
+
+    A security whose ticker changed, or whose ticker was reused, has several
+    rows here. Picking the newest would label a 2004 score with a ticker the
+    security only carried in 2019 -- the splice the identity architecture
+    exists to prevent, shown on a chart where somebody would believe it.
+    """
+    _populate(record)
+    engine = create_engine(record, future=True)
+    with sessionmaker(bind=engine, future=True)() as session:
+        session.add(
+            SymbolMapping(
+                instrument_id=7,
+                ticker="OLD",
+                valid_from=dt.date(2000, 1, 1),
+                valid_to=dt.date(2010, 1, 1),
+                source="t",
+            )
+        )
+        session.add(
+            SymbolMapping(instrument_id=7, ticker="NEW", valid_from=dt.date(2010, 1, 1), source="t")
+        )
+        session.commit()
+    row = TestClient(create_app(record)).get("/instruments").json()["instruments"][0]
+    assert row["ticker"] is None, "an ambiguous identity must not be resolved to one of them"
+    assert row["ticker_note"] is not None
+
+
+def test_sessions_lists_dates_newest_first(record: str) -> None:
+    """`GET /sessions/{date}` needed a date that nothing would tell you."""
+    _populate(record)
+    engine = create_engine(record, future=True)
+    with sessionmaker(bind=engine, future=True)() as session:
+        manifest_id = session.execute(select(RunManifest.id)).scalar_one()
+        record_score(
+            session,
+            instrument_id=7,
+            session_date=SESSION + dt.timedelta(days=5),
+            direction="long",
+            total=0.1,
+            components={"ma_spread": 0.1},
+            run_manifest_id=manifest_id,
+            mandate="swing",
+            timeframe="1d",
+        )
+        session.commit()
+    body = TestClient(create_app(record)).get("/sessions").json()
+    dates = [row["session_date"] for row in body["sessions"]]
+    assert dates == sorted(dates, reverse=True)
+    assert dates[0] == (SESSION + dt.timedelta(days=5)).isoformat()
+
+
+def test_listing_a_session_is_not_a_claim_that_it_can_be_walked(record: str) -> None:
+    """Presence in the menu says only that something was recorded.
+
+    Folding the end-to-end check in would mean reconstructing every date to
+    build a menu, and would let an incomplete session vanish from the list
+    rather than be found and shown as incomplete -- which is the one thing
+    this service exists to make visible.
+    """
+    _populate(record)
+    client = TestClient(create_app(record))
+    listed = client.get("/sessions").json()["sessions"][0]["session_date"]
+    assert client.get(f"/sessions/{listed}").json()["missing"], (
+        "fixture changed; this session is meant to be incomplete"
+    )
+
+
+def test_a_run_reports_the_trades_that_reference_it(record: str) -> None:
+    """`trade_count` is `NOT NULL DEFAULT 0` and was never written, so every
+    run recorded before 2026-11-16 claims zero trades beside real rows."""
+    _populate(record)
+    row = TestClient(create_app(record)).get("/runs").json()[0]
+    assert row["trades_recorded"] == 3
+    assert row["trade_count_column"] == 0
+
+
+def test_the_disagreement_is_named_rather_than_silently_corrected(record: str) -> None:
+    """Substituting the counted value would repair the display of a record
+    that is still wrong on disk, and the next reader to query the table
+    directly would get the old answer with nothing to warn them."""
+    _populate(record)
+    row = TestClient(create_app(record)).get("/runs").json()[0]
+    assert row["trade_count_disagrees"] is not None
+    assert "0" in row["trade_count_disagrees"] and "3" in row["trade_count_disagrees"]
+
+
+def test_an_agreeing_run_raises_no_flag(record: str) -> None:
+    """Without this the flag could be unconditional and every test above would
+    still pass."""
+    _populate(record)
+    engine = create_engine(record, future=True)
+    with sessionmaker(bind=engine, future=True)() as session:
+        session.execute(select(BacktestRun)).scalar_one().trade_count = 3
+        session.commit()
+    assert TestClient(create_app(record)).get("/runs").json()[0]["trade_count_disagrees"] is None
+
+
+def test_sample_size_is_judged_on_the_rows_not_on_the_column(record: str) -> None:
+    """`statistically_meaningful` is `trade_count >= 30`. Read from the stale
+    column, a repaired record would still read "not enough trades to
+    interpret" -- so it is computed from what the record actually holds."""
+    _populate(record)
+    engine = create_engine(record, future=True)
+    with sessionmaker(bind=engine, future=True)() as session:
+        run_id = session.execute(select(BacktestRun.id)).scalar_one()
+        for index in range(40):
+            session.add(
+                BacktestTradeRow(
+                    backtest_run_id=run_id,
+                    instrument_id=100 + index,
+                    side="long",
+                    quantity=Decimal(1),
+                    entry_date=SESSION,
+                    entry_price=Decimal(100),
+                    exit_date=SESSION + dt.timedelta(days=1),
+                    exit_price=Decimal(101),
+                    exit_reason="time_stop",
+                    gross_pnl=Decimal(1),
+                    costs=Decimal(0),
+                    net_pnl=Decimal(1),
+                    return_pct=0.01,
+                    holding_sessions=1,
+                )
+            )
+        session.commit()
+    row = TestClient(create_app(record)).get("/runs").json()[0]
+    assert row["trade_count_column"] == 0
+    assert row["statistically_meaningful"] is True
