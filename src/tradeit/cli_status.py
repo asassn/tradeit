@@ -458,6 +458,16 @@ def cmd_status(args: argparse.Namespace) -> int:
             "    These block rather than defaulting. A threshold nobody chose would\n"
             "    become policy by accident, which is what the roadmap forbids."
         )
+    else:
+        # **Said affirmatively, not left as a bare 0.** All four were owed as
+        # recently as 2026-10-22 and the last was approved 2026-11-15; a reader
+        # seeing only a zero cannot tell "all approved" from "this command no
+        # longer checks".
+        print(
+            "    every promotion threshold is approved -- ADR-0029, ADR-0031 and\n"
+            "    ADR-0034. Promotion is now blocked only by missing evidence, never\n"
+            "    by a missing decision."
+        )
 
     print("\n=== what this command does not tell you ===")
     print(

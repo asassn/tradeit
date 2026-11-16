@@ -378,3 +378,105 @@ def test_an_undefined_annualised_degradation_is_none_not_zero() -> None:
     window = WindowResult(window=_window(), in_sample=_result(None), out_of_sample=_result(None))
     assert window.annualised_degradation is None
     assert WalkForwardReport(mode="anchored", results=(window,)).mean_annualised_degradation is None
+
+
+def _pair(
+    *, in_cagr: float, out_cagr: float, in_total: float = 99.0, out_total: float = 99.0
+) -> WindowResult:
+    return WindowResult(
+        window=_window(),
+        # Uses the module's existing `_metrics`. A second helper of the same
+        # name was written here first and shadowed it, breaking three unrelated
+        # tests -- the duplicate took `total=` where the original takes
+        # `total_return_pct=`, so the failure named the callers rather than the
+        # redefinition.
+        in_sample=_result(_metrics(total_return_pct=in_total, cagr=in_cagr)),
+        out_of_sample=_result(_metrics(total_return_pct=out_total, cagr=out_cagr)),
+    )
+
+
+class TestEdgeRetained:
+    """The fragility bar the owner approved on 2026-11-15 (ADR-0034).
+
+    `degradation` is a *difference* of total returns, so it is in percentage
+    points and its size tracks span length. `edge_retained` is the share of the
+    annualised edge that travelled, which is what "keeps half its edge" means.
+    """
+
+    def test_it_is_the_share_of_the_edge_that_survived(self) -> None:
+        """Mutant: `out - in` instead of `out / in`. Caught."""
+        assert _pair(in_cagr=0.10, out_cagr=0.05).edge_retained == pytest.approx(0.5)
+        assert _pair(in_cagr=0.10, out_cagr=0.08).edge_retained == pytest.approx(0.8)
+
+    def test_a_strategy_that_loses_money_out_of_sample_retains_a_negative_share(
+        self,
+    ) -> None:
+        """Not clamped at zero: losing money out of sample is worse than keeping
+        none of the edge, and the number should say so.
+
+        Mutant: `max(0.0, ...)`. Caught.
+        """
+        assert _pair(in_cagr=0.10, out_cagr=-0.05).edge_retained == pytest.approx(-0.5)
+
+    def test_it_reads_cagr_not_total_return(self) -> None:
+        """**The reason the metric exists at all.**
+
+        Total return is not comparable across spans of different length: on
+        2003-2019 anchored, mean degradation read +34.10% almost entirely
+        because the in-sample span grew to fifteen years against a one-year
+        test. A ratio built on total return would inherit that.
+
+        Mutant: divide the total returns. Caught -- these two differ.
+        """
+        window = _pair(in_cagr=0.10, out_cagr=0.05, in_total=1.5, out_total=0.05)
+
+        assert window.edge_retained == pytest.approx(0.5), "0.05/0.10, not 0.05/1.5"
+
+    def test_no_in_sample_edge_means_unresolved_rather_than_a_number(self) -> None:
+        """**Fail closed, and this is the guard that matters.**
+
+        A strategy with no in-sample edge has no edge to retain, so the ratio
+        has no meaning -- and near zero it explodes into an artefact. Returning
+        a number would let a strategy that never worked pass a fragility bar.
+
+        Mutant: drop the `in_sample_cagr <= 0` guard. Caught -- a flat
+        in-sample window raises ZeroDivisionError, and a negative one returns a
+        positive-looking ratio from two losses.
+        """
+        assert _pair(in_cagr=0.0, out_cagr=0.05).edge_retained is None
+        assert _pair(in_cagr=-0.10, out_cagr=-0.05).edge_retained is None
+
+    def test_a_missing_side_is_unresolved(self) -> None:
+        """Mutant: assume metrics are present. Caught."""
+        bare = WindowResult(
+            window=_window(),
+            in_sample=_result(_metrics(total_return_pct=0.1, cagr=0.1)),
+            out_of_sample=_result(None),
+        )
+
+        assert bare.edge_retained is None
+
+    def test_the_mean_skips_windows_with_no_edge_rather_than_scoring_them_zero(
+        self,
+    ) -> None:
+        """Scoring "no edge to lose" as "lost everything" would drag the mean
+        down on exactly the windows that say nothing about fragility.
+
+        Mutant: treat `None` as 0.0 in the mean. Caught -- 0.5 becomes 0.25.
+        """
+        report = WalkForwardReport(
+            mode="rolling",
+            results=(
+                _pair(in_cagr=0.10, out_cagr=0.05),
+                _pair(in_cagr=0.0, out_cagr=0.05),
+            ),
+        )
+
+        assert report.mean_edge_retained == pytest.approx(0.5)
+
+    def test_a_report_with_no_usable_window_reports_nothing(self) -> None:
+        """Mutant: return 0.0 instead of None. Caught -- 0.0 reads as "kept
+        none of it", which is a measurement, and there was none."""
+        report = WalkForwardReport(mode="rolling", results=(_pair(in_cagr=0.0, out_cagr=0.05),))
+
+        assert report.mean_edge_retained is None

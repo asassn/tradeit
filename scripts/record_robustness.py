@@ -256,9 +256,10 @@ def main() -> int:
         "\n  **The raw degradation is dominated by span length in ANCHORED mode** and\n"
         "  the annualised figure beside it is the comparable one. Window 12 compares a\n"
         "  15-year in-sample span against a 1-year test, so a +67.86% raw difference is\n"
-        "  mostly arithmetic. `readiness.criteria.out_of_sample_degradation` is fed by\n"
-        "  this and its threshold is one of the four still awaiting approval -- which\n"
-        "  one it should use is part of that decision."
+        "  mostly arithmetic. **That decision was taken on 2026-11-15 (ADR-0034):**\n"
+        "  `readiness.criteria.out_of_sample_degradation` reads `edge_retained` -- the\n"
+        "  share of the ANNUALISED edge that survived -- and requires at least half.\n"
+        "  `degradation` itself is untouched and is not what the criterion reads."
     )
     print(
         "\nNothing here is evidence about profitability. The point is that these\n"

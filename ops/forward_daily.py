@@ -260,6 +260,67 @@ def report_silences() -> None:
         print(f"silence report failed, the capture stands: {exc}", file=sys.stderr, flush=True)
 
 
+#: The EDGAR full-index, and where superseded copies go when one is replaced.
+INDEX_ROOT = Path("/Users/ericsasson/Documents/TradeItData/edgar/full-index")
+SUPERSEDED = Path("/Users/ericsasson/Documents/TradeItData/edgar/superseded")
+
+
+def refresh_edgar_index() -> None:
+    """Pull the current and previous quarter's filing index. **Never gates.**
+
+    Added 2026-11-15. The archive had held filings only to 2026-08-13 -- QTR3
+    downloaded mid-quarter and never revisited, QTR4 absent -- and **nothing
+    reported it**, so `tradeit.forward.silence` answered "no exit found" about
+    companies whose deregistration filings were not in the archive at all.
+
+    `report_silences` prints the index's age, which makes a gap visible. This
+    closes it. **Two quarters, not one**, because refreshing only the current
+    one leaves the previous one permanently incomplete the moment the calendar
+    turns -- which is precisely how the three-month gap happened.
+
+    **Never installs a file that knows less than the one it replaces**, and
+    preserves any line SEC has withdrawn; see `tradeit.edgar.refresh` for why
+    both matter. Runs *before* the captures so the night's reports read a
+    current index.
+
+    **No shell.** The published fetch recipe is ``curl`` in a loop, which is
+    right for an operator at a terminal and would fail silently here: macOS TCC
+    grants Documents access per executable and ``/bin/bash`` does not have it
+    under ``launchd``. See this module's own docstring.
+
+    Never raises and never changes the exit code. A refresh problem must not
+    cost a capture, and a session not captured cannot be bought back.
+    """
+    try:
+        src = str(REPO / "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        from tradeit.edgar.refresh import fetch_quarter, quarters_to_refresh, refresh_quarter
+
+        agent = os.environ.get("EDGAR_USER_AGENT", "")
+        if not agent.strip():
+            # Not an error. Without an identifying User-Agent we do not ask SEC
+            # at all -- fair-access guidance requires one, and an unidentified
+            # client is both rude and liable to be blocked.
+            print("no EDGAR_USER_AGENT; the filing index is not refreshed", flush=True)
+            return
+        stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+        print("\n--- filing index", flush=True)
+        for year, quarter in quarters_to_refresh(dt.datetime.now(dt.UTC).date()):
+            outcome = refresh_quarter(
+                year,
+                quarter,
+                root=INDEX_ROOT,
+                superseded=SUPERSEDED,
+                # The agent is passed, never printed: it carries contact details.
+                fetch=lambda y, q: fetch_quarter(y, q, user_agent=agent),
+                stamp=stamp,
+            )
+            print(outcome.describe(), flush=True)
+    except Exception as exc:
+        print(f"index refresh failed, the capture stands: {exc}", file=sys.stderr, flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     # **`--dry-run` is passed straight through**, so the scheduled job can be
     # proved end to end without spending a vendor's daily allowance. Without
@@ -274,6 +335,11 @@ def main(argv: list[str] | None = None) -> int:
     stamp = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
     print(f"=== forward capture {stamp} ===", flush=True)
     print(f"credentials loaded: {load_env(REPO / '.env')} names", flush=True)
+    # **Before the captures**, so the night's silence report reads a current
+    # index rather than yesterday's. `load_env` has just run, so
+    # EDGAR_USER_AGENT is available.
+    if not dry_run:
+        refresh_edgar_index()
 
     # Imported from its path rather than by name: `scripts/` is not a package
     # and must not become one just to be scheduled. Loaded once and called per

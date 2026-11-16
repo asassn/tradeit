@@ -116,6 +116,41 @@ class WindowResult:
             return None
         return self.in_sample.metrics.cagr - self.out_of_sample.metrics.cagr
 
+    @property
+    def edge_retained(self) -> float | None:
+        """Share of the in-sample annualised edge that survived out of sample.
+
+        ``0.6`` means three fifths of the edge travelled; ``0.0`` means none of
+        it did; a negative value means the strategy lost money out of sample
+        while making it in sample.
+
+        **A ratio, not a difference, and on CAGR rather than total return.**
+        :attr:`degradation` subtracts one total return from another, so it is in
+        percentage points and its size depends on how long the spans were --
+        useless as a fragility bar, because "lost 40 points" means something
+        different for a strategy that made 60% than for one that made 45%. And
+        total return is not comparable across spans of different length at all,
+        which :attr:`annualised_degradation` records in detail: on 2003-2019
+        anchored, mean degradation read +34.10% almost entirely because the
+        in-sample span grew to fifteen years against a one-year test.
+
+        ``None`` when in-sample CAGR is not positive, and that is fail-closed
+        rather than tidy: **a strategy with no in-sample edge has no edge to
+        retain**, so the ratio has no meaning and a number here would be an
+        artefact of dividing by something near zero. The readiness assessment
+        reports UNRESOLVED instead, which is the honest answer.
+
+        :attr:`degradation` is deliberately untouched -- it is what the harness
+        shipped with, and changing a published definition needs a scoped
+        proposition. This is an addition.
+        """
+        if self.in_sample.metrics is None or self.out_of_sample.metrics is None:
+            return None
+        in_sample_cagr = self.in_sample.metrics.cagr
+        if in_sample_cagr <= 0:
+            return None
+        return self.out_of_sample.metrics.cagr / in_sample_cagr
+
 
 @dataclass(frozen=True, slots=True)
 class WalkForwardReport:
@@ -140,6 +175,24 @@ class WalkForwardReport:
         if not gaps:
             return None
         return sum(gaps) / len(gaps)
+
+    @property
+    def mean_edge_retained(self) -> float | None:
+        """Mean of :attr:`WindowResult.edge_retained` over the windows that have one.
+
+        Averaged over windows, not pooled over trades, for the same reason as
+        :attr:`mean_degradation`: a window with forty trades and one with four
+        are equally informative about whether the strategy travels.
+
+        ``None`` when no window had a positive in-sample edge. Windows without
+        one are **skipped rather than counted as zero** -- scoring "no edge to
+        lose" as "lost everything" would drag the mean down on exactly the
+        windows that say nothing about fragility.
+        """
+        kept = [r.edge_retained for r in self.results if r.edge_retained is not None]
+        if not kept:
+            return None
+        return sum(kept) / len(kept)
 
     @property
     def mean_annualised_degradation(self) -> float | None:

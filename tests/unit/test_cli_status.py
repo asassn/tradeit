@@ -153,15 +153,70 @@ def test_the_interlock_is_reported_as_engaged_not_as_a_missing_feature(
     assert "interlock" in out.lower()
 
 
-def test_unapproved_thresholds_are_named_as_blocking(
+def test_no_threshold_is_awaiting_approval_and_the_status_says_so(
     tmp_path: object, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """**Reworked 2026-11-15, because the product legitimately moved.**
+
+    This asserted that the status named a threshold as "blocks promotion". That
+    was true while one was unapproved -- all four were, as recently as
+    2026-10-22 -- and became false when the last was approved (ADR-0034).
+
+    The invariant it protected is that **the status is explicit about whether a
+    decision is outstanding**, and a bare `0` does not satisfy that: a reader
+    cannot tell "all approved" from "this command stopped checking". So the
+    command now says it affirmatively, and this asserts the affirmative.
+    """
     path = tmp_path / "s.sqlite"  # type: ignore[operator]
     Base.metadata.create_all(create_engine(f"sqlite:///{path}", future=True))
     cmd_status(_args(db=f"sqlite:///{path}"))
     out = capsys.readouterr().out
+
     assert "thresholds awaiting approval" in out
-    assert "blocks promotion" in out
+    assert "every promotion threshold is approved" in out
+    assert "blocks promotion" not in out, (
+        "claiming something blocks promotion would send someone looking for work that is done"
+    )
+
+
+def test_an_unapproved_threshold_would_still_be_named_as_blocking(
+    tmp_path: object, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The companion half: the reporting must not rot now that nothing triggers it.
+
+    Two tests here have gone vacuous exactly this way -- a promotion removed the
+    last instance of the shape under test and the assertion stopped meaning
+    anything. So this substitutes a criterion carrying an UNAPPROVED threshold
+    rather than relying on one existing on the real ladder.
+
+    Mutant: drop the `blocks promotion` line. Caught.
+    """
+    import tradeit.cli_status as status_module
+    from tradeit.readiness import Comparison, Criterion, Threshold, ThresholdSource
+    from tradeit.strategy.lifecycle import StrategyState
+
+    owed = Criterion(
+        name="synthetic_owed",
+        question="does the status still name an unapproved threshold?",
+        metric="synthetic_metric",
+        comparison=Comparison.AT_LEAST,
+        threshold=Threshold(
+            value=0.0,
+            source=ThresholdSource.UNAPPROVED,
+            citation="synthetic, for this test only; never on the real ladder",
+        ),
+        applies_from=StrategyState.PAPER_TRADING,
+    )
+    monkeypatch.setattr(status_module, "PROMOTION_CRITERIA", (owed,))
+
+    path = tmp_path / "s.sqlite"  # type: ignore[operator]
+    Base.metadata.create_all(create_engine(f"sqlite:///{path}", future=True))
+    cmd_status(_args(db=f"sqlite:///{path}"))
+    out = capsys.readouterr().out
+
+    assert "synthetic_owed: blocks promotion" in out
+    assert "become policy by accident" in out
+    assert "every promotion threshold is approved" not in out
 
 
 def test_an_unreachable_database_reports_it_and_exits_nonzero(

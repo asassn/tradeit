@@ -116,10 +116,7 @@ about *this* stop.
 - **It does not find the new ticker.** It says MGPI's registrant renamed; it
   does not establish that `CASK` is the successor. The 2026-11-14 adjudication
   left that `UNRESOLVED` on primary evidence and this does not improve on it.
-- **The index is not yet refreshed on a schedule.** It is now read nightly and
-  its age is printed nightly, so a repeat of the three-month gap becomes visible
-  within a day — but nothing yet *fixes* it. Refreshing is two HTTP requests and
-  free; automating it is the obvious next step and is not done here.
+- **Closed the same day: the index is now refreshed nightly.** See §7.
 
 ## 6. Wired in, 2026-11-15
 
@@ -156,3 +153,38 @@ Two path bugs were found wiring this up, and both are pinned by tests: reading
 the whole 32-year archive instead of the quarters covering the window, and
 `sqlite:////research01.sqlite` resolving to the filesystem root rather than the
 working directory — an error whose message never names the path it tried.
+
+
+## 7. The refresh, automated 2026-11-15
+
+`forward_daily.py` now pulls the filing index **before** the captures, so the
+night's reports read a current index. `tradeit.edgar.refresh` holds the logic.
+
+**Two quarters, not one.** Refreshing only the current quarter leaves the
+previous one permanently incomplete the moment the calendar turns — which is
+exactly how 2026 QTR3 came to stop at 2026-08-13 and stay there. The second
+request closes that hole for good.
+
+Automating a refresh introduces a new way to lose, so two rules:
+
+1. **Never install a file that knows less than the one it replaces.** Compared on
+   *both* the newest filing date and the row count, and both must hold: a partial
+   response that happens to include one recent filing reaches further than what
+   is held while containing a fraction of it, and installing that would delete
+   most of the archive while reporting it current. A failed fetch leaves the file
+   untouched.
+2. **Never destroy a withdrawn line silently.** Replacing QTR3 by hand removed 15
+   lines SEC no longer serves. The superseded file and the lost lines are written
+   to `TradeItData/edgar/superseded/` before any replacement.
+
+**No shell.** The published fetch recipe is `curl` in a loop, which is right for
+an operator at a terminal and would fail silently at 22:10: macOS TCC grants
+Documents access per executable and `/bin/bash` does not have it under `launchd`.
+This fetches with `urllib` from the interpreter that already holds the grant.
+
+Without `EDGAR_USER_AGENT` it declines to ask SEC at all rather than sending an
+unidentified request. That is not an error — the capture runs, and the index age
+simply shows it getting older.
+
+Verified live: both quarters reported `unchanged -- byte-identical`, so a nightly
+run that finds nothing new writes nothing and accumulates no superseded copies.

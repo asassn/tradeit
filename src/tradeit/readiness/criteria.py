@@ -284,30 +284,45 @@ PROMOTION_CRITERIA: tuple[Criterion, ...] = (
     Criterion(
         name="out_of_sample_degradation",
         question="How much of the in-sample edge survives out of sample?",
-        metric="degradation",
-        comparison=Comparison.AT_MOST,
+        # **Not `degradation`, and the swap is the substance of the decision.**
+        # `degradation` is a *difference* of total returns, so it is in
+        # percentage points and its size tracks how long the spans were: on
+        # 2003-2019 anchored it read +34.10% almost entirely because the
+        # in-sample span grew to fifteen years against a one-year test. A bar on
+        # it would mean "lost at most N points", which says something different
+        # for a strategy that made 60% than for one that made 45%.
+        # `edge_retained` is the share of the *annualised* edge that travelled,
+        # which is what "keeps half its edge" actually means.
+        metric="edge_retained",
+        comparison=Comparison.AT_LEAST,
         threshold=Threshold(
-            value=0.0,
-            source=ThresholdSource.UNAPPROVED,
+            value=0.5,
+            source=ThresholdSource.WRITTEN,
             citation=(
-                "OWED, and **the last of the four still owed** -- the other three "
-                "were settled on 2026-10-23 by expressing each as a test against "
-                "something already written rather than as a number somebody chose "
-                "(ADR-0029 for demotion, ADR-0031 for the other two). "
-                "**That move is not available here, and the reason is the point.** "
-                "Measured twice: SIGNAL_SCOREBOARD §52 and §53 both kept their "
-                "direction and lost roughly two thirds of magnitude. Two "
-                "observations describe what happened; they do not establish an "
-                "acceptable limit, and setting one from them would be fitting the "
-                "bar to the data. There is no chance baseline to standardise "
-                "against either -- a no-edge strategy has no characteristic "
-                "degradation, because it has no edge to lose. "
-                "**What would discharge it**: pre-registering a limit before the "
-                "next out-of-sample test, which is a decision the owner takes when "
-                "that test is designed rather than work anybody can do now. Note "
-                "that `out_of_sample_clears_hurdle` already requires the held-out "
-                "result to clear the ledger after whatever degradation occurred, so "
-                "what is missing is a bar on **fragility**, not on profitability."
+                "ADR-0034, **approved by the owner 2026-11-15**: a strategy that "
+                "keeps less than half its annualised edge out of sample is treated "
+                "as fragile and does not promote. The last of the four thresholds, "
+                "and the only one that could not be derived. The other three were "
+                "settled on 2026-10-23 by expressing each as a test against "
+                "something already written (ADR-0029 for demotion, ADR-0031 for the "
+                "other two); **that move was not available here and the reason is "
+                "the point.** SIGNAL_SCOREBOARD §52 and §53 each kept their "
+                "direction and lost roughly two thirds of magnitude -- two "
+                "observations describing what happened, which cannot establish an "
+                "acceptable limit without fitting the bar to the data. There is no "
+                "chance baseline to standardise against either, because a no-edge "
+                "strategy has no characteristic degradation: it has no edge to lose. "
+                "So it needed a judgement about tolerable fragility, and a judgement "
+                "is the owner's to make. "
+                "**Pre-registered**: recorded before the next out-of-sample test is "
+                "run, which is what makes it a bar rather than a rationalisation. "
+                "Note that `out_of_sample_clears_hurdle` already requires the "
+                "held-out result to clear the trial ledger after whatever "
+                "degradation occurred; this is a bar on **fragility**, not on "
+                "profitability, and both must pass. "
+                "`edge_retained` is UNRESOLVED when in-sample CAGR is not positive "
+                "-- a strategy with no edge has none to retain -- so this criterion "
+                "cannot be passed by a strategy that never worked in the first place."
             ),
         ),
         applies_from=StrategyState.PAPER_TRADING,

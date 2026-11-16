@@ -36,7 +36,7 @@ from tradeit.readiness import (
     demotion_criteria_for,
     hurdle_evidence,
 )
-from tradeit.readiness.assess import _evaluate
+from tradeit.readiness.assess import ReadinessReport, _evaluate
 from tradeit.strategy.lifecycle import LADDER, StrategyState
 
 CLEAN: dict[str, object] = {
@@ -275,14 +275,68 @@ def test_at_most_criteria_pass_below_their_threshold() -> None:
     assert not at_most.satisfied_by(0.11)
 
 
-def test_the_report_names_what_is_owed_in_its_description() -> None:
+def test_no_criterion_is_still_waiting_on_an_approved_threshold() -> None:
+    """**Reworked 2026-11-15, because the product legitimately moved.**
+
+    This test used to assert the report said `OWED`. That was right while a
+    threshold was unapproved -- `out_of_sample_degradation` was the last of four
+    -- and it became wrong the moment the owner approved it (ADR-0034). Re-pinning
+    it by feeding the report a stale fixture would have made it assert that the
+    project had *not* finished something it had.
+
+    The invariant it was really protecting is that **the report does not let an
+    unapproved threshold pass unnoticed**, and that splits in two now: nothing is
+    owed today, and the machinery that would say so still works. The companion
+    test below holds the second half, so this one cannot go vacuous by the
+    mechanism simply never firing.
+    """
     report = assess_promotion(
         StrategyState.OUT_OF_SAMPLE_TESTING, StrategyState.PAPER_TRADING, CLEAN
     )
-    text = report.describe()
-    assert "HOLD" in text
-    assert "APPROVED THRESHOLD" in text
-    assert "OWED" in text
+
+    assert report.blocked_on_unapproved_thresholds == (), (
+        "every threshold on the ladder is approved; see ADR-0029, ADR-0031, ADR-0034"
+    )
+    assert "APPROVED THRESHOLD" not in report.describe(), (
+        "a report that still claims something is owed would send someone looking "
+        "for work that is done"
+    )
+
+
+def test_an_unapproved_threshold_is_still_reported_as_owed() -> None:
+    """The other half: the mechanism must not rot now that nothing triggers it.
+
+    Two tests in this repository have gone vacuous exactly this way -- a
+    promotion removed the last instance of the shape under test and the
+    assertion stopped meaning anything. So this builds the shape directly
+    instead of relying on one existing.
+
+    Mutant: return `()` from `blocked_on_unapproved_thresholds`. Caught.
+    """
+    owed = Criterion(
+        name="synthetic_owed",
+        question="does the report still notice an unapproved threshold?",
+        metric="synthetic_metric",
+        comparison=Comparison.AT_LEAST,
+        threshold=Threshold(
+            value=0.0,
+            source=ThresholdSource.UNAPPROVED,
+            citation="synthetic, for this test only; never on the real ladder",
+        ),
+        applies_from=StrategyState.PAPER_TRADING,
+    )
+
+    # Built directly rather than through `assess_promotion`, which reads the
+    # real ladder: the point is to exercise the reporting, not to put a
+    # synthetic criterion on the ladder where a later reader might trust it.
+    report = ReadinessReport(
+        target=StrategyState.PAPER_TRADING,
+        decision=Decision.HOLD,
+        verdicts=(_evaluate(owed, CLEAN),),
+    )
+
+    assert [v.criterion.name for v in report.blocked_on_unapproved_thresholds] == ["synthetic_owed"]
+    assert "APPROVED THRESHOLD" in report.describe()
 
 
 # ---------------------------------------------------------------------------
