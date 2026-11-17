@@ -351,3 +351,27 @@ export interface WalkForward {
 }
 
 export const getWalkForward = () => get<WalkForward>("/walkforward");
+
+/* ---- prices ------------------------------------------------------------ */
+
+export interface PriceHistory {
+  security_id: number;
+  basis: string;
+  basis_note?: string;
+  available: boolean;
+  note?: string;
+  sessions?: number;
+  first_session?: string;
+  last_session?: string;
+  low?: number | null;
+  high?: number | null;
+  peak_close?: { session: string; close: number } | null;
+  series?: { session: string; close: number }[];
+  drawn?: number;
+  sampled?: boolean;
+  sampling_note?: string;
+  splits?: { ex_date: string; ratio: number | null }[];
+}
+
+export const getPrices = (id: number | string, basis: "raw" | "total") =>
+  get<PriceHistory>(`/securities/${id}/prices?basis=${basis}`);

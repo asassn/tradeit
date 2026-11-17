@@ -1,0 +1,32 @@
+.pc {
+  margin: 0;
+  width: 100%;
+}
+
+.pc svg {
+  display: block;
+  width: 100%;
+  height: 260px;
+}
+
+.pc__axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  align-items: baseline;
+  margin-top: var(--s-2);
+  font: var(--t-micro);
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+  letter-spacing: 0;
+}
+
+.pc__scale {
+  text-align: center;
+  flex: 1;
+}
+
+/* Named, not colour-alone: the dashed rule is the mark and this is its key. */
+.pc__splitkey {
+  color: var(--series-2);
+}

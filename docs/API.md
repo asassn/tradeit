@@ -39,6 +39,7 @@ search box would simply stop working. A test holds the order.
 | `GET /forward/health` | the nightly capture agent's liveness, from **the capture record**. `501` when none is attached |
 | `GET /securities/search?q=` | find a security by ticker or company name, from the corpus |
 | `GET /securities/{id}/valuation` | the valuation panel, read from **the corpus**. `501` when no corpus is attached |
+| `GET /securities/{id}/prices?basis=raw\|total` | the price history on either basis, sampled for drawing with exact extremes |
 | `GET /securities/{id}/provenance` | ticker intervals with their filing citations, corporate actions, disputed splits |
 
 **There are no write routes**, so the "writes are narrow and audited" section
@@ -62,6 +63,18 @@ part of this system had no web surface at all until 2026-11-17. **Liveness is
 reported as an age, not a count**: a scheduled job does not crash, it stops,
 and a payload of healthy totals with no age would show thousands of
 observations beside a dead agent.
+
+**The price route serves both bases and names which it is showing.** Neither
+is the default answer to every question: `v_prices_raw` is what the market
+printed and what a multiple needs, and it jumps at every split; `v_prices` is
+comparable across time and is **not point-in-time**, because the adjustment
+embeds every corporate action since. On Apple the two differ by a factor of
+112. Splits travel with either basis — on raw they explain the cliffs, on
+adjusted they explain why there are none.
+
+**The drawn series is sampled; the summary is not.** A 9,237-session history
+is bucketed for drawing, but the high, the low and their dates are measured
+over every row, so a sampled line can never misreport an extreme it skipped.
 
 **The provenance route is the corpus's own argument**, and the content that
 distinguishes `research-01` from a price feed: every ticker interval carries

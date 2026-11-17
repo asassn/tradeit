@@ -1,0 +1,48 @@
+.ov__controls {
+  display: flex;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
+/* A segmented control: two mutually exclusive readings of the same data, so
+   they sit together rather than as separate switches. */
+.ov__seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.ov__seg button {
+  background: none;
+  border: none;
+  padding: var(--s-1) var(--s-3);
+  font: var(--t-caption);
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ov__seg button + button {
+  border-left: 1px solid var(--line);
+}
+
+.ov__seg button:hover {
+  background: var(--sunken);
+  color: var(--ink);
+}
+
+.ov__seg button.is-on {
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  font: var(--t-body-strong);
+  font-size: 12px;
+}
+
+.ov__basis {
+  margin: var(--s-4) 0 0;
+  font: var(--t-caption);
+  color: var(--ink-2);
+  line-height: 1.6;
+  max-width: 82ch;
+}

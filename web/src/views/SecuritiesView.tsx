@@ -18,6 +18,7 @@ import {
 } from "@/components/Primitives";
 import { YieldChart } from "@/components/YieldChart";
 import { ApiError, getValuation } from "@/lib/api";
+import { OverviewTab } from "./OverviewTab";
 import { ProvenanceTab } from "./ProvenanceTab";
 import "./SecuritiesView.css";
 import { useAsync } from "@/lib/useAsync";
@@ -39,11 +40,11 @@ const title = (s: string) =>
  * company loses money" is more useful than a blank, and it is the *reason*
  * the number is absent.
  */
-type Tab = "valuation" | "provenance";
+type Tab = "overview" | "valuation" | "provenance";
 
 export function SecuritiesView() {
   const { securityId } = useParams();
-  const [tab, setTab] = useState<Tab>("valuation");
+  const [tab, setTab] = useState<Tab>("overview");
   const { data, error, loading } = useAsync(
     () =>
       securityId ? getValuation(securityId) : Promise.resolve(null),
@@ -134,7 +135,7 @@ export function SecuritiesView() {
       />
 
       <nav className="tabs" role="tablist">
-        {(["valuation", "provenance"] as const).map((name) => (
+        {(["overview", "valuation", "provenance"] as const).map((name) => (
           <button
             key={name}
             type="button"
@@ -143,10 +144,16 @@ export function SecuritiesView() {
             className={`tabs__tab${tab === name ? " is-on" : ""}`}
             onClick={() => setTab(name)}
           >
-            {name === "valuation" ? "Valuation" : "Provenance"}
+            {name === "overview"
+              ? "Overview"
+              : name === "valuation"
+                ? "Valuation"
+                : "Provenance"}
           </button>
         ))}
       </nav>
+
+      {tab === "overview" && <OverviewTab securityId={securityId} />}
 
       {tab === "provenance" && <ProvenanceTab securityId={securityId} />}
 

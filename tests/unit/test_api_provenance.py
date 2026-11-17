@@ -91,9 +91,9 @@ def test_an_interval_travels_with_the_filing_that_evidenced_it(corpus: str) -> N
     _alias(
         corpus,
         v="AAAB",
-        f=dt.date(2011, 8, 9),
-        t=dt.date(2018, 9, 12),
-        kt=dt.datetime(2011, 11, 14),
+        f=dt.date(2011, 8, 9).isoformat(),
+        t=dt.date(2018, 9, 12).isoformat(),
+        kt=dt.datetime(2011, 11, 14).isoformat(),
         ks="edgar_filing_text",
         cite=CITATION,
     )
@@ -112,9 +112,9 @@ def test_the_exclusive_end_date_is_corrected_before_display(corpus: str) -> None
     _alias(
         corpus,
         v="AAAB",
-        f=dt.date(2011, 8, 9),
-        t=dt.date(2018, 9, 12),
-        kt=dt.datetime(2011, 11, 14),
+        f=dt.date(2011, 8, 9).isoformat(),
+        t=dt.date(2018, 9, 12).isoformat(),
+        kt=dt.datetime(2011, 11, 14).isoformat(),
         ks="edgar_filing_text",
         cite=CITATION,
     )
@@ -127,9 +127,9 @@ def test_a_current_interval_has_no_end_and_says_so(corpus: str) -> None:
     _alias(
         corpus,
         v="ACME",
-        f=dt.date(1990, 1, 1),
+        f=dt.date(1990, 1, 1).isoformat(),
         t=None,
-        kt=dt.datetime(2026, 8, 14),
+        kt=dt.datetime(2026, 8, 14).isoformat(),
         ks="sec_company_tickers",
         cite="SEC company_tickers.json snapshot 2026-08-14",
     )
