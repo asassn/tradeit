@@ -79,6 +79,16 @@ export function HorizonsView() {
         <Unresolved what="This security" reason={panel.error.message} />
       )}
 
+      {/* A record older than migration 0020 carries no horizon on any row.
+          Stated rather than quietly shown as "unrecorded", because the
+          consequence matters: a population containing unattributable rows
+          cannot be certified as any horizon. */}
+      {panel.data?.horizons_not_recorded && (
+        <Caution title="This record predates the horizon split">
+          {panel.data.horizons_not_recorded}
+        </Caution>
+      )}
+
       {panel.data && (
         <>
           <div className="horizons">

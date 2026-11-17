@@ -233,6 +233,8 @@ export interface HorizonPanel {
   absent: Record<string, string>;
   note: string;
   unrecorded_horizon_rows: number;
+  /** Set only when the record predates migration 0020. */
+  horizons_not_recorded: string | null;
 }
 
 export const getPanel = (id: number | string) =>

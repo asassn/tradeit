@@ -775,3 +775,102 @@ def test_the_entry_document_is_never_cached(record: str) -> None:
     """
     headers = TestClient(create_app(record)).get("/").headers
     assert "no-store" in headers.get("cache-control", "")
+
+
+# ---------------------------------------------------------------------------
+# A record older than migration 0020. `opportunity_scores` gained `mandate`
+# and `timeframe` there, and the routes selected them unconditionally.
+# ---------------------------------------------------------------------------
+
+
+def _drop_horizon_columns(dsn: str) -> None:
+    """Rebuild `opportunity_scores` without `mandate` or `timeframe`.
+
+    The real pre-0020 shape, reproduced rather than mocked: the failure is a
+    SQLite `no such column` raised from the driver, and a mock of the column
+    list would not reproduce it.
+    """
+    engine = create_engine(dsn, future=True)
+    with engine.begin() as connection:
+        # The index came with the same migration and names the columns, so
+        # SQLite refuses the drop while it exists.
+        connection.exec_driver_sql("drop index if exists ix_score_horizon")
+        connection.exec_driver_sql("alter table opportunity_scores drop column mandate")
+        connection.exec_driver_sql("alter table opportunity_scores drop column timeframe")
+
+
+def test_every_route_answers_on_a_record_older_than_the_horizon_split(
+    record: str,
+) -> None:
+    """**Every** route, not the two that were noticed first.
+
+    The first fix patched `/instruments` and the panel and left `/health`,
+    `/sessions/{date}` and `/instruments/{id}/scores` raising the identical
+    error from the identical line of SQL — `select(OpportunityScore)` emits
+    `SELECT` for `mandate` and `timeframe`, which a pre-0020 record does not
+    have. Found by opening the dashboard on that record and seeing the header
+    read "record unreachable" while three routes still answered.
+
+    So this sweeps the whole surface. A per-route test would have passed
+    twice over and shipped the same defect three more times.
+    """
+    _populate(record)
+    _drop_horizon_columns(record)
+    client = TestClient(create_app(record))
+    for path in (
+        "/",
+        "/health",
+        "/runs",
+        "/sessions",
+        f"/sessions/{SESSION.isoformat()}",
+        "/instruments",
+        "/instruments/7/panel",
+        "/instruments/7/scores",
+    ):
+        assert client.get(path).status_code == 200, path
+
+
+def test_a_health_check_never_fails_on_a_schema_variation(record: str) -> None:
+    """A health check that 500s is the least useful failure available.
+
+    It is the route an operator hits to find out what is wrong, so it must
+    answer on any schema generation — and it only ever needed to know whether
+    a row exists.
+    """
+    _populate(record)
+    _drop_horizon_columns(record)
+    body = TestClient(create_app(record)).get("/health").json()
+    assert body["reachable"] is True
+    assert body["has_scores"] is True
+
+
+def test_rows_with_no_recorded_horizon_are_unattributable_not_swing(
+    record: str,
+) -> None:
+    """The substantive rule, not just the status code.
+
+    `check_recorded_scores` refuses to certify a population containing
+    unattributable rows, because "90% Swing and 10% unlabelled" is a Swing
+    population plus an unknown — and the unknown is exactly what a later study
+    would silently absorb. The API must not do by default what the
+    certification refuses to do at all.
+    """
+    _populate(record)
+    _drop_horizon_columns(record)
+    client = TestClient(create_app(record))
+
+    row = client.get("/instruments").json()["instruments"][0]
+    assert row["horizons"] == ["unrecorded"], "a horizon was assumed"
+
+    panel = client.get("/instruments/7/panel").json()
+    assert "swing" not in panel["horizons"]
+    assert panel["horizons_not_recorded"] is not None
+    assert "unattributable" in panel["horizons_not_recorded"]
+
+
+def test_a_current_record_carries_no_pre_migration_explanation(record: str) -> None:
+    """So the note cannot become decoration that is always present."""
+    _populate(record)
+    panel = TestClient(create_app(record)).get("/instruments/7/panel").json()
+    assert panel["horizons_not_recorded"] is None
+    assert "swing" in panel["horizons"]

@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from tradeit.backtesting.base import BacktestResult, BacktestSpec, MonteCarloResult
 from tradeit.backtesting.walkforward import WalkForwardReport
@@ -352,7 +352,23 @@ def reconstruct(session: Session, portfolio_id: int, session_date: dt.date) -> D
 
     scores = tuple(
         session.execute(
-            select(OpportunityScore).where(OpportunityScore.session_date == session_date)
+            # `load_only` rather than the whole entity: a record written
+            # before migration 0020 has no `mandate` or `timeframe`, and
+            # selecting them fails at the driver -- so a session in an older
+            # record could not be walked at all. The chain does not read them.
+            select(OpportunityScore)
+            .options(
+                load_only(
+                    OpportunityScore.id,
+                    OpportunityScore.instrument_id,
+                    OpportunityScore.session_date,
+                    OpportunityScore.direction,
+                    OpportunityScore.total,
+                    OpportunityScore.components,
+                    OpportunityScore.rank,
+                )
+            )
+            .where(OpportunityScore.session_date == session_date)
         )
         .scalars()
         .all()

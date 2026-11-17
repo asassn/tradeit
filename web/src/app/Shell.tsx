@@ -72,9 +72,27 @@ export function Shell() {
   );
 
   useEffect(() => {
-    getHealth()
-      .then(setHealth)
-      .catch(() => setHealthError(true));
+    // Re-checked, not read once. A dashboard is left open; a record that
+    // becomes reachable — or stops being — must change the header, and a
+    // once-on-mount read leaves an error state that outlives its cause for
+    // as long as the tab is open. Observed directly: the header went on
+    // reading "record unreachable" through a fix and a server restart.
+    let live = true;
+    const check = () => {
+      getHealth()
+        .then((next) => {
+          if (!live) return;
+          setHealth(next);
+          setHealthError(false);
+        })
+        .catch(() => live && setHealthError(true));
+    };
+    check();
+    const timer = setInterval(check, 60_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {

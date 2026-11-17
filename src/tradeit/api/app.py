@@ -53,7 +53,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import InstrumentedAttribute, Session, load_only, sessionmaker
 
 from tradeit.api.page import PAGE
 from tradeit.api.valuation_route import search_securities, valuation_payload
@@ -148,6 +148,64 @@ def _tickers_for(session: Session, ids: list[int]) -> dict[int, str]:
     return found
 
 
+#: What a record that predates migration 0020 is missing, and why it matters.
+#: `opportunity_scores` gained `mandate` and `timeframe` in that migration;
+#: rows written before it carry no horizon at all. That is not a display
+#: nicety -- `check_recorded_scores` refuses to certify a population
+#: containing unattributable rows, because "90% Swing and 10% unlabelled" is
+#: a Swing population plus an unknown, and the unknown is exactly what a later
+#: study would silently absorb.
+PRE_HORIZON_NOTE = (
+    "this record predates migration 0020, so its scores carry no recorded "
+    "horizon. They are reported as `unrecorded` rather than assumed to be "
+    "Swing: a row with no horizon is unattributable, and a population "
+    "containing unattributable rows cannot be certified as any horizon"
+)
+
+
+#: The score columns every schema generation has. Selecting the whole ORM
+#: entity emits `SELECT` for `mandate` and `timeframe` as well, which a record
+#: written before migration 0020 does not have -- so the read fails at the
+#: driver and the route answers 500.
+#:
+#: **This is the fix for the cause rather than the instances.** The first
+#: attempt patched two routes and left three others raising the same error
+#: from the same line of SQL, which is the shape of defect that comes back.
+#: Every read of a score now names its columns.
+SCORE_COLUMNS_IN_EVERY_SCHEMA = (
+    "id",
+    "instrument_id",
+    "session_date",
+    "direction",
+    "total",
+    "components",
+    "rank",
+)
+
+
+def _score_columns() -> tuple[InstrumentedAttribute[Any], ...]:
+    """The score attributes safe to load against any schema generation."""
+    return tuple(getattr(OpportunityScore, name) for name in SCORE_COLUMNS_IN_EVERY_SCHEMA)
+
+
+def _records_horizons(session: Session) -> bool:
+    """Whether this record's `opportunity_scores` carries a `mandate` column.
+
+    **Asked rather than assumed.** Querying `mandate` against a record written
+    before migration 0020 raises `no such column` and the route answers 500 --
+    which reads to an operator as a broken service rather than as an older
+    database, and sends them to the logs instead of to the answer.
+
+    Inspected on the live connection rather than inferred from a migration
+    version, because the question is what this file actually has.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    bind = session.get_bind()
+    columns = sa_inspect(bind).get_columns(OpportunityScore.__tablename__)
+    return any(column["name"] == "mandate" for column in columns)
+
+
 def _horizons_for(session: Session, ids: list[int]) -> dict[int, list[str]]:
     """Which horizons each instrument has a recorded conclusion at.
 
@@ -158,6 +216,10 @@ def _horizons_for(session: Session, ids: list[int]) -> dict[int, list[str]]:
     """
     if not ids:
         return {}
+    if not _records_horizons(session):
+        # Every row is unattributable, which is the honest answer rather than
+        # an error. See PRE_HORIZON_NOTE.
+        return {key: ["unrecorded"] for key in ids}
     rows = session.execute(
         select(OpportunityScore.instrument_id, OpportunityScore.mandate)
         .where(OpportunityScore.instrument_id.in_(ids))
@@ -248,7 +310,10 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
         not healthy for this service's purpose, and one number covering both
         would hide which it was.
         """
-        scores = session.execute(select(OpportunityScore)).first() is not None
+        # One narrow column, not the entity: `/health` must answer on any
+        # schema generation, and a health check that 500s is the least useful
+        # failure available.
+        scores = session.execute(select(OpportunityScore.id).limit(1)).first() is not None
         runs = session.execute(select(BacktestRun)).first() is not None
         return {
             "reachable": True,
@@ -565,25 +630,35 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
 
         A `NULL` horizon is its own bucket, not folded into Swing: those are
         rows written before migration 0020 and nobody recorded what they were.
+        **A record older than migration 0020 degrades rather than failing.**
+        Selecting `mandate` against one raises `no such column` and the route
+        answered 500, which reads to an operator as a broken service rather
+        than as an older database. Every row is reported as `unrecorded`,
+        which is what it is.
         """
-        rows = (
-            session.execute(
-                select(OpportunityScore)
-                .where(OpportunityScore.instrument_id == instrument_id)
-                .order_by(OpportunityScore.session_date.desc())
-            )
-            .scalars()
-            .all()
-        )
+        horizons_recorded = _records_horizons(session)
+        columns = [
+            OpportunityScore.session_date,
+            OpportunityScore.direction,
+            OpportunityScore.total,
+            OpportunityScore.components,
+        ]
+        if horizons_recorded:
+            columns += [OpportunityScore.mandate, OpportunityScore.timeframe]
+        rows = session.execute(
+            select(*columns)
+            .where(OpportunityScore.instrument_id == instrument_id)
+            .order_by(OpportunityScore.session_date.desc())
+        ).all()
         by_horizon: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            key = row.mandate or "unrecorded"
+            key = (row.mandate or "unrecorded") if horizons_recorded else "unrecorded"
             bucket = by_horizon.setdefault(key, [])
             if len(bucket) < per_horizon:
                 bucket.append(
                     {
                         "session_date": row.session_date.isoformat(),
-                        "timeframe": row.timeframe,
+                        "timeframe": row.timeframe if horizons_recorded else None,
                         "direction": row.direction,
                         "total": row.total,
                         "components": row.components,
@@ -616,6 +691,9 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
                 "across horizons."
             ),
             "unrecorded_horizon_rows": len(by_horizon.get("unrecorded", [])),
+            # Present only when it applies, so a current record carries no
+            # explanation for a condition it does not have.
+            "horizons_not_recorded": None if horizons_recorded else PRE_HORIZON_NOTE,
         }
 
     @app.get("/securities/search")
@@ -693,6 +771,7 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
         rows = (
             session.execute(
                 select(OpportunityScore)
+                .options(load_only(*_score_columns()))
                 .where(OpportunityScore.instrument_id == instrument_id)
                 .order_by(OpportunityScore.session_date.desc())
                 .limit(limit)
