@@ -22,6 +22,11 @@ PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard --record <path>
 | route | answers |
 |---|---|
 | `GET /` | the screen — one self-contained page over the routes below |
+
+**`/securities/search` must stay declared before `/securities/{id}/valuation`.**
+FastAPI matches routes in declaration order, so reversing them makes `search`
+be tried as a `security_id`, fail integer validation and answer `422` — the
+search box would simply stop working. A test holds the order.
 | `GET /health` | is the record reachable, which record is it, does it hold anything |
 | `GET /runs` | every recorded run, with trades **counted from the rows** |
 | `GET /runs/{id}/trades` | one run's trades, with the total so a page cannot pass for the whole |
@@ -30,6 +35,7 @@ PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard --record <path>
 | `GET /instruments` | which securities the record can speak about |
 | `GET /instruments/{id}/panel` | one security, each horizon separately, absent ones with a reason |
 | `GET /instruments/{id}/scores` | one security's scores as recorded, unaggregated |
+| `GET /securities/search?q=` | find a security by ticker or company name, from the corpus |
 | `GET /securities/{id}/valuation` | the valuation panel, read from **the corpus**. `501` when no corpus is attached |
 
 **There are no write routes**, so the "writes are narrow and audited" section

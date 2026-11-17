@@ -407,7 +407,10 @@ def test_the_page_is_served_and_needs_no_network(record: str) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     body = response.text
-    assert "<title>TradeIt research interface</title>" in body
+    # Not the title, which is incidental and changed when the page was
+    # rebuilt: that it is a complete document, and that every asset it
+    # needs is inside it.
+    assert body.lstrip().startswith("<!doctype html>")
     assert 'src="http' not in body
     assert 'href="http' not in body
     assert "cdn" not in body.lower()
@@ -676,3 +679,41 @@ def test_the_valuation_route_promises_no_verdict(record: str) -> None:
     # first, and both are checked by the same rule.
     for forbidden in ("verdict", "label", "rating", "callout"):
         assert forbidden not in body, f"the payload grew a {forbidden}"
+
+
+def test_search_without_a_corpus_is_501(record: str) -> None:
+    """Search reads the corpus. Without one it says so rather than returning
+    an empty result list, which would read as "no such company"."""
+    assert TestClient(create_app(record)).get("/securities/search?q=AAPL").status_code == 501
+
+
+def test_the_search_route_is_not_swallowed_by_the_valuation_route(record: str) -> None:
+    """`/securities/search` and `/securities/{security_id}` collide.
+
+    FastAPI matches in declaration order, so if `search` is declared second it
+    is tried as a `security_id`, fails integer validation and answers 422 --
+    the search box would simply never work. Declaration order is load-bearing
+    and nothing else would catch a reordering.
+    """
+    response = TestClient(create_app(record)).get("/securities/search?q=AAPL")
+    assert response.status_code != 422, "search is being parsed as a security id"
+
+
+def test_search_requires_something_to_search_for(record: str) -> None:
+    """An empty query would `LIKE '%'` the whole ticker table."""
+    assert TestClient(create_app(record, record)).get("/securities/search?q=").status_code == 422
+
+
+def test_the_page_offers_search_rather_than_asking_for_an_id() -> None:
+    """The rewrite's premise, asserted so it cannot quietly regress.
+
+    The first version of this page had a numeric `security_id` input: the
+    screen asking the reader for the answer it was supposed to give. Nobody
+    knows a security id, and the corpus holds 6,876 current tickers that
+    people do know.
+    """
+    from tradeit.api.page import PAGE
+
+    assert 'id="search"' in PAGE
+    assert "securities/search" in PAGE
+    assert 'type="number"' not in PAGE, "an id input is back on the page"

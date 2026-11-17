@@ -54,7 +54,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.api.page import PAGE
-from tradeit.api.valuation_route import valuation_payload
+from tradeit.api.valuation_route import search_securities, valuation_payload
 from tradeit.observability.record import reconstruct
 from tradeit.storage.tables import (
     BacktestRun,
@@ -589,6 +589,29 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
             ),
             "unrecorded_horizon_rows": len(by_horizon.get("unrecorded", [])),
         }
+
+    @app.get("/securities/search")
+    def securities_search(
+        q: Annotated[str, Query(min_length=1, max_length=64)],
+        limit: Annotated[int, Query(ge=1, le=50)] = 12,
+    ) -> dict[str, Any]:
+        """Find a security by ticker or company name.
+
+        **Declared before `/securities/{security_id}/valuation` on purpose.**
+        FastAPI matches routes in order, and `search` would otherwise be tried
+        as a `security_id` and rejected as an invalid integer.
+        """
+        if corpus_factory is None:
+            raise HTTPException(
+                status_code=501,
+                detail="no corpus is attached; start with --corpus to enable search",
+            )
+        corpus = corpus_factory()
+        try:
+            return {"query": q, "results": search_securities(corpus, q, limit)}
+        finally:
+            corpus.rollback()
+            corpus.close()
 
     @app.get("/securities/{security_id}/valuation")
     def security_valuation(security_id: int) -> dict[str, Any]:

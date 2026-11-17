@@ -140,6 +140,12 @@ class ValuationPanel:
     #: inverts a multiple. Named rather than left for the reader to work out.
     fcf_yield_rank: float | None
     fcf_yield_history_size: int
+    #: The history itself, as ``(session, yield)`` oldest first. Carried
+    #: because a percentile is a number a reader has to trust and a series is
+    #: something they can look at: "cheapest it has ever been" and "cheapest
+    #: since a spike three years ago" are the same percentile and different
+    #: facts, and only the shape distinguishes them.
+    fcf_yield_history: tuple[tuple[dt.date, float], ...]
     implied: tuple[ImpliedGrowth, ...]
     quality: tuple[QualityFlag, ...]
     #: Secondary. Kept because they are what most readers will look for first.
@@ -167,6 +173,22 @@ class ValuationPanel:
         lines.extend(growth.explanation for growth in self.implied)
         lines.extend(multiple.explanation for multiple in self.multiples)
         return tuple(lines)
+
+
+def _money(value: float) -> str:
+    """A figure the way a person says it: ``$98.8B``, not ``98767000000``.
+
+    Lives here rather than in the page because these strings are part of the
+    detail a :class:`QualityFlag` carries, and a flag whose text is unreadable
+    is a flag nobody reads. The API serves the raw numbers alongside, so
+    nothing downstream has to parse this.
+    """
+    sign = "-$" if value < 0 else "$"
+    size = abs(value)
+    for cut, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if size >= cut:
+            return f"{sign}{size / cut:,.1f}{suffix}"
+    return f"{sign}{size:,.0f}"
 
 
 def _yield_on(price: PriceBar, history: FundamentalHistory, on: dt.date) -> float | None:
@@ -198,8 +220,8 @@ def _deterioration(
         flags.append(
             QualityFlag(
                 "negative_free_cash_flow",
-                f"trailing twelve-month free cash flow is {current.value:,.0f}; "
-                "a yield on it is not a valuation",
+                f"free cash flow for the year to {current.period_end} is "
+                f"{_money(current.value)}; a yield on negative cash is not a valuation",
             )
         )
         return flags
@@ -219,9 +241,9 @@ def _deterioration(
         flags.append(
             QualityFlag(
                 "free_cash_flow_declining",
-                f"free cash flow is {abs(change):.0%} lower than {TREND_YEARS} years "
-                f"ago ({past.value:,.0f} to {current.value:,.0f}); a high yield on "
-                "falling cash is a repricing rather than a bargain",
+                f"Down {abs(change):.0%} over {TREND_YEARS} years, "
+                f"{_money(past.value)} to {_money(current.value)}. A high yield on "
+                "falling cash is a repricing rather than a bargain.",
             )
         )
     return flags
@@ -274,12 +296,14 @@ def panel_for(
 
     usable_past = [past for past in past_prices if past.session_date < on]
 
-    history_yields: list[float] = []
+    series: list[tuple[dt.date, float]] = []
     if fcf_yield is not None:
         for past in usable_past:
             earlier = _yield_on(past, history, past.session_date)
             if earlier is not None:
-                history_yields.append(earlier)
+                series.append((past.session_date, earlier))
+    series.sort()
+    history_yields = [value for _, value in series]
     yield_rank = rank_within(fcf_yield, history_yields) if fcf_yield is not None else None
 
     implied = (
@@ -349,6 +373,7 @@ def panel_for(
         fcf_yield=fcf_yield,
         fcf_yield_rank=yield_rank,
         fcf_yield_history_size=len(history_yields),
+        fcf_yield_history=tuple(series),
         implied=implied,
         quality=tuple(quality),
         multiples=tuple(computed),

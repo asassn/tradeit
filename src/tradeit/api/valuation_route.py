@@ -34,7 +34,13 @@ from tradeit.valuation.cashflow import (
 )
 from tradeit.valuation.multiples import EARNINGS_METRIC, EQUITY_METRIC, SHARES_METRIC
 
-__all__ = ["HISTORY_STRIDE", "WANTED_METRICS", "valuation_payload"]
+__all__ = [
+    "HISTORY_STRIDE",
+    "WANTED_METRICS",
+    "identity_for",
+    "search_securities",
+    "valuation_payload",
+]
 
 #: Every tag the valuation layer reads, named once so the query fetches
 #: exactly what is used. Reading the whole table for one security would pull
@@ -56,6 +62,77 @@ WANTED_METRICS: tuple[str, ...] = (
 #: would make the percentile a statement about price volatility rather than
 #: about valuation.
 HISTORY_STRIDE = 63
+
+
+def search_securities(session: Session, query: str, limit: int = 12) -> list[dict[str, Any]]:
+    """Find securities by ticker or company name.
+
+    **The single thing that turned this surface from a diagnostic into a
+    product.** Before it, the only way in was to type a numeric
+    ``security_id``, which nobody knows: the screen asked the reader for the
+    answer it was supposed to give them.
+
+    Current tickers sort first and exact ticker matches above those, because
+    somebody typing ``GM`` means the company trading as GM today, not a
+    1990s holder of the symbol. Both are returned --- a ticker that has
+    changed hands is exactly what this corpus exists to keep straight --- with
+    the interval shown so the reader can tell them apart.
+    """
+    like = f"{query.strip()}%"
+    rows = session.execute(
+        text(
+            "select t.security_id, t.ticker, i.display_name, t.is_current, "
+            "       t.first_day, t.last_day "
+            "from v_security_tickers t "
+            "join issuers i on i.issuer_id = t.issuer_id "
+            "where t.ticker like :like collate nocase "
+            "   or i.display_name like :like collate nocase "
+            "order by t.is_current desc, "
+            "         case when upper(t.ticker) = upper(:exact) then 0 else 1 end, "
+            "         length(t.ticker), t.ticker "
+            "limit :limit"
+        ).bindparams(like=like, exact=query.strip(), limit=limit),
+    ).all()
+    return [
+        {
+            "security_id": int(sid),
+            "ticker": str(ticker),
+            "name": str(name),
+            "is_current": bool(current),
+            "first_day": str(first) if first else None,
+            "last_day": str(last) if last else None,
+        }
+        for sid, ticker, name, current, first, last in rows
+    ]
+
+
+def identity_for(session: Session, security_id: int) -> dict[str, Any] | None:
+    """The ticker and company name to put at the top of the page.
+
+    Returns the **current** ticker where there is one, and otherwise the last
+    one held, flagged. A delisted security shown under a ticker somebody else
+    trades today would be the splice this corpus exists to prevent, arriving
+    as a page heading.
+    """
+    row = session.execute(
+        text(
+            "select t.ticker, i.display_name, t.is_current, t.first_day, t.last_day "
+            "from v_security_tickers t "
+            "join issuers i on i.issuer_id = t.issuer_id "
+            "where t.security_id = :sid "
+            "order by t.is_current desc, t.first_day desc limit 1"
+        ).bindparams(sid=security_id),
+    ).first()
+    if row is None:
+        return None
+    ticker, name, current, first, last = row
+    return {
+        "ticker": str(ticker),
+        "name": str(name),
+        "is_current": bool(current),
+        "first_day": str(first) if first else None,
+        "last_day": str(last) if last else None,
+    }
 
 
 def _history_for(session: Session, security_id: int) -> FundamentalHistory:
@@ -144,6 +221,7 @@ def valuation_payload(session: Session, security_id: int) -> dict[str, Any]:
         return {
             "security_id": security_id,
             "available": False,
+            "identity": identity_for(session, security_id),
             "note": (
                 "no raw price series for this security in the corpus; valuation "
                 "needs the unadjusted print"
@@ -161,6 +239,7 @@ def valuation_payload(session: Session, security_id: int) -> dict[str, Any]:
     return {
         "security_id": security_id,
         "available": True,
+        "identity": identity_for(session, security_id),
         "as_of": panel.as_of.isoformat(),
         "price": {"close": latest.close, "session": latest.session_date.isoformat()},
         "fcf_yield": panel.fcf_yield,
@@ -171,6 +250,9 @@ def valuation_payload(session: Session, security_id: int) -> dict[str, Any]:
         "fcf_yield_rank": panel.fcf_yield_rank,
         "fcf_yield_rank_means": "fraction of its own history at or below; higher is cheaper",
         "fcf_yield_history_size": panel.fcf_yield_history_size,
+        "fcf_yield_history": [
+            {"session": day.isoformat(), "value": value} for day, value in panel.fcf_yield_history
+        ],
         "free_cash_flow": (
             None
             if panel.free_cash_flow is None
