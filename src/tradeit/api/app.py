@@ -58,6 +58,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Session, load_only, sessionmak
 
 from tradeit.api.evidence_route import walkforward_payload
 from tradeit.api.forward_route import forward_payload
+from tradeit.api.fundamentals_route import fundamentals_payload
 from tradeit.api.page import PAGE
 from tradeit.api.prices_route import DEFAULT_POINTS, MAX_POINTS, prices_payload
 from tradeit.api.provenance_route import provenance_payload
@@ -819,6 +820,38 @@ def create_app(dsn: str, corpus_dsn: str | None = None, forward_dsn: str | None 
         corpus = corpus_factory()
         try:
             return {"query": q, "results": search_securities(corpus, q, limit)}
+        finally:
+            corpus.rollback()
+            corpus.close()
+
+    @app.get("/securities/{security_id}/fundamentals")
+    def security_fundamentals(security_id: int) -> dict[str, Any]:
+        """The as-filed annual statement spine, first-filed values only.
+
+        A later filing restating the same period is not shown: it was not
+        knowable at the time, and acting on it is look-ahead.
+        """
+        if corpus_factory is None:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "no corpus is attached. Fundamentals read research-01, which is "
+                    "a different database from the decision record; start with "
+                    "--corpus to enable it"
+                ),
+            )
+        corpus = corpus_factory()
+        try:
+            return fundamentals_payload(corpus, security_id)
+        except OperationalError as missing:
+            return {
+                "security_id": security_id,
+                "available": False,
+                "note": (
+                    "this database is not a prepared research-01 corpus. "
+                    f"Underlying error: {missing.orig}"
+                ),
+            }
         finally:
             corpus.rollback()
             corpus.close()

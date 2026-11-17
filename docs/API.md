@@ -40,6 +40,7 @@ search box would simply stop working. A test holds the order.
 | `GET /securities/search?q=` | find a security by ticker or company name, from the corpus |
 | `GET /securities/{id}/valuation` | the valuation panel, read from **the corpus**. `501` when no corpus is attached |
 | `GET /securities/{id}/prices?basis=raw\|total` | the price history on either basis, sampled for drawing with exact extremes |
+| `GET /securities/{id}/fundamentals` | the as-filed annual statement spine, **first-filed values only** |
 | `GET /securities/{id}/provenance` | ticker intervals with their filing citations, corporate actions, disputed splits |
 
 **There are no write routes**, so the "writes are narrow and audited" section
@@ -63,6 +64,22 @@ part of this system had no web surface at all until 2026-11-17. **Liveness is
 reported as an age, not a count**: a scheduled job does not crash, it stops,
 and a payload of healthy totals with no age would show thousands of
 observations beside a dead agent.
+
+**The fundamentals route reports what was FIRST filed**, with the date each
+figure became public. A later filing restating the same period is not shown:
+it was not knowable at the time and acting on it is look-ahead. Apple's FY2017
+revenue is the worked example — first filed in **2019**, when the FY2019 10-K
+restated it under the ASC 606 tag.
+
+Three rules travel with it. **A balance is an instant and a flow is not**, so
+balance-sheet lines read `duration_qtrs = 0` and income and cash-flow lines
+read `4`; querying one duration for every line silently removes the whole
+balance sheet. **The columns are fiscal years** and a balance is read *as at*
+each one, because instants land on quarter ends and mixing the two produces a
+statement whose holes are an artefact of the join. And **revenue is coalesced
+across the ASC 606 rename** — reading either tag alone shows a company whose
+revenue stops or starts in 2018, which is an accounting-standard change
+wearing the appearance of a business event.
 
 **The price route serves both bases and names which it is showing.** Neither
 is the default answer to every question: `v_prices_raw` is what the market

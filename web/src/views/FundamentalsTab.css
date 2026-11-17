@@ -1,0 +1,34 @@
+.fund {
+  font-variant-numeric: tabular-nums;
+}
+
+.fund__label {
+  white-space: nowrap;
+  color: var(--ink);
+  font: var(--t-body);
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+}
+
+thead .fund__label {
+  z-index: 1;
+}
+
+.fund__absent {
+  color: var(--ink-3);
+}
+
+/* A period the corpus cannot date honestly: marked, not hidden. */
+.fund__stale {
+  border-bottom: 1px dashed var(--warning);
+  padding-bottom: 1px;
+}
+
+.fund__note {
+  font: var(--t-caption);
+  color: var(--ink-3);
+  line-height: 1.6;
+  max-width: 82ch;
+  margin: 0;
+}

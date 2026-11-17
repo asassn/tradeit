@@ -22,6 +22,7 @@ export type FigureKind =
   | "multiple"
   | "score"
   | "count"
+  | "quantity"
   | "ratio";
 
 export const EM_DASH = "—";
@@ -45,13 +46,22 @@ export function formatFigure(
       return value.toFixed(precision ?? 2);
     case "count":
       return value.toLocaleString();
+    case "quantity":
+      // Scaled like money but without a currency symbol. A share count sits
+      // in a column beside $359.2B, and `14,773,260,000` there is eleven
+      // digits the eye has to parse while every neighbour is four.
+      return formatScaled(value, "");
     case "score":
       return formatScore(value);
   }
 }
 
 function formatMoney(value: number): string {
-  const sign = value < 0 ? "-$" : "$";
+  return formatScaled(value, "$");
+}
+
+function formatScaled(value: number, unit: string): string {
+  const sign = value < 0 ? `-${unit}` : unit;
   const size = Math.abs(value);
   const scales: [number, string][] = [
     [1e12, "T"],

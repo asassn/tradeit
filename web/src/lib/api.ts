@@ -375,3 +375,34 @@ export interface PriceHistory {
 
 export const getPrices = (id: number | string, basis: "raw" | "total") =>
   get<PriceHistory>(`/securities/${id}/prices?basis=${basis}`);
+
+/* ---- fundamentals ------------------------------------------------------ */
+
+export interface FundamentalCell {
+  period_end: string;
+  value: number | null;
+  tag: string | null;
+  first_filed?: string;
+  point_in_time?: boolean;
+}
+
+export interface FundamentalLine {
+  statement: string;
+  label: string;
+  values: FundamentalCell[];
+}
+
+export interface Fundamentals {
+  security_id: number;
+  available: boolean;
+  note?: string;
+  periods?: string[];
+  lines?: FundamentalLine[];
+  tag_changes?: string[];
+  tag_change_note?: string | null;
+  first_filed_note?: string;
+  point_in_time_note?: string | null;
+}
+
+export const getFundamentals = (id: number | string) =>
+  get<Fundamentals>(`/securities/${id}/fundamentals`);
