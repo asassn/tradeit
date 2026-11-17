@@ -293,7 +293,25 @@ PROMOTION_CRITERIA: tuple[Criterion, ...] = (
         # for a strategy that made 60% than for one that made 45%.
         # `edge_retained` is the share of the *annualised* edge that travelled,
         # which is what "keeps half its edge" actually means.
-        metric="edge_retained",
+        #
+        # **The metric reads the SHARE OF WINDOWS that kept half the edge, not
+        # the mean of `edge_retained`.** Owner decision 2026-11-17, from
+        # `EDGE_RETAINED_MEAN_2026-11-17.md`.
+        #
+        # `edge_retained` divides by an in-sample CAGR, so a window that barely
+        # made money in sample turns an ordinary out-of-sample year into an
+        # enormous ratio, and an arithmetic mean is dominated by it. Measured
+        # on `robustness_record.sqlite`: `wf-rolling-7` made **0.51%** in
+        # sample and 21.78% out, a ratio of 42.4, and it and two others pulled
+        # the mean of 21 windows from 0.70 to **4.21** -- comfortably past this
+        # bar, on a record where **eight of twenty-one windows lost money out
+        # of sample while making it in sample**.
+        #
+        # A count cannot be dragged that way. "At least half the windows kept
+        # at least half the edge" is the same sentence ADR-0034 approved,
+        # applied window by window, and it introduces no number that was not
+        # already approved -- 0.5 does both jobs.
+        metric="edge_retained_window_share",
         comparison=Comparison.AT_LEAST,
         threshold=Threshold(
             value=0.5,
@@ -322,7 +340,16 @@ PROMOTION_CRITERIA: tuple[Criterion, ...] = (
                 "profitability, and both must pass. "
                 "`edge_retained` is UNRESOLVED when in-sample CAGR is not positive "
                 "-- a strategy with no edge has none to retain -- so this criterion "
-                "cannot be passed by a strategy that never worked in the first place."
+                "cannot be passed by a strategy that never worked in the first place. "
+                "**Amended 2026-11-17 by owner decision** "
+                "(`EDGE_RETAINED_MEAN_2026-11-17.md`): the evidence read is the "
+                "SHARE OF WINDOWS clearing 0.5, not the mean of the ratios. The "
+                "ratio divides by an in-sample CAGR, so one window that made 0.51% "
+                "in sample scored 42.4 and pulled the mean of 21 windows from 0.70 "
+                "to 4.21 -- past this bar, while eight of them lost money out of "
+                "sample. The bar itself is unchanged; what changed is that it is "
+                "applied window by window rather than to an average, which is what "
+                "the approved sentence always meant."
             ),
         ),
         applies_from=StrategyState.PAPER_TRADING,

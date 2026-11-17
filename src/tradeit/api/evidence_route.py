@@ -46,17 +46,33 @@ __all__ = ["EDGE_RETAINED_BAR", "walkforward_payload"]
 _WINDOW = re.compile(r"^(?P<stem>.+)-(?P<leg>is|oos)$")
 
 
+#: The criterion carrying the fragility bar, looked up by NAME.
+#:
+#: Found by `metric` at first, which broke the moment ADR-0038 renamed the
+#: metric to `edge_retained_window_share` — the route's own tests caught it
+#: the same afternoon. The name is the stable identifier: `metric` says what
+#: evidence the criterion consumes and is free to change when the evaluation
+#: changes, which is exactly what happened.
+FRAGILITY_CRITERION = "out_of_sample_degradation"
+
+
 def _bar() -> tuple[float | None, str]:
-    """The approved `edge_retained` bar, read from the readiness criteria.
+    """The approved fragility bar, read from the readiness criteria.
 
     Not restated here. A number copied into a second place is a number that
     will eventually disagree with itself, and this one is a written decision
-    (ADR-0034) rather than an implementation detail.
+    (ADR-0034, evaluation amended by ADR-0038) rather than an implementation
+    detail.
+
+    **The same 0.5 does two jobs**, which is what made ADR-0038 cheap: the
+    share of its edge each window must retain, and the share of windows that
+    must retain it. This module applies it to the first; `readiness` applies
+    it to the second.
     """
     for criterion in PROMOTION_CRITERIA:
-        if criterion.metric == "edge_retained":
+        if criterion.name == FRAGILITY_CRITERION:
             return criterion.threshold.value, criterion.threshold.citation
-    return None, "no edge_retained criterion is declared"
+    return None, f"no {FRAGILITY_CRITERION} criterion is declared"
 
 
 EDGE_RETAINED_BAR, EDGE_RETAINED_CITATION = _bar()

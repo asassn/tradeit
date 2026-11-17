@@ -499,3 +499,28 @@ def test_the_consistency_threshold_names_its_parent_and_its_assumption() -> None
         "a justification that lives in a citation alone is a written decision nobody "
         "can find"
     )
+
+
+def test_the_fragility_criterion_reads_the_window_share_not_the_mean() -> None:
+    """Owner decision 2026-11-17 (`EDGE_RETAINED_MEAN_2026-11-17.md`).
+
+    `edge_retained` divides by an in-sample CAGR, so a window that barely made
+    money in sample turns an ordinary out-of-sample year into an enormous
+    ratio and an arithmetic mean is dominated by it. Measured on
+    `robustness_record.sqlite`: one window made **0.51%** in sample and 21.78%
+    out — a ratio of 42.4 — and three such windows pulled the mean of 21 from
+    0.70 to **4.21**, past the 0.5 bar, on a record where **eight of
+    twenty-one windows lost money out of sample while making it in sample**.
+
+    The bar is unchanged at 0.5; what changed is that it is applied window by
+    window rather than to an average, which is what the approved sentence
+    always meant. This test pins the decision, because the only thing
+    distinguishing the two readings is the metric name.
+    """
+    criterion = next(c for c in PROMOTION_CRITERIA if c.name == "out_of_sample_degradation")
+    assert criterion.metric == "edge_retained_window_share", (
+        "the criterion is reading the mean again"
+    )
+    assert criterion.threshold.value == 0.5
+    assert criterion.threshold.source is ThresholdSource.WRITTEN
+    assert "2026-11-17" in criterion.threshold.citation

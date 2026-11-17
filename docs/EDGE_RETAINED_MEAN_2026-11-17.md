@@ -102,6 +102,22 @@ approved, it is robust to the artefact by construction, and it reports the
 same fact the owner actually approved — that half the edge must survive —
 rather than an average that can be true while most windows fail.
 
-**This is the owner's decision.** It changes how an approved criterion is
+**This was the owner's decision.** It changes how an approved criterion is
 evaluated, which the project's rules reserve for an explicit scoped
 proposition.
+
+---
+
+## Decided: option 2, 2026-11-17
+
+The owner chose **counting the windows**, recorded in
+[`ADR-0038`](adr/0038-count-the-windows-not-the-mean.md).
+`readiness.criteria.out_of_sample_degradation` now reads
+`edge_retained_window_share`, supplied by
+`WalkForwardReport.edge_retained_window_share(bar)`. The bar stays 0.5 and
+does both jobs — the share each window must retain, and the share of windows
+that must retain it. `mean_edge_retained` is kept and still reported; it is
+simply no longer what the criterion is assessed on.
+
+On this record the honest reading is **13 of 21 resolved windows (62%) kept
+half their edge**, and 8 lost money out of sample.

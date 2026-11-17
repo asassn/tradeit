@@ -154,7 +154,13 @@ def test_the_bar_is_read_from_the_readiness_criteria_not_restated(
 
     ADR-0034 approved this threshold; the API must quote it, not keep its own.
     """
-    declared = next(c.threshold.value for c in PROMOTION_CRITERIA if c.metric == "edge_retained")
+    # By NAME, not by metric. Matching on `metric == "edge_retained"` broke
+    # the same afternoon ADR-0038 renamed it to `edge_retained_window_share`:
+    # `metric` says what evidence the criterion consumes and is free to change
+    # when the evaluation does, while the name identifies the criterion.
+    declared = next(
+        c.threshold.value for c in PROMOTION_CRITERIA if c.name == "out_of_sample_degradation"
+    )
     assert declared == EDGE_RETAINED_BAR
     assert _read(record)["bar"] == declared
 

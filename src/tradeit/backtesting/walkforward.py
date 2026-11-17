@@ -194,6 +194,41 @@ class WalkForwardReport:
             return None
         return sum(kept) / len(kept)
 
+    def edge_retained_window_share(self, bar: float) -> float | None:
+        """Share of resolved windows whose `edge_retained` reached ``bar``.
+
+        **This is what `readiness.criteria.out_of_sample_degradation` reads**,
+        by owner decision of 2026-11-17 recorded in
+        `docs/EDGE_RETAINED_MEAN_2026-11-17.md`. :attr:`mean_edge_retained`
+        is kept and is still reported, because it is a published figure and
+        removing it would rewrite history; it is simply no longer what the
+        criterion is assessed on.
+
+        **The reason is a near-zero denominator.** `edge_retained` divides by
+        an in-sample CAGR, so a window that barely made money in sample turns
+        an ordinary out-of-sample year into an enormous ratio, and an
+        arithmetic mean is dominated by it. Measured on
+        `robustness_record.sqlite`: `wf-rolling-7` made **0.51%** in sample and
+        21.78% out, a ratio of 42.4, and three such windows pulled the mean of
+        21 from 0.70 to **4.21** — past a bar of 0.5, on a record where
+        **eight of twenty-one windows lost money out of sample while making it
+        in sample**. A count cannot be dragged that way.
+
+        The denominator is the **resolved** windows, not all of them. A window
+        with no in-sample edge is UNRESOLVED for the same fail-closed reason
+        :attr:`WindowResult.edge_retained` gives, and counting it as a failure
+        would penalise a strategy for windows that say nothing about
+        fragility — the same error, in the opposite direction, as counting it
+        as a zero in the mean.
+
+        ``None`` when no window has a defined ratio, which is UNRESOLVED
+        rather than zero: nothing was measured, so nothing failed.
+        """
+        kept = [r.edge_retained for r in self.results if r.edge_retained is not None]
+        if not kept:
+            return None
+        return sum(1 for value in kept if value >= bar) / len(kept)
+
     @property
     def mean_annualised_degradation(self) -> float | None:
         """Mean of :attr:`WindowResult.annualised_degradation`, where defined.

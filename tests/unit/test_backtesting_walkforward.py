@@ -480,3 +480,71 @@ class TestEdgeRetained:
         report = WalkForwardReport(mode="rolling", results=(_pair(in_cagr=0.0, out_cagr=0.05),))
 
         assert report.mean_edge_retained is None
+
+
+def _report_of(pairs: list[tuple[float, float]]) -> WalkForwardReport:
+    """A report built from explicit (in-sample CAGR, out-of-sample CAGR) pairs.
+
+    The existing `TestReporting._report` applies one return to every window,
+    which cannot express the case these tests exist for: a grid where the
+    windows disagree.
+    """
+    return WalkForwardReport(
+        mode="rolling",
+        results=tuple(_pair(in_cagr=i, out_cagr=o) for i, o in pairs),
+    )
+
+
+class TestEdgeRetainedWindowShare:
+    """The share of windows that kept half the edge, which the readiness
+    criterion reads instead of the mean (owner decision 2026-11-17).
+
+    The mean of a ratio whose denominator is an in-sample CAGR is dominated by
+    whichever window barely made money in sample. Measured on the real
+    robustness record: one window made 0.51% in sample and 21.78% out — a
+    ratio of 42.4 — and three such windows pulled the mean of 21 from 0.70 to
+    4.21, past a bar of 0.5, while eight of them lost money out of sample.
+    """
+
+    def test_one_wild_window_cannot_drag_the_share(self) -> None:
+        """The property the mean does not have, and the whole reason for the
+        change."""
+        report = _report_of(
+            [
+                # The near-zero denominator: 0.5% in, 21% out -> ratio 42.
+                (0.005, 0.21),
+                (0.10, 0.02),  # 0.20 — fails
+                (0.10, 0.02),  # 0.20 — fails
+                (0.10, 0.02),  # 0.20 — fails
+            ]
+        )
+        assert report.mean_edge_retained is not None
+        assert report.mean_edge_retained > 10, "the mean is dragged, as expected"
+        # One in four kept half the edge. The mean says otherwise.
+        assert report.edge_retained_window_share(0.5) == pytest.approx(0.25)
+
+    def test_the_denominator_is_the_resolved_windows_only(self) -> None:
+        """A window with no in-sample edge says nothing about fragility.
+
+        Counting it as a failure penalises a strategy for windows that cannot
+        speak — the same error as counting it zero in the mean, in the other
+        direction.
+        """
+        report = _report_of(
+            [
+                (0.10, 0.08),  # 0.80 — clears
+                (-0.02, 0.10),  # no in-sample edge — unresolved
+            ]
+        )
+        assert report.edge_retained_window_share(0.5) == pytest.approx(1.0)
+
+    def test_no_resolved_window_is_unresolved_not_zero(self) -> None:
+        """Nothing was measured, so nothing failed."""
+        report = _report_of([(-0.02, 0.10), (0.0, 0.05)])
+        assert report.edge_retained_window_share(0.5) is None
+
+    def test_the_mean_is_kept_and_still_reported(self) -> None:
+        """A published figure is not removed because it stopped being the one
+        assessed. Removing it would rewrite history."""
+        report = _report_of([(0.10, 0.08)])
+        assert report.mean_edge_retained == pytest.approx(0.8)
