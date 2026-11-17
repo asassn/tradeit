@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from tradeit.research01.fundamental_signals import Fact, FundamentalHistory
 
 __all__ = [
+    "BALANCE_FRESH_DAYS",
     "EARNINGS_METRIC",
     "EQUITY_METRIC",
     "SHARES_METRIC",
@@ -54,6 +55,8 @@ __all__ = [
     "price_to_book",
     "price_to_earnings",
     "rank_within",
+    "shares_outstanding",
+    "trailing_twelve_months",
 ]
 
 #: Quarters in a trailing-twelve-month figure.
@@ -140,7 +143,7 @@ class Multiple:
         )
 
 
-def _trailing_twelve_months(history: FundamentalHistory, metric: str, on: dt.date) -> Fact | None:
+def trailing_twelve_months(history: FundamentalHistory, metric: str, on: dt.date) -> Fact | None:
     """The last four stand-alone quarters of ``metric`` usable on ``on``.
 
     Returns a :class:`Fact` whose ``known`` is the **latest** of the four, so a
@@ -175,7 +178,7 @@ def _trailing_twelve_months(history: FundamentalHistory, metric: str, on: dt.dat
     )
 
 
-def _shares_outstanding(history: FundamentalHistory, on: dt.date) -> Fact | None:
+def shares_outstanding(history: FundamentalHistory, on: dt.date) -> Fact | None:
     """Shares outstanding as a balance, fresh enough to describe the company."""
     shares = history.instant_known_by(SHARES_METRIC, on)
     if shares is None or shares.value <= 0:
@@ -199,7 +202,7 @@ def price_to_earnings(
     single denominator, which is also the only way the result can be compared
     with the same security's own history across a split.
     """
-    earnings = _trailing_twelve_months(history, EARNINGS_METRIC, on)
+    earnings = trailing_twelve_months(history, EARNINGS_METRIC, on)
     if earnings is None:
         return Unresolved(
             "price_to_earnings",
@@ -214,7 +217,7 @@ def price_to_earnings(
                 "names as the cheapest"
             ),
         )
-    shares = _shares_outstanding(history, on)
+    shares = shares_outstanding(history, on)
     if shares is None:
         return Unresolved(
             "price_to_earnings",
@@ -259,7 +262,7 @@ def price_to_book(
                 "non-positive book value sorts an insolvent balance sheet as cheap"
             ),
         )
-    shares = _shares_outstanding(history, on)
+    shares = shares_outstanding(history, on)
     if shares is None:
         return Unresolved(
             "price_to_book",

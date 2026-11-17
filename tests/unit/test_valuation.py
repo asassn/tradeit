@@ -1,11 +1,11 @@
-"""Valuation evidence, and the label it refuses to print.
+"""Multiples: the ways one returns a confident wrong number.
 
 Pure functions over facts, so every point-in-time rule is testable exactly --
 the same property `test_research01_fundamental_signals` relies on.
 
-The tests are grouped by what they protect against, because a flat list of
-multiples reads as arithmetic and almost none of this is arithmetic: it is the
-set of ways a multiple returns a confident wrong number.
+Grouped by what they protect against, because a flat list reads as arithmetic
+and almost none of this is arithmetic. The panel these feed is tested in
+`test_valuation_panel.py`.
 """
 
 from __future__ import annotations
@@ -14,19 +14,17 @@ import datetime as dt
 
 import pytest
 
-from tradeit.readiness.criteria import ThresholdSource
 from tradeit.research01.fundamental_signals import Fact, FundamentalHistory
 from tradeit.valuation import (
     Multiple,
     PriceBar,
     Unresolved,
-    ValuationVerdict,
-    evidence_for,
+    panel_for,
     price_to_book,
     price_to_earnings,
     rank_within,
 )
-from tradeit.valuation.evidence import LABEL_THRESHOLD_SOURCE, NOT_POINT_IN_TIME_BEFORE
+from tradeit.valuation.panel import NOT_POINT_IN_TIME_BEFORE
 
 ON = dt.date(2020, 6, 1)
 
@@ -216,13 +214,13 @@ def test_an_adjusted_price_is_flagged_as_the_wrong_basis() -> None:
     Pairing an adjusted close with an as-reported per-share figure is wrong by
     every split since -- a 2-for-1 prints the company at half its true
     multiple."""
-    evidence = evidence_for(1, _price(basis="total"), _history(earnings=[25, 25, 25, 25]), ON)
-    assert any("raw print" in caveat for caveat in evidence.caveats)
+    panel = panel_for(1, _price(basis="total"), _history(earnings=[25, 25, 25, 25]), ON)
+    assert any("raw print" in caveat for caveat in panel.caveats)
 
 
 def test_a_raw_price_raises_no_basis_caveat() -> None:
-    evidence = evidence_for(1, _price(), _history(earnings=[25, 25, 25, 25]), ON)
-    assert not any("raw print" in caveat for caveat in evidence.caveats)
+    panel = panel_for(1, _price(), _history(earnings=[25, 25, 25, 25]), ON)
+    assert not any("raw print" in caveat for caveat in panel.caveats)
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +250,8 @@ def test_history_is_repriced_rather_than_projected_backwards() -> None:
     """
     history = _history(earnings=[25, 25, 25, 25])
     past = [PriceBar(ON - dt.timedelta(days=days), 100.0) for days in (900, 800, 30, 20, 10)]
-    evidence = evidence_for(1, _price(close=100.0), history, ON, past_prices=past)
-    size = evidence.own_history_size["price_to_earnings"]
+    panel = panel_for(1, _price(close=100.0), history, ON, past_prices=past)
+    size = panel.multiple_history_size["price_to_earnings"]
     assert size == 3, "only the sessions where the fundamentals were already filed may count"
 
 
@@ -262,8 +260,8 @@ def test_a_future_session_never_enters_the_history() -> None:
     would otherwise rank today against tomorrow."""
     history = _history(earnings=[25, 25, 25, 25])
     past = [PriceBar(ON + dt.timedelta(days=days), 100.0) for days in (1, 2, 3)]
-    evidence = evidence_for(1, _price(), history, ON, past_prices=past)
-    assert "price_to_earnings" not in evidence.own_history_rank
+    panel = panel_for(1, _price(), history, ON, past_prices=past)
+    assert "price_to_earnings" not in panel.multiple_ranks
 
 
 def test_history_reaching_before_2013_carries_the_point_in_time_caveat() -> None:
@@ -272,116 +270,12 @@ def test_history_reaching_before_2013_carries_the_point_in_time_caveat() -> None
     history reaching back past that is not what a reader could have seen."""
     history = _history(earnings=[25, 25, 25, 25])
     past = [PriceBar(NOT_POINT_IN_TIME_BEFORE - dt.timedelta(days=1), 100.0)]
-    evidence = evidence_for(1, _price(), history, ON, past_prices=past)
-    assert any("not point-in-time" in caveat for caveat in evidence.caveats)
+    panel = panel_for(1, _price(), history, ON, past_prices=past)
+    assert any("not point-in-time" in caveat for caveat in panel.caveats)
 
 
 def test_a_history_inside_the_point_in_time_window_carries_no_such_caveat() -> None:
     history = _history(earnings=[25, 25, 25, 25])
     past = [PriceBar(ON - dt.timedelta(days=20), 100.0)]
-    evidence = evidence_for(1, _price(), history, ON, past_prices=past)
-    assert not any("not point-in-time" in caveat for caveat in evidence.caveats)
-
-
-# ---------------------------------------------------------------------------
-# The label, and why there is not one.
-# ---------------------------------------------------------------------------
-
-
-def test_the_verdict_is_unresolved_even_on_complete_evidence() -> None:
-    """Not a stub. The missing piece is an **approval**, not a measurement:
-    nothing already written says a security in the cheapest fifth of its own
-    history is undervalued, so a cut chosen here would be fitted to whatever
-    the corpus happens to hold."""
-    history = _history(earnings=[25, 25, 25, 25])
-    past = [PriceBar(ON - dt.timedelta(days=days), 50.0 + days) for days in (10, 20, 30)]
-    evidence = evidence_for(1, _price(), history, ON, past_prices=past)
-    assert evidence.multiples, "the evidence is meant to be complete here"
-    assert evidence.own_history_rank, "and ranked"
-    assert evidence.verdict is ValuationVerdict.UNRESOLVED
-
-
-def test_the_refusal_names_what_it_is_waiting_for() -> None:
-    """A reader who sees UNRESOLVED with no explanation concludes the data is
-    missing. The data may be complete and the decision missing, and those call
-    for different actions."""
-    evidence = evidence_for(1, _price(), _history(earnings=[25, 25, 25, 25]), ON)
-    assert evidence.owed is not None
-    assert "threshold" in evidence.owed
-    assert "product decision" in evidence.owed
-
-
-def test_no_evidence_and_no_threshold_are_distinguishable() -> None:
-    """Two different reasons to show no label, and they call for different
-    actions: one waits on a decision, the other on data that may never exist
-    for this company."""
-    unlabelled = evidence_for(1, _price(), _history(earnings=[25, 25, 25, 25]), ON)
-    # Negative on both, so neither multiple resolves and there is nothing to
-    # label even once a threshold is approved -- the real shape of securities
-    # 6 and 25 in the corpus, both delisted.
-    nothing = evidence_for(1, _price(), _history(earnings=[-1, -1, -1, -1], equity=-1.0), ON)
-    assert not nothing.multiples
-    assert unlabelled.owed != nothing.owed
-    assert "nothing to label" in (nothing.owed or "")
-
-
-def test_the_label_threshold_is_declared_unapproved() -> None:
-    """Held in the same mechanism `tradeit.readiness` uses for a criterion
-    whose number is still owed, so the gap is visible rather than absent."""
-    assert LABEL_THRESHOLD_SOURCE is ThresholdSource.UNAPPROVED
-
-
-def test_no_function_turns_a_number_into_a_label() -> None:
-    """The roadmap's condition enforced structurally rather than remembered.
-
-    `verdict` is a property of the evidence, so there is no path from a
-    percentile to a word that does not carry the reasoning with it. If a
-    helper taking a bare number ever appears in this package, this fails and
-    the condition is back in somebody's memory where it started.
-    """
-    import inspect
-
-    from tradeit import valuation
-
-    for name in valuation.__all__:
-        member = getattr(valuation, name)
-        if not inspect.isfunction(member):
-            continue
-        hints = inspect.signature(member).return_annotation
-        assert "Verdict" not in str(hints), (
-            f"{name} returns a verdict without requiring the evidence"
-        )
-
-
-def test_an_unresolved_multiple_is_reported_beside_the_resolved_ones() -> None:
-    """ "We did not compute a P/E" and "this company loses money" are different
-    facts, and the second is the more useful one."""
-    history = _history(earnings=[-25, -25, -25, -25], equity=1_000.0)
-    evidence = evidence_for(1, _price(), history, ON)
-    assert [m.basis for m in evidence.multiples] == ["price_to_book"]
-    assert [u.basis for u in evidence.unresolved] == ["price_to_earnings"]
-
-
-def test_a_stale_share_count_is_refused_on_its_own_guard() -> None:
-    """Added because a mutant survived.
-
-    `test_a_stale_balance_does_not_describe_the_company` aged *both* balances,
-    so it tripped the equity guard and returned before the share-count guard
-    was ever reached -- that guard was unprotected and deleting it changed
-    nothing. The equity here is fresh, so the refusal can only come from the
-    shares.
-
-    It matters because the share count is the denominator of *both* multiples:
-    a stale one from before a buyback or an issuance misprices the company by
-    whatever the count has done since, and quietly, because the arithmetic
-    succeeds.
-    """
-    history = FundamentalHistory(
-        [
-            _balance("StockholdersEquity", 1_000.0),
-            _balance("CommonStockSharesOutstanding", 100.0, end=dt.date(2015, 3, 31)),
-        ]
-    )
-    result = price_to_book(_price(), history, ON)
-    assert isinstance(result, Unresolved)
-    assert "CommonStockSharesOutstanding" in result.reason
+    panel = panel_for(1, _price(), history, ON, past_prices=past)
+    assert not any("not point-in-time" in caveat for caveat in panel.caveats)

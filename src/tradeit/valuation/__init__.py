@@ -1,29 +1,36 @@
-"""Valuation evidence: the multiples, and what they are cheap or dear against.
+"""Valuation evidence: what a company costs, what it produces, and no verdict.
 
-Phase 10 asks for *"a short human-readable verdict when browsing or selecting a
-name, backed by multiples, the security's own valuation history, and
-sector-relative comparison"*, and attaches a condition to it:
+Phase 10 asks for *"a short human-readable verdict when browsing or selecting
+a name, backed by multiples, the security's own valuation history, and
+sector-relative comparison"*, under the condition that **the callout is never
+shipped without the reasoning that produced it**.
 
-> **The callout is never shipped without the reasoning that produced it** --- a
-> one-word label with no visible methodology is an opinion wearing a badge, and
-> it would be acted on far more confidently than its evidence deserves.
+**This package builds the reasoning and does not print the verdict.** That is
+a decision, taken 2026-11-17 and recorded in
+`docs/adr/0036-valuation-is-a-panel-not-a-verdict.md`, after building the
+reasoning made the verdict look unsupportable: a multiple has no absolute
+meaning without growth and risk, valuation is horizon-dependent so one label
+across three horizons would be the global buy/sell number the architecture
+exists to prevent, and the four fundamental signals measured on this corpus
+have all failed. :func:`~tradeit.valuation.panel.panel_for` reports a free
+cash flow yield on enterprise value, where it sits in the security's own
+history, what growth the price implies at several required returns, and
+whether cheapness arrives with deterioration.
 
-This package builds the reasoning. **It does not produce the label**, and that
-is a decision rather than an unfinished edge: see
-:class:`~tradeit.valuation.evidence.ValuationEvidence`, which carries complete
-evidence and still answers ``UNRESOLVED``, naming the approval it is waiting
-for. The same machinery `tradeit.readiness` uses to declare a criterion whose
-number is still owed --- ``ThresholdSource.UNAPPROVED`` --- is what holds the
-gap open here, so it is visible on the screen instead of being filled with a
-number nobody chose.
+An earlier revision of this package carried a ``ValuationVerdict`` that always
+answered ``UNRESOLVED`` behind an ``UNAPPROVED`` threshold. The panel needs no
+such gate: every number in it is measured or supplied by the caller, so there
+is nothing left to approve.
 """
 
 from __future__ import annotations
 
-from tradeit.valuation.evidence import (
-    ValuationEvidence,
-    ValuationVerdict,
-    evidence_for,
+from tradeit.valuation.cashflow import (
+    EnterpriseValue,
+    FreeCashFlow,
+    enterprise_value,
+    free_cash_flow,
+    implied_growth,
 )
 from tradeit.valuation.multiples import (
     Multiple,
@@ -33,14 +40,26 @@ from tradeit.valuation.multiples import (
     price_to_earnings,
     rank_within,
 )
+from tradeit.valuation.panel import (
+    ImpliedGrowth,
+    QualityFlag,
+    ValuationPanel,
+    panel_for,
+)
 
 __all__ = [
+    "EnterpriseValue",
+    "FreeCashFlow",
+    "ImpliedGrowth",
     "Multiple",
     "PriceBar",
+    "QualityFlag",
     "Unresolved",
-    "ValuationEvidence",
-    "ValuationVerdict",
-    "evidence_for",
+    "ValuationPanel",
+    "enterprise_value",
+    "free_cash_flow",
+    "implied_growth",
+    "panel_for",
     "price_to_book",
     "price_to_earnings",
     "rank_within",

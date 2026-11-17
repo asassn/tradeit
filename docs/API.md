@@ -30,17 +30,33 @@ PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard --record <path>
 | `GET /instruments` | which securities the record can speak about |
 | `GET /instruments/{id}/panel` | one security, each horizon separately, absent ones with a reason |
 | `GET /instruments/{id}/scores` | one security's scores as recorded, unaggregated |
+| `GET /securities/{id}/valuation` | the valuation panel, read from **the corpus**. `501` when no corpus is attached |
 
 **There are no write routes**, so the "writes are narrow and audited" section
 below describes none of what exists. The constraints the running service
 enforces are in
 [ADR-0035](adr/0035-the-dashboard-shows-what-the-record-holds.md).
 
-**Not implemented, and each for a stated reason:** the valuation callout (the
-reasoning that must ship with it does not exist), live news and attention
-(gated on a source with honest publication timestamps), and the onboard
-assistant (only as honest as the record beneath it, which is one backtest and
-eighteen forward sessions deep).
+**Two databases, and the valuation route is why.** Everything above reads the
+decision record --- what the system decided. `/securities/{id}/valuation`
+reads `research-01` --- what the world did. They are **separate id spaces**:
+instruments live in the record, securities live in the corpus, and a route
+accepting one for the other would return another company's valuation, a wrong
+answer that looks entirely right. Start with `--corpus` to enable it; without
+it the route answers `501`, because an empty panel would read as a claim about
+the company rather than about this process.
+
+**The valuation route returns no verdict**, by decision rather than omission
+--- [ADR-0036](adr/0036-valuation-is-a-panel-not-a-verdict.md). It reports a
+free cash flow yield on enterprise value, where that sits in the security's
+own history, what growth the price implies at several required returns, and
+whether cheapness arrives with deterioration.
+
+**Not implemented, and each for a stated reason:** sector-relative comparison
+(needs the sector population resolved as of the session, a corpus-wide read),
+live news and attention (gated on a source with honest publication
+timestamps), and the onboard assistant (only as honest as the record beneath
+it, which is one backtest and eighteen forward sessions deep).
 
 ## Principles
 

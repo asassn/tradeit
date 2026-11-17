@@ -24,6 +24,7 @@ from tradeit.storage.tables import Base
 def _args(**overrides: object) -> argparse.Namespace:
     base: dict[str, object] = {
         "record": "",
+        "corpus": None,
         "host": LOOPBACK,
         "port": 8000,
         "log_level": "info",

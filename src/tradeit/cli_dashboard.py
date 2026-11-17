@@ -97,8 +97,20 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
-    app = create_app(dsn)
+    corpus_dsn: str | None = None
+    if args.corpus is not None:
+        corpus = Path(args.corpus)
+        if args.corpus.startswith(("sqlite:", "postgresql:", "postgres:")):
+            corpus_dsn = args.corpus
+        elif corpus.exists():
+            corpus_dsn = _sqlite_url(corpus)
+        else:
+            print(f"no corpus at {corpus.expanduser().resolve()}", file=sys.stderr)
+            return 2
+
+    app = create_app(dsn, corpus_dsn)
     print(f"reading  : {dsn}")
+    print(f"corpus   : {corpus_dsn or 'none -- valuation is disabled'}")
     print(f"serving  : http://{args.host}:{args.port}/")
     uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
     return 0
@@ -116,6 +128,16 @@ def add_dashboard_commands(sub: argparse._SubParsersAction) -> None:  # type: ig
             "the decision record to read: a path to a sqlite file, or a full DSN. "
             "Required and with no default -- the record and the corpus are different "
             "databases and there is more than one record"
+        ),
+    )
+    parser.add_argument(
+        "--corpus",
+        default=None,
+        help=(
+            "optional: research-01, for the valuation panel. A different database "
+            "from the record -- the record holds what the system decided, the "
+            "corpus holds what the world did. Without it the valuation route "
+            "says so rather than answering empty"
         ),
     )
     parser.add_argument("--host", default=LOOPBACK, help="interface to bind (default: loopback)")

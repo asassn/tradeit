@@ -54,6 +54,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.api.page import PAGE
+from tradeit.api.valuation_route import valuation_payload
 from tradeit.observability.record import reconstruct
 from tradeit.storage.tables import (
     BacktestRun,
@@ -163,7 +164,7 @@ def _horizons_for(session: Session, ids: list[int]) -> dict[int, list[str]]:
     return out
 
 
-def create_app(dsn: str) -> FastAPI:
+def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
     """Build the service over one decision record.
 
     ``dsn`` is required and has no default. The record and the corpus are
@@ -174,6 +175,16 @@ def create_app(dsn: str) -> FastAPI:
     """
     engine = create_engine(dsn, future=True)
     factory = sessionmaker(bind=engine, future=True)
+    # The corpus is a **second, optional** connection, and separate from the
+    # record on purpose. The record holds what the system decided; the corpus
+    # holds what the world did. Measured 2026-11-17: the decision record has
+    # zero rows in `securities`, `security_price_facts` and
+    # `security_fundamental_facts`, so a valuation route pointed at it would
+    # answer "no data" forever and read as a gap in the corpus rather than a
+    # service wired to the wrong database.
+    corpus_factory: sessionmaker[Session] | None = None
+    if corpus_dsn is not None:
+        corpus_factory = sessionmaker(bind=create_engine(corpus_dsn, future=True), future=True)
     # Rendered through SQLAlchemy's own URL rather than printed, because the
     # page displays it and a Postgres DSN carries a password. `hide_password`
     # is the library's redaction and is used instead of a hand-rolled one: the
@@ -190,6 +201,7 @@ def create_app(dsn: str) -> FastAPI:
         version="0.1.0",
     )
     app.state.session_factory = factory
+    app.state.corpus_factory = corpus_factory
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def index() -> str:
@@ -217,6 +229,7 @@ def create_app(dsn: str) -> FastAPI:
             # reading would let a reader attribute one record's results to
             # another. Password-redacted at construction.
             "record": record_label,
+            "corpus_attached": corpus_factory is not None,
             "has_scores": scores,
             "has_runs": runs,
             "note": (
@@ -576,6 +589,42 @@ def create_app(dsn: str) -> FastAPI:
             ),
             "unrecorded_horizon_rows": len(by_horizon.get("unrecorded", [])),
         }
+
+    @app.get("/securities/{security_id}/valuation")
+    def security_valuation(security_id: int) -> dict[str, Any]:
+        """One security's valuation panel, read from the corpus.
+
+        **Keyed on `security_id`, not `instrument_id`**, and the difference is
+        not pedantry: instruments live in the decision record and securities
+        live in `research-01`. They are separate id spaces, and a route that
+        silently accepted one for the other would return another company's
+        valuation --- a wrong answer that looks entirely right.
+
+        **No verdict is returned.** ADR-0036: a multiple has no absolute
+        meaning without growth and risk, valuation is horizon-dependent so one
+        label across three horizons would be the universal buy/sell number the
+        architecture exists to prevent, and none of the four fundamental
+        signals measured on this corpus has passed.
+        """
+        if corpus_factory is None:
+            # 501 rather than 404 or an empty body: the request is well formed
+            # and the service is not configured to answer it. An empty panel
+            # would read as "this company has no valuation", which is a claim
+            # about the company rather than about this process.
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "no corpus is attached. Valuation reads research-01, which is "
+                    "a different database from the decision record; start with "
+                    "--corpus to enable it"
+                ),
+            )
+        corpus = corpus_factory()
+        try:
+            return valuation_payload(corpus, security_id)
+        finally:
+            corpus.rollback()
+            corpus.close()
 
     @app.get("/instruments/{instrument_id}/scores")
     def instrument_scores(

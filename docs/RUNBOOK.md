@@ -159,7 +159,8 @@ The decision record answers it, and the read side serves it:
 ```bash
 .venv/bin/pip install -e ".[api]"
 PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard \
-  --record ~/Documents/TradeItData/out/decision_record_2003_2019.sqlite
+  --record ~/Documents/TradeItData/out/decision_record_2003_2019.sqlite \
+  --corpus research01.sqlite
 ```
 
 Then open <http://127.0.0.1:8000/>. The screen is served from that same
@@ -178,6 +179,12 @@ wrapper ([ADR-0035](adr/0035-the-dashboard-shows-what-the-record-holds.md)).
 is refused rather than created**: SQLite makes an empty database on connect, so
 a mistyped path would otherwise start a service that answers every route with
 nothing — which reads exactly like a record in which nothing happened.
+
+`--corpus` is optional and enables the valuation panel only. It is a
+**different database** from the record: the record holds what the system
+decided, the corpus holds what the world did, and they have separate id
+spaces. Without it `/securities/{id}/valuation` answers `501` rather than
+returning an empty panel, which would read as a claim about the company.
 
 `--host` defaults to loopback and warns when it is changed. The service is
 read-only and cannot trade, but nothing authenticates it.

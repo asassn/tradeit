@@ -614,3 +614,65 @@ def test_sample_size_is_judged_on_the_rows_not_on_the_column(record: str) -> Non
     row = TestClient(create_app(record)).get("/runs").json()[0]
     assert row["trade_count_column"] == 0
     assert row["statistically_meaningful"] is True
+
+
+# ---------------------------------------------------------------------------
+# Valuation, which reads a different database from everything above.
+# ---------------------------------------------------------------------------
+
+
+def test_valuation_without_a_corpus_is_501_not_an_empty_panel(record: str) -> None:
+    """The distinction this route exists to keep.
+
+    An empty panel reads as *this company has no valuation* --- a claim about
+    the company. The truth is a claim about this process: it was started
+    without the corpus. Measured 2026-11-17, the decision record holds **zero**
+    rows in `securities`, `security_price_facts` and
+    `security_fundamental_facts`, so a route pointed at the record would answer
+    empty forever and look like a gap in the corpus.
+
+    `501` rather than `404`: the request is well formed and the resource could
+    exist; the service is not configured to serve it.
+    """
+    response = TestClient(create_app(record)).get("/securities/1/valuation")
+    assert response.status_code == 501
+    assert "different database" in response.json()["detail"]
+
+
+def test_health_says_whether_a_corpus_is_attached(record: str) -> None:
+    """So a reader seeing no valuation can tell which of the two reasons it
+    is without trying the route."""
+    assert TestClient(create_app(record)).get("/health").json()["corpus_attached"] is False
+    attached = TestClient(create_app(record, record)).get("/health").json()
+    assert attached["corpus_attached"] is True
+
+
+def test_a_corpus_without_the_corpus_views_says_which_mistake_it_is(record: str) -> None:
+    """Pointing `--corpus` at the wrong database is the likely operator error.
+
+    `v_prices_raw` is a **view**, created by the corpus build and not by
+    `Base.metadata.create_all`, so a database with every table and no views is
+    exactly what you get by passing the decision record twice. Without this it
+    surfaced as a 500 naming a view nobody has heard of; it now names the
+    mistake.
+    """
+    _populate(record)
+    body = TestClient(create_app(record, record)).get("/securities/1/valuation").json()
+    assert body["available"] is False
+    assert "not a prepared research-01 corpus" in body["note"]
+
+
+def test_the_valuation_route_promises_no_verdict(record: str) -> None:
+    """ADR-0036, asserted at the boundary as well as in the panel.
+
+    The panel's own test checks the object has no verdict attribute; this
+    checks the payload does not grow one on the way out, which is where a
+    convenience field would most plausibly be added.
+    """
+    _populate(record)
+    body = TestClient(create_app(record, record)).get("/securities/1/valuation").json()
+    # True of the unavailable payload as well as the full one: a convenience
+    # field would most plausibly be added to whichever shape a caller hits
+    # first, and both are checked by the same rule.
+    for forbidden in ("verdict", "label", "rating", "callout"):
+        assert forbidden not in body, f"the payload grew a {forbidden}"

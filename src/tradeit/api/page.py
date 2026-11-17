@@ -112,6 +112,12 @@ PAGE = """<!doctype html>
   .pill { display: inline-block; border: 1px solid var(--line); border-radius: 999px;
           padding: 1px 8px; font-size: 11.5px; color: var(--soft); margin-right: 4px; }
   .empty { color: var(--soft); font-size: 13px; }
+  .headline { margin: 12px 0 16px; }
+  .big { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; color: var(--accent); }
+  ul.lines { padding-left: 18px; margin: 6px 0; }
+  ul.lines li { margin-bottom: 5px; overflow-wrap: anywhere; }
+  h3.sub { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;
+           margin: 16px 0 6px; font-weight: 600; }
   @media (max-width: 620px) {
     .wrap { padding: 16px; }
     table { font-size: 12.5px; }
@@ -140,6 +146,16 @@ PAGE = """<!doctype html>
       <select id="session-pick"></select>
     </div>
     <div id="session">pick a session</div>
+  </section>
+
+  <section id="valuation-panel">
+    <h2>What a company costs, and what it produces</h2>
+    <div class="row">
+      <label for="val-pick" class="sub">Security id</label>
+      <input id="val-pick" type="number" min="1" value="1" style="width: 110px">
+      <a id="val-go">look up</a>
+    </div>
+    <div id="valuation">enter a security id</div>
   </section>
 
   <section id="panel-panel">
@@ -360,10 +376,89 @@ async function loadPanel(id, meta) {
   $("panel").innerHTML = html;
 }
 
+// Valuation. Reads the corpus, not the record, and renders no verdict --
+// ADR-0036. The two rank directions are opposite and both are labelled on
+// screen, because a yield inverts a multiple and reading one for the other
+// reverses the conclusion.
+async function loadValuation(id) {
+  $("valuation").innerHTML = "loading&hellip;";
+  let v;
+  try {
+    v = await get("./securities/" + id + "/valuation");
+  } catch (e) {
+    $("valuation").innerHTML = '<div class="flag">' +
+      (String(e.message).includes("501")
+        ? "no corpus attached &mdash; start the dashboard with --corpus to enable valuation"
+        : esc(e.message)) + "</div>";
+    return;
+  }
+  if (!v.available) {
+    $("valuation").innerHTML = '<div class="flag">' + esc(v.note) + "</div>";
+    return;
+  }
+  let html = '<p class="mono">security ' + v.security_id + " &middot; close " +
+    num(v.price.close, 4) + " on " + esc(v.price.session) + "</p>";
+
+  if (v.fcf_yield !== null && v.fcf_yield !== undefined) {
+    const rank = (v.fcf_yield_rank === null || v.fcf_yield_rank === undefined)
+      ? "no history to compare"
+      : pct(v.fcf_yield_rank) + " of its own " + v.fcf_yield_history_size +
+        " past observations were at or below &mdash; <strong>higher is cheaper</strong>";
+    html += '<div class="headline"><span class="big">' + pct(v.fcf_yield) +
+      '</span><span class="sub"> free cash flow yield on enterprise value</span>' +
+      '<div class="sub">' + rank + "</div></div>";
+  }
+
+  if (v.implied_growth.length) {
+    html += "<h3 class='sub'>What this price is paying for</h3><table>" +
+      "<tr><th>Required return</th><th class='num'>Implied growth, perpetually</th></tr>";
+    for (const g of v.implied_growth) {
+      html += "<tr><td>" + pct(g.discount_rate) + '</td><td class="num">' +
+        pct(g.growth) + "</td></tr>";
+    }
+    html += "</table>";
+  }
+
+  for (const q of v.quality) {
+    html += '<div class="flag"><strong>' + esc(q.name.replace(/_/g, " ")) +
+      "</strong><br>" + esc(q.detail) + "</div>";
+  }
+
+  if (v.multiples.length) {
+    html += "<h3 class='sub'>Multiples (secondary)</h3><table>" +
+      "<tr><th>Basis</th><th class='num'>Value</th><th>Vs its own history</th></tr>";
+    for (const m of v.multiples) {
+      const r = (m.rank === null || m.rank === undefined)
+        ? "&mdash;"
+        : pct(m.rank) + " at or below of " + m.history_size + " (lower is cheaper)";
+      html += "<tr><td>" + esc(m.basis.replace(/_/g, " ")) + '</td><td class="num">' +
+        num(m.value) + "</td><td>" + r + "</td></tr>";
+    }
+    html += "</table>";
+  }
+
+  // Refusals are shown, never filtered. "This company loses money" is more
+  // useful than a blank cell, and it is the reason the number is absent.
+  for (const u of v.unresolved) {
+    html += '<div class="flag"><strong>' + esc(u.basis.replace(/_/g, " ")) +
+      " not computed</strong><br>" + esc(u.reason) + "</div>";
+  }
+
+  html += "<h3 class='sub'>Check the arithmetic</h3><ul class='mono lines'>";
+  for (const line of v.explanations) html += "<li>" + esc(line) + "</li>";
+  html += "</ul>";
+  for (const c of v.caveats) html += '<p class="note">' + esc(c) + "</p>";
+  html += '<p class="note">' + esc(v.note) + "</p>";
+  $("valuation").innerHTML = html;
+}
+
 (async () => {
   await loadHealth();
+  const valGo = () => loadValuation($("val-pick").value);
+  $("val-go").onclick = valGo;
+  $("val-pick").onkeydown = (e) => { if (e.key === "Enter") valGo(); };
   for (const [fn, where] of [[loadRuns, "runs"], [loadSessionList, "session"],
-                             [loadInstrumentList, "panel"]]) {
+                             [loadInstrumentList, "panel"], [valGo, "valuation"]]) {
     // Each panel fails on its own. One unreachable route must not blank the
     // page: a half-loaded screen that says which half failed is more useful
     // than a blank one, and far more useful than a screen that silently drops
