@@ -115,3 +115,10 @@ htmlcov/
 # An ignore rule does not untrack a file that is already committed. Adding a
 # pattern here is half the fix; `git rm --cached` is the other half.
 /.research01_*.json
+
+# The web toolchain. The BUILT BUNDLE is committed on purpose
+# (src/tradeit/api/static/) so `pip install` alone yields a working dashboard;
+# an operator must not need Node to run the thing. Only the toolchain's own
+# working files are ignored.
+web/node_modules/
+web/.vite/

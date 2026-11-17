@@ -84,3 +84,45 @@ jobs:
         env:
           TRADEIT_TEST_PG_DSN: postgresql+psycopg://tradeit:tradeit@localhost:5432/tradeit_test
         run: pytest -q --cov=tradeit --cov-report=term-missing
+
+  # The front end is a separate job on purpose. It has its own toolchain and
+  # its own failure modes, and coupling it to the Python matrix would run
+  # `npm ci` twice to learn the same thing.
+  #
+  # Note what this job does NOT do: it does not gate on the committed bundle
+  # being current. `src/tradeit/api/static/` is committed so that `pip
+  # install` alone yields a working dashboard -- an operator must not need
+  # Node -- and a staleness check would be a second source of truth for
+  # whether a build is needed. The build here proves the source compiles; the
+  # commit proves what ships.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Holds the invariants the backend enforces structurally and the UI is
+      # the likeliest place to undo: no mutating request, no rendered verdict
+      # (ADR-0036), no raw hex outside the design tokens.
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

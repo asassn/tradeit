@@ -1,0 +1,304 @@
+/*
+ * TradeIt design tokens — the single source for colour, type, space and density.
+ *
+ * Nothing in the application may use a raw hex, a raw pixel size, or a raw
+ * font size. Every component references a token by role, which is what makes
+ * the light/dark swap and the density swap one change rather than hundreds.
+ *
+ * THE DATA LAYER IS NOT OURS TO INVENT. The categorical series, status,
+ * sequential and diverging values below come from the validated reference
+ * palette of the `dataviz` method, and were re-validated against these
+ * surfaces on 2026-11-17:
+ *
+ *   light  — all checks PASS, with a CONTRAST WARN on three slots
+ *   dark   — all checks PASS, including contrast
+ *
+ * The light warn is a binding obligation, not advice: series 3 (aqua, 2.74),
+ * 4 (yellow, 2.11) and 5 (magenta, 2.62) sit below 3:1 on the light surface,
+ * so any chart using them ships **visible direct labels or a table view**.
+ * Re-run before changing any of these values:
+ *
+ *   node scripts/validate_palette.js "<hex,...>" --mode light --surface "#fcfcfb"
+ *   node scripts/validate_palette.js "<hex,...>" --mode dark  --surface "#1a1a19"
+ *
+ * THE CHROME IS OURS. Surfaces, ink and the accent below are TradeIt's, and
+ * they are deliberately restrained: one accent, three ink levels, hairline
+ * rules. The "expensive" look in this class of product comes from type,
+ * space and alignment, not from colour.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---- surfaces -------------------------------------------------------
+     Three planes, not a gradient of greys. Page is the backdrop, surface is
+     where content lives, raise is for things that sit above it (menus, the
+     command palette). The chart surface matches `surface` exactly, because
+     the palette above was validated against it. */
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --raise: #ffffff;
+  --sunken: #f1f1ee;
+
+  /* ---- ink ------------------------------------------------------------
+     Three levels and no more. A fourth invites using colour for emphasis,
+     which is the job of weight and size. */
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #898781;
+  --on-fill: #ffffff;
+  --on-fill-dark: #0b0b0b; /* for yellow and warning fills only */
+
+  /* ---- lines ---------------------------------------------------------- */
+  --line: #e1e0d9;
+  --line-strong: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.1);
+
+  /* ---- accent ---------------------------------------------------------
+     One. It marks the current thing and the primary action, and it is never
+     a series colour — a reader must never have to ask whether a green means
+     "selected" or "series 3". */
+  --accent: #11705c;
+  --accent-ink: #0c5445;
+  --accent-wash: #e4f0ec;
+
+  /* ---- status: fixed, never themed, never reused as a series ----------
+     Each ships with an icon or a label. Colour never carries the meaning
+     alone — on the light surface warning and serious are deliberately
+     sub-3:1 and the pairing is the mitigation. */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --good-wash: #e8f5e8;
+  --warning-wash: #fdf4e3;
+  --serious-wash: #fdeee7;
+  --critical-wash: #fbeced;
+  --delta-up: #006300;
+
+  /* ---- series: fixed order, assigned by entity, NEVER cycled ----------
+     A ninth series is not a generated hue: it folds into "Other", becomes
+     small multiples, or the view facets.
+
+     SERIES CAP: slots 1–3 validate for all-pairs forms (scatter, bubble,
+     small multiples). Beyond three on those forms, fold or facet — slot 4
+     puts yellow beside orange and that pair fails the all-pairs floors. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+
+  /* ---- sequential (magnitude) and diverging (polarity) ----------------
+     Sequential is ONE hue light→dark. Diverging is two hues with a NEUTRAL
+     GREY midpoint — never a hue at the middle, never a rainbow. */
+  --seq-1: #d9e7f8;
+  --seq-2: #a8c8ee;
+  --seq-3: #6ea3e0;
+  --seq-4: #2a78d6;
+  --seq-5: #1a4f8f;
+  --div-low: #2a78d6;
+  --div-mid: #c3c2b7;
+  --div-high: #eb6834;
+
+  /* ---- chart chrome ---------------------------------------------------- */
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+
+  /* ---- type -----------------------------------------------------------
+     A PRODUCTIVE scale, not an expressive one: tight, functional, built for
+     reading many numbers rather than for a headline. Body is 14 — the size
+     professional data tools run at. 16 is a marketing-site default and it
+     wastes a third of the screen here.
+
+     The stacks are system fonts. A webfont is a network dependency, and the
+     page is required to work with none; the system UI stacks are excellent
+     and cost nothing. */
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter,
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --t-display: 600 32px/36px var(--font);
+  --t-h1: 600 20px/28px var(--font);
+  --t-h2: 600 16px/24px var(--font);
+  --t-body: 400 14px/20px var(--font);
+  --t-body-strong: 550 14px/20px var(--font);
+  --t-caption: 400 12px/16px var(--font);
+  --t-micro: 600 11px/16px var(--font);
+
+  --tracking-tight: -0.02em; /* large figures only */
+  --tracking-label: 0.055em; /* micro labels only */
+
+  /* ---- space ----------------------------------------------------------
+     8px base. The 2px mini-unit exists for dense data regions, where fluid
+     columns are the wrong instrument and fixed spacers are the right one. */
+  --s-mini: 2px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  --shadow-1: 0 1px 2px rgba(11, 11, 11, 0.04);
+  --shadow-2: 0 4px 12px rgba(11, 11, 11, 0.06),
+    0 1px 2px rgba(11, 11, 11, 0.04);
+  --shadow-3: 0 12px 32px rgba(11, 11, 11, 0.12),
+    0 2px 6px rgba(11, 11, 11, 0.06);
+
+  /* ---- layout ----------------------------------------------------------
+     1600px, not 1120. This is a data product; a narrow measure costs columns
+     a professional reader wants to compare side by side. */
+  --max-width: 1600px;
+  --rail-width: 232px;
+  --rail-width-collapsed: 56px;
+  --header-height: 56px;
+
+  /* ---- density --------------------------------------------------------
+     Two modes, set on <html data-density>. A reader scanning 200 rows and a
+     reader studying one company want different row heights, and neither is
+     a compromise worth hard-coding. */
+  --row-height: 36px;
+  --cell-pad-y: 8px;
+  --cell-pad-x: 14px;
+  --section-gap: var(--s-5);
+
+  /* ---- motion ---------------------------------------------------------
+     Only to explain a state change. Nothing decorative. */
+  --ease: cubic-bezier(0.2, 0, 0.1, 1);
+  --fast: 120ms;
+  --normal: 180ms;
+}
+
+:root[data-density="compact"] {
+  --row-height: 28px;
+  --cell-pad-y: 4px;
+  --cell-pad-x: 10px;
+  --section-gap: var(--s-4);
+}
+
+/*
+ * Dark is SELECTED, not flipped. Every value below was chosen for the dark
+ * surface; an automatic inversion produces muddy fills and illegible ink.
+ *
+ * Declared under both scopes deliberately: the media query follows the OS,
+ * the [data-theme] scope follows the viewer's own toggle, and the toggle
+ * must win in both directions. The :not() guard lets an explicit light
+ * choice beat OS dark.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --raise: #232322;
+    --sunken: #131313;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --ink-3: #898781;
+    --on-fill: #ffffff;
+    --on-fill-dark: #0b0b0b;
+    --line: #2c2c2a;
+    --line-strong: #383835;
+    --ring: rgba(255, 255, 255, 0.1);
+    --accent: #5fc9a8;
+    --accent-ink: #8fdcc2;
+    --accent-wash: #11261f;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --good-wash: #11250f;
+    --warning-wash: #251c0d;
+    --serious-wash: #241610;
+    --critical-wash: #231011;
+    --delta-up: #0ca30c;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #0ca30c;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --seq-1: #16304d;
+    --seq-2: #1d4878;
+    --seq-3: #2764a8;
+    --seq-4: #3987e5;
+    --seq-5: #7cb2f0;
+    --div-low: #3987e5;
+    --div-mid: #383835;
+    --div-high: #d95926;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --raise: #232322;
+  --sunken: #131313;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --ink-3: #898781;
+  --on-fill: #ffffff;
+  --on-fill-dark: #0b0b0b;
+  --line: #2c2c2a;
+  --line-strong: #383835;
+  --ring: rgba(255, 255, 255, 0.1);
+  --accent: #5fc9a8;
+  --accent-ink: #8fdcc2;
+  --accent-wash: #11261f;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --good-wash: #11250f;
+  --warning-wash: #251c0d;
+  --serious-wash: #241610;
+  --critical-wash: #231011;
+  --delta-up: #0ca30c;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #0ca30c;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --seq-1: #16304d;
+  --seq-2: #1d4878;
+  --seq-3: #2764a8;
+  --seq-4: #3987e5;
+  --seq-5: #7cb2f0;
+  --div-low: #3987e5;
+  --div-mid: #383835;
+  --div-high: #d95926;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 0ms;
+    --normal: 0ms;
+  }
+}

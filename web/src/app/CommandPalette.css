@@ -1,0 +1,104 @@
+.palette__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--ink) 28%, transparent);
+  backdrop-filter: blur(2px);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh var(--s-4) var(--s-4);
+}
+
+.palette {
+  width: min(640px, 100%);
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+}
+
+.palette__input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  padding: var(--s-4) var(--s-5);
+  font: 400 16px/24px var(--font);
+  color: var(--ink);
+}
+
+.palette__input:focus {
+  outline: none;
+}
+
+.palette__list {
+  overflow-y: auto;
+  padding: var(--s-1) 0;
+}
+
+.palette__row {
+  width: 100%;
+  display: flex;
+  gap: var(--s-3);
+  align-items: baseline;
+  padding: var(--s-2) var(--s-5);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.palette__row.is-on {
+  background: var(--accent-wash);
+}
+
+.palette__ticker {
+  font: var(--t-body-strong);
+  font-family: var(--font-mono);
+  min-width: 68px;
+}
+
+.palette__label {
+  font: var(--t-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette__hint {
+  margin-left: auto;
+  font: var(--t-caption);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.palette__note {
+  padding: var(--s-4) var(--s-5);
+  color: var(--ink-3);
+  font: var(--t-caption);
+}
+
+.palette__foot {
+  border-top: 1px solid var(--line);
+  padding: var(--s-2) var(--s-5);
+  font: var(--t-caption);
+  color: var(--ink-3);
+  display: flex;
+  gap: var(--s-1);
+  align-items: center;
+}
+
+.palette__foot kbd {
+  font: var(--t-micro);
+  font-family: var(--font-mono);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  margin-right: 2px;
+}

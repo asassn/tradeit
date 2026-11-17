@@ -1,0 +1,117 @@
+/* Absence is content, so it is styled like content — same weight as a card,
+   not like a toast or an error banner. */
+
+.absence {
+  border: 1px solid;
+  border-radius: var(--radius);
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-3);
+  font: var(--t-body);
+}
+
+.absence__title {
+  font: var(--t-body-strong);
+  margin-bottom: var(--s-1);
+}
+
+.absence__body {
+  margin: 0;
+  font: var(--t-caption);
+  line-height: 1.55;
+  opacity: 0.92;
+}
+
+.absence__body + .absence__body {
+  margin-top: var(--s-1);
+}
+
+.absence--flat {
+  background: var(--sunken);
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+
+.absence--ok {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+
+.absence--warning {
+  background: var(--warning-wash);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  color: var(--ink);
+}
+
+.absence--critical {
+  background: var(--critical-wash);
+  border-color: color-mix(in srgb, var(--critical) 40%, transparent);
+  color: var(--ink);
+}
+
+.absence--block {
+  padding: var(--s-5);
+}
+
+/* ---- provenance disclosure ---- */
+
+.provenance {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: var(--s-3);
+}
+
+.provenance > summary {
+  padding: var(--s-3) var(--s-4);
+  cursor: pointer;
+  font: var(--t-body-strong);
+  color: var(--ink-2);
+  list-style: none;
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+}
+
+.provenance > summary::-webkit-details-marker {
+  display: none;
+}
+
+.provenance > summary::before {
+  content: "\203a";
+  font-size: 17px;
+  line-height: 1;
+  color: var(--ink-3);
+  transition: transform var(--fast) var(--ease);
+}
+
+.provenance[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.provenance > summary:hover {
+  color: var(--ink);
+}
+
+.provenance__count {
+  margin-left: auto;
+  font: var(--t-micro);
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 var(--s-2);
+}
+
+.provenance ul {
+  margin: 0;
+  padding: 0 var(--s-4) var(--s-4) calc(var(--s-4) + var(--s-3));
+}
+
+.provenance li {
+  font: var(--t-caption);
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+  margin-bottom: var(--s-2);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}

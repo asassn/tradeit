@@ -180,6 +180,22 @@ is refused rather than created**: SQLite makes an empty database on connect, so
 a mistyped path would otherwise start a service that answers every route with
 nothing — which reads exactly like a record in which nothing happened.
 
+The dashboard serves a **React bundle** that is committed under
+`src/tradeit/api/static/`, so `pip install` alone is enough to run it — an
+operator never needs Node. To *change* the front end:
+
+```bash
+cd web && npm ci && npm run dev
+```
+
+That runs Vite on :5173 with hot reload, proxying data to the Python service
+on :8000, so start the dashboard too. `npm run build` writes the bundle back
+into the package; commit it with the source change
+([ADR-0037](adr/0037-the-interface-is-designed-before-its-pages.md)).
+
+If no bundle is present, the hand-written fallback page is served instead, so
+a fresh checkout is never a 404.
+
 `--corpus` is optional and enables the valuation panel only. It is a
 **different database** from the record: the record holds what the system
 decided, the corpus holds what the world did, and they have separate id

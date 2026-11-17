@@ -1,0 +1,293 @@
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail-width) 1fr;
+  min-height: 100%;
+  transition: grid-template-columns var(--normal) var(--ease);
+}
+
+.shell--narrow {
+  grid-template-columns: var(--rail-width-collapsed) 1fr;
+}
+
+/* ---- rail ---- */
+
+.rail {
+  background: var(--sunken);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.rail__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-3);
+  height: var(--header-height);
+  border-bottom: 1px solid var(--line);
+}
+
+.rail__toggle {
+  background: none;
+  border: none;
+  padding: var(--s-1);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+}
+
+.rail__toggle:hover {
+  background: var(--line);
+}
+
+.rail__mark {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--accent);
+  display: block;
+}
+
+.rail__name {
+  font: 640 15px/1 var(--font);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.rail__name em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.rail__nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s-4) 0;
+}
+
+.rail__group + .rail__group {
+  margin-top: var(--s-5);
+}
+
+.rail__grouplabel {
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 0 var(--s-4) var(--s-2);
+  white-space: nowrap;
+}
+
+.rail__link {
+  display: block;
+  padding: var(--s-2) var(--s-4);
+  color: var(--ink-2);
+  text-decoration: none;
+  font: var(--t-body);
+  border-left: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.rail__link:hover {
+  color: var(--ink);
+  background: var(--line);
+}
+
+.rail__link.is-on {
+  color: var(--ink);
+  font: var(--t-body-strong);
+  border-left-color: var(--accent);
+  background: var(--surface);
+}
+
+.rail__foot {
+  border-top: 1px solid var(--line);
+  padding: var(--s-2);
+  display: grid;
+  gap: var(--s-1);
+}
+
+.rail__pref {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius-sm);
+  font: var(--t-caption);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.rail__pref:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.rail__pref span {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Collapsed: the rail keeps only its mark. Labels are hidden rather than
+   removed, so the tab order and the screen-reader tree are unchanged. */
+.shell--narrow .rail__name,
+.shell--narrow .rail__grouplabel,
+.shell--narrow .rail__pref span,
+.shell--narrow .rail__link {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.shell--narrow .rail__nav {
+  visibility: hidden;
+}
+
+/* ---- top bar ---- */
+
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 0 var(--s-5);
+  background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar__search {
+  flex: 1;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-3);
+  cursor: pointer;
+  font: var(--t-body);
+  text-align: left;
+}
+
+.topbar__search:hover {
+  border-color: var(--line-strong);
+  color: var(--ink-2);
+}
+
+.topbar__search kbd {
+  margin-left: auto;
+  font: var(--t-micro);
+  font-family: var(--font-mono);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  color: var(--ink-3);
+}
+
+.topbar__sources {
+  margin-left: auto;
+  display: flex;
+  gap: var(--s-4);
+  font: var(--t-caption);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.topbar__source b {
+  font-weight: 550;
+  color: var(--ink-2);
+}
+
+.topbar__source.is-off b {
+  color: var(--ink-3);
+}
+
+.topbar__source.is-bad {
+  color: var(--critical);
+}
+
+.content {
+  padding: var(--s-6) var(--s-5) var(--s-8);
+  max-width: var(--max-width);
+  width: 100%;
+  margin: 0 auto;
+  flex: 1;
+}
+
+@media (max-width: 900px) {
+  .shell,
+  .shell--narrow {
+    grid-template-columns: 1fr;
+  }
+  .rail {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .rail__brand {
+    border-bottom: none;
+    border-right: 1px solid var(--line);
+  }
+  .rail__nav {
+    display: flex;
+    padding: 0;
+    align-items: center;
+  }
+  .rail__group + .rail__group {
+    margin-top: 0;
+  }
+  .rail__grouplabel,
+  .rail__foot {
+    display: none;
+  }
+  .rail__group {
+    display: flex;
+  }
+  .rail__link {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+  }
+  .rail__link.is-on {
+    border-left: none;
+    border-bottom-color: var(--accent);
+    background: none;
+  }
+  .shell--narrow .rail__link,
+  .shell--narrow .rail__name {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .shell--narrow .rail__nav {
+    visibility: visible;
+  }
+  .topbar__sources {
+    display: none;
+  }
+  .content {
+    padding: var(--s-5) var(--s-4) var(--s-7);
+  }
+}

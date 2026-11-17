@@ -1,0 +1,26 @@
+.yc {
+  margin: 0;
+  width: 100%;
+}
+
+.yc svg {
+  display: block;
+  width: 100%;
+  height: 110px;
+  overflow: visible;
+}
+
+.yc__axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-top: var(--s-1);
+  font: var(--t-micro);
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+  letter-spacing: 0;
+}
+
+.yc__range {
+  color: var(--ink-3);
+}

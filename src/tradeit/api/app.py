@@ -46,10 +46,12 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -64,7 +66,12 @@ from tradeit.storage.tables import (
     SymbolMapping,
 )
 
-__all__ = ["create_app"]
+__all__ = ["STATIC_ROOT", "create_app"]
+
+#: Where `vite build` puts the compiled front end. Inside the package so that
+#: `pip install` carries it, which is why the bundle is committed: an operator
+#: must not need Node to run the dashboard.
+STATIC_ROOT = Path(__file__).resolve().parent / "static"
 
 #: Why an instrument may have no ticker in a response. Spelled out rather than
 #: returned as ``null``, because the two readings of a bare null -- "this
@@ -204,13 +211,34 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
     app.state.corpus_factory = corpus_factory
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    def index() -> str:
-        """The screen. Served from this process, so it needs no network at all.
+    def index() -> HTMLResponse:
+        """The screen, served from this process so it needs no network at all.
 
-        ``include_in_schema=False`` keeps the page out of the OpenAPI document:
-        it is a view over the routes below, not a route anything should call.
+        ``include_in_schema=False`` keeps it out of the OpenAPI document: it
+        is a view over the routes below, not a route anything should call.
+
+        **`PAGE` remains as the fallback**, for a source checkout whose bundle
+        has not been built. `pip install` carries the committed bundle, so an
+        operator never needs Node; a developer who has just cloned and not yet
+        run `npm run build` still gets a working dashboard rather than a 404.
         """
-        return PAGE
+        built = STATIC_ROOT / "index.html"
+        if built.is_file():
+            # **`no-store`, and this is not belt-and-braces.** Vite hashes
+            # every asset filename and `emptyOutDir` deletes the previous
+            # build, so a browser holding a cached `index.html` after a
+            # rebuild asks for a bundle that no longer exists and renders
+            # nothing at all -- a white screen, with the server healthy and
+            # every JSON route answering. Found by rebuilding and watching a
+            # stale page serve the previous figures.
+            #
+            # The hashed assets themselves are immutable and cache normally;
+            # it is only the entry document that must never be reused.
+            return HTMLResponse(
+                built.read_text(encoding="utf-8"),
+                headers={"cache-control": "no-store, must-revalidate"},
+            )
+        return HTMLResponse(PAGE, headers={"cache-control": "no-store"})
 
     @app.get("/health")
     def health(session: SessionDep) -> dict[str, Any]:
@@ -690,5 +718,12 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
                 "architecture exists to prevent."
             ),
         }
+
+    # Mounted LAST, deliberately: a static mount matches greedily, and
+    # mounting it before the routes above would have `/runs` serve a 404 from
+    # the asset directory instead of JSON.
+    assets = STATIC_ROOT / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets), name="assets")
 
     return app

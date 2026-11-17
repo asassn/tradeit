@@ -717,3 +717,61 @@ def test_the_page_offers_search_rather_than_asking_for_an_id() -> None:
     assert 'id="search"' in PAGE
     assert "securities/search" in PAGE
     assert 'type="number"' not in PAGE, "an id input is back on the page"
+
+
+def test_the_built_bundle_is_served_when_it_exists(record: str) -> None:
+    """`vite build` writes into the package and FastAPI serves it from there.
+
+    The bundle is **committed** so that `pip install` alone yields a working
+    dashboard: an operator must never need Node to run the thing, only a
+    developer to change it.
+    """
+    from tradeit.api.app import STATIC_ROOT
+
+    if not (STATIC_ROOT / "index.html").is_file():
+        pytest.skip("no bundle built in this checkout")
+    body = TestClient(create_app(record)).get("/").text
+    assert '<div id="root">' in body, "the React mount point is not being served"
+
+
+def test_the_static_mount_does_not_swallow_the_json_routes(record: str) -> None:
+    """A static mount matches greedily.
+
+    Mounted before the routes, `/runs` would serve a 404 out of the asset
+    directory instead of JSON — a failure that looks like an empty database
+    rather than a misconfigured app. The mount is therefore last in
+    `create_app`, and this asserts the ordering rather than trusting it.
+    """
+    client = TestClient(create_app(record))
+    for path in ("/health", "/runs", "/sessions", "/instruments"):
+        assert client.get(path).status_code == 200, path
+
+
+def test_the_page_fallback_survives_for_a_checkout_with_no_bundle() -> None:
+    """The hand-written page is kept as the no-bundle fallback.
+
+    Someone who has just cloned the repository and not run `npm run build`
+    should get a working dashboard, not a 404 — and the fallback is also what
+    makes the Node toolchain genuinely optional rather than nominally so.
+    """
+    from tradeit.api.page import PAGE
+
+    assert "<!doctype html>" in PAGE.lower()
+    assert 'src="http' not in PAGE
+
+
+def test_the_entry_document_is_never_cached(record: str) -> None:
+    """A stale `index.html` is a white screen, not a stale figure.
+
+    Vite hashes every asset filename and `emptyOutDir` deletes the previous
+    build, so a browser reusing a cached entry document asks for a bundle that
+    no longer exists and renders nothing — with the server healthy and every
+    JSON route answering, which is the hardest kind of failure to diagnose.
+    Observed directly: after a rebuild, a cached page went on serving the
+    previous figures.
+
+    The hashed assets are immutable and cache normally; only the document
+    that names them must not be reused.
+    """
+    headers = TestClient(create_app(record)).get("/").headers
+    assert "no-store" in headers.get("cache-control", "")

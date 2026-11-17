@@ -21,7 +21,7 @@ PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard --record <path>
 
 | route | answers |
 |---|---|
-| `GET /` | the screen — one self-contained page over the routes below |
+| `GET /` | the screen — the committed React bundle, or the hand-written fallback page when none is built. Served `no-store` |
 
 **`/securities/search` must stay declared before `/securities/{id}/valuation`.**
 FastAPI matches routes in declaration order, so reversing them makes `search`

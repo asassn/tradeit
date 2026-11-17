@@ -1,0 +1,39 @@
+.horizons {
+  display: grid;
+  gap: var(--s-3);
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  margin-bottom: var(--s-4);
+}
+
+.horizon {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-4);
+}
+
+.horizon__name {
+  margin: 0 0 var(--s-3);
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.horizon--absent .horizon__name {
+  color: var(--ink-3);
+}
+
+.horizon__why {
+  margin: 0;
+  font: var(--t-caption);
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.horizons__note {
+  font: var(--t-caption);
+  color: var(--ink-3);
+  line-height: 1.55;
+  margin: 0;
+}
