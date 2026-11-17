@@ -1,0 +1,63 @@
+.prov {
+  padding: 0;
+}
+
+.prov__row {
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.prov__row:last-child {
+  border-bottom: none;
+}
+
+.prov__head {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.prov__ticker {
+  font: var(--t-h2);
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+}
+
+.prov__dates {
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
+/* The citation is the point, so it is readable prose rather than a tooltip:
+   measure capped for legibility, never truncated. */
+.prov__cite {
+  margin: var(--s-3) 0 0;
+  font: var(--t-caption);
+  color: var(--ink-2);
+  line-height: 1.6;
+  max-width: 78ch;
+  border-left: 2px solid var(--line-strong);
+  padding-left: var(--s-3);
+}
+
+.prov__note {
+  font: var(--t-caption);
+  color: var(--ink-3);
+  line-height: 1.6;
+  margin: calc(var(--s-4) * -1 + var(--s-1)) 0 var(--section-gap);
+  max-width: 78ch;
+}
+
+.prov__empty {
+  padding: var(--s-5);
+  color: var(--ink-2);
+  font: var(--t-body);
+}
+
+.prov__small {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  max-width: 30ch;
+  overflow-wrap: anywhere;
+}

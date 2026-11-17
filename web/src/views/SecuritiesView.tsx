@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   Caution,
@@ -17,6 +18,8 @@ import {
 } from "@/components/Primitives";
 import { YieldChart } from "@/components/YieldChart";
 import { ApiError, getValuation } from "@/lib/api";
+import { ProvenanceTab } from "./ProvenanceTab";
+import "./SecuritiesView.css";
 import { useAsync } from "@/lib/useAsync";
 
 const title = (s: string) =>
@@ -36,8 +39,11 @@ const title = (s: string) =>
  * company loses money" is more useful than a blank, and it is the *reason*
  * the number is absent.
  */
+type Tab = "valuation" | "provenance";
+
 export function SecuritiesView() {
   const { securityId } = useParams();
+  const [tab, setTab] = useState<Tab>("valuation");
   const { data, error, loading } = useAsync(
     () =>
       securityId ? getValuation(securityId) : Promise.resolve(null),
@@ -127,11 +133,28 @@ export function SecuritiesView() {
         }
       />
 
-      {!data.available && (
+      <nav className="tabs" role="tablist">
+        {(["valuation", "provenance"] as const).map((name) => (
+          <button
+            key={name}
+            type="button"
+            role="tab"
+            aria-selected={tab === name}
+            className={`tabs__tab${tab === name ? " is-on" : ""}`}
+            onClick={() => setTab(name)}
+          >
+            {name === "valuation" ? "Valuation" : "Provenance"}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "provenance" && <ProvenanceTab securityId={securityId} />}
+
+      {tab === "valuation" && !data.available && (
         <Unresolved what="Valuation" reason={data.note ?? "No data."} />
       )}
 
-      {data.available && (
+      {tab === "valuation" && data.available && (
         <>
           {data.fcf_yield !== null && data.fcf_yield !== undefined && (
             <Card>

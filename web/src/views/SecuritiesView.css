@@ -1,0 +1,30 @@
+/* Tabs within one security. A hairline rail, not a pill group: the heavier
+   control belongs to the global navigation, and a second one competing with
+   it at the same weight makes neither read as primary. */
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--section-gap);
+}
+
+.tabs__tab {
+  background: none;
+  border: none;
+  padding: var(--s-2) var(--s-3) var(--s-3);
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-2);
+  font: var(--t-body);
+  cursor: pointer;
+}
+
+.tabs__tab:hover {
+  color: var(--ink);
+}
+
+.tabs__tab.is-on {
+  color: var(--ink);
+  font: var(--t-body-strong);
+  border-bottom-color: var(--accent);
+}

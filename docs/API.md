@@ -38,6 +38,7 @@ search box would simply stop working. A test holds the order.
 | `GET /forward/health` | the nightly capture agent's liveness, from **the capture record**. `501` when none is attached |
 | `GET /securities/search?q=` | find a security by ticker or company name, from the corpus |
 | `GET /securities/{id}/valuation` | the valuation panel, read from **the corpus**. `501` when no corpus is attached |
+| `GET /securities/{id}/provenance` | ticker intervals with their filing citations, corporate actions, disputed splits |
 
 **There are no write routes**, so the "writes are narrow and audited" section
 below describes none of what exists. The constraints the running service
@@ -60,6 +61,16 @@ part of this system had no web surface at all until 2026-11-17. **Liveness is
 reported as an age, not a count**: a scheduled job does not crash, it stops,
 and a payload of healthy totals with no age would show thousands of
 observations beside a dead agent.
+
+**The provenance route is the corpus's own argument**, and the content that
+distinguishes `research-01` from a price feed: every ticker interval carries
+the filing text that evidenced it, every split the corpus had to settle
+carries its verdict and who decided it. Citations travel in full and are never
+truncated — an interval without its evidence is an assertion. Two read rules
+travel with the payload: `v_security_tickers` has the half-open interval
+arithmetic done (reading the stored `valid_to` as inclusive is trap 0.2), and
+an interval evidenced by `sec_company_tickers` proves the **current** holding
+only, so its start date is a floor rather than a finding.
 
 **The valuation route returns no verdict**, by decision rather than omission
 --- [ADR-0036](adr/0036-valuation-is-a-panel-not-a-verdict.md). It reports a

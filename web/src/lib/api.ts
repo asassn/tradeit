@@ -263,3 +263,51 @@ export interface ForwardHealth {
 }
 
 export const getForwardHealth = () => get<ForwardHealth>("/forward/health");
+
+/* ---- provenance -------------------------------------------------------- */
+
+export interface TickerInterval {
+  ticker: string;
+  first_day: string;
+  last_day: string | null;
+  is_current: boolean;
+  evidence: string;
+  citation: string | null;
+}
+
+export interface SplitVerdict {
+  ex_date: string;
+  verdict: string;
+  decided_by: string;
+  stored_raw_close: number | null;
+  vendor_printed_close: number | null;
+  vendor_adjusted_close: number | null;
+  citation: string | null;
+}
+
+export interface Provenance {
+  security_id: number;
+  available?: boolean;
+  note?: string;
+  issuer: { name: string; source: string } | null;
+  tickers: TickerInterval[];
+  ticker_note: string;
+  action_counts: {
+    action_type: string;
+    count: number;
+    first: string;
+    last: string;
+  }[];
+  actions: {
+    ex_date: string;
+    action_type: string;
+    ratio: number | null;
+    cash_amount: number | null;
+  }[];
+  actions_truncated: boolean;
+  split_verdicts: SplitVerdict[];
+  split_verdict_note: string;
+}
+
+export const getProvenance = (id: number | string) =>
+  get<Provenance>(`/securities/${id}/provenance`);

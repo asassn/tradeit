@@ -53,10 +53,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import InstrumentedAttribute, Session, load_only, sessionmaker
 
 from tradeit.api.forward_route import forward_payload
 from tradeit.api.page import PAGE
+from tradeit.api.provenance_route import provenance_payload
 from tradeit.api.valuation_route import search_securities, valuation_payload
 from tradeit.observability.record import reconstruct
 from tradeit.storage.tables import (
@@ -750,6 +752,41 @@ def create_app(dsn: str, corpus_dsn: str | None = None, forward_dsn: str | None 
         corpus = corpus_factory()
         try:
             return {"query": q, "results": search_securities(corpus, q, limit)}
+        finally:
+            corpus.rollback()
+            corpus.close()
+
+    @app.get("/securities/{security_id}/provenance")
+    def security_provenance(security_id: int) -> dict[str, Any]:
+        """Where this security's facts came from, read from the corpus.
+
+        The content that distinguishes `research-01` from a price feed: every
+        ticker interval with the filing that evidenced it, every split the
+        corpus had to settle, and what it withholds.
+        """
+        if corpus_factory is None:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "no corpus is attached. Provenance reads research-01, which is "
+                    "a different database from the decision record; start with "
+                    "--corpus to enable it"
+                ),
+            )
+        corpus = corpus_factory()
+        try:
+            return provenance_payload(corpus, security_id)
+        except OperationalError as missing:
+            # Same shape as the valuation route: a database with the tables
+            # and no views is what you get by passing the record twice.
+            return {
+                "security_id": security_id,
+                "available": False,
+                "note": (
+                    "this database has no `v_security_tickers` view, so it is not "
+                    f"a prepared research-01 corpus. Underlying error: {missing.orig}"
+                ),
+            }
         finally:
             corpus.rollback()
             corpus.close()
