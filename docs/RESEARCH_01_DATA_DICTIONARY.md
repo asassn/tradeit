@@ -293,6 +293,29 @@ exists to measure rather than invent.
 across 3,353 securities**; 1,677,687 carried closes served. By decade: 1990s
 41,704 · 2000s 234,029 · 2010s 235,462 · 2020s 48,905.
 
+**For 26 securities the rule removes the entire series, measured 2026-11-17.**
+They hold price rows and **no row has volume**, so both views return nothing
+and `select * from v_prices_raw where security_id = …` is empty for a security
+the table plainly has rows for. Two different things sit in that bucket and
+only one is junk:
+
+| | |
+|---|---|
+| ASKE (Alaska Pacific Energy) | all 329 rows are `999999.9999` at zero volume — a vendor sentinel stored as a price. Nothing is lost |
+| CFCI (CFC International) | 2,537 rows, **64 distinct closes from $0.06 to $19.02** — a real price history whose volume was never recorded |
+
+The rule is right either way: a bar nobody traded is not a price you could
+have transacted at, and §0.7 above records why refusing them wholesale was
+measured and rejected for the ordinary case. But **"the view returns nothing"
+and "the corpus holds nothing" are different facts**, and for these 26 only
+the first is true.
+
+`security_summary` therefore carries **two counts**: `price_rows` is what the
+table holds and `priced_rows` is how many of those actually traded. A security
+whose two counts disagree is holding rows that are not prices, and the
+listing filters on the second. Found by sorting the securities list by price
+and seeing one at exactly $1,000,000.
+
 **Two things it does not do.**
 
 * **A served carry is still a day nobody traded.** It keeps a quiet stock

@@ -61,6 +61,12 @@ from tradeit.api.forward_route import forward_payload
 from tradeit.api.page import PAGE
 from tradeit.api.prices_route import DEFAULT_POINTS, MAX_POINTS, prices_payload
 from tradeit.api.provenance_route import provenance_payload
+from tradeit.api.securities_route import (
+    DEFAULT_LIMIT,
+    MAX_LIMIT,
+    SORTS,
+    securities_payload,
+)
 from tradeit.api.valuation_route import search_securities, valuation_payload
 from tradeit.observability.record import reconstruct
 from tradeit.storage.tables import (
@@ -748,6 +754,51 @@ def create_app(dsn: str, corpus_dsn: str | None = None, forward_dsn: str | None 
         finally:
             forward.rollback()
             forward.close()
+
+    @app.get("/securities")
+    def securities(
+        q: Annotated[str | None, Query(max_length=64)] = None,
+        sort: Annotated[str, Query()] = "priced_rows",
+        limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        """A page of securities, read from the corpus's precomputed summary.
+
+        **Never a live scan.** A corpus-wide count takes 2 minutes 31 seconds
+        over 83.8M price rows, so a list cannot be served from one; the
+        summary's build time travels with every response.
+        """
+        if corpus_factory is None:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "no corpus is attached. The securities list reads research-01, "
+                    "which is a different database from the decision record; start "
+                    "with --corpus to enable it"
+                ),
+            )
+        corpus = corpus_factory()
+        try:
+            return securities_payload(
+                corpus,
+                query=q,
+                sort=sort if sort in SORTS else "priced_rows",
+                limit=limit,
+                offset=offset,
+            )
+        except OperationalError as missing:
+            return {
+                "available": False,
+                "securities": [],
+                "total": 0,
+                "note": (
+                    "this database is not a prepared research-01 corpus. "
+                    f"Underlying error: {missing.orig}"
+                ),
+            }
+        finally:
+            corpus.rollback()
+            corpus.close()
 
     @app.get("/securities/search")
     def securities_search(

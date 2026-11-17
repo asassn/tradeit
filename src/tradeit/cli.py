@@ -16,6 +16,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from tradeit.cli_corpus import add_corpus_commands
 from tradeit.cli_dashboard import add_dashboard_commands
 from tradeit.cli_data import add_data_commands
 from tradeit.cli_edgar import add_edgar_commands
@@ -175,6 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_status_commands(sub)
     add_forward_commands(sub)
     add_dashboard_commands(sub)
+    add_corpus_commands(sub)
     add_data_commands(sub)
     add_edgar_commands(sub)
     return parser
