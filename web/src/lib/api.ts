@@ -406,3 +406,30 @@ export interface Fundamentals {
 
 export const getFundamentals = (id: number | string) =>
   get<Fundamentals>(`/securities/${id}/fundamentals`);
+
+/* ---- filings ----------------------------------------------------------- */
+
+export interface Filings {
+  security_id: number;
+  available: boolean;
+  note?: string;
+  issuer?: { name: string; source: string };
+  total?: number;
+  first_filed?: string;
+  last_filed?: string;
+  last_session?: string | null;
+  stops_early?: string | null;
+  source_note?: string;
+  forms?: { form_type: string; count: number; first: string; last: string }[];
+  recent?: {
+    accession: string;
+    form_type: string;
+    filed_at: string;
+    period_end: string | null;
+  }[];
+  truncated?: boolean;
+  scope_note?: string;
+}
+
+export const getFilings = (id: number | string) =>
+  get<Filings>(`/securities/${id}/filings`);

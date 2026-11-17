@@ -57,6 +57,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import InstrumentedAttribute, Session, load_only, sessionmaker
 
 from tradeit.api.evidence_route import walkforward_payload
+from tradeit.api.filings_route import filings_payload
 from tradeit.api.forward_route import forward_payload
 from tradeit.api.fundamentals_route import fundamentals_payload
 from tradeit.api.page import PAGE
@@ -820,6 +821,39 @@ def create_app(dsn: str, corpus_dsn: str | None = None, forward_dsn: str | None 
         corpus = corpus_factory()
         try:
             return {"query": q, "results": search_securities(corpus, q, limit)}
+        finally:
+            corpus.rollback()
+            corpus.close()
+
+    @app.get("/securities/{security_id}/filings")
+    def security_filings(security_id: int) -> dict[str, Any]:
+        """What this issuer filed, and whether the record of it is complete.
+
+        **Completeness is the question**, not the list. A filing record that
+        ends years before the security stopped trading is a record that stops,
+        not a company that stopped filing.
+        """
+        if corpus_factory is None:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "no corpus is attached. Filings read research-01, which is a "
+                    "different database from the decision record; start with "
+                    "--corpus to enable it"
+                ),
+            )
+        corpus = corpus_factory()
+        try:
+            return filings_payload(corpus, security_id)
+        except OperationalError as missing:
+            return {
+                "security_id": security_id,
+                "available": False,
+                "note": (
+                    "this database is not a prepared research-01 corpus. "
+                    f"Underlying error: {missing.orig}"
+                ),
+            }
         finally:
             corpus.rollback()
             corpus.close()

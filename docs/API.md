@@ -41,6 +41,7 @@ search box would simply stop working. A test holds the order.
 | `GET /securities/{id}/valuation` | the valuation panel, read from **the corpus**. `501` when no corpus is attached |
 | `GET /securities/{id}/prices?basis=raw\|total` | the price history on either basis, sampled for drawing with exact extremes |
 | `GET /securities/{id}/fundamentals` | the as-filed annual statement spine, **first-filed values only** |
+| `GET /securities/{id}/filings` | the issuer's filing record, **with its completeness stated** |
 | `GET /securities/{id}/provenance` | ticker intervals with their filing citations, corporate actions, disputed splits |
 
 **There are no write routes**, so the "writes are narrow and audited" section
@@ -64,6 +65,18 @@ part of this system had no web surface at all until 2026-11-17. **Liveness is
 reported as an age, not a count**: a scheduled job does not crash, it stops,
 and a payload of healthy totals with no age would show thousands of
 observations beside a dead agent.
+
+**The filings route answers completeness, not inventory.** `filings` is
+seeded from more than one place — 22,927 issuers from the EDGAR full index,
+17,000 from `sec_fsds_sub`, 858 from filing text, 34 from control evidence —
+and they are not equally complete, so the issuer's source travels with the
+response. It also compares the last filing with the last session the security
+traded: measured 2026-11-17 across price-active securities, records stopping
+more than a year early run **93 of 858 for `edgar_filing_text`** against 24 of
+11,635 for `sec_fsds_sub`. IMC Global is the worked example — the record stops
+2004-11-19 and the security traded until 2018-01-30, 4,820 days later. **A
+record that stops is not a company that stopped filing**, and only the first
+is established.
 
 **The fundamentals route reports what was FIRST filed**, with the date each
 figure became public. A later filing restating the same period is not shown:
