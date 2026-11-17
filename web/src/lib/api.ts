@@ -44,6 +44,7 @@ export interface Health {
   reachable: boolean;
   record: string;
   corpus_attached: boolean;
+  forward_attached: boolean;
   has_scores: boolean;
   has_runs: boolean;
   note: string | null;
@@ -239,3 +240,26 @@ export interface HorizonPanel {
 
 export const getPanel = (id: number | string) =>
   get<HorizonPanel>(`/instruments/${id}/panel`);
+
+/* ---- the nightly capture ----------------------------------------------- */
+
+export interface ForwardHealth {
+  available: boolean;
+  note?: string;
+  latest_ask?: string;
+  age_days?: number;
+  stale?: boolean;
+  stale_after_days?: number;
+  liveness_note?: string;
+  asks: number;
+  symbols?: number;
+  sessions?: number;
+  interpretable_asks?: number;
+  earlier_asks?: number;
+  earlier_note?: string;
+  silent_observations?: number;
+  silent_note?: string;
+  recent_sessions?: { session_date: string; asks: number; silent: number }[];
+}
+
+export const getForwardHealth = () => get<ForwardHealth>("/forward/health");

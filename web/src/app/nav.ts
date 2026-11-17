@@ -42,6 +42,9 @@ export const NAV: NavGroup[] = [
   },
   {
     label: "System",
-    items: [{ label: "Not yet produced", to: "/not-yet" }],
+    items: [
+      { label: "Capture health", to: "/system/capture", source: "forward" },
+      { label: "Not yet produced", to: "/not-yet" },
+    ],
   },
 ];

@@ -35,6 +35,7 @@ search box would simply stop working. A test holds the order.
 | `GET /instruments` | which securities the record can speak about |
 | `GET /instruments/{id}/panel` | one security, each horizon separately, absent ones with a reason |
 | `GET /instruments/{id}/scores` | one security's scores as recorded, unaggregated |
+| `GET /forward/health` | the nightly capture agent's liveness, from **the capture record**. `501` when none is attached |
 | `GET /securities/search?q=` | find a security by ticker or company name, from the corpus |
 | `GET /securities/{id}/valuation` | the valuation panel, read from **the corpus**. `501` when no corpus is attached |
 
@@ -43,7 +44,7 @@ below describes none of what exists. The constraints the running service
 enforces are in
 [ADR-0035](adr/0035-the-dashboard-shows-what-the-record-holds.md).
 
-**Two databases, and the valuation route is why.** Everything above reads the
+**Three databases, and the routes are why.** Everything above reads the
 decision record --- what the system decided. `/securities/{id}/valuation`
 reads `research-01` --- what the world did. They are **separate id spaces**:
 instruments live in the record, securities live in the corpus, and a route
@@ -51,6 +52,14 @@ accepting one for the other would return another company's valuation, a wrong
 answer that looks entirely right. Start with `--corpus` to enable it; without
 it the route answers `501`, because an empty panel would read as a claim about
 the company rather than about this process.
+
+`GET /forward/health` reads a **third** database again: the nightly capture
+writes `forward.sqlite`, which is a different file from every record the
+service could previously open — which is exactly why the one live-updating
+part of this system had no web surface at all until 2026-11-17. **Liveness is
+reported as an age, not a count**: a scheduled job does not crash, it stops,
+and a payload of healthy totals with no age would show thousands of
+observations beside a dead agent.
 
 **The valuation route returns no verdict**, by decision rather than omission
 --- [ADR-0036](adr/0036-valuation-is-a-panel-not-a-verdict.md). It reports a

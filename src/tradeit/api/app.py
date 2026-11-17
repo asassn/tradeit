@@ -55,6 +55,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import InstrumentedAttribute, Session, load_only, sessionmaker
 
+from tradeit.api.forward_route import forward_payload
 from tradeit.api.page import PAGE
 from tradeit.api.valuation_route import search_securities, valuation_payload
 from tradeit.observability.record import reconstruct
@@ -233,7 +234,7 @@ def _horizons_for(session: Session, ids: list[int]) -> dict[int, list[str]]:
     return out
 
 
-def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
+def create_app(dsn: str, corpus_dsn: str | None = None, forward_dsn: str | None = None) -> FastAPI:
     """Build the service over one decision record.
 
     ``dsn`` is required and has no default. The record and the corpus are
@@ -254,6 +255,13 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
     corpus_factory: sessionmaker[Session] | None = None
     if corpus_dsn is not None:
         corpus_factory = sessionmaker(bind=create_engine(corpus_dsn, future=True), future=True)
+    # A **third** connection, and the only one holding data that changes. The
+    # nightly capture writes `forward.sqlite`, which is a different file from
+    # every record this service could previously open — which is exactly why
+    # the one live part of the system had no web surface at all.
+    forward_factory: sessionmaker[Session] | None = None
+    if forward_dsn is not None:
+        forward_factory = sessionmaker(bind=create_engine(forward_dsn, future=True), future=True)
     # Rendered through SQLAlchemy's own URL rather than printed, because the
     # page displays it and a Postgres DSN carries a password. `hide_password`
     # is the library's redaction and is used instead of a hand-rolled one: the
@@ -271,6 +279,7 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
     )
     app.state.session_factory = factory
     app.state.corpus_factory = corpus_factory
+    app.state.forward_factory = forward_factory
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def index() -> HTMLResponse:
@@ -323,6 +332,7 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
             # another. Password-redacted at construction.
             "record": record_label,
             "corpus_attached": corpus_factory is not None,
+            "forward_attached": forward_factory is not None,
             "has_scores": scores,
             "has_runs": runs,
             "note": (
@@ -695,6 +705,31 @@ def create_app(dsn: str, corpus_dsn: str | None = None) -> FastAPI:
             # explanation for a condition it does not have.
             "horizons_not_recorded": None if horizons_recorded else PRE_HORIZON_NOTE,
         }
+
+    @app.get("/forward/health")
+    def forward_health() -> dict[str, Any]:
+        """The nightly capture agent's state, liveness first.
+
+        Reads a **third** database. The forward record is the only
+        live-updating data in the system and had no HTTP surface before
+        2026-11-17, because `create_app` could open a record and a corpus and
+        nothing else.
+        """
+        if forward_factory is None:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "no forward record is attached. The nightly capture writes a "
+                    "different database from the decision record; start with "
+                    "--forward to enable it"
+                ),
+            )
+        forward = forward_factory()
+        try:
+            return forward_payload(forward)
+        finally:
+            forward.rollback()
+            forward.close()
 
     @app.get("/securities/search")
     def securities_search(

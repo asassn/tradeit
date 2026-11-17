@@ -198,6 +198,15 @@ export function Shell() {
                 >
                   corpus <b>{health?.corpus_attached ? "attached" : "none"}</b>
                 </span>
+                <span
+                  className={
+                    health?.forward_attached
+                      ? "topbar__source"
+                      : "topbar__source is-off"
+                  }
+                >
+                  capture <b>{health?.forward_attached ? "attached" : "none"}</b>
+                </span>
               </>
             )}
           </div>

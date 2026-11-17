@@ -4,6 +4,7 @@ import { createHashRouter, Navigate, RouterProvider } from "react-router-dom";
 import { Shell } from "@/app/Shell";
 import { DecisionsView } from "@/views/DecisionsView";
 import { HorizonsView } from "@/views/HorizonsView";
+import { CaptureHealthView } from "@/views/CaptureHealthView";
 import { NotYetView } from "@/views/NotYetView";
 import { RunsView } from "@/views/RunsView";
 import { SecuritiesView } from "@/views/SecuritiesView";
@@ -30,6 +31,7 @@ const router = createHashRouter([
       { path: "evidence/runs", element: <RunsView /> },
       { path: "evidence/horizons", element: <HorizonsView /> },
       { path: "decisions", element: <DecisionsView /> },
+      { path: "system/capture", element: <CaptureHealthView /> },
       { path: "not-yet", element: <NotYetView /> },
       { path: "*", element: <Navigate to="/securities" replace /> },
     ],

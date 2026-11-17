@@ -196,6 +196,11 @@ into the package; commit it with the source change
 If no bundle is present, the hand-written fallback page is served instead, so
 a fresh checkout is never a 404.
 
+`--forward ~/Documents/TradeItData/out/forward.sqlite` adds the capture-health
+view — the nightly agent's liveness, which is otherwise visible only through
+`tradeit status`. It reads an **age**, not a count: a stopped agent does not
+crash, it just stops writing.
+
 `--corpus` is optional and enables the valuation panel only. It is a
 **different database** from the record: the record holds what the system
 decided, the corpus holds what the world did, and they have separate id

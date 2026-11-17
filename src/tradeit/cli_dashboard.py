@@ -108,9 +108,21 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
             print(f"no corpus at {corpus.expanduser().resolve()}", file=sys.stderr)
             return 2
 
-    app = create_app(dsn, corpus_dsn)
+    forward_dsn: str | None = None
+    if args.forward is not None:
+        forward = Path(args.forward)
+        if args.forward.startswith(("sqlite:", "postgresql:", "postgres:")):
+            forward_dsn = args.forward
+        elif forward.exists():
+            forward_dsn = _sqlite_url(forward)
+        else:
+            print(f"no forward record at {forward.expanduser().resolve()}", file=sys.stderr)
+            return 2
+
+    app = create_app(dsn, corpus_dsn, forward_dsn)
     print(f"reading  : {dsn}")
     print(f"corpus   : {corpus_dsn or 'none -- valuation is disabled'}")
+    print(f"forward  : {forward_dsn or 'none -- capture health is disabled'}")
     print(f"serving  : http://{args.host}:{args.port}/")
     uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
     return 0
@@ -138,6 +150,15 @@ def add_dashboard_commands(sub: argparse._SubParsersAction) -> None:  # type: ig
             "from the record -- the record holds what the system decided, the "
             "corpus holds what the world did. Without it the valuation route "
             "says so rather than answering empty"
+        ),
+    )
+    parser.add_argument(
+        "--forward",
+        default=None,
+        help=(
+            "optional: the nightly capture record, for the system health view. "
+            "A third database again -- the only one in this system whose "
+            "contents change, and the one a stopped agent shows up in"
         ),
     )
     parser.add_argument("--host", default=LOOPBACK, help="interface to bind (default: loopback)")
