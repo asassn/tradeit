@@ -1,0 +1,19 @@
+.wf__span {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.wf__note {
+  font: var(--t-caption);
+  color: var(--ink-3);
+  line-height: 1.6;
+  max-width: 82ch;
+  margin: 0 0 var(--s-3);
+}
+
+/* The hero's right-hand side is a stat row, so it must not keep the row's
+   own bottom margin inside a card that already has one. */
+.hero .stat-row {
+  margin-bottom: 0;
+}

@@ -311,3 +311,43 @@ export interface Provenance {
 
 export const getProvenance = (id: number | string) =>
   get<Provenance>(`/securities/${id}/provenance`);
+
+/* ---- walk-forward ------------------------------------------------------ */
+
+export interface WalkForwardLeg {
+  start: string;
+  end: string;
+  cagr: number | null;
+  sharpe: number | null;
+  max_drawdown_pct: number | null;
+}
+
+export interface WalkForwardWindow {
+  window: string;
+  strategy: string;
+  in_sample: WalkForwardLeg;
+  out_of_sample: WalkForwardLeg;
+  edge_retained: number | null;
+  unresolved: string | null;
+  clears_bar: boolean | null;
+}
+
+export interface WalkForward {
+  windows: WalkForwardWindow[];
+  window_count: number;
+  resolved_count: number;
+  unresolved_count: number;
+  mean_edge_retained: number | null;
+  median_edge_retained: number | null;
+  windows_clearing_bar: number | null;
+  windows_negative: number | null;
+  smallest_in_sample_cagr: number | null;
+  distribution_note: string | null;
+  mean_clears_bar: boolean | null;
+  bar: number | null;
+  bar_citation: string;
+  unpaired: string[];
+  note: string;
+}
+
+export const getWalkForward = () => get<WalkForward>("/walkforward");

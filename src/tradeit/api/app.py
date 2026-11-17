@@ -56,6 +56,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import InstrumentedAttribute, Session, load_only, sessionmaker
 
+from tradeit.api.evidence_route import walkforward_payload
 from tradeit.api.forward_route import forward_payload
 from tradeit.api.page import PAGE
 from tradeit.api.provenance_route import provenance_payload
@@ -504,6 +505,20 @@ def create_app(dsn: str, corpus_dsn: str | None = None, forward_dsn: str | None 
                 "`missing` on the session itself for that."
             ),
         }
+
+    @app.get("/walkforward")
+    def walkforward(session: SessionDep) -> dict[str, Any]:
+        """Every in-sample window paired with its own out-of-sample test.
+
+        Reads whichever record is attached. The robustness record holds 53
+        runs in 26 pairs; a record holding a single run returns no windows,
+        which is the correct answer rather than an error.
+
+        **The pairing lives in the run name and nowhere else** — there is no
+        column joining a window to its own out-of-sample test — which is why
+        `/runs` could list all 53 and show none of the structure.
+        """
+        return walkforward_payload(session)
 
     @app.get("/runs/{run_id}/trades")
     def run_trades(

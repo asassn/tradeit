@@ -33,6 +33,7 @@ export const NAV: NavGroup[] = [
     label: "Evidence",
     items: [
       { label: "Strategy runs", to: "/evidence/runs", source: "record" },
+      { label: "Walk-forward", to: "/evidence/walkforward", source: "record" },
       { label: "Horizons", to: "/evidence/horizons", source: "record" },
     ],
   },

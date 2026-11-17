@@ -30,6 +30,7 @@ search box would simply stop working. A test holds the order.
 | `GET /health` | is the record reachable, which record is it, does it hold anything |
 | `GET /runs` | every recorded run, with trades **counted from the rows** |
 | `GET /runs/{id}/trades` | one run's trades, with the total so a page cannot pass for the whole |
+| `GET /walkforward` | in-sample windows paired with their out-of-sample tests, **with the distribution beside the mean** |
 | `GET /sessions` | which sessions the record can speak about |
 | `GET /sessions/{date}` | what was decided, and **`missing`** — read that first |
 | `GET /instruments` | which securities the record can speak about |

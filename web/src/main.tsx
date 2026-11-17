@@ -7,6 +7,7 @@ import { HorizonsView } from "@/views/HorizonsView";
 import { CaptureHealthView } from "@/views/CaptureHealthView";
 import { NotYetView } from "@/views/NotYetView";
 import { RunsView } from "@/views/RunsView";
+import { WalkForwardView } from "@/views/WalkForwardView";
 import { SecuritiesView } from "@/views/SecuritiesView";
 import "@/tokens/tokens.css";
 import "@/tokens/base.css";
@@ -29,6 +30,7 @@ const router = createHashRouter([
       { path: "securities", element: <SecuritiesView /> },
       { path: "securities/:securityId", element: <SecuritiesView /> },
       { path: "evidence/runs", element: <RunsView /> },
+      { path: "evidence/walkforward", element: <WalkForwardView /> },
       { path: "evidence/horizons", element: <HorizonsView /> },
       { path: "decisions", element: <DecisionsView /> },
       { path: "system/capture", element: <CaptureHealthView /> },
