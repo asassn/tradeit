@@ -393,3 +393,66 @@ def test_candidates_considered_is_reported_so_an_empty_plan_is_explicable() -> N
     """Zero buys from zero candidates and zero buys from forty are different facts."""
     assert _plan(candidates=[]).candidates_considered == 0
     assert _plan(candidates=[_candidate(1), _candidate(2)]).candidates_considered == 2
+
+
+# ---------------------------------------------------------------------------
+# What each horizon specifically lacks, measured from its own hierarchy
+#
+# The first version of this stated Swing's missing `H1/M15` trigger as a
+# constant, and printed that sentence on a Retirement plan — whose trigger is
+# `D1` from `research-01` and is entirely available. A false caveat is worse
+# than no caveat: it is the part of the screen a reader is meant to trust.
+# ---------------------------------------------------------------------------
+
+
+def test_retirement_lacks_nothing_so_it_claims_nothing_absent() -> None:
+    """Its whole hierarchy — MN1/W1, W1/D1, D1 — is in research-01."""
+    from tradeit.decide.plan import caveats_for
+
+    caveats = caveats_for(Mandate.RETIREMENT)
+
+    assert not any("ADR-0030" in caveat for caveat in caveats)
+    assert not any("layer" in caveat for caveat in caveats)
+    assert len(caveats) == 2, "the two universal caveats and nothing invented"
+
+
+def test_swing_reports_its_trigger_absent_and_its_setup_partial() -> None:
+    """Setup is D1/H1 — half available. Trigger is H1/M15 — wholly absent."""
+    from tradeit.decide.plan import caveats_for
+
+    caveats = " ".join(caveats_for(Mandate.SWING))
+
+    assert "trigger layer is 1h/15m" in caveats
+    assert "entirely absent" in caveats
+    assert "setup layer is 1d/1h" in caveats
+    assert "only partly available (1d)" in caveats
+    assert "context" not in caveats, "W1/D1 is wholly in research-01"
+
+
+def test_day_reports_two_whole_layers_absent() -> None:
+    from tradeit.decide.plan import caveats_for
+
+    caveats = caveats_for(Mandate.DAY)
+    absent = [c for c in caveats if "entirely absent" in c]
+
+    assert len(absent) == 2, f"setup and trigger are both wholly intraday: {caveats}"
+
+
+def test_the_caveat_names_the_mandate_it_is_about() -> None:
+    """So a Swing sentence can never appear on a Retirement plan again."""
+    from tradeit.decide.plan import caveats_for
+
+    for mandate in (Mandate.SWING, Mandate.DAY):
+        for caveat in caveats_for(mandate):
+            if "layer" in caveat:
+                assert caveat.startswith(str(mandate))
+
+
+def test_a_plan_carries_its_own_mandate_caveats_not_another_horizons() -> None:
+    swing = _plan(mandate=Mandate.SWING).caveats
+    retirement = _plan(mandate=Mandate.RETIREMENT).caveats
+
+    assert any("1h/15m" in caveat for caveat in swing)
+    assert not any("1h/15m" in caveat for caveat in retirement), (
+        "Retirement's trigger is D1 and is available; claiming otherwise is a false caveat"
+    )

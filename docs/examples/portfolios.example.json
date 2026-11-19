@@ -1,0 +1,66 @@
+{
+  "_comment": [
+    "A declared portfolio per horizon. Nothing in this repository writes a",
+    "`portfolios` or `positions` row, so the operator states what each horizon",
+    "holds and this file is the statement -- versionable, diffable, and honest",
+    "about its own provenance.",
+    "",
+    "Every field is required. There is no default equity, cash, universe,",
+    "as-of date, holding stop, session count or score range, because each",
+    "would decide something material while appearing to decide nothing: a",
+    "defaulted stop invents the position's size, since risk-based sizing",
+    "derives shares from the entry-to-stop distance.",
+    "",
+    "Run it with:  tradeit plan --declaration docs/examples/portfolios.example.json"
+  ],
+  "portfolios": [
+    {
+      "mandate": "swing",
+      "note": "Daily bars. The trigger layer (H1/M15) needs intraday-01 and is reported absent.",
+      "equity": "100000",
+      "cash": "40000",
+      "universe": [
+        "AAPL", "MSFT", "INTC", "CSCO", "ORCL", "IBM", "TXN", "QCOM",
+        "PFE", "MRK", "JNJ", "PG", "KO", "WMT"
+      ],
+      "warmup_from": "2014-01-02",
+      "as_of": "2015-11-27",
+      "fast": 50,
+      "slow": 200,
+      "stop_pct": "0.08",
+      "score_range": { "lower": 0.0, "upper": 0.5 },
+      "holdings": [
+        {
+          "ticker": "IBM",
+          "quantity": "400",
+          "entry_price": "138.46",
+          "stop_price": "110.00",
+          "sessions_held": 20,
+          "opened_on": "2015-10-29"
+        },
+        {
+          "ticker": "TXN",
+          "quantity": "300",
+          "entry_price": "55.00",
+          "stop_price": "44.00",
+          "sessions_held": 35,
+          "opened_on": "2015-10-07"
+        }
+      ]
+    },
+    {
+      "mandate": "retirement",
+      "note": "Derivable from Daily and never run before. Starts flat.",
+      "equity": "250000",
+      "cash": "250000",
+      "universe": ["JNJ", "PG", "KO", "WMT", "MRK", "PFE"],
+      "warmup_from": "2014-01-02",
+      "as_of": "2015-11-27",
+      "fast": 50,
+      "slow": 200,
+      "stop_pct": "0.12",
+      "score_range": { "lower": 0.0, "upper": 0.5 },
+      "holdings": []
+    }
+  ]
+}

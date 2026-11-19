@@ -57,14 +57,17 @@ from tradeit.core.enums import Bartimeframe
 from tradeit.portfolio.base import PortfolioState, RankerRefusal
 from tradeit.portfolio.cycle import CyclePlan, EntryCandidate, PortfolioCycle
 from tradeit.portfolio.mandate import (
+    Corpus,
     Mandate,
     Observation,
     UnitOfStudy,
     require_population,
 )
+from tradeit.portfolio.mandate import spec as mandate_spec
 from tradeit.portfolio.stops import StopContext
 
 __all__ = [
+    "AVAILABLE_CORPORA",
     "AbsentControl",
     "Holding",
     "ProposedEntry",
@@ -72,6 +75,7 @@ __all__ = [
     "Refusal",
     "SessionPlan",
     "absent_controls",
+    "caveats_for",
     "plan_session",
 ]
 
@@ -243,19 +247,81 @@ class SessionPlan:
         return "\n".join(lines)
 
 
-#: Carried with every plan. Each is measured or recorded elsewhere in this
-#: repository, and each changes what the numbers above are worth.
-CAVEATS: tuple[str, ...] = (
+#: Corpora this system actually has. ``intraday-01`` is deferred (ADR-0030) and
+#: is **not** listed, which is what makes the layer reporting below measured
+#: rather than asserted.
+AVAILABLE_CORPORA: frozenset[Corpus] = frozenset({Corpus.RESEARCH_01})
+
+#: Which corpus a timeframe has to come from. Daily and longer are in
+#: ``research-01``; everything shorter needs ``intraday-01``.
+_SUB_DAILY = frozenset(
+    {
+        Bartimeframe.M1,
+        Bartimeframe.M5,
+        Bartimeframe.M15,
+        Bartimeframe.M30,
+        Bartimeframe.H1,
+        Bartimeframe.H4,
+    }
+)
+
+
+def _corpus_for(timeframe: Bartimeframe) -> Corpus:
+    return Corpus.INTRADAY_01 if timeframe in _SUB_DAILY else Corpus.RESEARCH_01
+
+
+def _layers_absent(mandate: Mandate) -> tuple[str, ...]:
+    """Which of a mandate's declared layers cannot be built, and why.
+
+    **Measured from the mandate's own hierarchy**, not written out per mandate.
+    The first version of this stated Swing's missing ``H1/M15`` trigger as a
+    constant, and printed that sentence on a Retirement plan — whose trigger is
+    ``D1`` from ``research-01`` and is entirely available. A caveat that is
+    false is worse than no caveat, because it is the part of the screen a reader
+    is meant to trust.
+    """
+    spec = mandate_spec(mandate)
+    out: list[str] = []
+    for role, timeframes in (
+        ("context", spec.hierarchy.context),
+        ("setup", spec.hierarchy.setup),
+        ("trigger", spec.hierarchy.trigger),
+    ):
+        needed = {_corpus_for(timeframe) for timeframe in timeframes}
+        missing = sorted(str(corpus) for corpus in needed - AVAILABLE_CORPORA)
+        if not missing:
+            continue
+        names = "/".join(str(timeframe) for timeframe in timeframes)
+        available = [t for t in timeframes if _corpus_for(t) in AVAILABLE_CORPORA]
+        wholly = not available
+        out.append(
+            f"{mandate}'s declared {role} layer is {names}, which needs "
+            f"{', '.join(missing)}. That corpus does not exist (ADR-0030), so the layer is "
+            + (
+                "entirely absent"
+                if wholly
+                else f"only partly available ({'/'.join(str(t) for t in available)})"
+            )
+            + " — reported rather than silently skipped."
+        )
+    return tuple(out)
+
+
+#: Carried with every plan, whatever the horizon. Each is measured or recorded
+#: elsewhere in this repository, and each changes what the numbers are worth.
+UNIVERSAL_CAVEATS: tuple[str, ...] = (
     "No signal in this system has a validated portfolio edge. The best measured "
     "one (realized_vol_60) passes a registered out-of-sample test as a signal and "
     "lost to a random portfolio in 4 of 4 samples as a portfolio. The ranking "
     "below is a decision process running on real data, not a recommendation.",
-    "Swing's declared hierarchy is context W1/D1 → setup D1/H1 → trigger H1/M15. "
-    "The trigger layer needs intraday-01, which does not exist, so a Daily slate "
-    "is admissible but unrefined. Reported absent rather than silently skipped.",
     "Nothing in this path may place an order. The live-trading interlock in "
     "tradeit.config requires a machine-local authorisation file regardless.",
 )
+
+
+def caveats_for(mandate: Mandate) -> tuple[str, ...]:
+    """The universal caveats plus whatever this horizon specifically lacks."""
+    return (*UNIVERSAL_CAVEATS, *_layers_absent(mandate))
 
 
 def absent_controls(
@@ -374,7 +440,7 @@ def plan_session(
         exits=_exits(plan, label),
         refusals=_refusals(plan.refusals, label),
         absent=absent_controls(cycle, contexts),
-        caveats=CAVEATS,
+        caveats=caveats_for(mandate),
         candidates_considered=len(candidates),
     )
 
