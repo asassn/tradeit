@@ -161,3 +161,27 @@ interlock of [ADR-0004](0004-live-trading-safety-interlock.md) is untouched.
 **Four controls remain unarmed.** Installing them changes what a backtest
 measures, which CLAUDE.md places behind an explicit scoped proposition. They
 are reported absent until that proposition is put and answered.
+
+### A finding from sweeping the path, rather than running it once
+
+Running one session proves the code executes. Walking 1,763 sessions of
+2003-2009 over 36 names found two things one session could not.
+
+**A ticker resolved by its earliest alias interval is an invented identity.**
+`resolve_universe` did that — deterministic, and wrong. `DIS` resolved to the
+Disney security whose prices begin in **2018**, so it printed on 0 of 1,763
+sessions. Resolution is **per date**
+(`RESEARCH_01_DATA_DICTIONARY` §0.2), and the per-date query returns **more
+than one row for 6.18% of tickers**, measured — so zero rows and two rows are
+both `UNRESOLVED`, with different reasons worth reporting separately. That is
+now §0.2a of the dictionary, and the first test of the old behaviour had
+asserted the wrong thing as though it were a safeguard.
+
+**One bad identity can suppress a whole run.** `EventDrivenEngine._decide`
+returns early when *any* held instrument lacks a print that session — correct
+in intent, because a stop cannot be managed against a price nobody quoted, but
+the blast radius is the entire session: every other position goes unmanaged and
+no entry is considered. In the sweep, holding one patchy name skipped **1,007
+of 1,763 sessions**, and the run still completed and reported a result. This is
+recorded, not fixed: narrowing the skip to the affected position changes what a
+backtest measures and needs its own scoped proposition.

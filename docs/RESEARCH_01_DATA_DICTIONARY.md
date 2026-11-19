@@ -187,6 +187,43 @@ Resolution is **per date**, never per ticker. Tickers are reused: two unrelated
 companies can hold `ACME` in different decades, and asking "which security is
 ACME" has no answer.
 
+### 0.2a The per-date query can return **more than one row**
+
+The query in §0.2 looks like it resolves to one security. It does not always,
+and the failure is silent: `fetchone()` returns whichever row the database
+produced first.
+
+**Measured 2026-11-19: 1,072 of 17,342 distinct tickers — 6.18%, one in
+sixteen — have intervals that overlap another security's.** `DIS` is the worked
+example. Two rows cover 2015-11-27:
+
+| security | valid_from | valid_to | issuer | price history |
+|---|---|---|---|---|
+| 14164 | 1990-01-01 | *(open)* | WALT DISNEY CO | 2018-06-25 .. 2026-09-04 |
+| 4232 | 1995-11-13 | 2019-10-07 | WALT DISNEY CO/ | 1995-11-13 .. 2019-10-04 |
+
+The intervals disagree with the prices: the row claiming the ticker from 1990
+has no print before 2018. So **picking either is inventing an identity**, and
+the honest result is `UNRESOLVED`.
+
+Taking the *earliest* interval — which looks deterministic and therefore safe —
+is how `tradeit.decide.runner` resolved `DIS` to security 14164 over a
+2003-2009 window, where it printed on **0 of 1,763 sessions**. That cost more
+than a missing name: the backtest engine skips an entire session when any held
+instrument lacks a print, so one bad identity can suppress every decision in a
+run while the run still completes and reports a result.
+
+```sql
+-- correct: ask, and be prepared for 0, 1 or 2+
+select security_id from symbol_aliases
+where alias_kind = 'ticker' and alias_value = :ticker
+  and valid_from <= :as_of and (valid_to is null or valid_to > :as_of);
+```
+
+Count the rows. One is an answer; zero and two are both `UNRESOLVED`, and they
+have different reasons worth reporting separately — *"no security held this
+ticker then"* against *"two securities claim it"*.
+
 ### 0.3 Rows the corpus knows are wrong are **still in the tables**
 
 This corpus bounds what it *reads* rather than destroying what it was *sent*, so

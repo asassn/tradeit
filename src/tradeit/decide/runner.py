@@ -42,9 +42,14 @@ from tradeit.strategy.config import StrategyConfig
 
 __all__ = ["PlanResult", "build_cycle", "plan_declared", "resolve_universe"]
 
+#: **Resolution is per date, never per ticker** — `RESEARCH_01_DATA_DICTIONARY`
+#: §0.2, and `valid_to` is **exclusive**, so the last day a security owns a
+#: ticker is `valid_to - 1`.
 _TICKERS = text(
     "select alias_value, security_id from symbol_aliases "
-    "where alias_kind = 'ticker' and alias_value in :t order by valid_from"
+    "where alias_kind = 'ticker' and alias_value in :t "
+    "  and valid_from <= :as_of and (valid_to is null or valid_to > :as_of) "
+    "order by alias_value, valid_from"
 )
 _SECTORS = text(
     "select instrument_id, sector from sectors where scheme = 'SIC' "
@@ -68,23 +73,55 @@ class PlanResult:
     seconds: float
 
 
-def resolve_universe(session: Session, tickers: tuple[str, ...]) -> dict[str, int]:
-    """Resolve tickers to security ids, the **earliest** alias interval winning.
+def resolve_universe(
+    session: Session, tickers: tuple[str, ...], as_of: dt.date
+) -> tuple[dict[str, int], dict[str, str]]:
+    """Resolve tickers **as of a date**, and refuse the ones that are ambiguous.
 
-    Deterministic rather than whichever row the database returns first. One
-    ticker can belong to two unrelated issuers across time, and an arbitrary
-    choice would price one company while planning trades for another — the
-    splice this corpus exists to prevent, arriving as a universe entry.
+    Returns ``(resolved, unresolved)`` where ``unresolved`` maps a ticker to
+    the reason it could not be used.
+
+    **Resolution is per date, never per ticker.** That is
+    `RESEARCH_01_DATA_DICTIONARY` §0.2, and this function previously ignored
+    it: it took the earliest alias interval, which is deterministic but not
+    correct. Measured 2026-11-19 over 2003-2009, that rule resolved ``DIS`` to
+    the Walt Disney security whose prices begin in **2018**, so the name
+    printed on 0 of 1,763 sessions — and because the backtest engine skips a
+    whole session when any held name lacks a print, one such pick can suppress
+    every decision in the run.
+
+    **A ticker claimed by two securities on the same date is UNRESOLVED.**
+    ``DIS`` is exactly that on 2015-11-27: two intervals overlap, one
+    open-ended from 1990 and one running 1995 to 2019. Picking either would be
+    inventing an identity, and `CLAUDE.md` is explicit that ambiguity beats
+    fabricated certainty. ``valid_to`` is exclusive, so an interval ending on
+    the as-of date does **not** cover it.
     """
     if not tickers:
-        return {}
+        return {}, {}
     rows = session.execute(
-        _TICKERS.bindparams(bindparam("t", value=list(tickers), expanding=True))
+        _TICKERS.bindparams(bindparam("t", value=list(tickers), expanding=True)),
+        {"as_of": as_of.isoformat()},
     ).all()
-    found: dict[str, int] = {}
+    claims: dict[str, list[int]] = {}
     for ticker, security_id in rows:
-        found.setdefault(str(ticker), int(security_id))
-    return found
+        claims.setdefault(str(ticker), []).append(int(security_id))
+
+    resolved: dict[str, int] = {}
+    unresolved: dict[str, str] = {}
+    for ticker in tickers:
+        found = claims.get(ticker, [])
+        if len(found) == 1:
+            resolved[ticker] = found[0]
+        elif not found:
+            unresolved[ticker] = f"no security held this ticker on {as_of}"
+        else:
+            ids = ", ".join(str(i) for i in sorted(found))
+            unresolved[ticker] = (
+                f"{len(found)} securities claim this ticker on {as_of} ({ids}); "
+                "picking one would invent an identity"
+            )
+    return resolved, unresolved
 
 
 def build_cycle(config: StrategyConfig, sectors: dict[int, str]) -> PortfolioCycle:
@@ -145,8 +182,8 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
             f"{declared.mandate} label"
         )
 
-    resolved = resolve_universe(session, declared.universe)
-    unresolved = tuple(sorted(set(declared.universe) - set(resolved)))
+    resolved, why_not = resolve_universe(session, declared.universe, declared.as_of)
+    unresolved = tuple(f"{ticker} ({why})" for ticker, why in sorted(why_not.items()))
     if not resolved:
         raise DeclarationError(
             f"{declared.mandate}: none of {len(declared.universe)} tickers resolved against "
