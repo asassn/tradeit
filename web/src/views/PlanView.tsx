@@ -348,6 +348,20 @@ function Horizon({ horizon }: { horizon: PlanHorizon }) {
         </Caution>
       )}
 
+      {(horizon.loaded?.carried.length ?? 0) > 0 && (
+        <Caution title="Marked at an older close">
+          {horizon.loaded!.carried
+            .map((c) => `${c.reference} (${c.session})`)
+            .join(", ")}{" "}
+          did not print on this session and {horizon.loaded!.carried.length === 1
+            ? "is"
+            : "are"}{" "}
+          carried at the last price anybody quoted. That cannot trigger a stop
+          yesterday did not — but open risk, and therefore heat, is measured
+          against it.
+        </Caution>
+      )}
+
       {plan.not_armed.length > 0 && (
         <Card title={`Not armed · ${plan.not_armed.length}`}>
           <p className="plan__dim plan__lede">

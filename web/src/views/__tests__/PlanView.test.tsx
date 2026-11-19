@@ -57,6 +57,7 @@ function horizon(overrides: Partial<PlanHorizon> = {}): PlanHorizon {
     },
     loaded: {
       unresolved: [],
+      carried: [],
       sectors_classified: 14,
       sessions_loaded: 481,
       bars_loaded: 6253,
@@ -210,6 +211,7 @@ describe("absence is rendered", () => {
         horizon({
           loaded: {
             unresolved: ["BAC", "JPM"],
+            carried: [],
             sectors_classified: 12,
             sessions_loaded: 481,
             bars_loaded: 6253,
@@ -429,5 +431,44 @@ describe("what the portfolio holds", () => {
 
     await waitFor(() => expect(screen.getByText("IBM")).toBeInTheDocument());
     expect(screen.getAllByLabelText("not recorded").length).toBeGreaterThan(0);
+  });
+});
+
+
+describe("a holding that did not print is carried, not refused", () => {
+  it("says which position is marked at an older close, and what that affects", async () => {
+    // The engine's rule and its reasoning: a security that did not print today
+    // is carried at its last known price, which "is not a guess, it is the last
+    // thing anybody knew, and being unchanged from yesterday it cannot trigger
+    // a stop that yesterday did not". Refusing the whole horizon over one quiet
+    // name — which the plan did until 2026-11-19 — stalls every other stop.
+    serve({
+      portfolios: [
+        horizon({
+          loaded: {
+            unresolved: [],
+            carried: [{ reference: "NVDA", session: "2026-08-12" }],
+            sectors_classified: 14,
+            sessions_loaded: 489,
+            bars_loaded: 16137,
+            seconds: 1.2,
+          },
+        }),
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Marked at an older close/)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/NVDA \(2026-08-12\)/)).toBeInTheDocument();
+    // The consequence, not just the fact: heat is measured against that mark.
+    expect(screen.getByText(/heat, is measured against it/)).toBeInTheDocument();
+  });
+
+  it("says nothing when every holding printed", async () => {
+    serve({});
+
+    await waitFor(() => expect(screen.getByText("Swing")).toBeInTheDocument());
+    expect(screen.queryByText(/Marked at an older close/)).toBeNull();
   });
 });

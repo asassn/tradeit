@@ -151,6 +151,9 @@ def _loaded(result: PlanResult) -> dict[str, Any]:
         # Reported, never dropped silently: a universe quietly smaller than the
         # one declared produces a plan about a portfolio nobody described.
         "unresolved": list(result.unresolved),
+        # Holdings marked at an older close. Carried, not refused — and
+        # reported, because a stale mark changes what the heat figure means.
+        "carried": [{"reference": ticker, "session": str(day)} for ticker, day in result.carried],
         "sectors_classified": result.sectors_classified,
         "sessions_loaded": result.sessions_loaded,
         "bars_loaded": result.bars_loaded,

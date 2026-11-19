@@ -98,6 +98,9 @@ def _report(result: PlanResult) -> None:
         f"loaded   : {result.sessions_loaded} sessions, {result.bars_loaded} bars, "
         f"{result.sectors_classified} classified, in {result.seconds:,.1f}s"
     )
+    for ticker, day in result.carried:
+        # A stale mark is a fact the reader should see, not one to hide.
+        print(f"carried  : {ticker} did not print; marked at its {day} close")
     print()
     print(result.plan.describe())
 

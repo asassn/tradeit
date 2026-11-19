@@ -254,3 +254,31 @@ def test_an_empty_portfolios_list_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(DeclarationError, match="non-empty list"):
         load_declaration(path)
+
+
+# ---------------------------------------------------------------------------
+# A quiet holding is carried, not refused
+#
+# `EventDrivenEngine._context` carries a security that did not print today at
+# its last known close, and says why: that "is not a guess -- it is the last
+# thing anybody knew, and being unchanged from yesterday it cannot trigger a
+# stop that yesterday did not". `plan_declared` refused the whole horizon in
+# that case until 2026-11-19, which stalls every other position's stop over one
+# quiet name. These pin the corrected behaviour at the declaration boundary;
+# the carry itself is exercised against the corpus.
+# ---------------------------------------------------------------------------
+
+
+def test_a_declaration_may_hold_a_name_that_is_quiet_on_the_as_of_date(
+    tmp_path: Path,
+) -> None:
+    """The loader does not know what printed; it must not pre-judge it.
+
+    Whether a holding has a bar on the as-of date is a fact about the corpus,
+    resolved by `plan_declared`. The declaration is valid either way, and a
+    loader that refused here would make a quiet session a malformed file.
+    """
+    (declared,) = load_declaration(_write(tmp_path, _portfolio()))
+
+    assert declared.holdings[0].ticker == "IBM"
+    assert declared.as_of == dt.date(2015, 11, 27)

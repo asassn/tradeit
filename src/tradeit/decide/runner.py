@@ -67,6 +67,14 @@ class PlanResult:
     #: plan about a portfolio nobody described. Five of twenty did not resolve
     #: in the first real run.
     unresolved: tuple[str, ...]
+    #: Holdings marked at a close older than the session being planned, as
+    #: ``(ticker, session)``. **Carried, not refused** — the engine's rule, and
+    #: its reasoning: a security that did not print today is carried at its last
+    #: known price, which "is not a guess, it is the last thing anybody knew,
+    #: and being unchanged from yesterday it cannot trigger a stop that
+    #: yesterday did not". Reported per position, because a stale mark is a fact
+    #: the reader should see rather than one the plan should hide.
+    carried: tuple[tuple[str, dt.date], ...]
     sectors_classified: int
     sessions_loaded: int
     bars_loaded: int
@@ -241,14 +249,39 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
         for candidate in kept
     ]
 
+    # A holding that did not print today is carried at its last known close,
+    # which is what `EventDrivenEngine._context` does and for the reason it
+    # gives. Refusing the whole horizon over one quiet name — which this did
+    # until 2026-11-19 — stalls every other position's stop for no gain.
+    marks: dict[int, Decimal] = {}
+    highs: dict[int, Decimal] = {}
+    carried: list[tuple[str, dt.date]] = []
+    before = [day for day in sessions if day <= declared.as_of]
+    for holding in declared.holdings:
+        instrument_id = resolved[holding.ticker]
+        if instrument_id in bars:
+            marks[instrument_id] = bars[instrument_id].close
+            highs[instrument_id] = bars[instrument_id].high
+            continue
+        for day in reversed(before[:-1]):
+            earlier = data.bars(day)
+            if instrument_id in earlier:
+                marks[instrument_id] = earlier[instrument_id].close
+                highs[instrument_id] = earlier[instrument_id].high
+                carried.append((holding.ticker, day))
+                break
+        else:
+            # Never printed in the window at all. That is an identity problem,
+            # not a quiet session, and there is no last known price to carry.
+            raise DeclarationError(
+                f"{declared.mandate}: {holding.ticker} has no print anywhere between "
+                f"{declared.warmup_from} and {declared.as_of}, so it cannot be marked or "
+                "stopped. Check the ticker resolves to the security you mean"
+            )
+
     positions: list[PositionState] = []
     for holding in declared.holdings:
         instrument_id = resolved[holding.ticker]
-        if instrument_id not in bars:
-            raise DeclarationError(
-                f"{declared.mandate}: {holding.ticker} has no print on {declared.as_of}, so its "
-                "stop cannot be managed. The cycle refuses that case rather than guessing"
-            )
         positions.append(
             PositionState(
                 position_id=instrument_id,
@@ -270,13 +303,18 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
         cash=declared.cash,
         equity=declared.equity,
         positions=tuple(positions),
-        last_prices={p.instrument_id: bars[p.instrument_id].close for p in positions},
+        last_prices={p.instrument_id: marks[p.instrument_id] for p in positions},
     )
     held_sessions = {resolved[h.ticker]: h.sessions_held for h in declared.holdings}
     contexts = {
         p.instrument_id: StopContext(
-            last_price=bars[p.instrument_id].close,
-            high_since_entry=max(bars[p.instrument_id].high, p.average_entry_price),
+            last_price=marks[p.instrument_id],
+            # An approximation, and stated as one: the true high since entry
+            # needs the whole holding period, which a declaration does not
+            # carry. `EventDrivenEngine` tracks it exactly from its own lots.
+            # Understating it only ever keeps a trailing stop lower, and the
+            # trailing rung is reported unarmed anyway for want of an ATR.
+            high_since_entry=max(highs[p.instrument_id], p.average_entry_price),
             sessions_held=held_sessions[p.instrument_id],
             partial_profit_taken=False,
             # None, deliberately, and reported as an absent control: the
@@ -300,6 +338,7 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
     return PlanResult(
         plan=plan,
         unresolved=unresolved,
+        carried=tuple(carried),
         sectors_classified=len(sectors),
         sessions_loaded=len(sessions),
         bars_loaded=data.bar_count,

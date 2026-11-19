@@ -177,11 +177,26 @@ both `UNRESOLVED`, with different reasons worth reporting separately. That is
 now §0.2a of the dictionary, and the first test of the old behaviour had
 asserted the wrong thing as though it were a safeguard.
 
-**One bad identity can suppress a whole run.** `EventDrivenEngine._decide`
-returns early when *any* held instrument lacks a print that session — correct
-in intent, because a stop cannot be managed against a price nobody quoted, but
-the blast radius is the entire session: every other position goes unmanaged and
-no entry is considered. In the sweep, holding one patchy name skipped **1,007
-of 1,763 sessions**, and the run still completed and reported a result. This is
-recorded, not fixed: narrowing the skip to the affected position changes what a
-backtest measures and needs its own scoped proposition.
+**A claim about the engine that was wrong, and the correction.** The first
+version of this ADR said `EventDrivenEngine._decide` skips a whole session when
+any held instrument lacks a print, citing 1,007 skipped sessions of 1,763.
+**That was my sweep script's defect, not the engine's.** `_decide` skips only
+when `_context` returns `None`, and `_context` falls back to
+`state.last_prices`, which `_RunState` populates as bars arrive — so once a
+holding has printed once the fallback always succeeds. The engine's own
+docstring states the reasoning and it is right: *"A security that did not print
+today is carried at its last known price rather than skipped. That is not a
+guess — it is the last thing anybody knew, and being unchanged from yesterday
+it cannot trigger a stop that yesterday did not."*
+
+The real finding is about **this package**, which had the defect the engine
+avoided: `plan_declared` refused an entire horizon when a declared holding had
+no print on the as-of date. It now carries the holding at its last known close
+and **reports the staleness per position**, because a mark two sessions old is
+a fact the reader should see rather than one the plan should hide — and only
+refuses when a holding has never printed at all, which is an identity problem
+rather than a quiet session.
+
+This is the "never answer by accident" failure in the direction that matters
+least and embarrasses most: a symptom was observed in a measuring instrument
+and attributed to the thing being measured.

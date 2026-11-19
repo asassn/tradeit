@@ -157,8 +157,15 @@ export interface PlanDeclared {
   note: string;
 }
 
+export interface PlanCarried {
+  reference: string;
+  session: string;
+}
+
 export interface PlanLoaded {
   unresolved: string[];
+  /** Holdings marked at an older close because they did not print. */
+  carried: PlanCarried[];
   sectors_classified: number;
   sessions_loaded: number;
   bars_loaded: number;
