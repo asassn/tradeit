@@ -243,7 +243,17 @@ class AllocationRanker(Protocol):
         candidates: Sequence[AllocationCandidate],
         portfolio: PortfolioState,
         correlation: dict[tuple[int, int], float] | None = None,
-    ) -> list[AllocationCandidate]: ...
+    ) -> Sequence[AllocationCandidate]:
+        """Candidates in allocation order, possibly fewer than were given.
+
+        ``Sequence`` rather than ``list``: a return type is covariant, so a
+        protocol promising ``list`` forbids the natural implementation for a
+        frozen ranker, which is to return a tuple. ``PortfolioCycle`` only
+        iterates the result, so nothing needed the stronger promise — and
+        ``OpportunityFitRanker`` already returned a tuple, which typechecked
+        solely because no typed caller had yet assigned one to this protocol.
+        """
+        ...
 
 
 @dataclass(frozen=True, slots=True)
