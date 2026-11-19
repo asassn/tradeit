@@ -11,6 +11,7 @@ a thin alias for ``uvicorn``.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,10 @@ def _args(**overrides: object) -> argparse.Namespace:
         "record": "",
         "corpus": None,
         "forward": None,
+        # The plan's declared portfolios. None is the real argparse default,
+        # so a test that omitted it would exercise a Namespace the command can
+        # never actually receive.
+        "declaration": None,
         "host": LOOPBACK,
         "port": 8000,
         "log_level": "info",
@@ -162,3 +167,90 @@ def test_the_command_is_registered_on_the_cli() -> None:
         parser.parse_args(["dashboard"])  # required --record
     args = parser.parse_args(["dashboard", "--record", "x.sqlite"])
     assert args.func is cmd_dashboard
+
+
+# ---------------------------------------------------------------------------
+# The declared portfolios
+#
+# A plan needs holdings, and nothing in this repository writes a `portfolios`
+# or `positions` row, so the operator declares them in a file. It is validated
+# before the server starts for the same reason the record is: a declaration
+# that only refuses when the home page is opened reads as a broken dashboard
+# rather than as a file with a missing stop in it.
+# ---------------------------------------------------------------------------
+
+
+def test_without_a_declaration_the_plan_is_reported_disabled(
+    tmp_path: Path, served: list[dict[str, Any]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    a_record = tmp_path / "record.sqlite"
+    a_record.touch()
+
+    assert cmd_dashboard(_args(record=str(a_record))) == 0
+
+    assert "portfolio: none -- the plan is disabled" in capsys.readouterr().out
+
+
+def test_a_missing_declaration_file_is_refused_before_serving(
+    tmp_path: Path, served: list[dict[str, Any]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    a_record = tmp_path / "record.sqlite"
+    a_record.touch()
+
+    assert cmd_dashboard(_args(record=str(a_record), declaration=str(tmp_path / "gone.json"))) == 2
+
+    assert served == [], "nothing should be served"
+    err = capsys.readouterr().err
+    assert "declaration refused" in err
+    assert "no declaration at" in err, "and it names the path that was tried"
+
+
+def test_a_declaration_that_cannot_be_read_is_refused_before_serving(
+    tmp_path: Path, served: list[dict[str, Any]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**Refused at startup, not at the first request.**
+
+    A missing stop is a fact about the file. Surfacing it only when somebody
+    opens the page makes it look like the dashboard is broken.
+    """
+    a_record = tmp_path / "record.sqlite"
+    a_record.touch()
+    bad = tmp_path / "declaration.json"
+    bad.write_text(json.dumps({"portfolios": [{"mandate": "swing"}]}))
+
+    assert cmd_dashboard(_args(record=str(a_record), declaration=str(bad))) == 2
+
+    assert served == []
+    assert "declaration refused" in capsys.readouterr().err
+
+
+def test_a_valid_declaration_names_the_horizons_it_will_plan(
+    tmp_path: Path, served: list[dict[str, Any]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    a_record = tmp_path / "record.sqlite"
+    a_record.touch()
+    good = tmp_path / "declaration.json"
+    good.write_text(
+        json.dumps(
+            {
+                "portfolios": [
+                    {
+                        "mandate": "swing",
+                        "equity": "100000",
+                        "cash": "40000",
+                        "universe": ["IBM"],
+                        "warmup_from": "2014-01-02",
+                        "as_of": "2015-11-27",
+                        "score_range": {"lower": 0.0, "upper": 0.5},
+                        "holdings": [],
+                    }
+                ]
+            }
+        )
+    )
+
+    assert cmd_dashboard(_args(record=str(a_record), declaration=str(good))) == 0
+
+    out = capsys.readouterr().out
+    assert "portfolio:" in out
+    assert "(swing)" in out, "which horizons will be planned is part of what is being served"

@@ -1,0 +1,97 @@
+/**
+ * The plan, as columns that never merge.
+ *
+ * One column per horizon, side by side on a wide screen and stacked on a
+ * narrow one. There is no row that totals them: Day, Swing and Retirement are
+ * separate decision systems and a blended figure would destroy the
+ * information the three-horizon architecture exists to preserve.
+ */
+
+.plan__columns {
+  display: grid;
+  gap: var(--s-5);
+  grid-template-columns: 1fr;
+}
+
+/* Side by side only when a column can still be read. Below this each one is
+   narrower than its own tables. */
+@media (min-width: 1100px) {
+  .plan__columns {
+    grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  }
+}
+
+.plan__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-width: 0; /* so a wide table scrolls inside the column, not past it */
+}
+
+.plan__mandate {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  font: var(--t-h2);
+  gap: var(--s-2);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.plan__session,
+.plan__stamp {
+  color: var(--ink-3);
+  font: var(--t-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan__note {
+  color: var(--ink-2);
+  font: var(--t-caption);
+  margin: 0;
+}
+
+.plan__dim {
+  color: var(--ink-3);
+  font: var(--t-caption);
+}
+
+.plan__lede {
+  margin: 0 0 var(--s-3);
+}
+
+.plan__name {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan__row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  padding: var(--s-1) 0;
+}
+
+.plan__refusal {
+  border-top: 1px solid var(--line);
+  padding: var(--s-2) 0;
+}
+
+.plan__refusal:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.plan__absent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plan__absent code {
+  font: 400 12px/16px var(--font-mono);
+}

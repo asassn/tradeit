@@ -61,6 +61,7 @@ from tradeit.api.filings_route import filings_payload
 from tradeit.api.forward_route import forward_payload
 from tradeit.api.fundamentals_route import fundamentals_payload
 from tradeit.api.page import PAGE
+from tradeit.api.plan_route import plan_payload
 from tradeit.api.prices_route import DEFAULT_POINTS, MAX_POINTS, prices_payload
 from tradeit.api.provenance_route import provenance_payload
 from tradeit.api.securities_route import (
@@ -246,7 +247,12 @@ def _horizons_for(session: Session, ids: list[int]) -> dict[int, list[str]]:
     return out
 
 
-def create_app(dsn: str, corpus_dsn: str | None = None, forward_dsn: str | None = None) -> FastAPI:
+def create_app(
+    dsn: str,
+    corpus_dsn: str | None = None,
+    forward_dsn: str | None = None,
+    declaration: Path | None = None,
+) -> FastAPI:
     """Build the service over one decision record.
 
     ``dsn`` is required and has no default. The record and the corpus are
@@ -291,6 +297,12 @@ def create_app(dsn: str, corpus_dsn: str | None = None, forward_dsn: str | None 
     )
     app.state.session_factory = factory
     app.state.corpus_factory = corpus_factory
+    # A **fourth** input, and the only one that is not a database. Nothing in
+    # this repository writes a `portfolios` or `positions` row, so the holdings
+    # a plan is made against are declared by the operator in a file. Reading
+    # them from storage would produce a confident plan for an empty portfolio,
+    # indistinguishable from a portfolio that genuinely holds nothing.
+    app.state.declaration = declaration
     app.state.forward_factory = forward_factory
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -1041,6 +1053,47 @@ def create_app(dsn: str, corpus_dsn: str | None = None, forward_dsn: str | None 
                 "architecture exists to prevent."
             ),
         }
+
+    @app.get("/plan")
+    def plan() -> dict[str, Any]:
+        """What each declared portfolio should do, and what it refused.
+
+        **The route this dashboard exists for.** Every route written before it
+        answered "is this a great stock"; this one answers "is this a great
+        trade for this portfolio right now", which is the only question that
+        may authorise a trade.
+
+        Needs the corpus, because a plan is made against prices, and the
+        declaration, because nothing in this repository writes a portfolio row.
+        Each is reported missing by name rather than producing an empty plan
+        that would read as a portfolio with nothing to do.
+        """
+        declaration: Path | None = getattr(app.state, "declaration", None)
+        if declaration is None:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "no portfolio declaration. A plan needs holdings, and nothing in this "
+                    "system writes a portfolios or positions row, so the operator declares "
+                    "them: start with --declaration pointing at a JSON file "
+                    "(docs/examples/portfolios.example.json)"
+                ),
+            )
+        if corpus_factory is None:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "no corpus is attached. A plan is made against prices from research-01, "
+                    "which is a different database from the decision record; start with "
+                    "--corpus to enable it"
+                ),
+            )
+        corpus = corpus_factory()
+        try:
+            return plan_payload(corpus, declaration)
+        finally:
+            corpus.rollback()
+            corpus.close()
 
     # Mounted LAST, deliberately: a static mount matches greedily, and
     # mounting it before the routes above would have `/runs` serve a 404 from

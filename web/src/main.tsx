@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { createHashRouter, Navigate, RouterProvider } from "react-router-dom";
 import { Shell } from "@/app/Shell";
 import { DecisionsView } from "@/views/DecisionsView";
+import { PlanView } from "@/views/PlanView";
 import { HorizonsView } from "@/views/HorizonsView";
 import { CaptureHealthView } from "@/views/CaptureHealthView";
 import { NotYetView } from "@/views/NotYetView";
@@ -26,7 +27,8 @@ const router = createHashRouter([
     path: "/",
     element: <Shell />,
     children: [
-      { index: true, element: <Navigate to="/securities" replace /> },
+      { index: true, element: <Navigate to="/plan" replace /> },
+      { path: "plan", element: <PlanView /> },
       { path: "securities", element: <SecuritiesView /> },
       { path: "securities/:securityId", element: <SecuritiesView /> },
       { path: "evidence/runs", element: <RunsView /> },
@@ -35,7 +37,7 @@ const router = createHashRouter([
       { path: "decisions", element: <DecisionsView /> },
       { path: "system/capture", element: <CaptureHealthView /> },
       { path: "not-yet", element: <NotYetView /> },
-      { path: "*", element: <Navigate to="/securities" replace /> },
+      { path: "*", element: <Navigate to="/plan" replace /> },
     ],
   },
 ]);

@@ -52,6 +52,138 @@ export interface Health {
 
 export const getHealth = () => get<Health>("/health");
 
+/* ---- the plan ---------------------------------------------------------- */
+
+/**
+ * **The shape the product is for.**
+ *
+ * Every other type in this file describes a research answer — what a price
+ * did, what a filing said, what a backtest scored. This one describes a
+ * portfolio decision: what is held, what would be bought or sold, and
+ * **what was refused and by which limit**.
+ *
+ * `refused` and `declined` are separate on purpose and must stay separate.
+ * A refusal came from the ranker before any sizing and names a `VetoReason`;
+ * a decline came from the risk engine after sizing and names a rule. Showing
+ * them as one list loses which control acted.
+ */
+export interface PlanHolding {
+  instrument_id: number;
+  reference: string;
+  quantity: number;
+  average_entry_price: number;
+  last_price: number;
+  /** Null, never 0 — a stop at zero is unlimited risk, not an absent stop. */
+  stop_price: number | null;
+  market_value: number;
+  open_risk: number;
+  weight: number;
+}
+
+export interface PlanEntry {
+  instrument_id: number;
+  reference: string;
+  quantity: number;
+  entry_price: number;
+  stop_price: number;
+  notional: number;
+  risk_amount: number;
+  risk_fraction: number;
+  /** Which of the five caps decided the size. */
+  binding_constraint: string;
+  weight: number;
+  standalone: number;
+  accepted: boolean;
+  /** For a decline: the risk rule that rejected it, after sizing. */
+  declined_by: string | null;
+  detail: string;
+}
+
+export interface PlanExit {
+  instrument_id: number;
+  reference: string;
+  reason: string;
+  fraction: number;
+  detail: string;
+}
+
+export interface PlanRefusal {
+  instrument_id: number;
+  reference: string;
+  /** Every limit that bound it, not the first. */
+  reasons: string[];
+  ranker: string;
+  /** Where it would have ranked — what the limit cost. */
+  standing: number;
+  detail: string;
+}
+
+export interface AbsentControl {
+  name: string;
+  reason: string;
+}
+
+export interface Plan {
+  mandate: string;
+  timeframe: string;
+  session_date: string;
+  equity: number;
+  cash: number;
+  heat: number;
+  position_count: number;
+  candidates_considered: number;
+  capital_deployed: number;
+  holdings: PlanHolding[];
+  would_buy: PlanEntry[];
+  declined: PlanEntry[];
+  would_sell: PlanExit[];
+  refused: PlanRefusal[];
+  not_armed: AbsentControl[];
+  caveats: string[];
+}
+
+export interface PlanDeclared {
+  mandate: string;
+  equity: number;
+  cash: number;
+  universe_size: number;
+  warmup_from: string;
+  as_of: string;
+  holdings_declared: number;
+  score_range: { lower: number; upper: number };
+  fast: number;
+  slow: number;
+  stop_pct: number;
+  note: string;
+}
+
+export interface PlanLoaded {
+  unresolved: string[];
+  sectors_classified: number;
+  sessions_loaded: number;
+  bars_loaded: number;
+  seconds: number;
+}
+
+export interface PlanHorizon {
+  mandate: string;
+  available: boolean;
+  note?: string;
+  declared: PlanDeclared;
+  loaded?: PlanLoaded;
+  plan?: Plan;
+}
+
+export interface PlanPayload {
+  available: boolean;
+  declaration: string;
+  generated_at?: string;
+  note?: string;
+  portfolios: PlanHorizon[];
+}
+
+export const getPlan = () => get<PlanPayload>("/plan");
+
 /* ---- securities -------------------------------------------------------- */
 
 export interface SearchHit {

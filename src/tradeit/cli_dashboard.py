@@ -119,10 +119,33 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
             print(f"no forward record at {forward.expanduser().resolve()}", file=sys.stderr)
             return 2
 
-    app = create_app(dsn, corpus_dsn, forward_dsn)
+    declaration: Path | None = None
+    if args.declaration is not None:
+        declaration = Path(args.declaration).expanduser().resolve()
+        # Read before the server starts, not left to the first request. A
+        # declaration that refuses only when the home page is opened reads as a
+        # broken dashboard rather than as a file with a missing stop in it.
+        #
+        # There is no separate `exists()` check: `load_declaration` already
+        # raises "no declaration at <path>" for a missing file, and a mutation
+        # test proved no assertion could tell the two apart. A guard whose
+        # removal nothing detects is redundant, not defensive — the same
+        # finding as the duplicated `require_timeframe` in `decide.plan`.
+        from tradeit.decide import DeclarationError, load_declaration
+
+        try:
+            declared = load_declaration(declaration)
+        except DeclarationError as exc:
+            print(f"declaration refused: {exc}", file=sys.stderr)
+            return 2
+        horizons = ", ".join(str(portfolio.mandate) for portfolio in declared)
+
+    app = create_app(dsn, corpus_dsn, forward_dsn, declaration)
     print(f"reading  : {dsn}")
     print(f"corpus   : {corpus_dsn or 'none -- valuation is disabled'}")
     print(f"forward  : {forward_dsn or 'none -- capture health is disabled'}")
+    stated = f"{declaration} ({horizons})" if declaration else "none -- the plan is disabled"
+    print(f"portfolio: {stated}")
     print(f"serving  : http://{args.host}:{args.port}/")
     uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
     return 0
@@ -159,6 +182,17 @@ def add_dashboard_commands(sub: argparse._SubParsersAction) -> None:  # type: ig
             "optional: the nightly capture record, for the system health view. "
             "A third database again -- the only one in this system whose "
             "contents change, and the one a stopped agent shows up in"
+        ),
+    )
+    parser.add_argument(
+        "--declaration",
+        default=None,
+        help=(
+            "optional: the declared portfolios, one entry per horizon, for the plan. "
+            "Not a database -- nothing in this system writes a portfolios or positions "
+            "row, so the operator states what each horizon holds and this file is the "
+            "statement. See docs/examples/portfolios.example.json. Without it the plan "
+            "route says so rather than serving an empty portfolio"
         ),
     )
     parser.add_argument("--host", default=LOOPBACK, help="interface to bind (default: loopback)")

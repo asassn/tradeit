@@ -1,15 +1,24 @@
 /**
  * The information architecture, in one place.
  *
- * **Four areas that have data, and one that honestly reports what does not.**
- * Measured 2026-11-17: roughly thirty tables in this schema are declared and
- * hold zero rows in every database — portfolios, positions, patterns,
- * breakouts, strategies, indicators, regimes, breadth, watchlists, risk. A
- * Portfolios menu would be furniture over nothing.
+ * **Portfolio comes first, because that is what the product is.** CLAUDE.md
+ * says the system behaves "like a portfolio manager rather than a stock
+ * picker", and that only *"is this a great trade for this portfolio right
+ * now"* may authorise a trade. The first version of this rail opened on
+ * Securities, which made the product a stock research browser: every area had
+ * data and none of them answered the question the system is for.
  *
- * So the unpopulated capabilities live under one honest heading that names
- * what each needs before it can exist, which is the `UNRESOLVED` discipline
- * of the data layer applied to the product surface.
+ * **What is still unpopulated stays honestly named.** Measured 2026-11-17,
+ * roughly thirty tables in this schema are declared and hold zero rows in
+ * every database — positions, patterns, breakouts, strategies, indicators,
+ * regimes, breadth, watchlists. `portfolios` is still among them: the plan is
+ * built from a declaration the operator writes, precisely because nothing
+ * writes that table, and the plan says so on screen rather than implying a
+ * persistence it does not have.
+ *
+ * So the unpopulated capabilities live under one heading that names what each
+ * needs before it can exist, which is the `UNRESOLVED` discipline of the data
+ * layer applied to the product surface.
  */
 
 export interface NavItem {
@@ -25,6 +34,10 @@ export interface NavGroup {
 }
 
 export const NAV: NavGroup[] = [
+  {
+    label: "Portfolio",
+    items: [{ label: "Today's plan", to: "/plan", source: "corpus" }],
+  },
   {
     label: "Research",
     items: [{ label: "Securities", to: "/securities", source: "corpus" }],
