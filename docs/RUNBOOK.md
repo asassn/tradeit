@@ -152,19 +152,73 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradeit.forward-capt
 
 ---
 
-## "Why did it do that?"
+## "What should each portfolio do today?"
 
-The decision record answers it, and the read side serves it:
+The question the system is for, and the screen it opens on:
 
 ```bash
 .venv/bin/pip install -e ".[api]"
 PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard \
   --record ~/Documents/TradeItData/out/decision_record_2003_2019.sqlite \
-  --corpus research01.sqlite
+  --corpus research01.sqlite \
+  --declaration docs/examples/portfolios.example.json
 ```
 
 Then open <http://127.0.0.1:8000/>. The screen is served from that same
 process, so it needs no network at all.
+
+Per horizon, side by side and never merged: what is held, what it would buy or
+sell with the constraint that sized it, and **what it refused and by which
+limit** — for example `TXN  sector limit reached  heat limit exceeded — would
+have ranked 1`. The refusals are what make the rest checkable: a page showing
+only what a system would buy looks identical whether its limits are working or
+absent ([ADR-0039](adr/0039-a-refusal-must-name-the-limit-that-caused-it.md)).
+
+Without `--declaration` the plan says so rather than showing an empty
+portfolio. Without `--corpus` likewise: a plan is made against prices, and the
+record holds none.
+
+**`--declaration` is a file you write, and that is deliberate.** Nothing in
+this repository writes a `portfolios` or `positions` row, so there is nothing
+to read holdings from; reading from the empty tables would produce a confident
+plan for an empty portfolio, which is indistinguishable from a portfolio that
+genuinely holds nothing. Copy
+[`examples/portfolios.example.json`](examples/portfolios.example.json) and
+edit it. Nothing in it has a default, including each holding's stop and its
+session count — a defaulted stop invents the position's size, because
+risk-based sizing derives shares from the entry-to-stop distance, and a
+defaulted session count suppresses the time stop that should close it. It is
+read at startup, so a missing field is reported before the server binds rather
+than when somebody opens the page.
+
+The same plan runs on the command line, for one horizon or for the whole file:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m tradeit.cli plan --declaration docs/examples/portfolios.example.json
+```
+
+**Day declines to be scored**, and says why: its primary corpus is
+`intraday-01`, which does not exist
+([ADR-0030](adr/0030-day-is-deferred-not-deleted.md)). Daily bars are in Day's
+eligible set, so a Daily slate would be admissible and would look plausible —
+but its setup and trigger layers would both be absent, and the result would be
+a swing plan wearing a day-trading label.
+
+**"Not armed" is not a warning you can clear.** It lists controls that exist in
+this system and cannot fire as currently wired, measured from the cycle rather
+than written down. Four risk rules are never installed, the trailing stop
+engages only on an ATR nothing supplies, and `insufficient_cash` is unreachable
+by construction. Installing the four changes what a backtest measures, so it
+needs an explicit scoped proposition before it happens.
+
+**Nothing on this screen may be acted on as a recommendation.** No signal here
+has a validated portfolio edge — the best measured one passes an out-of-sample
+test as a signal and lost to a random portfolio in four of four samples as a
+portfolio — and every plan carries that statement beside its numbers.
+
+## "Why did it do that?"
+
+The decision record answers it, and the same service serves it.
 
 **This block used to read
 `uvicorn --factory "tradeit.api:create_app"` and could not work.** `create_app`

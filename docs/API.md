@@ -16,12 +16,14 @@ to them.
 Measured, not planned. `src/tradeit/api/app.py`, started with:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard --record <path>
+PYTHONPATH=src .venv/bin/python -m tradeit.cli dashboard --record <path> \
+  --corpus research01.sqlite --declaration docs/examples/portfolios.example.json
 ```
 
 | route | answers |
 |---|---|
 | `GET /` | the screen — the committed React bundle, or the hand-written fallback page when none is built. Served `no-store` |
+| `GET /plan` | **what each declared portfolio should do, and what it refused.** Needs the corpus *and* a declaration; each is reported missing by name. `501` otherwise |
 
 **`/securities/search` must stay declared before `/securities/{id}/valuation`.**
 FastAPI matches routes in declaration order, so reversing them makes `search`
@@ -47,7 +49,40 @@ search box would simply stop working. A test holds the order.
 **There are no write routes**, so the "writes are narrow and audited" section
 below describes none of what exists. The constraints the running service
 enforces are in
-[ADR-0035](adr/0035-the-dashboard-shows-what-the-record-holds.md).
+[ADR-0035](adr/0035-the-dashboard-shows-what-the-record-holds.md) and
+[ADR-0039](adr/0039-a-refusal-must-name-the-limit-that-caused-it.md).
+
+**`/plan` is the one route that answers the question the product is for.**
+Every other route above answers *"is this a great stock"* — what a price did,
+what a filing said, what a backtest scored. `/plan` answers *"is this a great
+trade for this portfolio right now"*, which is the only question that may
+authorise a trade, and it is the route the service was missing. Four things in
+its payload are load-bearing and must not be collapsed:
+
+* **`refused`** carries, per candidate, **every** limit that bound it and the
+  standing it would have had. A plan listing only what it would buy looks
+  identical whether its limits are working or absent.
+* **`refused` and `declined` are different mechanisms**: a ranker veto before
+  sizing, and a risk-engine rejection after it. One list loses which acted.
+* **`not_armed`** names the controls that cannot fire as currently wired, and
+  is measured from the cycle rather than listed, so it stops claiming an
+  absence the moment one is fixed.
+* **`caveats`** travels beside the numbers, not in a footnote. No signal here
+  has a validated portfolio edge, and a figure on a screen is acted on.
+
+A horizon that cannot be planned keeps its place in `portfolios` with a `note`
+rather than being omitted — a client receiving two horizons instead of three
+could not tell a declining Day from a Day nobody declared.
+
+**A fourth input, and it is not a database.** `--declaration` is a JSON file,
+one entry per horizon, naming equity, cash, universe, as-of date and holdings.
+It exists because **nothing in this repository writes a `portfolios` or
+`positions` row**: reading holdings from those empty tables would produce a
+confident plan for an empty portfolio, indistinguishable from a portfolio that
+genuinely holds nothing. Nothing in it has a default — a defaulted stop would
+invent the position's size, since risk-based sizing derives shares from the
+entry-to-stop distance. See
+[`examples/portfolios.example.json`](examples/portfolios.example.json).
 
 **Three databases, and the routes are why.** Everything above reads the
 decision record --- what the system decided. `/securities/{id}/valuation`

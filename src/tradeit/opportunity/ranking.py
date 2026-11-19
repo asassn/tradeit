@@ -146,9 +146,14 @@ class RankedCandidate:
 
     This type exists because :meth:`OpportunityFitRanker.rank` used to compute a
     :class:`PortfolioFit` and a :class:`FinalOpportunityScore` per candidate and
-    then return neither, so **no caller downstream could name a veto** — every
-    refusal in the stored record says ``"sizer"``, which is the risk engine's
-    vocabulary, because the fit's vocabulary never left the loop.
+    then return neither, so **no caller downstream could name a veto**.
+
+    Measured in ``decision_record_2003_2019.sqlite`` on 2026-11-19: of 804
+    stored refusals, 504 say ``"sizer"``, 274 ``"max_positions"`` and 26
+    ``"sector_exposure"`` — the sizer's and the risk engine's vocabulary. **Not
+    one is a** :class:`VetoReason`, and all 804 record ``score = 0.0`` in place
+    of the candidate's own score, because the fit's vocabulary never left this
+    loop.
     """
 
     candidate: AllocationCandidate

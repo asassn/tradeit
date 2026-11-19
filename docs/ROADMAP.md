@@ -273,11 +273,44 @@ Three distinct scores, deliberately separated:
 The separation is the point: a great stock the portfolio already effectively
 owns three times over is not a great trade.
 
+**Measured 2026-11-19: the three scores now run in the seat that decides.**
+All of this had been built, tested and measured *beside* the decision rather
+than inside it — `score_fit`, `combine`, `build_slate` and `VetoReason` were
+called only from a demonstration script, and the one run that produced a stored
+decision record ranked with the portfolio awareness switched off and never
+imported `tradeit.opportunity`. The cause was a single return:
+`OpportunityFitRanker.rank` computed the fit and its vetoes per candidate and
+returned neither — which is why, of the 804 refusals measured in
+`decision_record_2003_2019.sqlite` on 2026-11-19, **not one names a
+`VetoReason`**: 504 say `sizer`, 274 `max_positions`, 26 `sector_exposure`,
+and all 804 record `score = 0.0` in place of the candidate's own score.
+`tradeit plan` and `GET /plan` now run the path end to end for one horizon and
+one session, and **a refusal names every limit that bound it and the standing
+it would have had** ([ADR-0039](adr/0039-a-refusal-must-name-the-limit-that-caused-it.md)).
+**Still owed:** no table stores a fit, a veto or a slate — refusals are
+reported, not persisted — and four declared risk rules remain uninstalled, each
+reported absent rather than silently skipped. Nothing here is evidence of
+profitability: the slate ranks on a signal with no validated portfolio edge,
+and every plan says so beside its numbers.
+
 ## Phase 8 — Portfolio construction, risk & compounding
 
 Risk-based sizing, portfolio heat, correlation and sector limits, allocation
 ranking, stops and trailing, pyramiding, capital recycling. Compounding is a
 property of this loop rather than a separate feature.
+
+**Measured 2026-11-19.** The cycle runs and its plan is served. **The
+portfolio itself is declared by the operator, not persisted**: `portfolios`,
+`positions`, `risk_snapshots` and `portfolio_snapshots` have no writer anywhere
+in `src/tradeit`, and every run hardcodes `portfolio_id=1` pointing at a row
+that does not exist. Reading holdings from those empty tables would produce a
+confident plan for an empty portfolio, so a declaration file is read instead and
+the screen says so. **Still owed:** writers for those four tables —
+`PortfolioSnapshot`'s columns already match `CyclePlan.projected` field for
+field, which is the smallest honest first one — and the four uninstalled risk
+rules, which change what a backtest measures and so need an explicit scoped
+proposition. Trailing stops have never engaged in any run: the rung requires an
+ATR and no caller supplies one.
 
 ## Phase 9 — Portfolio backtesting & Monte Carlo
 
@@ -317,6 +350,16 @@ and they must be labelled as such wherever they appear.
 ## Phase 10 — Dashboard / research interface
 
 FastAPI service and dashboard over produced results. See [`API.md`](API.md).
+
+**Measured 2026-11-19: the dashboard opens on the portfolio, not on a search
+box.** The first version opened on Securities, which made it a stock research
+browser — every view answered *"is this a great stock"*, and none answered the
+question that may authorise a trade. `GET /plan` and the view over it show, per
+horizon and never merged, what is held, what would be bought or sold with the
+constraint that sized it, and **what was refused and by which limit**. Controls
+that cannot fire are listed rather than omitted, measured from the cycle's own
+wiring, because a page showing only what fired looks identical to one where
+everything was armed.
 
 Four capabilities belong here and are recorded so they are not forgotten:
 
