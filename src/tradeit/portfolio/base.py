@@ -244,3 +244,61 @@ class AllocationRanker(Protocol):
         portfolio: PortfolioState,
         correlation: dict[tuple[int, int], float] | None = None,
     ) -> list[AllocationCandidate]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RankerRefusal:
+    """A candidate the ranker refused, named in the cycle's own vocabulary.
+
+    A ranker is permitted to return fewer candidates than it was given, and a
+    refusal is the most consequential thing it can do — yet until this type
+    existed the omission was all that reached the caller, so a limit could bind
+    with no record of which limit, on what, or at what cost.
+
+    ``reasons`` are plain strings rather than an enum because the cycle must
+    carry refusals from any ranker without knowing that ranker's vocabulary.
+    ``tradeit.opportunity`` supplies :class:`~tradeit.opportunity.fit.VetoReason`
+    values here; another ranker may supply its own. The cycle never interprets
+    them, it only passes them on, which is what keeps this package independent
+    of the packages that rank for it.
+    """
+
+    instrument_id: int
+    #: Every binding reason, not merely the first — a candidate refused twice
+    #: that reported one reason would make the second limit look slack.
+    reasons: tuple[str, ...]
+    #: Which ranker refused, so a refusal is attributable when the ranker changes.
+    ranker: str
+    #: Where it would have placed had it been admissible, 1-based. This is what
+    #: makes a limit's cost legible: "forbidden, and would have ranked first".
+    standing: int
+    detail: str = ""
+
+    def describe(self) -> str:
+        named = ", ".join(self.reasons) or "unspecified"
+        return (
+            f"{self.instrument_id} refused by {self.ranker}: {named} "
+            f"(would have ranked {self.standing})"
+        )
+
+
+@runtime_checkable
+class ExplainingRanker(Protocol):
+    """An :class:`AllocationRanker` that also reports what it refused.
+
+    Optional by design. ``AllocationRanker`` stays the minimum contract so a
+    simple ranker needs no extra machinery, and :class:`PortfolioCycle` uses
+    this richer one when the ranker it was given implements it.
+
+    **One call returns both** views deliberately. Asking a ranker separately
+    for its order and its refusals would rank twice against the same portfolio,
+    and two computations can disagree — which is exactly the class of defect
+    that produces a plan whose refusals do not match its admissions.
+    """
+
+    def rank_explained(
+        self,
+        candidates: Sequence[AllocationCandidate],
+        portfolio: PortfolioState,
+        correlation: dict[tuple[int, int], float] | None = None,
+    ) -> tuple[Sequence[AllocationCandidate], tuple[RankerRefusal, ...]]: ...

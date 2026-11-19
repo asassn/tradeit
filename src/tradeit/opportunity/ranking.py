@@ -65,7 +65,7 @@ from tradeit.opportunity.fit import (
     VetoReason,
     score_fit,
 )
-from tradeit.portfolio.base import AllocationCandidate, PortfolioState
+from tradeit.portfolio.base import AllocationCandidate, PortfolioState, RankerRefusal
 from tradeit.risk.contextual import UNCLASSIFIED
 from tradeit.strategy.base import OpportunityScore, ScoreComponent
 from tradeit.strategy.config import RiskConfig, SizingConfig
@@ -228,6 +228,27 @@ class FitRanking:
             (entry.instrument_id, str(veto)) for entry in self.refused for veto in entry.vetoes
         )
 
+    def as_refusals(self, ranker: str) -> tuple[RankerRefusal, ...]:
+        """The refusals in the portfolio package's vocabulary.
+
+        One :class:`RankerRefusal` per refused candidate, carrying **every**
+        veto rather than the first, so the cycle can report a candidate that two
+        limits bound without making either look slack.
+        """
+        return tuple(
+            RankerRefusal(
+                instrument_id=entry.instrument_id,
+                reasons=tuple(str(veto) for veto in entry.vetoes),
+                ranker=ranker,
+                standing=entry.standing,
+                detail=(
+                    f"fit {entry.fit.score:.4f}, total {entry.final.total:.4f}, "
+                    f"sector {entry.sector}"
+                ),
+            )
+            for entry in self.refused
+        )
+
     def describe(self) -> str:
         return "\n".join(entry.describe() for entry in self.ranked)
 
@@ -281,6 +302,21 @@ class OpportunityFitRanker:
         derived from that one rather than computed again.
         """
         return self.assess(candidates, portfolio, correlation).for_allocation
+
+    def rank_explained(
+        self,
+        candidates: Sequence[AllocationCandidate],
+        portfolio: PortfolioState,
+        correlation: dict[tuple[int, int], float] | None = None,
+    ) -> tuple[Sequence[AllocationCandidate], tuple[RankerRefusal, ...]]:
+        """Allocation order **and** the refusals, from one assessment.
+
+        Satisfies ``ExplainingRanker``, so :class:`PortfolioCycle` carries fit
+        vetoes into its plan without this package and that one knowing each
+        other's vocabulary.
+        """
+        ranking = self.assess(candidates, portfolio, correlation)
+        return ranking.for_allocation, ranking.as_refusals(self.name)
 
     def assess(
         self,

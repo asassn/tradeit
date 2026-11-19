@@ -48,9 +48,11 @@ from tradeit.core.enums import PositionStatus, RiskDecision, Side
 from tradeit.portfolio.base import (
     AllocationCandidate,
     AllocationRanker,
+    ExplainingRanker,
     PortfolioState,
     PositionSizer,
     PositionState,
+    RankerRefusal,
     SizingDecision,
 )
 from tradeit.portfolio.stops import ExitSignal, StopContext, StopLadder, StopUpdate
@@ -115,6 +117,20 @@ class CyclePlan:
     #: against as the cycle progressed, so it is reported rather than left for
     #: the caller to reconstruct and get subtly wrong.
     projected: PortfolioState
+
+    #: Candidates the **ranker** refused outright, which therefore never became
+    #: a :class:`PlannedEntry` at all.
+    #:
+    #: This field closes a gap between this class's docstring and its contents.
+    #: ``declined`` reports what the *risk engine* rejected after sizing; a
+    #: candidate the ranker vetoed was simply absent from the ranking and so
+    #: absent from the plan, with no record that it had been considered. Two
+    #: refusal mechanisms existed and only one was reported.
+    #:
+    #: Empty for a ranker that does not implement ``ExplainingRanker``, which
+    #: means "not reported" rather than "nothing refused" — so a caller that
+    #: needs the distinction checks the ranker, not this tuple.
+    refusals: tuple[RankerRefusal, ...] = ()
 
     @property
     def accepted(self) -> tuple[PlannedEntry, ...]:
@@ -193,12 +209,13 @@ class PortfolioCycle:
                 exits.append(signal)
 
         after_exits = self._apply_exits(portfolio, exits, contexts)
-        entries, projected = self._plan_entries(after_exits, candidates, correlation)
+        entries, projected, refusals = self._plan_entries(after_exits, candidates, correlation)
         return CyclePlan(
             stop_updates=tuple(stop_updates),
             exits=tuple(exits),
             entries=tuple(entries),
             projected=projected,
+            refusals=refusals,
         )
 
     @staticmethod
@@ -235,7 +252,7 @@ class PortfolioCycle:
         portfolio: PortfolioState,
         candidates: Sequence[EntryCandidate],
         correlation: dict[tuple[int, int], float] | None,
-    ) -> tuple[list[PlannedEntry], PortfolioState]:
+    ) -> tuple[list[PlannedEntry], PortfolioState, tuple[RankerRefusal, ...]]:
         # First sizing: for the ranker only. See the module docstring.
         for_ranking = [
             AllocationCandidate(
@@ -246,7 +263,15 @@ class PortfolioCycle:
             for candidate in candidates
         ]
         by_id = {candidate.instrument_id: candidate for candidate in candidates}
-        ranked = self.ranker.rank(for_ranking, portfolio, correlation)
+        # One call, both answers, when the ranker can give them. Asking
+        # separately would rank twice against the same portfolio, and two
+        # computations can disagree -- a plan whose refusals contradict its
+        # admissions is worse than one that reports no refusals at all.
+        refusals: tuple[RankerRefusal, ...] = ()
+        if isinstance(self.ranker, ExplainingRanker):
+            ranked, refusals = self.ranker.rank_explained(for_ranking, portfolio, correlation)
+        else:
+            ranked = self.ranker.rank(for_ranking, portfolio, correlation)
 
         provisional = portfolio
         planned: list[PlannedEntry] = []
@@ -265,7 +290,7 @@ class PortfolioCycle:
             )
             if quantity > 0:
                 provisional = self._admit(provisional, candidate, quantity)
-        return planned, provisional
+        return planned, provisional, refusals
 
     def _size(self, candidate: EntryCandidate, portfolio: PortfolioState) -> SizingDecision:
         return self.sizer.size(

@@ -269,3 +269,109 @@ def test_capital_deployed_matches_the_cash_the_projection_spent() -> None:
     candidates = [_candidate(i, total=1.0 - i / 100) for i in range(1, 6)]
     plan = cycle.plan(_portfolio(), candidates, {})
     assert plan.capital_deployed == Decimal(100000) - plan.projected.cash
+
+
+# ---------------------------------------------------------------------------
+# A ranker's refusal reaches the plan
+#
+# `CyclePlan` promises "everything one cycle decided, including what it decided
+# against", and for a long time it kept only half of that. `declined` reports
+# what the risk engine rejected *after* sizing; a candidate the ranker vetoed
+# never entered `_plan_entries` at all, so it was absent from the plan with no
+# record that it had been considered. Two refusal mechanisms, one reported.
+# ---------------------------------------------------------------------------
+
+
+def _fit_cycle(sectors: dict[int, str], *, risk: RiskConfig | None = None) -> PortfolioCycle:
+    """The same cycle, ranked by score 3 instead of by score 1."""
+    from tradeit.opportunity import OpportunityFitRanker
+
+    sizing = SizingConfig()
+    risk = risk or RiskConfig()
+    return PortfolioCycle(
+        sizer=RiskBasedSizer(sizing=sizing, risk=risk, max_participation=Decimal("0.05")),
+        engine=MostRestrictiveEngine(
+            rule_set=(
+                PortfolioHeatRule(config=risk),
+                MaxPositionsRule(config=risk),
+                GrossExposureRule(config=risk),
+            ),
+            sizing=sizing,
+        ),
+        ranker=OpportunityFitRanker(risk=risk, sizing=sizing, sectors=sectors),
+        ladder=StopLadder(config=ExitConfig()),
+    )
+
+
+def test_a_fit_veto_is_reported_in_the_plan_not_merely_omitted() -> None:
+    """The gap this closes: a ranker refusal used to leave no trace at all."""
+    from tradeit.opportunity import VetoReason
+
+    # 40% of equity in one sector, against the 30% cap.
+    held = _position(9, quantity="400", entry="100", stop="95")
+    portfolio = _portfolio(held, cash="60000", equity="100000")
+    cycle = _fit_cycle({1: "Crowded", 9: "Crowded"})
+
+    plan = cycle.plan(portfolio, [_candidate(1, total=1.0)], {9: _context("100")})
+
+    assert plan.accepted == (), "a candidate in a capped sector must not be admitted"
+    assert plan.declined == (), "it never reached the risk engine, so it is not a decline"
+    assert len(plan.refusals) == 1, "but the refusal is reported rather than silent"
+    refusal = plan.refusals[0]
+    assert refusal.instrument_id == 1
+    assert refusal.reasons == (str(VetoReason.SECTOR_LIMIT_REACHED),)
+    assert refusal.ranker == "opportunity_fit"
+    assert refusal.standing == 1, "it would have ranked first; the cap is what stopped it"
+    assert "sector_limit_reached" in refusal.describe()
+
+
+def test_a_ranker_refusal_and_a_risk_decline_stay_distinguishable() -> None:
+    """Two mechanisms, two fields. Collapsing them loses which control acted.
+
+    The sector cap is a *ranker* veto before sizing; the heat limit is a *risk
+    engine* rejection after it. A plan that reported both the same way would
+    make it impossible to say whether a limit refused a trade or merely sized
+    it to nothing.
+    """
+    held = _position(9, quantity="400", entry="100", stop="95")
+    portfolio = _portfolio(held, cash="60000", equity="100000")
+    cycle = _fit_cycle({1: "Crowded", 2: "Roomy", 9: "Crowded"})
+
+    plan = cycle.plan(
+        portfolio,
+        [_candidate(1, total=1.0), _candidate(2, total=0.9)],
+        {9: _context("100")},
+    )
+
+    refused_ids = {refusal.instrument_id for refusal in plan.refusals}
+    planned_ids = {entry.candidate.instrument_id for entry in plan.entries}
+    assert refused_ids == {1}
+    assert planned_ids == {2}, "the uncapped name still gets a sizing and a verdict"
+    assert not refused_ids & planned_ids, "a candidate is refused or planned, never both"
+
+
+def test_a_plain_ranker_reports_no_refusals_and_still_plans() -> None:
+    """``ExplainingRanker`` is optional, and the old ranker must keep working."""
+    portfolio = _portfolio(cash="100000", equity="100000")
+
+    plan = _cycle().plan(portfolio, [_candidate(1)], {})
+
+    assert plan.refusals == (), "not reported, which is not the same as nothing refused"
+    assert len(plan.accepted) == 1
+
+
+def test_the_refusals_do_not_double_count_when_the_ranker_also_sizes() -> None:
+    """A refused candidate is counted once, however many candidates there are."""
+    held = _position(9, quantity="400", entry="100", stop="95")
+    portfolio = _portfolio(held, cash="60000", equity="100000")
+    cycle = _fit_cycle({1: "Crowded", 2: "Crowded", 9: "Crowded"})
+
+    plan = cycle.plan(
+        portfolio,
+        [_candidate(1, total=1.0), _candidate(2, total=0.5)],
+        {9: _context("100")},
+    )
+
+    assert len(plan.refusals) == 2
+    assert sorted(r.instrument_id for r in plan.refusals) == [1, 2]
+    assert sorted(r.standing for r in plan.refusals) == [1, 2], "distinct standings"
