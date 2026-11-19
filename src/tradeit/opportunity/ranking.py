@@ -154,6 +154,10 @@ class RankedCandidate:
     one is a** :class:`VetoReason`, and all 804 record ``score = 0.0`` in place
     of the candidate's own score, because the fit's vocabulary never left this
     loop.
+
+    This is about the *reporting*, not the wiring: the ranker has occupied the
+    allocation seat since ADR-0027 and ``SIGNAL_SCOREBOARD.md`` §57 measured it
+    changing which trades are taken. It decided and then could not say why.
     """
 
     candidate: AllocationCandidate

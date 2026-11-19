@@ -14,15 +14,37 @@ says what must be in the record for a decision to be checkable at all.
 The architecture separates three scores — the setup, the **portfolio fit**,
 and the number that may authorise — and declares five absolute vetoes:
 `already_at_full_size`, `position_limit_reached`, `sector_limit_reached`,
-`heat_limit_exceeded`, `insufficient_cash`. All of it was built and tested.
+`heat_limit_exceeded`, `insufficient_cash`.
 
-**None of it had ever run.** Measured 2026-11-18:
+### A claim this ADR made and withdraws
 
-| Capability | In code | Had run |
-|---|---|---|
-| `score_fit`, `combine`, `build_slate`, `VetoReason` | yes | only from a demonstration script |
-| `OpportunityFitRanker` in the allocation seat | yes | never |
-| A `Portfolio`, `Position`, `RiskSnapshot` or `PortfolioSnapshot` row | class exists | **no writer anywhere in `src/tradeit`** |
+The first version said *"none of it had ever run"*. **That is wrong**, and the
+evidence was already in this repository.
+[ADR-0027](0027-score-3-ranks-capital.md) authorised wiring score 3 into the
+allocation seat on 2026-10-18, `scripts/backtest_fit_ranked.py` runs it, and
+`SIGNAL_SCOREBOARD.md` §57 measured it on 195 names over 2010-2019: 800 trades
+at 44.40% against `DiversityAwareRanker`'s 802 at 48.31%. §55 and §56 had
+already measured the fit on 15,095 candidates over 2,359 slates, with the
+ranking changing on 1,703 of the 2,327 slates that held real competition.
+
+I measured the stored **decision record**, found `DiversityAwareRanker` and no
+import of `tradeit.opportunity`, and concluded about the **system**. The record
+was produced by one script; the backtest path was a different one, and it had
+the ranker wired. That is the same "never answer by accident" failure this
+project keeps cataloguing — the expected answer arrived and was not an answer to
+the question asked.
+
+### What was actually missing
+
+Narrower, and still worth an ADR:
+
+| | |
+|---|---|
+| `OpportunityFitRanker` in the allocation seat | **ran** — ADR-0027, §57 |
+| The fit's refusals surviving the call | **no.** `rank()` computed a `PortfolioFit` and its `VetoReason`s per candidate and returned neither |
+| Any refusal in any record naming a `VetoReason` | **no** — measured below |
+| A `Portfolio`, `Position`, `RiskSnapshot` or `PortfolioSnapshot` row | **no writer anywhere in `src/tradeit`** |
+| A command, route or screen showing a portfolio's plan | **no** |
 
 The single run that produced a stored decision record ranked with
 `DiversityAwareRanker(correlation_weight=0.0, sector_penalty_per_holding=0.0,
@@ -89,13 +111,22 @@ keep asserting an absence after somebody fixed it, which is a false claim about
 a risk control — the one place a false claim costs money.
 
 **`VetoReason.INSUFFICIENT_CASH` is unreachable by construction and stays.**
-`BindingConstraint.CASH` caps quantity at `cash / entry_price` and then floors
-it, so the sizer's notional can equal available cash but never exceed it, while
-the veto needs `required_cash > cash`. A test pins that unreachability against
-the cap rather than faking a trigger by hand: removing the cap fails six tests,
-which is the moment somebody needs to know the veto came alive. The veto is not
-deleted, because a different sizer, a multi-leg order, or a cash reservation
-taken between sizing and fit would each make it reachable.
+**This was established by `SIGNAL_SCOREBOARD.md` §56 on 2026-10-18, not here** —
+same reasoning and the same `sizing.py:197` citation, recorded there as "a proof
+of impossibility, not a near miss". `BindingConstraint.CASH` caps quantity at
+`cash / entry_price` and then floors it, so the sizer's notional can equal
+available cash but never exceed it, while the veto needs `required_cash > cash`.
+
+What this ADR adds is a **test that pins the unreachability against the cap**
+rather than leaving it as prose: removing the cap fails six tests, which is the
+moment somebody needs to know the veto came alive. The veto is not deleted,
+because a different sizer, a multi-leg order, or a cash reservation taken
+between sizing and fit would each make it reachable.
+
+§56 also measured the other four firing comfortably on a universe selected for
+sector coverage — 6,662 `heat_limit_exceeded`, 1,903 `sector_limit_reached`,
+1,875 `already_at_full_size`, 335 `position_limit_reached` — so "four fire, the
+fifth cannot" is §56's finding and is cited, not rediscovered.
 
 **A horizon whose primary corpus does not exist declines to be scored.** Day's
 primary corpus is `intraday-01` ([ADR-0030](0030-day-is-deferred-not-deleted.md)).

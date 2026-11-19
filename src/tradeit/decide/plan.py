@@ -1,13 +1,12 @@
 """What one portfolio should do today, and what it refused to do.
 
 This module exists because the platform's central distinction had never been
-*run*. ``tradeit.opportunity`` separates three scores — the setup, the fit, and
-the number that may authorise — and ``tradeit.portfolio`` decides and
-constrains. Both were built, tested and measured beside the decision rather
-than inside it: the one run that produced a stored decision record ranked with
-``DiversityAwareRanker(correlation_weight=0.0, sector_penalty_per_holding=0.0,
-held_sectors={})``, which is pure score order with the portfolio awareness
-switched off, and never imported ``tradeit.opportunity`` at all.
+**reported**, not because it had never been run. ``OpportunityFitRanker`` has
+occupied the allocation seat since ADR-0027, and ``SIGNAL_SCOREBOARD.md`` §57
+measured it changing which trades are taken. What it could not do was say *why*:
+``rank`` computed a ``PortfolioFit`` and its vetoes per candidate and returned
+neither, so every refusal that reached a record carried the risk engine's
+vocabulary instead.
 
 So this composes the parts that already exist into the answer the system is
 for: **not "is this a great stock" but "is this a great trade for this

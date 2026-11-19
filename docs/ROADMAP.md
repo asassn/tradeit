@@ -273,20 +273,22 @@ Three distinct scores, deliberately separated:
 The separation is the point: a great stock the portfolio already effectively
 owns three times over is not a great trade.
 
-**Measured 2026-11-19: the three scores now run in the seat that decides.**
-All of this had been built, tested and measured *beside* the decision rather
-than inside it — `score_fit`, `combine`, `build_slate` and `VetoReason` were
-called only from a demonstration script, and the one run that produced a stored
-decision record ranked with the portfolio awareness switched off and never
-imported `tradeit.opportunity`. The cause was a single return:
-`OpportunityFitRanker.rank` computed the fit and its vetoes per candidate and
-returned neither — which is why, of the 804 refusals measured in
-`decision_record_2003_2019.sqlite` on 2026-11-19, **not one names a
-`VetoReason`**: 504 say `sizer`, 274 `max_positions`, 26 `sector_exposure`,
-and all 804 record `score = 0.0` in place of the candidate's own score.
+**Score 3 has occupied the allocation seat since 2026-10-18** — ADR-0027,
+measured in `SIGNAL_SCOREBOARD.md` §57. An earlier version of this entry said it
+had never run, which was wrong: I had measured the stored decision record, which
+one script produced with `DiversityAwareRanker`, and concluded about the system.
+
+**What was missing is narrower: the fit's refusals did not survive the call.**
+`OpportunityFitRanker.rank` computed a `PortfolioFit` and its `VetoReason`s per
+candidate and returned neither, so nothing downstream could name a veto. Of the
+804 refusals in `decision_record_2003_2019.sqlite`, measured 2026-11-19, **not
+one names a `VetoReason`**: 504 say `sizer`, 274 `max_positions`, 26
+`sector_exposure`, and all 804 record `score = 0.0` in place of the candidate's
+own score.
 `tradeit plan` and `GET /plan` now run the path end to end for one horizon and
-one session, and **a refusal names every limit that bound it and the standing
-it would have had** ([ADR-0039](adr/0039-a-refusal-must-name-the-limit-that-caused-it.md)).
+one session — the first command, route or screen to do so — and **a refusal
+names every limit that bound it and the standing it would have had**
+([ADR-0039](adr/0039-a-refusal-must-name-the-limit-that-caused-it.md)).
 **Still owed:** no table stores a fit, a veto or a slate — refusals are
 reported, not persisted — and four declared risk rules remain uninstalled, each
 reported absent rather than silently skipped. Nothing here is evidence of

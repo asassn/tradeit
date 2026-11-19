@@ -1,7 +1,9 @@
 """``tradeit plan`` — what one portfolio should do today, and what it refused.
 
-The first command in this project that runs the **portfolio manager** path
-rather than a research path. Everything it prints comes from
+The first command in this project that produces a **plan for a declared
+portfolio** — what it holds, what it would do, and what it refused — rather
+than a backtest result. The ranker it uses has occupied the allocation seat
+since ADR-0027; what had no surface was the decision itself. Everything it prints comes from
 :func:`tradeit.decide.plan_declared`, which is shared with the web service so
 the two cannot drift: a second copy of that wiring would be a second set of
 answers to *which ranker, which rules, which declared score range* — and the
