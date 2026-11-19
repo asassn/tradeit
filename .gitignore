@@ -122,3 +122,6 @@ htmlcov/
 # working files are ignored.
 web/node_modules/
 web/.vite/
+
+# Claude Code local run configs: machine-specific paths, not shared state.
+.claude/
