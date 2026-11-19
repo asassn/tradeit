@@ -31,6 +31,7 @@ from tradeit.core.enums import PositionStatus, Side, SignalDirection
 from tradeit.opportunity import (
     OpportunityFitRanker,
     StandaloneScoreOutOfRange,
+    VetoReason,
     normalise_total,
 )
 from tradeit.portfolio.base import (
@@ -336,3 +337,139 @@ def test_parameters_record_what_the_ranking_was_run_with() -> None:
     assert ranker.parameters["standalone_weight"] == 0.75
     assert ranker.parameters["classified_instruments"] == 1
     assert ranker.parameters["refuse_vetoed"] is True
+
+
+# ---------------------------------------------------------------------------
+# The reasons survive the ranking
+#
+# `rank` returns only what may receive capital, which is what the
+# `AllocationRanker` protocol promises. Until now that was the *only* view, so
+# a `PortfolioFit` and its `VetoReason`s were computed per candidate and then
+# dropped at the `continue` — which is why every refusal in the stored decision
+# record says `"sizer"`, the risk engine's vocabulary. The fit's vocabulary
+# never left the loop.
+# ---------------------------------------------------------------------------
+
+
+def _crowded() -> tuple[dict[int, str], PortfolioState]:
+    """A portfolio 35% into one sector, against a 30% cap."""
+    sectors = {1: "Crowded", 2: "Empty", 9: "Crowded"}
+    held = (_position(9, Decimal(700), Decimal(50)),)
+    return sectors, _portfolio(positions=held, last_prices={9: Decimal(50)})
+
+
+def test_assess_keeps_the_veto_that_rank_drops() -> None:
+    """The root fix: a refusal that cannot name its reason is not a refusal.
+
+    `rank` is right to drop a vetoed candidate — the cycle must not be handed
+    something impermissible. The defect was that nothing else could see it
+    either, so a limit could bind with no record of which limit or on what.
+    """
+    sectors, portfolio = _crowded()
+    ranker = _ranker(sectors=sectors)
+
+    ranking = ranker.assess([_candidate(1, 1.00)], portfolio)
+
+    assert ranker.rank([_candidate(1, 1.00)], portfolio) == (), "still refused for capital"
+    assert len(ranking.refused) == 1, "and the refusal is still reportable"
+    refused = ranking.refused[0]
+    assert refused.instrument_id == 1
+    assert refused.vetoes == (VetoReason.SECTOR_LIMIT_REACHED,)
+    assert refused.sector == "Crowded"
+    assert "sector_limit_reached" in refused.describe()
+
+
+def test_rank_is_derived_from_assess_so_the_two_cannot_disagree() -> None:
+    """One computation, two views. A second computation could drift from the first."""
+    sectors, portfolio = _crowded()
+    ranker = _ranker(sectors=sectors)
+    candidates = [_candidate(1, 1.00), _candidate(2, 0.40), _candidate(3, 0.90)]
+
+    ranked = ranker.rank(candidates, portfolio)
+    assessed = ranker.assess(candidates, portfolio)
+
+    assert tuple(ranked) == assessed.for_allocation
+    assert [c.score.instrument_id for c in ranked] == [
+        entry.instrument_id for entry in assessed.admitted
+    ]
+
+
+def test_a_refused_candidate_reports_what_the_limit_cost() -> None:
+    """`standing` is taken before admissibility, so the cost of a cap is visible.
+
+    The perfect setup is in the capped sector. Its standing must say it would
+    have come first — otherwise the only honest answer to "what did the sector
+    limit cost us?" is unavailable, and a cap nobody can price is a cap nobody
+    will revisit.
+    """
+    sectors, portfolio = _crowded()
+    ranker = _ranker(sectors=sectors)
+
+    ranking = ranker.assess([_candidate(2, 0.30), _candidate(1, 1.00)], portfolio)
+
+    refused = ranking.refused[0]
+    assert refused.instrument_id == 1
+    assert refused.standing == 1, "it would have ranked first; the cap is what stopped it"
+    assert refused.final.total > ranking.admitted[0].final.total
+    assert "would have ranked 1" in refused.describe()
+
+
+def test_a_vetoed_candidate_sorts_below_every_admissible_one_in_assess() -> None:
+    """Reporting a refusal must never become a way to prefer it."""
+    sectors, portfolio = _crowded()
+    ranker = _ranker(sectors=sectors)
+
+    ranking = ranker.assess([_candidate(1, 1.00), _candidate(2, 0.01)], portfolio)
+
+    assert [entry.instrument_id for entry in ranking.ranked] == [2, 1]
+    assert ranking.ranked[-1].vetoes, "the vetoed one is last despite the better setup"
+
+
+def test_refusals_record_one_veto_per_row_not_one_candidate_per_row() -> None:
+    """A candidate refused twice has both recorded.
+
+    Reporting only the first would make the second limit look slack when it is
+    also binding, which is how a limit gets relaxed on the strength of a
+    measurement that never applied to it.
+    """
+    sectors = {1: "Crowded", 9: "Crowded"}
+    # Over the sector cap AND at the position limit at the same time.
+    held = tuple(
+        _position(9 + offset, Decimal(700) if offset == 0 else Decimal(1), Decimal(50))
+        for offset in range(12)
+    )
+    portfolio = _portfolio(
+        positions=held, last_prices={9 + offset: Decimal(50) for offset in range(12)}
+    )
+    ranker = _ranker(sectors=sectors)
+
+    ranking = ranker.assess([_candidate(1, 0.80)], portfolio)
+
+    refused = ranking.refused[0]
+    assert len(refused.vetoes) >= 2, f"expected two binding limits, got {refused.vetoes}"
+    rows = ranking.refusals()
+    assert len(rows) == len(refused.vetoes)
+    assert {name for _, name in rows} == {str(veto) for veto in refused.vetoes}
+    assert all(instrument_id == 1 for instrument_id, _ in rows)
+
+
+def test_an_empty_candidate_list_assesses_to_an_empty_ranking() -> None:
+    ranking = _ranker().assess([], _portfolio())
+
+    assert ranking.ranked == ()
+    assert ranking.admitted == ()
+    assert ranking.refused == ()
+    assert ranking.refusals() == ()
+    assert ranking.for_allocation == ()
+
+
+def test_measurement_mode_reports_the_vetoed_candidate_for_allocation_too() -> None:
+    """`refuse_vetoed=False` is isolated to `for_allocation`, not to admissibility."""
+    sectors, portfolio = _crowded()
+    ranking = _ranker(sectors=sectors, refuse_vetoed=False).assess(
+        [_candidate(1, 1.00), _candidate(2, 0.10)], portfolio
+    )
+
+    assert len(ranking.for_allocation) == 2
+    assert [c.score.instrument_id for c in ranking.for_allocation] == [2, 1]
+    assert ranking.refused[0].admissible is False, "still inadmissible, merely still reported"

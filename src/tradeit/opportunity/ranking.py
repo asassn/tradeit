@@ -54,15 +54,26 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from tradeit.opportunity.final import DEFAULT_STANDALONE_WEIGHT, combine
-from tradeit.opportunity.fit import PortfolioContext, score_fit
+from tradeit.opportunity.final import (
+    DEFAULT_STANDALONE_WEIGHT,
+    FinalOpportunityScore,
+    combine,
+)
+from tradeit.opportunity.fit import (
+    PortfolioContext,
+    PortfolioFit,
+    VetoReason,
+    score_fit,
+)
 from tradeit.portfolio.base import AllocationCandidate, PortfolioState
 from tradeit.risk.contextual import UNCLASSIFIED
 from tradeit.strategy.base import OpportunityScore, ScoreComponent
 from tradeit.strategy.config import RiskConfig, SizingConfig
 
 __all__ = [
+    "FitRanking",
     "OpportunityFitRanker",
+    "RankedCandidate",
     "StandaloneScoreOutOfRange",
     "normalise_total",
 ]
@@ -130,6 +141,98 @@ def _replace_score(
 
 
 @dataclass(frozen=True, slots=True)
+class RankedCandidate:
+    """One candidate, with the fit that judged it and the number it earned.
+
+    This type exists because :meth:`OpportunityFitRanker.rank` used to compute a
+    :class:`PortfolioFit` and a :class:`FinalOpportunityScore` per candidate and
+    then return neither, so **no caller downstream could name a veto** — every
+    refusal in the stored record says ``"sizer"``, which is the risk engine's
+    vocabulary, because the fit's vocabulary never left the loop.
+    """
+
+    candidate: AllocationCandidate
+    fit: PortfolioFit
+    final: FinalOpportunityScore
+    sector: str
+    #: Where this would have placed on ``final.total`` alone, 1-based, **with
+    #: the veto ignored**. "Forbidden but would have ranked first" is the fact
+    #: that makes a limit's cost visible, and it is unrecoverable once the
+    #: candidate has been dropped from the sequence.
+    standing: int
+
+    @property
+    def instrument_id(self) -> int:
+        return self.candidate.score.instrument_id
+
+    @property
+    def admissible(self) -> bool:
+        return self.final.admissible
+
+    @property
+    def vetoes(self) -> tuple[VetoReason, ...]:
+        return self.fit.vetoes
+
+    def describe(self) -> str:
+        """One line naming the veto, for a plan a person reads."""
+        if self.admissible:
+            return (
+                f"{self.instrument_id} admitted, total {self.final.total:.4f} "
+                f"(standalone {self.final.standalone:.4f}, fit {self.fit.score:.4f})"
+            )
+        named = ", ".join(str(veto) for veto in self.vetoes)
+        return (
+            f"{self.instrument_id} REFUSED {named} "
+            f"(fit {self.fit.score:.4f}, total {self.final.total:.4f}, "
+            f"would have ranked {self.standing})"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FitRanking:
+    """Every candidate the ranker judged, in order, **including the refused**.
+
+    :meth:`OpportunityFitRanker.rank` returns only what may receive capital,
+    because that is what the ``AllocationRanker`` protocol promises its caller.
+    This is the lossless view beside it, and the reason a refusal can now
+    travel to a screen with the name of the limit that caused it.
+    """
+
+    #: Best first. A vetoed candidate sorts below every admissible one whatever
+    #: its total, so reporting it can never promote it.
+    ranked: tuple[RankedCandidate, ...]
+    refuse_vetoed: bool
+
+    @property
+    def admitted(self) -> tuple[RankedCandidate, ...]:
+        return tuple(entry for entry in self.ranked if entry.admissible)
+
+    @property
+    def refused(self) -> tuple[RankedCandidate, ...]:
+        return tuple(entry for entry in self.ranked if not entry.admissible)
+
+    @property
+    def for_allocation(self) -> tuple[AllocationCandidate, ...]:
+        """What :meth:`OpportunityFitRanker.rank` hands the cycle."""
+        kept = self.admitted if self.refuse_vetoed else self.ranked
+        return tuple(entry.candidate for entry in kept)
+
+    def refusals(self) -> tuple[tuple[int, str], ...]:
+        """``(instrument_id, veto)`` per refusal, in the shape the record takes.
+
+        One row per veto rather than per candidate: a candidate refused for two
+        reasons has both recorded, because reporting only the first would make
+        a second limit look slack when it is also binding.
+        """
+        return tuple(
+            (entry.instrument_id, str(veto)) for entry in self.refused for veto in entry.vetoes
+        )
+
+    def describe(self) -> str:
+        return "\n".join(entry.describe() for entry in self.ranked)
+
+
+@dataclass(frozen=True, slots=True)
 class OpportunityFitRanker:
     """Ranks by score 3, and refuses what the fit vetoes.
 
@@ -171,14 +274,37 @@ class OpportunityFitRanker:
         portfolio: PortfolioState,
         correlation: dict[tuple[int, int], float] | None = None,
     ) -> Sequence[AllocationCandidate]:
+        """Allocation order, as the ``AllocationRanker`` protocol promises.
+
+        A thin view over :meth:`assess`, which is where the work happens and
+        which keeps the reasons. The two cannot disagree, because this one is
+        derived from that one rather than computed again.
+        """
+        return self.assess(candidates, portfolio, correlation).for_allocation
+
+    def assess(
+        self,
+        candidates: Sequence[AllocationCandidate],
+        portfolio: PortfolioState,
+        correlation: dict[tuple[int, int], float] | None = None,
+    ) -> FitRanking:
+        """Judge every candidate and **keep the judgement**.
+
+        The lossless counterpart to :meth:`rank`. ``final.py`` already states
+        that a total is computed for inadmissible candidates *"because
+        'forbidden but would have ranked first' is worth seeing, and discarding
+        it hides what a limit cost"* — and then this class discarded it anyway,
+        by dropping the candidate from the returned sequence. This is where
+        that intent is honoured.
+        """
         if not candidates:
-            return ()
+            return FitRanking(ranked=(), refuse_vetoed=self.refuse_vetoed)
         exposures = _sector_exposures(portfolio, self.sectors)
         held = {position.instrument_id: position for position in portfolio.open_positions}
         held_ids = list(held)
         equity = portfolio.equity
 
-        scored: list[tuple[float, AllocationCandidate]] = []
+        judged: list[tuple[AllocationCandidate, PortfolioFit, FinalOpportunityScore, str]] = []
         for candidate in candidates:
             standalone = candidate.score.total
             if not 0.0 <= standalone <= 1.0:
@@ -212,15 +338,39 @@ class OpportunityFitRanker:
             )
             fit = score_fit(context)
             final = combine(standalone, fit, standalone_weight=self.standalone_weight)
-            if self.refuse_vetoed and not final.admissible:
-                continue
-            # A vetoed candidate kept for measurement sorts below every
-            # admissible one regardless of its number, so `refuse_vetoed=False`
-            # changes what is reported and never what is preferred.
-            scored.append((final.total if final.admissible else final.total - 1.0, candidate))
+            judged.append((candidate, fit, final, sector))
 
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        return tuple(candidate for _, candidate in scored)
+        # Standing is taken on `final.total` alone, before admissibility is
+        # applied, so a refused candidate can say what the limit cost. Keyed on
+        # position in `judged` rather than on the candidate: `id()` would
+        # collapse two entries for one object and equality would collapse two
+        # equal-but-distinct candidates, and either silently gives a name the
+        # wrong standing.
+        standings = {
+            index: place
+            for place, (index, _) in enumerate(
+                sorted(enumerate(judged), key=lambda row: row[1][2].total, reverse=True),
+                start=1,
+            )
+        }
+        ranked = [
+            RankedCandidate(
+                candidate=candidate,
+                fit=fit,
+                final=final,
+                sector=sector,
+                standing=standings[index],
+            )
+            for index, (candidate, fit, final, sector) in enumerate(judged)
+        ]
+        # A vetoed candidate sorts below every admissible one regardless of its
+        # number, so neither reporting it nor `refuse_vetoed=False` can ever
+        # promote it over something permissible.
+        ranked.sort(
+            key=lambda entry: entry.final.total if entry.admissible else entry.final.total - 1.0,
+            reverse=True,
+        )
+        return FitRanking(ranked=tuple(ranked), refuse_vetoed=self.refuse_vetoed)
 
 
 def _sector_exposures(portfolio: PortfolioState, sectors: Mapping[int, str]) -> dict[str, float]:

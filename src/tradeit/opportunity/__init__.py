@@ -28,7 +28,9 @@ from tradeit.opportunity.fit import (
 )
 from tradeit.opportunity.gates import GateOutcome, GateResult, breakout_confirmation_gate
 from tradeit.opportunity.ranking import (
+    FitRanking,
     OpportunityFitRanker,
+    RankedCandidate,
     StandaloneScoreOutOfRange,
     normalise_total,
 )
@@ -38,11 +40,13 @@ __all__ = [
     "Contender",
     "FinalOpportunityScore",
     "FitComponent",
+    "FitRanking",
     "GateOutcome",
     "GateResult",
     "OpportunityFitRanker",
     "PortfolioContext",
     "PortfolioFit",
+    "RankedCandidate",
     "Slate",
     "StandaloneScoreOutOfRange",
     "VetoReason",
