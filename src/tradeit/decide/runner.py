@@ -23,7 +23,7 @@ from decimal import Decimal
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
-from tradeit.backtesting.baselines import MovingAverageCross
+from tradeit.backtesting.baselines import MovingAverageCross, base_rules
 from tradeit.backtesting.corpus import CorpusSessionData
 from tradeit.core.enums import Bartimeframe, PositionStatus, Side
 from tradeit.decide.declaration import DeclarationError, DeclaredPortfolio
@@ -34,10 +34,7 @@ from tradeit.portfolio.cycle import EntryCandidate, PortfolioCycle
 from tradeit.portfolio.mandate import spec as mandate_spec
 from tradeit.portfolio.sizing import RiskBasedSizer
 from tradeit.portfolio.stops import StopContext, StopLadder
-from tradeit.risk.base import RiskRule
-from tradeit.risk.contextual import SectorExposureRule
 from tradeit.risk.engine import MostRestrictiveEngine
-from tradeit.risk.rules import GrossExposureRule, MaxPositionsRule, PortfolioHeatRule
 from tradeit.strategy.config import StrategyConfig
 
 __all__ = ["PlanResult", "build_cycle", "plan_declared", "resolve_universe"]
@@ -142,12 +139,16 @@ def build_cycle(config: StrategyConfig, sectors: dict[int, str]) -> PortfolioCyc
     the portfolio awareness switched off — and ``OpportunityFitRanker`` existed
     the whole time, called only by a demonstration script.
     """
-    rules: tuple[RiskRule, ...] = (
-        PortfolioHeatRule(config=config.risk),
-        MaxPositionsRule(config=config.risk),
-        GrossExposureRule(config=config.risk),
-        SectorExposureRule(config=config.risk, sectors=sectors),
-    )
+    # **The archive's rule set, exactly.** This used to be a hand-written list
+    # that happened to differ from `build_engine`'s in both directions — it
+    # added `SectorExposureRule` and omitted `PositionSizeRule` — so the plan
+    # showed a decision no backtest had validated, and the backtest validated a
+    # decision the plan would not make.
+    #
+    # Sector concentration is still enforced, by `score_fit`'s
+    # `sector_limit_reached` veto at the ranker. The engine-stage rule is the
+    # second check, and installing it here alone would make the plan stricter
+    # than the thing that measures it.
     return PortfolioCycle(
         sizer=RiskBasedSizer(
             sizing=config.sizing,
@@ -155,7 +156,7 @@ def build_cycle(config: StrategyConfig, sectors: dict[int, str]) -> PortfolioCyc
             max_participation=Decimal("0.02"),
             costs=config.costs,
         ),
-        engine=MostRestrictiveEngine(rule_set=rules, sizing=config.sizing),
+        engine=MostRestrictiveEngine(rule_set=base_rules(config), sizing=config.sizing),
         ranker=OpportunityFitRanker(risk=config.risk, sizing=config.sizing, sectors=sectors),
         ladder=StopLadder(config=config.exits),
     )

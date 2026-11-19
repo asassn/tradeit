@@ -79,6 +79,7 @@ __all__ = [
     "EqualWeightBenchmark",
     "MovingAverageCross",
     "NaiveMomentumClassifier",
+    "base_rules",
     "build_engine",
 ]
 
@@ -415,6 +416,30 @@ class NaiveMomentumClassifier(_StopFromPercent):
         return out
 
 
+def base_rules(config: StrategyConfig) -> tuple[RiskRule, ...]:
+    """The rule set every decision path installs.
+
+    **Extracted so there can only be one of it.** Measured 2026-11-19, there
+    were two and they disagreed in both directions: the backtest installed
+    ``PositionSizeRule`` and the dashboard's plan did not, while the plan
+    installed ``SectorExposureRule`` and the backtest did not. A plan showing a
+    decision the backtest never validated — and a backtest validating a
+    decision the plan would not make — is two systems wearing one name.
+
+    **This list is frozen by what the archive ran.** ``build_engine``'s
+    docstring requires that every scoreboard result stay reproducible by calling
+    it as it was called then, so adding a rule here changes what published
+    results mean. A caller wanting more passes ``extra_rules`` and says so in
+    its own result.
+    """
+    return (
+        PortfolioHeatRule(config=config.risk),
+        MaxPositionsRule(config=config.risk),
+        PositionSizeRule(max_position_pct_of_equity=config.sizing.max_position_pct_of_equity),
+        GrossExposureRule(config=config.risk),
+    )
+
+
 def build_engine(
     config: StrategyConfig,
     data: SessionData,
@@ -445,13 +470,7 @@ def build_engine(
     A caller that supplies either is asking a different question from the
     archive's, and it is the caller's job to say so in the result.
     """
-    rules: tuple[RiskRule, ...] = (
-        PortfolioHeatRule(config=config.risk),
-        MaxPositionsRule(config=config.risk),
-        PositionSizeRule(max_position_pct_of_equity=config.sizing.max_position_pct_of_equity),
-        GrossExposureRule(config=config.risk),
-        *extra_rules,
-    )
+    rules: tuple[RiskRule, ...] = (*base_rules(config), *extra_rules)
     return EventDrivenEngine(
         cycle=PortfolioCycle(
             sizer=RiskBasedSizer(

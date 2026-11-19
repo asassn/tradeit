@@ -342,7 +342,16 @@ def absent_controls(
         ("DrawdownHaltRule", "trading does not halt on a drawdown"),
         ("DailyLossRule", "a session's losses do not stop further entries"),
         ("PositionSizeRule", "a single position's share of equity is not capped by the engine"),
-        ("SectorExposureRule", "sector concentration is not blocked by the engine"),
+        (
+            "SectorExposureRule",
+            # Not the same as "sector is unconstrained": `score_fit` vetoes on
+            # `sector_limit_reached` at the ranker, before any sizing. What is
+            # absent is the engine-stage check *after* it, which would also
+            # catch a position grown into the cap by a price move rather than
+            # by a new entry.
+            "the fit still vetoes a new entry on sector_limit_reached, but nothing "
+            "re-checks a holding that grew into the cap",
+        ),
     ):
         if name not in installed:
             found.append(AbsentControl(name=name, reason=f"not installed — {why}"))

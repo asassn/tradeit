@@ -238,3 +238,54 @@ def test_a_mandate_whose_corpus_does_not_exist_declines(
     """Day's primary corpus is intraday-01, and a Daily slate would mislabel."""
     with pytest.raises(DeclarationError, match="declines to be scored"):
         plan_declared(db_session, _declared(mandate=Mandate.DAY))
+
+
+# ---------------------------------------------------------------------------
+# The plan and the backtest must install the same rules
+#
+# Measured 2026-11-19, they did not, and they differed in BOTH directions: the
+# backtest installed `PositionSizeRule` and the plan did not, while the plan
+# installed `SectorExposureRule` and the backtest did not. A plan showing a
+# decision the backtest never validated, and a backtest validating a decision
+# the plan would not make, is two systems wearing one name.
+# ---------------------------------------------------------------------------
+
+
+def test_the_plan_installs_exactly_the_rules_the_backtest_does() -> None:
+    """One source of truth, asserted rather than assumed.
+
+    The archive's rule set is frozen by what it ran — `build_engine`'s own
+    docstring requires every scoreboard result to stay reproducible — so this
+    pins the plan to it rather than the other way round.
+    """
+    from tradeit.backtesting.baselines import base_rules
+    from tradeit.decide.runner import build_cycle
+    from tradeit.strategy.config import StrategyConfig
+
+    config = StrategyConfig(name="ma_cross_baseline")
+    planned = sorted(type(rule).__name__ for rule in build_cycle(config, {}).engine.rules)
+    archived = sorted(type(rule).__name__ for rule in base_rules(config))
+
+    assert planned == archived, (
+        "the dashboard would show a decision no backtest validated, and the "
+        f"backtest would validate one the dashboard would not make: {planned} vs {archived}"
+    )
+
+
+def test_sector_is_still_enforced_even_though_its_engine_rule_is_absent(
+    db_session: Session, corpus: dict[str, int]
+) -> None:
+    """**Absent from the engine is not absent from the decision.**
+
+    `score_fit` vetoes `sector_limit_reached` at the ranker, before any sizing.
+    What the engine-stage rule would add is a re-check of a holding that grew
+    into the cap by a price move rather than by a new entry, and the reported
+    absence has to say that rather than implying sector is unconstrained.
+    """
+    result = plan_declared(db_session, _declared())
+    absent = {control.name: control.reason for control in result.plan.absent}
+
+    assert "SectorExposureRule" in absent
+    assert "sector_limit_reached" in absent["SectorExposureRule"]
+    assert "grew into the cap" in absent["SectorExposureRule"]
+    assert "PositionSizeRule" not in absent, "it is installed now, so it must not be listed"
