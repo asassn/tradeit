@@ -189,9 +189,40 @@ slate therefore ranks on something unvalidated, and every plan carries that
 statement beside its numbers rather than in a document. The live-trading
 interlock of [ADR-0004](0004-live-trading-safety-interlock.md) is untouched.
 
-**Four controls remain unarmed.** Installing them changes what a backtest
-measures, which CLAUDE.md places behind an explicit scoped proposition. They
-are reported absent until that proposition is put and answered.
+**Four controls remain unarmed, and they are now measured.**
+`scripts/measure_unarmed_rules.py`, on 27 names that resolve to one security at
+both ends of 2010-2019 — 67,932 bars over 2,516 sessions:
+
+| rule | binds? | Δ trades | Δ return | Δ max drawdown |
+|---|---|---|---|---|
+| `PyramidRule` | **once in ten years** | 0 | +0.24 pp | −0.01 pp |
+| `CorrelationRule` | 14 of 183 proposals | −12 | +0.47 pp | **−0.55 pp** |
+| `DrawdownHaltRule` | **not installable** | — | — | — |
+| `DailyLossRule` | **not installable** | — | — | — |
+
+`DrawdownHaltRule.peak_equity` and `DailyLossRule.session_open_equity` are
+**constructor fields**, while `MostRestrictiveEngine.rule_set` is built once per
+run and never rebuilt per session. A static value makes the first measure
+drawdown from *inception* rather than the running peak, and the second measure
+loss since inception rather than since today's open — which is not a daily loss
+limit. Neither is a bug in the rule: both are correct functions of state nothing
+supplies. Arming them needs a change to the engine's contract first.
+
+`PyramidRule` bound **once**, rejecting an add whose stop had not been raised.
+That is not a measured control, it is an untested one that happened to be
+consulted 181 times and had something to say once.
+
+`CorrelationRule` is the only one of the four that is both installable and
+exercised. It refused 14 proposals at correlations of 0.77 to 0.83 against a
+0.75 limit, and **reduced max drawdown by 0.55 pp**, which is what a correlation
+limit is for — judging it on return alone would have missed that entirely.
+
+**None of this is evidence about profitability, and the reason is the number
+beside it.** The baseline earns **1.70% a year at a Sharpe of −0.087** over the
+decade. It does not beat cash. Every rule above moves the result by a fraction
+of a percentage point on a strategy with no edge, so arming them is
+housekeeping — worth doing, and not the thing standing between this system and
+a return.
 
 ### A finding from sweeping the path, rather than running it once
 
