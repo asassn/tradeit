@@ -74,9 +74,11 @@ numbers are not yet evidence.
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -97,7 +99,12 @@ from tradeit.research01.series import (
 )
 from tradeit.storage.tables import SecurityPriceFact
 
-__all__ = ["CandidateSource", "CorpusSessionData", "SessionBars"]
+__all__ = [
+    "CandidateSource",
+    "CorpusSessionData",
+    "SessionBars",
+    "pairwise_correlations",
+]
 
 #: What the engine asks a strategy for, given one session's prices. Injected
 #: rather than implemented here: choosing what to buy is the strategy's job,
@@ -328,3 +335,53 @@ class CorpusSessionData:
             latest[day] = (day, open_, high, low, close, volume)
             supplier[day] = source
         return list(latest.values()), supplier
+
+
+def pairwise_correlations(
+    data: CorpusSessionData, sessions: Sequence[dt.date], lookback: int
+) -> dict[tuple[int, int], float]:
+    """Pearson correlation of daily returns over the first ``lookback`` sessions.
+
+    **Computed once and held fixed**, which is a stated simplification rather
+    than an oversight: a live system recomputes as the window rolls, and a
+    correlation measured across a whole span uses information from after some
+    of the decisions it informs. It is acceptable where the question is whether
+    a correlation *control* functions, and it is not acceptable as an input to
+    a return claim.
+
+    Keys are ordered ``(lower_id, higher_id)``, matching what
+    ``MatrixCorrelationSource`` and ``OpportunityFitRanker._overlap`` both
+    expect. A pair with too little overlapping history is **absent**, not zero:
+    zero says two names are independent, absent says nobody checked, and the
+    two lead to opposite decisions. ``CorrelationRule`` fails closed on an
+    absent pair by design.
+
+    Extracted here because it was copied into two scripts, and a measurement
+    duplicated is a measurement that can disagree with itself.
+    """
+    import numpy as np
+
+    span = list(sessions[:lookback])
+    closes: dict[int, dict[dt.date, float]] = {}
+    for day in span:
+        for instrument_id, bar in data.bars(day).items():
+            closes.setdefault(instrument_id, {})[day] = float(bar.close)
+    series: dict[int, np.ndarray[Any, Any]] = {}
+    for instrument_id, by_day in closes.items():
+        values = np.array([by_day[d] for d in span if d in by_day])
+        # Half the window is the floor: a correlation from a handful of points
+        # is noise wearing a number, and a non-positive price is not a price.
+        if len(values) < lookback // 2 or (values <= 0).any():
+            continue
+        series[instrument_id] = np.diff(values) / values[:-1]
+    out: dict[tuple[int, int], float] = {}
+    for a, b in itertools.combinations(sorted(series), 2):
+        x, y = series[a], series[b]
+        n = min(len(x), len(y))
+        if n < 20:
+            continue
+        x, y = x[-n:], y[-n:]
+        if x.std() == 0 or y.std() == 0:
+            continue
+        out[(a, b)] = float(np.corrcoef(x, y)[0, 1])
+    return out

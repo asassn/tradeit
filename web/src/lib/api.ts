@@ -166,6 +166,9 @@ export interface PlanLoaded {
   unresolved: string[];
   /** Holdings marked at an older close because they did not print. */
   carried: PlanCarried[];
+  /** The correlation rule fails closed, so coverage explains a silent plan. */
+  correlation_pairs: number;
+  correlation_over_limit: number;
   sectors_classified: number;
   sessions_loaded: number;
   bars_loaded: number;

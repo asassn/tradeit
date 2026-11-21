@@ -154,6 +154,10 @@ def _loaded(result: PlanResult) -> dict[str, Any]:
         # Holdings marked at an older close. Carried, not refused — and
         # reported, because a stale mark changes what the heat figure means.
         "carried": [{"reference": ticker, "session": str(day)} for ticker, day in result.carried],
+        # The rule fails closed on an unmeasured pair, so coverage is what makes
+        # a plan that refuses everything explicable rather than broken.
+        "correlation_pairs": result.correlation_pairs,
+        "correlation_over_limit": result.correlation_over_limit,
         "sectors_classified": result.sectors_classified,
         "sessions_loaded": result.sessions_loaded,
         "bars_loaded": result.bars_loaded,

@@ -58,6 +58,8 @@ function horizon(overrides: Partial<PlanHorizon> = {}): PlanHorizon {
     loaded: {
       unresolved: [],
       carried: [],
+      correlation_pairs: 351,
+      correlation_over_limit: 8,
       sectors_classified: 14,
       sessions_loaded: 481,
       bars_loaded: 6253,
@@ -212,6 +214,8 @@ describe("absence is rendered", () => {
           loaded: {
             unresolved: ["BAC", "JPM"],
             carried: [],
+            correlation_pairs: 351,
+            correlation_over_limit: 8,
             sectors_classified: 12,
             sessions_loaded: 481,
             bars_loaded: 6253,
@@ -448,6 +452,8 @@ describe("a holding that did not print is carried, not refused", () => {
           loaded: {
             unresolved: [],
             carried: [{ reference: "NVDA", session: "2026-08-12" }],
+            correlation_pairs: 351,
+            correlation_over_limit: 8,
             sectors_classified: 14,
             sessions_loaded: 489,
             bars_loaded: 16137,

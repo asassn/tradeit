@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+from collections.abc import Mapping
 from decimal import Decimal
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from tradeit.backtesting.baselines import MovingAverageCross, base_rules
-from tradeit.backtesting.corpus import CorpusSessionData
+from tradeit.backtesting.corpus import CorpusSessionData, pairwise_correlations
 from tradeit.core.enums import Bartimeframe, PositionStatus, Side
 from tradeit.decide.declaration import DeclarationError, DeclaredPortfolio
 from tradeit.decide.plan import AVAILABLE_CORPORA, SessionPlan, plan_session
@@ -34,6 +35,8 @@ from tradeit.portfolio.cycle import EntryCandidate, PortfolioCycle
 from tradeit.portfolio.mandate import spec as mandate_spec
 from tradeit.portfolio.sizing import RiskBasedSizer
 from tradeit.portfolio.stops import StopContext, StopLadder
+from tradeit.risk.base import RiskRule
+from tradeit.risk.contextual import CorrelationRule, MatrixCorrelationSource
 from tradeit.risk.engine import MostRestrictiveEngine
 from tradeit.strategy.config import StrategyConfig
 
@@ -72,6 +75,12 @@ class PlanResult:
     #: yesterday did not". Reported per position, because a stale mark is a fact
     #: the reader should see rather than one the plan should hide.
     carried: tuple[tuple[str, dt.date], ...]
+    #: Correlation pairs measured, and how many exceed the configured limit.
+    #: **Coverage is reported because the rule fails closed**: an unmeasured
+    #: pair refuses, so a plan that suddenly buys nothing is explicable from
+    #: here rather than looking like a broken screen.
+    correlation_pairs: int
+    correlation_over_limit: int
     sectors_classified: int
     sessions_loaded: int
     bars_loaded: int
@@ -129,7 +138,27 @@ def resolve_universe(
     return resolved, unresolved
 
 
-def build_cycle(config: StrategyConfig, sectors: dict[int, str]) -> PortfolioCycle:
+#: Controls the decision path applies **beyond the archive's set**.
+#:
+#: `base_rules` is frozen by what the published backtests ran, so it cannot
+#: grow without changing what those results mean. This is where a control the
+#: archive did not have is declared instead — and the plan reports the
+#: difference on screen, because a reader comparing a plan against a scoreboard
+#: number needs to know the two were not decided under the same constraints.
+#:
+#: `CorrelationRule` was added 2026-11-21 on the owner's approval, measured in
+#: `scripts/measure_unarmed_rules.py`: 14 of 183 proposals refused at
+#: correlations of 0.77 to 0.83 against a 0.75 limit, cutting max drawdown by
+#: 0.55 pp over 2010-2019. It is the only one of the four never-installed rules
+#: that is both installable and exercised.
+BEYOND_THE_ARCHIVE = ("correlation_cluster",)
+
+
+def build_cycle(
+    config: StrategyConfig,
+    sectors: dict[int, str],
+    correlation: Mapping[tuple[int, int], float] | None = None,
+) -> PortfolioCycle:
     """The cycle, ranked by **score 3** rather than by score 1.
 
     This is the swap that makes the system a portfolio manager rather than a
@@ -149,6 +178,20 @@ def build_cycle(config: StrategyConfig, sectors: dict[int, str]) -> PortfolioCyc
     # `sector_limit_reached` veto at the ranker. The engine-stage rule is the
     # second check, and installing it here alone would make the plan stricter
     # than the thing that measures it.
+    # **Fails closed on an unmeasured pair**, deliberately: treating one as
+    # uncorrelated produces a portfolio that passes the correlation limit
+    # precisely because nobody measured it. With no matrix at all the rule is
+    # left out rather than installed to refuse everything, and the plan reports
+    # that it is absent.
+    extra: tuple[RiskRule, ...] = (
+        (
+            CorrelationRule(
+                config=config.risk, source=MatrixCorrelationSource(values=dict(correlation))
+            ),
+        )
+        if correlation
+        else ()
+    )
     return PortfolioCycle(
         sizer=RiskBasedSizer(
             sizing=config.sizing,
@@ -156,7 +199,7 @@ def build_cycle(config: StrategyConfig, sectors: dict[int, str]) -> PortfolioCyc
             max_participation=Decimal("0.02"),
             costs=config.costs,
         ),
-        engine=MostRestrictiveEngine(rule_set=base_rules(config), sizing=config.sizing),
+        engine=MostRestrictiveEngine(rule_set=(*base_rules(config), *extra), sizing=config.sizing),
         ranker=OpportunityFitRanker(risk=config.risk, sizing=config.sizing, sectors=sectors),
         ladder=StopLadder(config=config.exits),
     )
@@ -326,20 +369,36 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
         for p in portfolio.open_positions
     }
 
+    # **Measured and supplied, not left to default.**
+    #
+    # `cycle.plan(..., correlation=None)` makes `OpportunityFitRanker._overlap`
+    # return 0.0 for every pair, which pins the fit's `distinctness` component
+    # at a constant 1.0 — a flat 0.20 contribution for every candidate, with
+    # one of five components inert while the fit score is reported as though
+    # all five were live. SIGNAL_SCOREBOARD §56 found exactly that in §55's
+    # harness; this had reproduced it.
+    config = StrategyConfig(name="ma_cross_baseline")
+    correlation = pairwise_correlations(data, sessions, config.risk.correlation_lookback_sessions)
+    limit = config.risk.max_correlation_for_new_position
+    over_limit = sum(1 for value in correlation.values() if value > limit)
+
     plan = plan_session(
         mandate=declared.mandate,
         timeframe=Bartimeframe.D1,
         session_date=declared.as_of,
-        cycle=build_cycle(StrategyConfig(name="ma_cross_baseline"), sectors),
+        cycle=build_cycle(config, sectors, correlation),
         portfolio=portfolio,
         candidates=scored,
         contexts=contexts,
         references={i: t for t, i in resolved.items()},
+        correlation=dict(correlation),
     )
     return PlanResult(
         plan=plan,
         unresolved=unresolved,
         carried=tuple(carried),
+        correlation_pairs=len(correlation),
+        correlation_over_limit=over_limit,
         sectors_classified=len(sectors),
         sessions_loaded=len(sessions),
         bars_loaded=data.bar_count,

@@ -100,6 +100,12 @@ def _report(result: PlanResult) -> None:
         f"loaded   : {result.sessions_loaded} sessions, {result.bars_loaded} bars, "
         f"{result.sectors_classified} classified, in {result.seconds:,.1f}s"
     )
+    # Coverage, because the correlation rule FAILS CLOSED: an unmeasured pair
+    # refuses, so a plan that suddenly buys nothing is explicable from here.
+    print(
+        f"correl.  : {result.correlation_pairs} pairs measured, "
+        f"{result.correlation_over_limit} over the limit"
+    )
     for ticker, day in result.carried:
         # A stale mark is a fact the reader should see, not one to hide.
         print(f"carried  : {ticker} did not print; marked at its {day} close")

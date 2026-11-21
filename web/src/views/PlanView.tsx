@@ -389,6 +389,7 @@ function Horizon({ horizon }: { horizon: PlanHorizon }) {
           lines={[
             `${horizon.loaded.sessions_loaded} sessions and ${horizon.loaded.bars_loaded} bars loaded in ${horizon.loaded.seconds}s`,
             `${horizon.declared.universe_size} declared, ${horizon.loaded.sectors_classified} classified by sector`,
+            `${horizon.loaded.correlation_pairs} correlation pairs measured, ${horizon.loaded.correlation_over_limit} over the limit — the rule refuses an unmeasured pair rather than assuming independence`,
             `${horizon.declared.fast}/${horizon.declared.slow} moving-average crossover, ${formatFigure(horizon.declared.stop_pct, "percent", 0)} stop`,
             `setup score normalised against a declared [${horizon.declared.score_range.lower}, ${horizon.declared.score_range.upper}] — the raw spread is not a score`,
             `holdings declared by the operator, not read from storage: nothing in this system writes a portfolio row`,

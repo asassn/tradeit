@@ -37,15 +37,32 @@ def _forward(path: str, rows: list[tuple[str, str, str, str, int]]) -> str:
 
 
 def _fresh(tmp_path: object) -> str:
+    """A record captured recently, **relative to the real clock**.
+
+    It has to be relative because the one test that uses it goes through
+    `create_app`, which reads the wall clock; every other test here injects
+    `as_of=NOW` instead. With the timestamps hardcoded at 2026-11-17 this
+    fixture was "fresh" for exactly four days and then asserted the opposite of
+    what it meant — it failed on 2026-11-21 because `STALE_AFTER_DAYS` is 4,
+    not because anything regressed.
+
+    Bumping the date would buy another four days. The invariant is *recent*,
+    so the fixture says recent.
+    """
+    recent = dt.datetime.now(dt.UTC) - dt.timedelta(days=1)
+    asked_at = recent.strftime("%Y-%m-%d %H:%M:%S")
+    session_date = (recent - dt.timedelta(days=1)).date().isoformat()
+    # Comfortably past the staleness threshold, and still a real timestamp.
+    old = recent - dt.timedelta(days=STALE_AFTER_DAYS + 25)
     return _forward(
         str(tmp_path / "forward.sqlite"),  # type: ignore[operator]
         [
-            ("AAPL", "2026-11-16", "2026-11-17 03:11:00", "ok", 1),
-            ("MSFT", "2026-11-16", "2026-11-17 03:11:00", "ok", 1),
+            ("AAPL", session_date, asked_at, "ok", 1),
+            ("MSFT", session_date, asked_at, "ok", 1),
             # Silent: the vendor returned nothing for a symbol that used to print.
-            ("DEAD", "2026-11-16", "2026-11-17 03:11:00", "ok", 0),
+            ("DEAD", session_date, asked_at, "ok", 0),
             # Older semantics: counted the fetch window, not the session.
-            ("AAPL", "2026-10-20", "2026-10-20 18:00:00", "ok", 5),
+            ("AAPL", old.date().isoformat(), old.strftime("%Y-%m-%d %H:%M:%S"), "ok", 5),
         ],
     )
 
