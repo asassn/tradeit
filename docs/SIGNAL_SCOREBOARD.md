@@ -32,6 +32,13 @@ studies rather than quoting this later.
 > changed. The rest have not been re-run. Findings that rest on large, many-sample effects are unlikely
 > to be reversed; any that rest on a few extreme returns could be.
 
+> **Where this has got to, read across all sixty-one measurements:**
+> [`RESEARCH_FRONTIER_2026-11-21.md`](RESEARCH_FRONTIER_2026-11-21.md). Not a
+> trial; the ledger does not move. It collects every line closed by a written
+> stop rule and what the record itself still names as open, because that was
+> scattered across thirteen sections and a reader asking "what do we try next?"
+> could not see it.
+
 ## What is being tested, and what is not
 
 A **signal** answers one question: does this measurement predict future
