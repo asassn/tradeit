@@ -32,6 +32,13 @@ studies rather than quoting this later.
 > changed. The rest have not been re-run. Findings that rest on large, many-sample effects are unlikely
 > to be reversed; any that rest on a few extreme returns could be.
 
+> **The floor, measured 2026-11-22:**
+> [`THE_FLOOR_2026-11-22.md`](THE_FLOOR_2026-11-22.md). Not a trial. Holding
+> the universe earns 7.74%/yr on 2020–2025, which is §37's RANDOM arm to
+> within 0.03 pp — **the control was already the floor**. The result worth
+> keeping is the delisting contrast: writing delisted holdings to zero costs a
+> diversified book 1.09 pp a year and the low-volatility screen 20.88 pp.
+>
 > **Where this has got to, read across all sixty-one measurements:**
 > [`RESEARCH_FRONTIER_2026-11-21.md`](RESEARCH_FRONTIER_2026-11-21.md). Not a
 > trial; the ledger does not move. It collects every line closed by a written

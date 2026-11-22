@@ -83,6 +83,12 @@ Measured against what has happened since:
 
 ## The number any future signal has to beat
 
+> **Measured 2026-11-22**, and it corrected a premise of this document:
+> [`THE_FLOOR_2026-11-22.md`](THE_FLOOR_2026-11-22.md). §37's RANDOM arm
+> *already was* the buy-and-hold floor under another name — holding the
+> universe earns **7.74%/yr** against RANDOM's 7.77%, a difference of 0.03 pp.
+> The benchmark was never missing; it was implicit in the control.
+
 From §37, and it is not the risk-free rate:
 
 > "a random selection run through the platform's stop ladder earned **+7.77% a
