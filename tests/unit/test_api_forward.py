@@ -52,8 +52,13 @@ def _fresh(tmp_path: object) -> str:
     recent = dt.datetime.now(dt.UTC) - dt.timedelta(days=1)
     asked_at = recent.strftime("%Y-%m-%d %H:%M:%S")
     session_date = (recent - dt.timedelta(days=1)).date().isoformat()
-    # Comfortably past the staleness threshold, and still a real timestamp.
-    old = recent - dt.timedelta(days=STALE_AFTER_DAYS + 25)
+    # **Anchored to the cutover, not to the clock.** This row exists to be
+    # counted under the older `rows_returned` semantics, and that boundary is
+    # the fixed constant `SESSION_COUNTS_FROM`. A first attempt made it
+    # relative to now as well, which drifted past the cutover a day later and
+    # failed a different test in this file — the two rows test two different
+    # properties and need two different anchors.
+    old = dt.datetime.fromisoformat(SESSION_COUNTS_FROM) - dt.timedelta(days=3)
     return _forward(
         str(tmp_path / "forward.sqlite"),  # type: ignore[operator]
         [
