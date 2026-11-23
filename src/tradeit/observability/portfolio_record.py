@@ -102,13 +102,29 @@ def record_portfolio(
     return row
 
 
-def record_position(session: Session, position: PositionState) -> Position:
+def record_position(
+    session: Session,
+    position: PositionState,
+    *,
+    highest_since_entry: Decimal | None = None,
+    sessions_held: int | None = None,
+    partial_profit_taken: bool | None = None,
+) -> Position:
     """Persist one position exactly as the domain holds it.
 
     Takes the :class:`PositionState` rather than loose fields so the row cannot
     disagree with the object the cycle actually decided on — the same reason
     :func:`~tradeit.observability.record.record_order` takes an
     :class:`OrderRequest`.
+
+    **The three ladder fields are separate arguments, and default to None.**
+    They are not on ``PositionState`` because that value is shared with the
+    backtester and the risk layer and must not grow execution-only fields; they
+    live on ``execution.live_shape.Lot``, whose docstring says losing them
+    "would reset the stop ladder on every restart". A ``None`` means *nobody
+    recorded this*, and `LiveShapedSession` refuses to resume such a position
+    rather than resuming it from a default — see migration
+    ``0022_position_ladder_state``.
     """
     if position.status is PositionStatus.OPEN and position.stop_price is None:
         raise ValueError(
@@ -130,6 +146,9 @@ def record_position(session: Session, position: PositionState) -> Position:
         closed_on=position.closed_on,
         realised_pnl=position.realised_pnl,
         pyramid_entries=position.pyramid_entries,
+        highest_since_entry=highest_since_entry,
+        sessions_held=sessions_held,
+        partial_profit_taken=partial_profit_taken,
     )
     session.add(row)
     return row

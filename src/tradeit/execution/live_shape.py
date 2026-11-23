@@ -93,6 +93,20 @@ class SessionOutcome:
     positions: int
 
 
+@dataclass(frozen=True, slots=True)
+class LadderState:
+    """What a broker cannot tell us about a holding we already had.
+
+    Read back from ``positions.highest_since_entry``, ``sessions_held`` and
+    ``partial_profit_taken`` — the three columns added in migration
+    ``0022_position_ladder_state`` for exactly this.
+    """
+
+    highest: Decimal
+    sessions_held: int
+    partial_profit_taken: bool
+
+
 @dataclass
 class LiveShapedSession:
     """Drives the cycle against a broker, holding our own view of the book."""
@@ -126,14 +140,76 @@ class LiveShapedSession:
     #: rather than hidden, and a large number means the stop is too tight
     #: for the universe's overnight behaviour.
     premise_failed: int = field(init=False, default=0)
+    #: A previously recorded book to continue from, instead of starting flat.
+    #:
+    #: Optional, because a backtest and the first session of a paper run both
+    #: legitimately start from nothing — and because every existing caller
+    #: starts flat and must keep doing so. ``None`` is "start fresh"; an empty
+    #: portfolio is "resume a book that holds nothing", and the two are
+    #: different instructions.
+    resume_from: PortfolioState | None = None
+    #: Ladder state per instrument, keyed by instrument id.
+    #:
+    #: Carried **beside** ``resume_from`` rather than inside it, because
+    #: ``PortfolioState`` is the domain value the backtester and the risk layer
+    #: both consume and it must not grow execution-only fields. A position in
+    #: ``resume_from`` with no entry here is refused, not defaulted.
+    ladder_state: dict[int, LadderState] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._cash = self.initial_capital
         self._as_of = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
+        if self.resume_from is not None:
+            self._adopt(self.resume_from)
         # The service reconciles OUR state, which it reads through this
         # callable. Wired here rather than by the caller so the two cannot be
         # pointed at different books by accident.
         self.service.ours = self.state
+
+    def _adopt(self, state: PortfolioState) -> None:
+        """Continue from a recorded book rather than starting flat.
+
+        **The ladder state is the whole difficulty.** ``Lot`` keeps a running
+        high, a session count and whether a partial profit was taken, and says
+        plainly that "losing them would reset the stop ladder on every
+        restart". A trailing stop resumed from a reset high is looser than the
+        one that was in force and a time stop resumed from zero never fires, so
+        a position whose ladder state was never recorded is **refused rather
+        than resumed with defaults**: `positions.highest_since_entry` is
+        nullable precisely so that "nobody recorded this" stays distinguishable
+        from a number.
+
+        The caller's options for such a position are to re-derive the high from
+        prices or to decline to resume. Quietly substituting the entry price
+        would be a third that looks like the first.
+        """
+        self._cash = state.cash
+        self._as_of = state.as_of
+        self._last_prices = dict(state.last_prices)
+        for position in state.open_positions:
+            if position.stop_price is None or position.initial_stop_price is None:
+                raise ValueError(
+                    f"cannot resume instrument {position.instrument_id}: no stop recorded, "
+                    "so its risk is undefined and the ladder has nothing to advance from"
+                )
+            high = self.ladder_state.get(position.instrument_id)
+            if high is None:
+                raise ValueError(
+                    f"cannot resume instrument {position.instrument_id}: no high-since-entry "
+                    "recorded, and a trailing stop resumed from a reset high is looser than "
+                    "the one that was in force. Re-derive it from prices or decline to resume"
+                )
+            self._lots[position.instrument_id] = Lot(
+                instrument_id=position.instrument_id,
+                quantity=position.quantity,
+                entry_price=position.average_entry_price,
+                initial_stop=position.initial_stop_price,
+                current_stop=position.stop_price,
+                highest=high.highest,
+                opened_on=position.opened_on,
+                sessions_held=high.sessions_held,
+                partial_profit_taken=high.partial_profit_taken,
+            )
 
     # -- our model of the book ----------------------------------------------
 

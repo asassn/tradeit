@@ -25,14 +25,17 @@ from tradeit.config import Settings, TradingMode
 from tradeit.core.enums import (
     Bartimeframe,
     KnowledgeTimeSource,
+    PositionStatus,
+    Side,
     SignalDirection,
 )
 from tradeit.core.models import OhlcvBar
-from tradeit.execution.live_shape import LiveShapedSession, Lot
+from tradeit.execution.live_shape import LadderState, LiveShapedSession, Lot
 from tradeit.execution.paper import PaperBroker
 from tradeit.execution.service import BrokerExecutionService
 from tradeit.execution.simulation import BarFillModel, ParticipationCostModel
 from tradeit.portfolio.allocation import DiversityAwareRanker
+from tradeit.portfolio.base import PortfolioState, PositionState
 from tradeit.portfolio.cycle import EntryCandidate, PortfolioCycle
 from tradeit.portfolio.sizing import RiskBasedSizer
 from tradeit.portfolio.stops import StopLadder
@@ -247,3 +250,174 @@ def test_the_service_reconciles_our_state_not_the_brokers(db_session: Session) -
     assert getattr(driver.service.ours, "__self__", None) is driver
     assert driver.service.ours() is not None  # type: ignore[operator]
     assert driver.service.ours().portfolio_id == driver.portfolio_id  # type: ignore[operator]
+
+
+# ---------------------------------------------------------------------------
+# Resuming a session
+#
+# `Lot` has said since Phase 11 why this is hard: "A broker reports quantity and
+# average price. It does not report the high since entry, how many sessions we
+# have held, or whether a partial profit was taken — those are ours, and losing
+# them would reset the stop ladder on every restart."
+#
+# Until 2026-11-23 there was nowhere to put those three and no loader, so every
+# paper session started flat and the question never arose. Phase 11 is closed on
+# *equivalence* — 1,457 of 1,457 fills agreed — and these are about *operation*.
+# ---------------------------------------------------------------------------
+
+
+def _resume_state(**overrides: object) -> PortfolioState:
+    position = PositionState(
+        position_id=7,
+        portfolio_id=1,
+        instrument_id=7,
+        side=Side.LONG,
+        status=PositionStatus.OPEN,
+        quantity=Decimal(100),
+        average_entry_price=Decimal(100),
+        stop_price=Decimal(95),
+        opened_on=dt.date(2026, 7, 1),
+        initial_stop_price=Decimal(92),
+    )
+    payload: dict[str, object] = {
+        "portfolio_id": 1,
+        "as_of": dt.datetime(2026, 8, 14, 21, tzinfo=dt.UTC),
+        "cash": Decimal(40_000),
+        "equity": Decimal(100_000),
+        "positions": (position,),
+        "last_prices": {7: Decimal(110)},
+    }
+    payload.update(overrides)
+    return PortfolioState(**payload)  # type: ignore[arg-type]
+
+
+def test_a_session_resumes_the_book_it_was_given(db_session: Session) -> None:
+    """**The feature**: tomorrow continues yesterday instead of starting over."""
+    driver = _driver(db_session)
+    resumed = LiveShapedSession(
+        cycle=driver.cycle,
+        service=driver.service,
+        broker=driver.broker,
+        initial_capital=Decimal(100_000),
+        resume_from=_resume_state(),
+        ladder_state={
+            7: LadderState(highest=Decimal(130), sessions_held=31, partial_profit_taken=True)
+        },
+    )
+
+    state = resumed.state()
+
+    assert state.cash == Decimal(40_000)
+    assert state.position_count == 1
+    (held,) = state.open_positions
+    assert held.instrument_id == 7
+    assert held.stop_price == Decimal(95), "the stop in force, not the initial one"
+    assert held.initial_stop_price == Decimal(92)
+
+
+def test_the_ladder_state_survives_the_restart(db_session: Session) -> None:
+    """The three fields a broker cannot report, carried across the boundary.
+
+    A trailing stop resumed from a reset high is looser than the one that was in
+    force; a time stop resumed from zero never fires; and a partial profit
+    forgotten is one that can be taken twice.
+    """
+    driver = _driver(db_session)
+    resumed = LiveShapedSession(
+        cycle=driver.cycle,
+        service=driver.service,
+        broker=driver.broker,
+        initial_capital=Decimal(100_000),
+        resume_from=_resume_state(),
+        ladder_state={
+            7: LadderState(highest=Decimal(130), sessions_held=31, partial_profit_taken=True)
+        },
+    )
+
+    lot = resumed._lots[7]
+    assert lot.highest == Decimal(130), "not reset to the entry price"
+    assert lot.sessions_held == 31, "not reset to zero"
+    assert lot.partial_profit_taken is True, "not forgotten and taken twice"
+
+
+def test_a_position_with_no_recorded_high_is_refused_not_defaulted(
+    db_session: Session,
+) -> None:
+    """**Unknown ladder state is refused, not substituted.**
+
+    `positions.highest_since_entry` is nullable so that "nobody recorded this"
+    stays distinguishable from a number. Quietly using the entry price would
+    resume a trailing stop from a high that never happened, which is looser
+    than the stop that was actually in force — a silent loosening of risk on
+    every restart.
+    """
+    driver = _driver(db_session)
+
+    with pytest.raises(ValueError, match="no high-since-entry"):
+        LiveShapedSession(
+            cycle=driver.cycle,
+            service=driver.service,
+            broker=driver.broker,
+            initial_capital=Decimal(100_000),
+            resume_from=_resume_state(),
+            ladder_state={},
+        )
+
+
+def test_a_position_with_no_stop_cannot_be_resumed(db_session: Session) -> None:
+    """Its risk is undefined, so the ladder has nothing to advance from."""
+    driver = _driver(db_session)
+    stopless = PositionState(
+        position_id=7,
+        portfolio_id=1,
+        instrument_id=7,
+        side=Side.LONG,
+        status=PositionStatus.OPEN,
+        quantity=Decimal(100),
+        average_entry_price=Decimal(100),
+        stop_price=None,
+        opened_on=dt.date(2026, 7, 1),
+        initial_stop_price=None,
+    )
+
+    with pytest.raises(ValueError, match="no stop recorded"):
+        LiveShapedSession(
+            cycle=driver.cycle,
+            service=driver.service,
+            broker=driver.broker,
+            initial_capital=Decimal(100_000),
+            resume_from=_resume_state(positions=(stopless,)),
+            ladder_state={
+                7: LadderState(highest=Decimal(130), sessions_held=1, partial_profit_taken=False)
+            },
+        )
+
+
+def test_resuming_a_flat_book_is_not_the_same_as_starting_fresh(
+    db_session: Session,
+) -> None:
+    """``None`` is "start fresh"; an empty portfolio is "resume, holding nothing".
+
+    The difference is the cash: a fresh session starts at `initial_capital`, and
+    a resumed flat one starts at whatever the book was left with.
+    """
+    driver = _driver(db_session)
+    resumed = LiveShapedSession(
+        cycle=driver.cycle,
+        service=driver.service,
+        broker=driver.broker,
+        initial_capital=Decimal(100_000),
+        resume_from=_resume_state(positions=(), cash=Decimal(73_500), last_prices={}),
+    )
+
+    assert resumed.state().cash == Decimal(73_500)
+    assert resumed.state().open_positions == ()
+    assert driver.state().cash == Decimal(100_000), "the fresh driver is untouched"
+
+
+def test_every_existing_caller_still_starts_flat(db_session: Session) -> None:
+    """`resume_from` defaults to None, so nothing that worked before changed."""
+    driver = _driver(db_session)
+
+    assert driver.state().cash == Decimal(100_000)
+    assert driver.state().open_positions == ()

@@ -1619,6 +1619,24 @@ class Position(Base):
     closed_on: Mapped[dt.date | None] = mapped_column(Date)
     realised_pnl: Mapped[Decimal] = mapped_column(VALUE, nullable=False, default=Decimal(0))
     pyramid_entries: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    #: Stop-ladder state the broker does not carry, and cannot.
+    #:
+    #: ``execution.live_shape.Lot`` says why these are ours: "A broker reports
+    #: quantity and average price. It does not report the high since entry, how
+    #: many sessions we have held, or whether a partial profit was taken --
+    #: those are ours, and **losing them would reset the stop ladder on every
+    #: restart**." Until 2026-11-23 the table had nowhere to put them, so that
+    #: is exactly what a restart did.
+    #:
+    #: ``highest_since_entry`` is the one that cannot be recovered: a session
+    #: count follows from ``opened_on`` and a calendar, and a partial sale is
+    #: visible in `executions`, but a running high needs every bar of the
+    #: holding period replayed. Nullable, because a row written before this
+    #: migration genuinely does not have one and a backfilled guess would be a
+    #: stop ladder resumed from a number nobody measured.
+    highest_since_entry: Mapped[Decimal | None] = mapped_column(PRICE)
+    sessions_held: Mapped[int | None] = mapped_column(Integer)
+    partial_profit_taken: Mapped[bool | None] = mapped_column(Boolean)
     entry_score_id: Mapped[int | None] = mapped_column(
         ForeignKey("opportunity_scores.id", ondelete="SET NULL")
     )
