@@ -211,6 +211,55 @@ class PaperBroker:
         self._cash = self.starting_cash
         self._as_of = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
 
+    def restore(self, *, cash: Decimal, holdings: Mapping[int, tuple[Decimal, Decimal]]) -> None:
+        """Put the venue back where a previous process left it.
+
+        A real broker needs nothing of the sort: its book is its own and
+        survives our restart, which is the whole reason reconciliation is worth
+        running. **A simulated venue has no memory**, so without this a paper
+        run resumed from a record would reconcile a restored book against an
+        empty one and halt on the first session -- not a drift, just the venue
+        having forgotten.
+
+        **The limitation this creates, stated rather than buried.** At the
+        restart boundary our book and the venue's come from the *same* recorded
+        rows, so the first session after a restart cannot detect a drift that
+        happened across it. Every session after that one evolves the two
+        independently again and drift is detectable as before. A paper venue
+        cannot do better: the alternative is to give the simulation its own
+        persistence, which would be a second record claiming to be an
+        independent authority while still being written by this process.
+
+        Refuses a venue that has already traded. Restoring over a live book
+        would discard fills it has reported to us, which is the one thing a
+        venue must never do.
+        """
+        if self._holdings or self._fills or self._sequence:
+            raise ValueError(
+                f"{self.account_id} has already traded ({len(self._fills)} fills, "
+                f"{len(self._holdings)} holdings); restoring over a book in use would "
+                "discard fills already reported, so a restore belongs before the first "
+                "session or not at all"
+            )
+        if cash < 0:
+            raise ValueError(f"cannot restore a negative cash balance of {cash}")
+        self._cash = cash
+        for instrument_id, (quantity, average_price) in holdings.items():
+            if quantity <= 0:
+                raise ValueError(
+                    f"instrument {instrument_id} restored with quantity {quantity}; "
+                    "a holding of nothing is an absence, and absences are not restored"
+                )
+            self._holdings[instrument_id] = _Holding(
+                quantity=quantity,
+                # Reconstructed from the average, because that is what a
+                # broker reports and what reconciliation compares. The true
+                # cost basis including commission is in `executions`; using it
+                # here would make the venue disagree with our book by exactly
+                # the commission, every restart.
+                cost_basis=quantity * average_price,
+            )
+
     # -- BrokerProvider ------------------------------------------------------
 
     @property

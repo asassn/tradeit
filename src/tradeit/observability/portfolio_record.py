@@ -44,23 +44,39 @@ the later row win.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from tradeit.core.enums import PositionStatus, Side, TradingMode
+
+# **Downhill, and deliberately this way round.** `observability` already
+# imports `execution` (`base.py` takes `Fill`, `record.py` takes the journal)
+# and nothing in `execution` imports `observability` -- the rule that keeps
+# SQLAlchemy out of the backtest engine's import graph. `LadderState` is
+# imported rather than re-declared so the thing written and the thing resumed
+# cannot drift apart.
+from tradeit.execution.live_shape import LadderState
 from tradeit.portfolio.base import PortfolioState, PositionState
 from tradeit.risk.base import RiskSnapshot as RiskSnapshotValue
 from tradeit.storage.tables import Portfolio, PortfolioSnapshot, Position, RiskSnapshot
 
 __all__ = [
+    "PositionSync",
     "SnapshotExists",
+    "last_recorded_session",
+    "load_ladder_state",
     "load_portfolio_state",
+    "portfolio_named",
     "record_portfolio",
     "record_portfolio_snapshot",
     "record_position",
     "record_risk_snapshot",
+    "recorded_peak_equity",
+    "sync_positions",
 ]
 
 
@@ -337,3 +353,182 @@ def load_portfolio_state(
         positions=positions,
         last_prices=dict(last_prices or {}),
     )
+
+
+# -- the book, kept current rather than logged ------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class PositionSync:
+    """What one session's write did to the book."""
+
+    opened: int
+    updated: int
+    closed: int
+
+    def describe(self) -> str:
+        return f"{self.opened} opened, {self.updated} updated, {self.closed} closed"
+
+
+def sync_positions(
+    session: Session,
+    portfolio_id: int,
+    positions: Sequence[PositionState],
+    ladder: Mapping[int, LadderState],
+    *,
+    closed_on: dt.date,
+) -> PositionSync:
+    """Make ``positions`` describe the book as it now stands.
+
+    **`positions` is the running total, not a log.** The table's own docstring
+    says so -- "the immutable record is `executions`; this table is the running
+    total" -- so one holding gets one row for its lifetime, updated in place,
+    and a holding that has gone is *closed* rather than deleted.
+    :func:`record_position` inserts unconditionally and is the right primitive
+    for a first write; this is the one a session loop needs, because calling
+    the other every session would write a new open row per session and the
+    reader would restore the same holding several times over.
+
+    **A holding whose ladder state is missing is refused, not written.**
+    `LiveShapedSession._adopt` refuses to resume such a position -- correctly,
+    because a trailing stop resumed from a reset high is looser than the one in
+    force. Writing it incomplete here would move that failure to tomorrow,
+    where it is a crash in a session that was meant to continue rather than an
+    error in the session that caused it.
+
+    ``initial_stop_price`` is written on the insert and never on an update. It
+    is the premise the entry was decided on and defines R; a later write that
+    could move it would make the recorded risk of a trade depend on when it was
+    last saved.
+    """
+    rows = {
+        int(row.instrument_id): row
+        for row in session.execute(
+            select(Position).where(
+                Position.portfolio_id == portfolio_id,
+                Position.status == str(PositionStatus.OPEN),
+            )
+        ).scalars()
+    }
+    opened = updated = 0
+    for position in positions:
+        if position.status is not PositionStatus.OPEN:
+            continue
+        state = ladder.get(position.instrument_id)
+        if state is None:
+            raise ValueError(
+                f"refusing to write instrument {position.instrument_id} with no ladder "
+                "state: the high since entry, sessions held and partial-profit flag are "
+                "ours and cannot be recovered from a broker, so a row without them is "
+                "one that cannot be resumed"
+            )
+        row = rows.pop(position.instrument_id, None)
+        if row is None:
+            record_position(
+                session,
+                position,
+                highest_since_entry=state.highest,
+                sessions_held=state.sessions_held,
+                partial_profit_taken=state.partial_profit_taken,
+            )
+            opened += 1
+            continue
+        row.quantity = position.quantity
+        row.average_entry_price = position.average_entry_price
+        row.stop_price = position.stop_price
+        row.target_price = position.target_price
+        row.realised_pnl = position.realised_pnl
+        row.pyramid_entries = position.pyramid_entries
+        row.highest_since_entry = state.highest
+        row.sessions_held = state.sessions_held
+        row.partial_profit_taken = state.partial_profit_taken
+        updated += 1
+
+    for row in rows.values():
+        # Closed, not deleted, and the quantity is left as it was: what the
+        # position held is a fact about it, and the realised P&L belongs to
+        # `executions`, which this writer does not read.
+        row.status = str(PositionStatus.CLOSED)
+        row.closed_on = closed_on
+    session.flush()
+    return PositionSync(opened=opened, updated=updated, closed=len(rows))
+
+
+# -- what resume needs to ask the record ------------------------------------
+
+
+def portfolio_named(session: Session, name: str) -> Portfolio | None:
+    """The portfolio to continue, or ``None`` to create one.
+
+    Looked up by name because that is what an operator has: a run is resumed
+    by saying which portfolio it is, not by remembering a row id.
+    """
+    return session.execute(select(Portfolio).where(Portfolio.name == name)).scalar_one_or_none()
+
+
+def last_recorded_session(session: Session, portfolio_id: int) -> dt.date | None:
+    """The last session this portfolio has a snapshot for.
+
+    A resumed run must start *after* it. Re-running a recorded session would
+    hit :class:`SnapshotExists`, which is the right refusal and the wrong place
+    to discover the mistake -- the caller can skip the sessions already done.
+    """
+    return session.execute(
+        select(func.max(PortfolioSnapshot.session_date)).where(
+            PortfolioSnapshot.portfolio_id == portfolio_id
+        )
+    ).scalar_one_or_none()
+
+
+def recorded_peak_equity(
+    session: Session, portfolio_id: int, *, as_of: dt.datetime | None = None
+) -> Decimal | None:
+    """The highest equity this portfolio has ever been recorded at.
+
+    Derived from the record rather than held in memory, so it survives a
+    restart. A peak that reset on every restart would make every recorded
+    drawdown an understatement -- and understating drawdown is the direction
+    that gets a strategy promoted.
+
+    Takes the larger of each snapshot's ``equity`` and its own ``peak_equity``,
+    because the first snapshot of a run has no prior peak to carry and is
+    itself the peak so far.
+    """
+    query = select(
+        func.max(PortfolioSnapshot.equity), func.max(PortfolioSnapshot.peak_equity)
+    ).where(PortfolioSnapshot.portfolio_id == portfolio_id)
+    if as_of is not None:
+        query = query.where(PortfolioSnapshot.as_of <= as_of)
+    equity, peak = session.execute(query).one()
+    candidates = [value for value in (equity, peak) if value is not None]
+    return max(candidates) if candidates else None
+
+
+def load_ladder_state(session: Session, portfolio_id: int) -> dict[int, LadderState]:
+    """The three fields a broker cannot report, for the positions still open.
+
+    **A position missing any of them is left out rather than defaulted**, so
+    `LiveShapedSession` refuses it by name instead of silently resuming a
+    reset ladder. Rows written before migration ``0022_position_ladder_state``
+    have all three null, and that is the case this absence is for.
+    """
+    rows = session.execute(
+        select(
+            Position.instrument_id,
+            Position.highest_since_entry,
+            Position.sessions_held,
+            Position.partial_profit_taken,
+        ).where(
+            Position.portfolio_id == portfolio_id,
+            Position.status == str(PositionStatus.OPEN),
+        )
+    ).all()
+    return {
+        int(instrument_id): LadderState(
+            highest=highest,
+            sessions_held=int(held),
+            partial_profit_taken=bool(taken),
+        )
+        for instrument_id, highest, held, taken in rows
+        if highest is not None and held is not None and taken is not None
+    }

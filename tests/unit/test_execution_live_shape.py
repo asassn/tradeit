@@ -16,6 +16,7 @@ here.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -25,11 +26,13 @@ from tradeit.config import Settings, TradingMode
 from tradeit.core.enums import (
     Bartimeframe,
     KnowledgeTimeSource,
+    OrderSide,
     PositionStatus,
     Side,
     SignalDirection,
 )
 from tradeit.core.models import OhlcvBar
+from tradeit.execution.base import Fill
 from tradeit.execution.live_shape import LadderState, LiveShapedSession, Lot
 from tradeit.execution.paper import PaperBroker
 from tradeit.execution.service import BrokerExecutionService
@@ -421,3 +424,102 @@ def test_every_existing_caller_still_starts_flat(db_session: Session) -> None:
 
     assert driver.state().cash == Decimal(100_000)
     assert driver.state().open_positions == ()
+
+
+# -- the stop belongs to one decision ---------------------------------------
+
+DAY4 = dt.date(2015, 6, 4)
+DAY5 = dt.date(2015, 6, 5)
+DAY6 = dt.date(2015, 6, 8)
+
+
+def test_a_re_entry_gets_its_own_stop_not_the_first_entrys(db_session: Session) -> None:
+    """Found on 2026-11-24 by comparing a paper run against the same run
+    stopped and resumed, and it is the reason to run that comparison at all.
+
+    The pending stop was keyed by client order id and looked up by prefix
+    match -- first hit, never removed. So the second entry in an instrument
+    inherited the first entry's stop, and so did every later one. Over three
+    years instrument 1695 was entered four times at prices from 75.60 to 78.91
+    and all four got the stop decided for the first: 70.104, between 7.3% and
+    11.2% away where 8% was declared.
+
+    The initial stop defines R. A position whose R is a year-old number has a
+    risk figure that is wrong in every direction it is used.
+
+    754 of 754 sessions had reconciled clean and both runs agreed on final
+    equity. The expected answer arrived; it answered a different question.
+
+    What this pins is the **key**: one pending stop per instrument, overwritten
+    by the latest decision. Consuming it on use is a separate invariant and is
+    held separately below, because a mutant that only stopped consuming it
+    survived this test.
+    """
+    driver = _driver(db_session)
+    driver.run_session(DAY1, {1: _bar()}, [_candidate(stop="93")])
+    driver.run_session(DAY2, {1: _bar(session_date=DAY2)}, [])
+    assert driver._lots[1].initial_stop == Decimal(93)
+
+    # A close through the stop, so the ladder exits and the lot goes.
+    driver.run_session(DAY3, {1: _bar(session_date=DAY3, open_=90, close=90)}, [])
+    driver.run_session(DAY4, {1: _bar(session_date=DAY4, open_=90, close=90)}, [])
+    assert 1 not in driver._lots, "no exit, so the re-entry under test never happens"
+
+    # Re-entered at a different price, with a different stop.
+    driver.run_session(
+        DAY5, {1: _bar(session_date=DAY5, open_=90, close=90)}, [_candidate(entry="90", stop="82")]
+    )
+    driver.run_session(DAY6, {1: _bar(session_date=DAY6, open_=90, close=90)}, [])
+
+    assert 1 in driver._lots, "the second entry never filled, so nothing is under test"
+    assert driver._lots[1].initial_stop == Decimal(82), (
+        "the re-entry inherited the first entry's stop"
+    )
+
+
+def test_an_unfilled_entrys_stop_is_not_handed_to_a_later_one(db_session: Session) -> None:
+    """Two decisions pending in one instrument: the later one is in force.
+
+    An entry is only submitted for an instrument we do not hold, so a second
+    submission means the first did not fill -- and a stop decided against a
+    price we have since moved away from is stale, not a spare.
+    """
+    driver = _driver(db_session)
+    driver._submit(DAY1, 1, OrderSide.BUY, Decimal(10), candidate=_candidate(stop="93"))
+    driver._submit(DAY2, 1, OrderSide.BUY, Decimal(10), candidate=_candidate(stop="81"))
+
+    assert driver._pending_stops == {1: Decimal(81)}
+
+
+def test_a_stop_is_used_once_and_not_left_for_a_later_fill(db_session: Session) -> None:
+    """A stop belongs to one decision, and is consumed by the fill that uses it.
+
+    Keying by instrument and overwriting is what fixes the re-entry above, and
+    it is **not** what this holds. This holds the second half: a fill that
+    arrives with no decision behind it must reach the fallback stop rather than
+    inherit the last one recorded. With the stop merely read instead of popped,
+    the fallback becomes unreachable for any instrument ever entered -- and the
+    fallback is the only thing standing between a forgotten order and a
+    position with no defined risk.
+    """
+    driver = _driver(db_session)
+    driver._submit(DAY1, 1, OrderSide.BUY, Decimal(10), candidate=_candidate(stop="93"))
+    first = Fill(
+        order_id=1,
+        instrument_id=1,
+        side=OrderSide.BUY,
+        quantity=Decimal(10),
+        price=Decimal(100),
+        filled_at=dt.datetime.combine(DAY2, dt.time(20), tzinfo=dt.UTC),
+    )
+    driver._apply_fill(first, DAY2)
+    assert driver._lots[1].initial_stop == Decimal(93)
+    assert driver._pending_stops == {}, "the stop outlived the decision that made it"
+
+    # The lot goes, as a sell fill would take it, and a buy fill arrives for
+    # an order no decision of ours is holding a stop for.
+    driver._lots.clear()
+    driver._apply_fill(replace(first, order_id=2, price=Decimal(200)), DAY3)
+
+    assert driver._lots[1].initial_stop == Decimal(200) * Decimal("0.92")
+    assert driver._lots[1].initial_stop != Decimal(93)

@@ -121,13 +121,35 @@ class LiveShapedSession:
     _last_prices: dict[int, Decimal] = field(init=False, default_factory=dict)
     _as_of: dt.datetime = field(init=False)
     _orders: int = field(init=False, default=0)
-    #: The stop each entry order was decided with, keyed by its order id.
+    #: The stop the latest pending entry was decided with, by instrument.
     #:
-    #: Remembered against the ORDER rather than the fill, because the fill
+    #: Remembered against the DECISION rather than the fill, because the fill
     #: price is not known when the decision is made and the stop was part of
     #: that decision. A stop derived from the fill price instead would quietly
     #: move with slippage.
-    _pending_stops: dict[str, Decimal] = field(init=False, default_factory=dict)
+    #:
+    #: **Keyed by instrument and consumed on use**, after a defect found on
+    #: 2026-11-24 by comparing an uninterrupted paper run against the same run
+    #: stopped and resumed. The key used to be the client order id, and the
+    #: lookup was a prefix match that took the first hit and never removed it
+    #: -- so the *second* entry in an instrument inherited the *first* entry's
+    #: stop, and the third, and the fourth. Over three years instrument 1695
+    #: was entered four times at 75.60, 77.80, 78.91 and 76.42 and every one of
+    #: them got the stop decided for the first: 70.104, a distance ranging from
+    #: 7.3% to 11.2% where 8% was declared. The initial stop defines R, so
+    #: every risk figure derived from those positions was wrong.
+    #:
+    #: Only the restart exposed it: a fresh process starts with this empty, so
+    #: its first entry in an instrument got its own stop while the long-running
+    #: process did not. 754 of 754 sessions had reconciled clean and the two
+    #: runs agreed on final equity -- the expected answer, to a different
+    #: question.
+    #:
+    #: An entry is only submitted for an instrument we do not hold, so at most
+    #: one pending stop per instrument can ever be *current*; a second
+    #: submission means the first order has not filled and its stop is stale by
+    #: definition, which is why this overwrites rather than accumulates.
+    _pending_stops: dict[int, Decimal] = field(init=False, default_factory=dict)
     #: Where a stop goes when the decision's own stop cannot be used.
     #:
     #: A fraction of the fill price. Only reached when an entry gapped
@@ -212,6 +234,24 @@ class LiveShapedSession:
             )
 
     # -- our model of the book ----------------------------------------------
+
+    def ladder(self) -> dict[int, LadderState]:
+        """The ladder state of every holding, for writing down.
+
+        The exact counterpart of the ``ladder_state`` argument: what
+        :meth:`_adopt` consumes is what this produces, so a session written by
+        one and resumed by the other round-trips. Returned as a plain dict
+        rather than exposing ``_lots``, because the lots are mutable and a
+        caller holding one could move a stop by assignment.
+        """
+        return {
+            lot.instrument_id: LadderState(
+                highest=lot.highest,
+                sessions_held=lot.sessions_held,
+                partial_profit_taken=lot.partial_profit_taken,
+            )
+            for lot in self._lots.values()
+        }
 
     @property
     def equity(self) -> Decimal:
@@ -378,24 +418,21 @@ class LiveShapedSession:
         self.service.place(order)
         self._orders += 1
         if candidate is not None:
-            # The intended stop is remembered against the order, not the fill,
-            # because the fill price is not known yet and the stop was part of
-            # the decision.
-            self._pending_stops[order.client_order_id] = candidate.stop_price
+            # The intended stop is remembered against the decision, not the
+            # fill, because the fill price is not known yet and the stop was
+            # part of the decision.
+            self._pending_stops[instrument_id] = candidate.stop_price
         return 1
 
     def _apply_fill(self, fill: Fill, session_date: dt.date) -> None:
         lot = self._lots.get(fill.instrument_id)
         if fill.side is OrderSide.BUY:
             if lot is None:
-                intended = next(
-                    (
-                        value
-                        for key, value in self._pending_stops.items()
-                        if key.startswith(f"e-{fill.instrument_id}-")
-                    ),
-                    None,
-                )
+                # **Popped, not read.** A stop belongs to one decision. Leaving
+                # it here would hand it to the next entry in the same
+                # instrument, months later, at a price it has nothing to do
+                # with -- see `_pending_stops`.
+                intended = self._pending_stops.pop(fill.instrument_id, None)
                 stop = intended if intended is not None else fill.price * self._fallback_stop
                 if stop >= fill.price:
                     # **The backtester's option does not exist here.** When a
