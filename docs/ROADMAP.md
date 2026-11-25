@@ -327,10 +327,10 @@ before proposing another signal test.** Twenty-nine indicator arms, nine
 signals, four fundamentals, eight swing indicators and three chart patterns
 have been measured on daily US equity bars, and **every line is closed by a
 stop rule written at the time**. One signal survives as a signal (§35) and
-nothing survives as a strategy. The hurdle is |t| > 2.6563 and rises with each
-trial, so a thirtieth arm inside the same frame spends evidence to re-ask an
-answered question. What the record names as still open is intraday bars, a
-different market, or the short side.
+nothing survives as a strategy. The hurdle is |t| > 2.6587 after trial 145
+(§59) and rises with each trial, so a thirtieth arm inside the same frame spends
+evidence to re-ask an answered question. What the record names as still open is
+intraday bars, a different market, or the short side.
 
 **Which indicators actually predict anything, at which horizon, in which
 regime.** Not a display feature — a measurement. It lives here rather than in

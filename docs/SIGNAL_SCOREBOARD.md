@@ -4608,3 +4608,83 @@ proposes a retry, gets a yes, and runs it has defeated that mechanism without
 anybody deciding to — and the yes was given on a recommendation that did not
 mention the clause existed. Recorded here because the near-miss is more
 instructive than the result would have been.
+
+---
+
+## §59 — breadth as drawdown protection: FAILED, and the mechanism inverted — 2026-11-25
+
+Registered at `3a47c6b`, committed and pushed to `origin` before any bar of
+2010–2019 was read for this question.
+[`docs/prereg/BREADTH_DRAWDOWN_2026-11-25.md`](prereg/BREADTH_DRAWDOWN_2026-11-25.md).
+Full record: [`TRIAL_145_BREADTH_DRAWDOWN_2026-11-25.md`](TRIAL_145_BREADTH_DRAWDOWN_2026-11-25.md).
+
+The hypothesis: *a hundred-name book draws down less than a twelve-name book at
+the same total risk budget, **because it absorbs a delisting write-off the
+narrow book cannot.*** Held-out decade 2010–2019, a universe built with **no
+survival condition** (2,393 names liquid in 2009, **38.7% of them with no bar
+after 2019**), four disjoint samples of 500, two arms, twenty six-month blocks.
+
+| criterion | result | |
+|---|---|---|
+| 1 — within-block drawdown difference positive past `small_sample_hurdle(145, 20)` | **+1.54%, t 4.726** against 2.9713, 18/20 blocks | pass |
+| 2 — both halves positive **and agreeing** | 2010–14 +1.08%, 2015–19 +2.00% | pass |
+| 3 — the advantage at least halves when delistings recover in full | r0.0 +1.54%, r1.0 **+1.87%**, ceiling +0.77% | **FAIL** |
+| 4 — the wide arm actually holds ~100 names | narrowest mean 66.2 against 80 | **FAIL** |
+
+### The mechanism did not fail to appear. It appeared backwards.
+
+| | narrow (12) | wide (100) | the write-off's cost |
+|---|---|---|---|
+| max drawdown, delistings recovered in full | 17.39% | 9.90% | — |
+| max drawdown, delistings written to zero | 19.40% | 12.64% | |
+| **what writing them off cost** | **+2.01 pp** | **+2.74 pp** | the wide book paid more |
+
+A hundred-name book takes roughly eight times as many delisting hits, each about
+an eighth the size, and **in drawdown terms the frequency wins**. The screening
+run's 4-of-4 sign agreement (`BREADTH_2026-11-24.md`) was real; the reason given
+for it was wrong. The wide book's smaller drawdown is ordinary diversification
+of idiosyncratic risk — and the registration forbade harvesting that in advance:
+*"'wider is smoother' is not a finding this project needs a trial to establish
+and may not be harvested from this one."* So criteria 1 and 2 passing authorises
+nothing.
+
+### Criterion 4 failed on a threshold that could not measure what it named
+
+It read "mean open positions ≥ 80" and was written to catch
+`min_position_notional` starving a hundred-name book. **The arm was not
+starved** — it reached 100 of 100 on its first session. The observer records
+only on sessions where a proposal reaches the risk layer, and a session only has
+proposals when the book has room, so the statistic is *how full the book was at
+the moments it was being refilled* — structurally below the cap in both arms
+(narrow 57% of its cap, wide 66% of its). A correct criterion would have used
+the **peak**, and would have passed.
+
+The defect is charged here in §52's shape: the next registration needing a
+book-width guard uses the peak, not a mean sampled at refills. **The verdict does
+not hinge on it** — corrected to the peak the trial still fails on criterion 3,
+which is the criterion about the mechanism.
+
+### The return columns, which were never criteria
+
+| recovery 0.0 | narrow | wide | difference | \|t\| vs the 4-sample hurdle 6.366 |
+|---|---|---|---|---|
+| CAGR | 5.16% | 3.84% | +1.32 pp | 1.87 |
+| Sharpe | 0.240 | 0.141 | +0.099 | 1.27 |
+| costs, ten years on $100k | $103 | $508 | | |
+
+Directionally as in the screening window, nowhere near the hurdle. Breadth's
+lower return is again not a cost story: $508 against $103 is 0.05%/yr against
+0.01%/yr.
+
+### Verdict: FAILED, and breadth as drawdown protection is closed
+
+Per the stop rule, in full: **no other breadth level, capital level, window,
+block length, delisting assumption or drawdown definition is substituted, and
+this is not re-read on the screening window.** `max_positions` stays at 12 and
+`risk_per_trade_pct` at 0.005 — the registration authorised raising them only on
+a pass. No default moved and no published result moved.
+
+### Registered and spent
+
+**Ledger: 144 → 145 trials.** Sixty-two measurements. Hurdle now
+|t| > 2.6587 on the normal scale.

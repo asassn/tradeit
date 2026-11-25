@@ -151,3 +151,30 @@ indicator arms, nine signals, four fundamentals, eight swing indicators and
 three patterns have been measured, and every line is closed by a rule written
 at the time. Trying a thirtieth without new information would be spending a
 trial against a rising hurdle to re-ask a question the record has answered.
+
+---
+
+## Addendum, 2026-11-25 — one trial spent since this was written
+
+**Ledger 144 → 145.** [`§59`](SIGNAL_SCOREBOARD.md) /
+[`TRIAL_145_BREADTH_DRAWDOWN_2026-11-25.md`](TRIAL_145_BREADTH_DRAWDOWN_2026-11-25.md):
+breadth as drawdown protection, registered and **failed** on a held-out decade.
+The hurdle quoted above is now **|t| > 2.6587** on the normal scale.
+
+Two corrections to this document's framing, both from that trial:
+
+1. **The trial was not spent inside the exhausted frame, and it was not a
+   signal test.** This document's option A was "stop spending trials inside the
+   frame"; the trial that was spent was a *risk* hypothesis about portfolio
+   construction, which is a different frame and is why it was worth spending.
+   It still failed, which closes that line rather than reopening the signal
+   search.
+2. **"The number any future signal has to beat" is now better understood and no
+   larger.** The 7.74%/yr floor is thirteen names chosen by tie-break
+   (corrected 2026-11-24). Trial 145 measured a hundred-name book on a
+   different decade and it earned **less**, not more — so widening the
+   benchmark does not raise the bar a signal must clear, and the floor stands
+   as stated.
+
+**What remains open is unchanged by this trial**: intraday bars, a different
+market, or the short side. None is free.
