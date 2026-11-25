@@ -33,11 +33,22 @@ studies rather than quoting this later.
 > to be reversed; any that rest on a few extreme returns could be.
 
 > **The floor, measured 2026-11-22:**
-> [`THE_FLOOR_2026-11-22.md`](THE_FLOOR_2026-11-22.md). Not a trial. Holding
-> the universe earns 7.74%/yr on 2020–2025, which is §37's RANDOM arm to
-> within 0.03 pp — **the control was already the floor**. The result worth
-> keeping is the delisting contrast: writing delisted holdings to zero costs a
-> diversified book 1.09 pp a year and the low-volatility screen 20.88 pp.
+> [`THE_FLOOR_2026-11-22.md`](THE_FLOOR_2026-11-22.md). Not a trial. The arm
+> told to hold the universe earns 7.74%/yr on 2020–2025, which is §37's RANDOM
+> arm to within 0.03 pp — **the control was already the floor**. The result
+> worth keeping is the delisting contrast: writing delisted holdings to zero
+> costs that book 1.09 pp a year and the low-volatility screen 20.88 pp.
+>
+> **Corrected 2026-11-24** — [`BREADTH_2026-11-24.md`](BREADTH_2026-11-24.md).
+> The floor reproduces to the digit, but **it did not hold the universe**: every
+> candidate scores 1.0, so the ranker's tie-break on instrument id decides the
+> book, and it is the **twelve lowest instrument ids** — the identical result
+> comes back after deleting 460 of the 500 securities. The floor stands as the
+> hurdle; it may not be called diversified, and its 0.03 pp agreement with
+> RANDOM is a coincidence between two draws. Measured on breadth directly,
+> twelve names to a hundred, return moved by less than its sampling error
+> (|t| 1.24) and the drawdown delistings cause was **5.23 pp deeper** in the
+> narrow book, four of four samples agreeing.
 >
 > **Where this has got to, read across all sixty-one measurements:**
 > [`RESEARCH_FRONTIER_2026-11-21.md`](RESEARCH_FRONTIER_2026-11-21.md). Not a

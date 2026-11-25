@@ -85,9 +85,17 @@ Measured against what has happened since:
 
 > **Measured 2026-11-22**, and it corrected a premise of this document:
 > [`THE_FLOOR_2026-11-22.md`](THE_FLOOR_2026-11-22.md). §37's RANDOM arm
-> *already was* the buy-and-hold floor under another name — holding the
-> universe earns **7.74%/yr** against RANDOM's 7.77%, a difference of 0.03 pp.
-> The benchmark was never missing; it was implicit in the control.
+> *already was* the buy-and-hold floor under another name — the arm told to hold
+> the universe earns **7.74%/yr** against RANDOM's 7.77%, a difference of 0.03
+> pp. The benchmark was never missing; it was implicit in the control.
+>
+> **Corrected 2026-11-24** — [`BREADTH_2026-11-24.md`](BREADTH_2026-11-24.md).
+> The 7.74% reproduces exactly and remains the hurdle, but the arm **held
+> thirteen names, not the universe**: all candidates tie at a score of 1.0 and
+> the ranker breaks ties on instrument id, so the book is the twelve lowest ids
+> in each sample. Two consequences for this document — the agreement with
+> RANDOM is one coincidence rather than two measurements of the same thing, and
+> the hurdle is not a diversified benchmark.
 
 From §37, and it is not the risk-free rate:
 
