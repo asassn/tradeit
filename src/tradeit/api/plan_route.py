@@ -132,8 +132,16 @@ def _declared(declared: DeclaredPortfolio) -> dict[str, Any]:
     """
     return {
         "mandate": str(declared.mandate),
-        "equity": float(declared.equity),
-        "cash": float(declared.cash),
+        # Null when the book supplies them: the record's figures travel in
+        # `loaded.book`, and a declared figure beside them would be a second
+        # answer to the same question.
+        "equity": None if declared.equity is None else float(declared.equity),
+        "cash": None if declared.cash is None else float(declared.cash),
+        "book": (
+            None
+            if declared.book is None
+            else {"record": str(declared.book.record), "portfolio": declared.book.portfolio}
+        ),
         "universe_size": len(declared.universe),
         "warmup_from": str(declared.warmup_from),
         "as_of": str(declared.as_of),
@@ -162,6 +170,24 @@ def _loaded(result: PlanResult) -> dict[str, Any]:
         "sessions_loaded": result.sessions_loaded,
         "bars_loaded": result.bars_loaded,
         "seconds": round(result.seconds, 2),
+        "book": _book(result),
+    }
+
+
+def _book(result: PlanResult) -> dict[str, Any] | None:
+    """Which recorded book the holdings came from, or null for a declaration."""
+    book = result.book
+    if book is None:
+        return None
+    return {
+        "name": book.name,
+        "portfolio_id": book.portfolio_id,
+        "mode": book.mode,
+        "last_session": str(book.last_session),
+        "recorded_equity": float(book.recorded_equity),
+        "marked_equity": float(book.marked_equity),
+        "peak_equity": None if book.peak_equity is None else float(book.peak_equity),
+        "positions": book.positions,
     }
 
 

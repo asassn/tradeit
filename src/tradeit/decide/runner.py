@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from tradeit.backtesting.baselines import MovingAverageCross, base_rules
 from tradeit.backtesting.corpus import CorpusSessionData, pairwise_correlations
 from tradeit.core.enums import Bartimeframe, PositionStatus, Side
+from tradeit.decide.book import IN_FLIGHT_CAVEAT, RecordedBook, open_record, read_book
 from tradeit.decide.declaration import DeclarationError, DeclaredPortfolio
 from tradeit.decide.plan import AVAILABLE_CORPORA, SessionPlan, plan_session
 from tradeit.opportunity import OpportunityFitRanker, normalise_total
@@ -40,7 +41,7 @@ from tradeit.risk.contextual import CorrelationRule, MatrixCorrelationSource
 from tradeit.risk.engine import MostRestrictiveEngine
 from tradeit.strategy.config import StrategyConfig
 
-__all__ = ["PlanResult", "build_cycle", "plan_declared", "resolve_universe"]
+__all__ = ["BookSummary", "PlanResult", "build_cycle", "plan_declared", "resolve_universe"]
 
 #: **Resolution is per date, never per ticker** — `RESEARCH_01_DATA_DICTIONARY`
 #: §0.2, and `valid_to` is **exclusive**, so the last day a security owns a
@@ -55,6 +56,26 @@ _SECTORS = text(
     "select instrument_id, sector from sectors where scheme = 'SIC' "
     "and valid_from <= :as_of and (valid_to is null or valid_to > :as_of)"
 )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BookSummary:
+    """Which recorded book a plan started from, so the screen can say so.
+
+    ``recorded_equity`` is the figure at the last recorded close and
+    ``marked_equity`` is the same book marked at the planned session's closes,
+    which is what the decision was sized against — the driver marks before it
+    decides, and so does this.
+    """
+
+    name: str
+    portfolio_id: int
+    mode: str
+    last_session: dt.date
+    recorded_equity: Decimal
+    marked_equity: Decimal
+    peak_equity: Decimal | None
+    positions: int
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -85,6 +106,8 @@ class PlanResult:
     sessions_loaded: int
     bars_loaded: int
     seconds: float
+    #: Set when the holdings came from a recorded book rather than a declaration.
+    book: BookSummary | None = None
 
 
 def resolve_universe(
@@ -241,7 +264,18 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
             f"{declared.mandate}: none of {len(declared.universe)} tickers resolved against "
             "this corpus, so there is nothing to plan"
         )
+    book = _read_declared_book(declared)
     held_unresolved = sorted(h.ticker for h in declared.holdings if h.ticker not in resolved)
+    if book is not None:
+        # A held instrument outside the universe has no prices loaded, so it
+        # could not be marked and its stop could not be managed. Refused by
+        # id, and by ticker where the universe would have known it.
+        inside = set(resolved.values())
+        held_unresolved = [
+            f"instrument {p.instrument_id}"
+            for p in book.state.open_positions
+            if p.instrument_id not in inside
+        ]
     if held_unresolved:
         raise DeclarationError(
             f"{declared.mandate}: {', '.join(held_unresolved)} is declared held but does not "
@@ -282,6 +316,23 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
             kept = candidates
             break
     bars = data.bars(declared.as_of)
+    if book is not None:
+        _require_next_session(declared, book, sessions)
+        split = sorted(
+            p.instrument_id
+            for p in book.state.open_positions
+            if p.instrument_id in data.splits_on(declared.as_of)
+        )
+        if split:
+            # The driver restates a lot before pricing it; this path does not,
+            # and marking a pre-split holding at a post-split close would read
+            # as a collapse through its stop.
+            raise DeclarationError(
+                f"{declared.mandate}: instrument(s) {', '.join(map(str, split))} split on "
+                f"{declared.as_of}. The book holds pre-split units and the bars are "
+                "post-split; run the session through the paper driver, which restates "
+                "the holding first"
+            )
 
     scored = [
         dataclasses.replace(
@@ -301,8 +352,16 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
     highs: dict[int, Decimal] = {}
     carried: list[tuple[str, dt.date]] = []
     before = [day for day in sessions if day <= declared.as_of]
-    for holding in declared.holdings:
-        instrument_id = resolved[holding.ticker]
+    tickers = {i: t for t, i in resolved.items()}
+    held: list[tuple[str, int]] = (
+        [(h.ticker, resolved[h.ticker]) for h in declared.holdings]
+        if book is None
+        else [
+            (tickers.get(p.instrument_id, str(p.instrument_id)), p.instrument_id)
+            for p in book.state.open_positions
+        ]
+    )
+    for label, instrument_id in held:
         if instrument_id in bars:
             marks[instrument_id] = bars[instrument_id].close
             highs[instrument_id] = bars[instrument_id].high
@@ -312,17 +371,45 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
             if instrument_id in earlier:
                 marks[instrument_id] = earlier[instrument_id].close
                 highs[instrument_id] = earlier[instrument_id].high
-                carried.append((holding.ticker, day))
+                carried.append((label, day))
                 break
         else:
             # Never printed in the window at all. That is an identity problem,
             # not a quiet session, and there is no last known price to carry.
             raise DeclarationError(
-                f"{declared.mandate}: {holding.ticker} has no print anywhere between "
+                f"{declared.mandate}: {label} has no print anywhere between "
                 f"{declared.warmup_from} and {declared.as_of}, so it cannot be marked or "
                 "stopped. Check the ticker resolves to the security you mean"
             )
 
+    if book is not None:
+        portfolio, contexts = _from_book(declared, book, marks)
+    else:
+        portfolio, contexts = _from_declaration(declared, resolved, marks, highs)
+    return _plan(
+        declared,
+        data=data,
+        sessions=sessions,
+        resolved=resolved,
+        sectors=sectors,
+        scored=scored,
+        portfolio=portfolio,
+        contexts=contexts,
+        unresolved=unresolved,
+        carried=carried,
+        book=book,
+        started=started,
+    )
+
+
+def _from_declaration(
+    declared: DeclaredPortfolio,
+    resolved: dict[str, int],
+    marks: dict[int, Decimal],
+    highs: dict[int, Decimal],
+) -> tuple[PortfolioState, dict[int, StopContext]]:
+    if declared.cash is None or declared.equity is None:  # pragma: no cover - __post_init__
+        raise DeclarationError(f"{declared.mandate}: equity and cash are required")
     positions: list[PositionState] = []
     for holding in declared.holdings:
         instrument_id = resolved[holding.ticker]
@@ -368,7 +455,100 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
         )
         for p in portfolio.open_positions
     }
+    return portfolio, contexts
 
+
+def _read_declared_book(declared: DeclaredPortfolio) -> RecordedBook | None:
+    if declared.book is None:
+        return None
+    record = open_record(declared.book)
+    try:
+        return read_book(record, declared.book.portfolio)
+    finally:
+        record.close()
+
+
+def _require_next_session(
+    declared: DeclaredPortfolio, book: RecordedBook, sessions: list[dt.date]
+) -> None:
+    """The planned session must be the one immediately after the book's last close.
+
+    See `tradeit.decide.book`: the plan advances the ladder by exactly one
+    session, as `LiveShapedSession.run_session` does, so any other distance
+    produces a plan about a book that does not exist.
+    """
+    last = book.last_session
+    if declared.as_of <= last:
+        raise DeclarationError(
+            f"{declared.mandate}: book {book.name!r} is recorded through {last}, so "
+            f"{declared.as_of} has already been decided. Plan the session after it"
+        )
+    if last not in sessions:
+        raise DeclarationError(
+            f"{declared.mandate}: warmup_from {declared.warmup_from} starts after the book's "
+            f"last recorded session {last}, so the sessions between cannot be checked. "
+            "Start the warmup on or before it"
+        )
+    skipped = [day for day in sessions if last < day < declared.as_of]
+    if skipped:
+        raise DeclarationError(
+            f"{declared.mandate}: book {book.name!r} is recorded through {last} and "
+            f"{len(skipped)} session(s) lie between it and {declared.as_of}, in which no stop "
+            f"was checked. Plan {skipped[0]}, or run the paper session forward first"
+        )
+
+
+def _from_book(
+    declared: DeclaredPortfolio, book: RecordedBook, marks: dict[int, Decimal]
+) -> tuple[PortfolioState, dict[int, StopContext]]:
+    """The recorded book, advanced one session exactly as the driver advances it.
+
+    `LiveShapedSession.run_session` marks every holding, increments
+    ``sessions_held`` and raises the high to the close, then decides. The same
+    three steps, in the same order, on the same recorded values — so the stop
+    the plan proposes is the stop the paper session would move to.
+    """
+    positions = book.state.open_positions
+    equity = book.state.cash + sum(
+        (p.quantity * marks[p.instrument_id] for p in positions), Decimal(0)
+    )
+    portfolio = PortfolioState(
+        portfolio_id=book.portfolio_id,
+        as_of=dt.datetime.combine(declared.as_of, dt.time(21), tzinfo=dt.UTC),
+        cash=book.state.cash,
+        equity=equity,
+        positions=tuple(positions),
+        last_prices={p.instrument_id: marks[p.instrument_id] for p in positions},
+    )
+    contexts = {
+        p.instrument_id: StopContext(
+            last_price=marks[p.instrument_id],
+            # The driver raises the high to the CLOSE, not the bar's high.
+            high_since_entry=max(book.ladder[p.instrument_id].highest, marks[p.instrument_id]),
+            sessions_held=book.ladder[p.instrument_id].sessions_held + 1,
+            partial_profit_taken=book.ladder[p.instrument_id].partial_profit_taken,
+            atr=None,
+        )
+        for p in positions
+    }
+    return portfolio, contexts
+
+
+def _plan(
+    declared: DeclaredPortfolio,
+    *,
+    data: CorpusSessionData,
+    sessions: list[dt.date],
+    resolved: dict[str, int],
+    sectors: dict[int, str],
+    scored: list[EntryCandidate],
+    portfolio: PortfolioState,
+    contexts: dict[int, StopContext],
+    unresolved: tuple[str, ...],
+    carried: list[tuple[str, dt.date]],
+    book: RecordedBook | None,
+    started: dt.datetime,
+) -> PlanResult:
     # **Measured and supplied, not left to default.**
     #
     # `cycle.plan(..., correlation=None)` makes `OpportunityFitRanker._overlap`
@@ -393,6 +573,19 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
         references={i: t for t, i in resolved.items()},
         correlation=dict(correlation),
     )
+    summary = None
+    if book is not None:
+        plan = dataclasses.replace(plan, caveats=(*plan.caveats, IN_FLIGHT_CAVEAT))
+        summary = BookSummary(
+            name=book.name,
+            portfolio_id=book.portfolio_id,
+            mode=book.mode,
+            last_session=book.last_session,
+            recorded_equity=book.state.equity,
+            marked_equity=portfolio.equity,
+            peak_equity=book.peak_equity,
+            positions=len(portfolio.open_positions),
+        )
     return PlanResult(
         plan=plan,
         unresolved=unresolved,
@@ -403,4 +596,5 @@ def plan_declared(session: Session, declared: DeclaredPortfolio) -> PlanResult:
         sessions_loaded=len(sessions),
         bars_loaded=data.bar_count,
         seconds=(dt.datetime.now(dt.UTC) - started).total_seconds(),
+        book=summary,
     )

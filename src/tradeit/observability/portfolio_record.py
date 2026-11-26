@@ -9,9 +9,11 @@ dangling foreign key. Measured 2026-11-19.
 That absence is the root of three separate things, which is why it is worth
 closing rather than working around:
 
-* **`tradeit plan` reads its holdings from a JSON file the operator edits**,
-  because there is nowhere else to read them from
+* **`tradeit plan` read its holdings from a JSON file the operator edits**,
+  because there was nowhere else to read them from
   ([ADR-0039](../../../docs/adr/0039-a-refusal-must-name-the-limit-that-caused-it.md)).
+  Since 2026-11-26 it can read them from a book recorded here instead
+  (`tradeit.decide.book`).
 * **A paper session cannot resume.** `LiveShapedSession.__post_init__` sets cash
   to `initial_capital` and lots to empty, and no loader exists — so Phase 11's
   closure is real for *equivalence* (1,457 of 1,457 fills agreed) and not for

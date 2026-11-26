@@ -178,3 +178,10 @@ Two corrections to this document's framing, both from that trial:
 
 **What remains open is unchanged by this trial**: intraday bars, a different
 market, or the short side. None is free.
+
+## Addendum, 2026-11-26 — option A is now a decision
+
+The owner accepted option A as standing policy:
+[ADR-0040](adr/0040-the-signal-search-is-answered.md). No further trial inside
+this frame without new information; effort moves to the platform. Options B
+and C stay as written, and B's purchase remains declined.

@@ -158,3 +158,16 @@ it, and `research-01`'s evidence rules are untouched.
 * **`record_trade` remains unusable** by its own account until a closed position
   is written with its realised P&L; `sync_positions` closes the row and leaves
   the P&L to `executions`, which it does not read.
+
+---
+
+## Addendum, 2026-11-26 — the cut had nothing in flight
+
+Running the same book **one process per session** for the 144 sessions after
+2014-06-06 places 379 orders and fills none, where one process places 20 and
+fills 20 ([`PLAN_FROM_BOOK_2026-11-26.md`](PLAN_FROM_BOOK_2026-11-26.md)). An
+order decided at a close fills at the next session, the record holds no
+orders, and `PaperBroker.restore` restores cash and holdings only — so every
+order in flight at a restart is dropped. The measurement above is correct for
+its cut, which had no order in flight; it does not establish that a run
+stopped at an arbitrary close resumes as one run.

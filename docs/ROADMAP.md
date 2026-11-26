@@ -332,6 +332,10 @@ nothing survives as a strategy. The hurdle is |t| > 2.6587 after trial 145
 evidence to re-ask an answered question. What the record names as still open is
 intraday bars, a different market, or the short side.
 
+**The owner closed the search inside that frame on 2026-11-26**
+([ADR-0040](adr/0040-the-signal-search-is-answered.md)): no further trial
+without new information, and effort moves to the platform.
+
 **Which indicators actually predict anything, at which horizon, in which
 regime.** Not a display feature — a measurement. It lives here rather than in
 Phase 7 because it needs exactly the machinery Phase 9 builds: out-of-sample

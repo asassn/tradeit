@@ -14,6 +14,12 @@ Two ways to say what the portfolio is, and they are the same thing underneath.
 what the dashboard serves and what an operator can version and diff. The flags
 are the one-off form, for a single horizon on the command line.
 
+**Either form may name a recorded book instead of stating holdings** —
+``"book"`` in the file, ``--book RECORD --portfolio NAME`` on the command line.
+Then cash, positions and each stop's ladder come from what
+``scripts/paper_live_shape.py --record`` wrote at the last close, and the plan
+is for the session immediately after it.
+
 **Every number is declared, never invented** — equity, cash, each holding's
 stop, the session held count, and the bounds of the raw setup score. Each would
 decide something material while appearing to decide nothing.
@@ -31,6 +37,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from tradeit.decide import (
+    BookRef,
     DeclarationError,
     DeclaredHolding,
     DeclaredPortfolio,
@@ -75,10 +82,33 @@ def _holding(spec: str) -> DeclaredHolding:
 
 def _from_flags(args: argparse.Namespace) -> DeclaredPortfolio:
     universe = tuple(dict.fromkeys(t.strip().upper() for t in args.tickers.split(",") if t.strip()))
+    book = None
+    if args.book or args.portfolio:
+        if not (args.book and args.portfolio):
+            raise DeclarationError(
+                "--book and --portfolio go together: a record holds several books, and "
+                "which one is meant is not something to guess"
+            )
+        stated = [
+            flag
+            for flag, value in (
+                ("--equity", args.equity),
+                ("--cash", args.cash),
+                ("--hold", args.hold),
+            )
+            if value
+        ]
+        if stated:
+            raise DeclarationError(
+                f"{', '.join(stated)} stated beside --book. The record supplies them, and two "
+                "sources for one portfolio is a question about which is current"
+            )
+        book = BookRef(record=Path(args.book), portfolio=args.portfolio)
     return DeclaredPortfolio(
         mandate=Mandate(args.mandate),
-        equity=Decimal(str(args.equity)),
-        cash=Decimal(str(args.cash)),
+        # The hand-stated defaults are unchanged from before the book existed.
+        equity=None if book else Decimal(str(args.equity or "100000")),
+        cash=None if book else Decimal(str(args.cash or "100000")),
         universe=universe,
         warmup_from=dt.date.fromisoformat(args.start),
         as_of=dt.date.fromisoformat(args.as_of),
@@ -88,6 +118,7 @@ def _from_flags(args: argparse.Namespace) -> DeclaredPortfolio:
         fast=args.fast,
         slow=args.slow,
         stop_pct=Decimal(str(args.stop_pct)),
+        book=book,
     )
 
 
@@ -106,6 +137,15 @@ def _report(result: PlanResult) -> None:
         f"correl.  : {result.correlation_pairs} pairs measured, "
         f"{result.correlation_over_limit} over the limit"
     )
+    if result.book is not None:
+        book = result.book
+        peak = "none recorded" if book.peak_equity is None else f"{book.peak_equity:,.2f}"
+        print(
+            f"book     : {book.name!r} (portfolio {book.portfolio_id}, {book.mode}), recorded "
+            f"through {book.last_session}: {book.positions} position(s), equity "
+            f"{book.recorded_equity:,.2f} at that close, {book.marked_equity:,.2f} marked "
+            f"today, peak {peak}"
+        )
     for ticker, day in result.carried:
         # A stale mark is a fact the reader should see, not one to hide.
         print(f"carried  : {ticker} did not print; marked at its {day} close")
@@ -167,8 +207,14 @@ def add_decide_commands(sub: Any) -> None:
     plan.add_argument("--tickers", default=None, help="comma separated")
     plan.add_argument("--start", default=None, help="warmup start; needs --slow sessions")
     plan.add_argument("--as-of", default=None, help="the session to plan")
-    plan.add_argument("--equity", default="100000")
-    plan.add_argument("--cash", default="100000")
+    plan.add_argument("--equity", default=None, help="default 100000; not with --book")
+    plan.add_argument("--cash", default=None, help="default 100000; not with --book")
+    plan.add_argument(
+        "--book",
+        default=None,
+        help="record file written by paper_live_shape.py --record; holdings come from it",
+    )
+    plan.add_argument("--portfolio", default=None, help="the portfolio name within --book")
     plan.add_argument(
         "--hold",
         action="append",

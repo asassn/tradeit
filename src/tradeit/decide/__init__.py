@@ -7,7 +7,9 @@ been taken, which is why no refusal in the stored decision record could name
 the limit that caused it.
 """
 
+from tradeit.decide.book import IN_FLIGHT_CAVEAT, RecordedBook, open_record, read_book
 from tradeit.decide.declaration import (
+    BookRef,
     DeclarationError,
     DeclaredHolding,
     DeclaredPortfolio,
@@ -24,10 +26,19 @@ from tradeit.decide.plan import (
     plan_session,
     with_references,
 )
-from tradeit.decide.runner import PlanResult, build_cycle, plan_declared, resolve_universe
+from tradeit.decide.runner import (
+    BookSummary,
+    PlanResult,
+    build_cycle,
+    plan_declared,
+    resolve_universe,
+)
 
 __all__ = [
+    "IN_FLIGHT_CAVEAT",
     "AbsentControl",
+    "BookRef",
+    "BookSummary",
     "DeclarationError",
     "DeclaredHolding",
     "DeclaredPortfolio",
@@ -35,13 +46,16 @@ __all__ = [
     "PlanResult",
     "ProposedEntry",
     "ProposedExit",
+    "RecordedBook",
     "Refusal",
     "SessionPlan",
     "absent_controls",
     "build_cycle",
     "load_declaration",
+    "open_record",
     "plan_declared",
     "plan_session",
+    "read_book",
     "resolve_universe",
     "with_references",
 ]

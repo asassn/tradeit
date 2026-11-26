@@ -31,6 +31,26 @@ inventing the position's size and the portfolio's heat at once.
 Every field is required for the same reason. There is no default equity, no
 default cash, no default universe and no default as-of date, because each of
 those would decide something material while appearing to decide nothing.
+
+**Superseded in part, 2026-11-26: a horizon may now name a recorded book.**
+Storage stopped being empty on 2026-11-24, when ``scripts/paper_live_shape.py
+--record`` began writing ``positions`` and ``portfolio_snapshots`` at every
+close and ``--resume`` began continuing them. The objection above — that
+reading an empty table produces a confident plan for an empty portfolio — is
+answered by the reader rather than by avoiding it: a book with no snapshot is
+refused, which is a different answer from a book that holds nothing.
+
+So an entry carries **exactly one source** for what the portfolio holds:
+``equity``/``cash``/``holdings`` stated by hand, or ``book`` naming a record
+file and a portfolio within it. Both at once is refused, because two sources
+for one book is a question about which is current and nothing here can answer
+it. The rejected alternative was to let the book override the hand-stated
+fields; that makes a stale declaration look authoritative until the day the
+record is missing, and then silently plans the stale one.
+
+What stays declared either way is the *process* — universe, warmup, score
+range, signal windows — because the record holds what a portfolio owns, not
+how it decides.
 """
 
 from __future__ import annotations
@@ -45,6 +65,7 @@ from typing import Any
 from tradeit.portfolio.mandate import Mandate
 
 __all__ = [
+    "BookRef",
     "DeclarationError",
     "DeclaredHolding",
     "DeclaredPortfolio",
@@ -73,12 +94,29 @@ class DeclaredHolding:
 
 
 @dataclass(frozen=True, slots=True)
+class BookRef:
+    """Where a horizon's holdings are read from instead of being stated.
+
+    The record is opened **read-only**. A plan is a question about what the
+    book would do, and nothing that answers it may write to the book.
+    """
+
+    record: Path
+    portfolio: str
+
+
+@dataclass(frozen=True, slots=True)
 class DeclaredPortfolio:
-    """One horizon's portfolio and the window to plan it over."""
+    """One horizon's portfolio and the window to plan it over.
+
+    ``equity`` and ``cash`` are ``None`` exactly when ``book`` is set: the
+    record supplies them, and a hand-stated figure beside it would be a second
+    answer to the same question.
+    """
 
     mandate: Mandate
-    equity: Decimal
-    cash: Decimal
+    equity: Decimal | None
+    cash: Decimal | None
     universe: tuple[str, ...]
     #: Where the candidate source starts accumulating history. A moving-average
     #: crossover needs its slow window before it can cross, so a warmup shorter
@@ -96,12 +134,37 @@ class DeclaredPortfolio:
     slow: int
     stop_pct: Decimal
     note: str = ""
+    book: BookRef | None = None
 
     def __post_init__(self) -> None:
-        if self.equity <= 0:
-            raise DeclarationError(f"{self.mandate}: equity must be positive, got {self.equity}")
-        if self.cash < 0:
-            raise DeclarationError(f"{self.mandate}: cash cannot be negative, got {self.cash}")
+        if self.book is not None:
+            stated = [
+                name
+                for name, present in (
+                    ("equity", self.equity is not None),
+                    ("cash", self.cash is not None),
+                    ("holdings", bool(self.holdings)),
+                )
+                if present
+            ]
+            if stated:
+                raise DeclarationError(
+                    f"{self.mandate}: {', '.join(stated)} stated beside a recorded book. "
+                    "Two sources for one portfolio is a question about which is current, "
+                    "and the loader may not choose"
+                )
+        else:
+            if self.equity is None or self.cash is None:
+                raise DeclarationError(
+                    f"{self.mandate}: equity and cash are required unless a recorded book "
+                    "is named; there is no honest default for either"
+                )
+            if self.equity <= 0:
+                raise DeclarationError(
+                    f"{self.mandate}: equity must be positive, got {self.equity}"
+                )
+            if self.cash < 0:
+                raise DeclarationError(f"{self.mandate}: cash cannot be negative, got {self.cash}")
         if not self.universe:
             raise DeclarationError(
                 f"{self.mandate}: a universe is required. Loading every security would scan "
@@ -179,7 +242,24 @@ def _holding(payload: dict[str, Any], where: str) -> DeclaredHolding:
     )
 
 
-def _portfolio(payload: dict[str, Any]) -> DeclaredPortfolio:
+def _book(payload: dict[str, Any], where: str, base: Path) -> BookRef | None:
+    raw = payload.get("book")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not raw.get("record") or not raw.get("portfolio"):
+        raise DeclarationError(
+            f"{where}: book needs both record (the file) and portfolio (the name within it). "
+            "A record holds several books, and which one is meant is not something to guess"
+        )
+    record = Path(str(raw["record"])).expanduser()
+    # Relative to the declaration, not to wherever the command was run from:
+    # the same file must name the same book from the CLI and from the service.
+    if not record.is_absolute():
+        record = base / record
+    return BookRef(record=record, portfolio=str(raw["portfolio"]))
+
+
+def _portfolio(payload: dict[str, Any], base: Path = Path()) -> DeclaredPortfolio:
     raw = str(payload.get("mandate", "")).strip().lower()
     try:
         mandate = Mandate(raw)
@@ -197,10 +277,21 @@ def _portfolio(payload: dict[str, Any]) -> DeclaredPortfolio:
             "moving-average spread in OpportunityScore.total, and blending that with a fit "
             "score at a declared weight would describe a mixture that is not happening"
         )
+    book = _book(payload, where, base)
+    if book is not None:
+        # Refused here with the file's own words, rather than by the dataclass
+        # after the defaults below have quietly filled the gaps.
+        stated = [key for key in ("equity", "cash", "holdings") if key in payload]
+        if stated:
+            raise DeclarationError(
+                f"{where}: {', '.join(stated)} stated beside a recorded book. Two sources "
+                "for one portfolio is a question about which is current, and the loader "
+                "may not choose"
+            )
     return DeclaredPortfolio(
         mandate=mandate,
-        equity=_decimal(payload, "equity", where),
-        cash=_decimal(payload, "cash", where),
+        equity=None if book else _decimal(payload, "equity", where),
+        cash=None if book else _decimal(payload, "cash", where),
         universe=universe,
         warmup_from=_date(payload, "warmup_from", where),
         as_of=_date(payload, "as_of", where),
@@ -211,6 +302,7 @@ def _portfolio(payload: dict[str, Any]) -> DeclaredPortfolio:
         slow=int(payload.get("slow", 200)),
         stop_pct=Decimal(str(payload.get("stop_pct", "0.08"))),
         note=str(payload.get("note", "")),
+        book=book,
     )
 
 
@@ -237,7 +329,7 @@ def load_declaration(path: Path) -> tuple[DeclaredPortfolio, ...]:
     if not isinstance(entries, list) or not entries:
         raise DeclarationError(f"{path}: 'portfolios' must be a non-empty list")
 
-    portfolios = tuple(_portfolio(entry) for entry in entries)
+    portfolios = tuple(_portfolio(entry, path.parent) for entry in entries)
     seen = [p.mandate for p in portfolios]
     duplicates = sorted({str(m) for m in seen if seen.count(m) > 1})
     if duplicates:
