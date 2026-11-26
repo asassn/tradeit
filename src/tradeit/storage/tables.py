@@ -1725,6 +1725,10 @@ class Order(Base):
     filled_quantity: Mapped[Decimal] = mapped_column(QTY, nullable=False, default=Decimal(0))
     limit_price: Mapped[Decimal | None] = mapped_column(PRICE)
     stop_price: Mapped[Decimal | None] = mapped_column(PRICE)
+    #: The protective stop an ENTRY was decided with, placed only after it
+    #: fills. Not ``stop_price``, which is a STOP order's trigger at the venue.
+    #: Null for exits and for rows written before migration 0023.
+    intended_stop_price: Mapped[Decimal | None] = mapped_column(PRICE)
     intent: Mapped[str | None] = mapped_column(String(128))
     submitted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))

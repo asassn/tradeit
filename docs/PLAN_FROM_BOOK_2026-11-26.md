@@ -44,9 +44,9 @@ because it would plan a book that does not exist:
 The record is opened read-only; a missing file is refused before connecting,
 because SQLite creates one on connect. Thirty tests; ten mutants, all caught.
 
-**One thing the record cannot see, carried as a caveat on every such plan:**
-orders decided at the last recorded close and not yet filled. That turned out
-to matter more than a caveat — see below.
+**One thing the record could not see:** orders decided at the last recorded
+close and not yet filled. That turned out to matter more than a caveat — see
+below, and the fix after it.
 
 ## The measurement
 
@@ -88,8 +88,43 @@ stopped run "is one run" holds **only for a cut with nothing in flight**.
 
 This is the failure that matters for operation, because one process per day is
 what operation *is*. Under it, every exit control — stop loss, time stop,
-partial profit — decides correctly and executes never. It is the next thing to
-fix: the record must hold orders in flight, and resume must restore them.
+partial profit — decides correctly and executes never.
+
+## Fixed the same day, and measured
+
+The paper session now writes every order to `orders` at each close
+(`sync_orders`), with the protective stop an entry was decided with in a new
+column, `orders.intended_stop_price` (migration 0023; not `stop_price`, which
+is a STOP order's trigger at the venue). `--resume` reads the orders still
+resting (`load_open_orders`), re-derives each one's reference bar from the
+corpus — it sets the fill price — and restores them into the venue with their
+original broker ids, so `advance` fills them in the same order.
+
+The same 144 sessions, one process per session, against one process:
+
+| | one process, 754 sessions | 610, then 144 processes of one session |
+|---|---|---|
+| orders / fills | 20 / 20 | **20 / 20** — identical rows, intended stops included |
+| `positions` rows | 10 | **10**, every field agreeing |
+| snapshots | 754 | **754**, cash and equity within 4.8e-7 |
+| at 2014-12-31 | flat, 100,944.67 | **flat, 100,944.67** |
+
+The 4.8e-7 is `Numeric(18,6)` truncation, compounded over 144 restarts where
+the 2026-11-24 measurement had one (4.8e-8 there). All 144 sessions reconciled
+clean; eleven of them had an order in flight across the restart.
+
+Refused rather than restored: an entry with no recorded stop, a resting order
+already part-filled (the filled part is in the position, so restoring the
+whole would buy it twice), an order from another account, and an order whose
+decision bar is missing from the corpus. Eight tests; ten mutants, all caught.
+
+**`tradeit plan` now refuses over an order in flight**, naming it, instead of
+carrying a blanket caveat. The order fills at the planned session's bars before
+that session decides, and the plan does not simulate a fill, so it would
+propose, say, selling a position the venue had sold that morning. The paper
+session is the thing to run on such a day. A record written before orders were
+recorded still carries the caveat, because it cannot tell "nothing in flight"
+from "nothing recorded".
 
 ## Reproduce
 

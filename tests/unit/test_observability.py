@@ -13,6 +13,7 @@ one.**
 from __future__ import annotations
 
 import datetime as dt
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -333,9 +334,15 @@ def test_only_this_module_writes_the_four_tables() -> None:
         text = path.read_text()
         if "from tradeit.storage.tables import" not in text:
             continue
-        for name in ("Order(", "Execution(", "Trade(", "OpportunityScore("):
-            if name in text and name.rstrip("(") in text.split("import", 1)[1][:4000]:
-                offenders.append((str(path.relative_to(root)), name.rstrip("(")))
+        for name in ("Order", "Execution", "Trade", "OpportunityScore"):
+            # **The ORM class's own constructor, as a whole name.** A bare
+            # substring test flagged `RecordedOrder(` -- a reader's value type
+            # that writes nothing -- on 2026-11-26. The invariant is that no
+            # other module constructs these four rows, not that no other
+            # identifier may end in their names.
+            constructed = re.search(rf"(?<![\w.]){name}\(", text)
+            if constructed and name in text.split("import", 1)[1][:4000]:
+                offenders.append((str(path.relative_to(root)), name))
     assert offenders == [], f"written outside the observability writer: {offenders}"
 
 

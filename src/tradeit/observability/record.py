@@ -163,6 +163,7 @@ def record_order(
     broker_order_id: str | None = None,
     run_manifest_id: int | None = None,
     rejection_reason: str | None = None,
+    intended_stop_price: Decimal | None = None,
 ) -> Order:
     """What order was submitted, keyed on the id we generated for it.
 
@@ -170,6 +171,10 @@ def record_order(
     disagree with the object that was actually sent. ``client_order_id`` is the
     column's unique key, which is why the engine's ids had to carry their
     session — see `PHASE_11_AUDIT_2026-10-18.md`.
+
+    ``intended_stop_price`` is the protective stop an entry was decided with,
+    which is ours and never sent to the venue (migration 0023). It is a
+    separate argument because ``OrderRequest`` is what the venue sees.
     """
     row = Order(
         portfolio_id=request.portfolio_id,
@@ -188,6 +193,7 @@ def record_order(
         rejection_reason=rejection_reason,
         run_manifest_id=run_manifest_id,
         position_id=request.parent_position_id,
+        intended_stop_price=intended_stop_price,
     )
     session.add(row)
     return row

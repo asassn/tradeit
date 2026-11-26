@@ -43,7 +43,7 @@ from tradeit.observability.portfolio_record import (
     record_position,
 )
 from tradeit.portfolio.base import PortfolioState, PositionState
-from tradeit.storage.tables import Base
+from tradeit.storage.tables import Base, Order
 
 LAST = dt.date(2024, 2, 29)  # the weekday before AS_OF
 NAME = "paper-swing"
@@ -500,3 +500,51 @@ def test_the_flags_keep_their_old_defaults_without_a_book() -> None:
     declared = _from_flags(_args())
 
     assert declared.equity == Decimal(100_000) and declared.cash == Decimal(100_000)
+
+
+# -- orders in flight, now that the record holds them -----------------------
+
+
+def _order(path: Path, portfolio_id: int, instrument_id: int, *, status: str) -> None:
+    engine = create_engine(f"sqlite:///{path}")
+    with sessionmaker(bind=engine)() as record:
+        record.add(
+            Order(
+                portfolio_id=portfolio_id,
+                instrument_id=instrument_id,
+                client_order_id=f"x-{instrument_id}-{LAST}",
+                broker_order_id="live-shape-000001",
+                side="sell",
+                order_type="market",
+                time_in_force="day",
+                status=status,
+                quantity=Decimal(100),
+                submitted_at=dt.datetime.combine(LAST, dt.time(20), tzinfo=dt.UTC),
+            )
+        )
+        record.commit()
+
+
+def test_an_order_in_flight_refuses_the_plan_and_is_named(
+    db_session: Session, loud: int, tmp_path: Path
+) -> None:
+    """It fills before the session decides; planning over it would sell twice."""
+    record = tmp_path / "book.sqlite"
+    pid = _record(record, loud)
+    _order(record, pid, loud, status="new")
+
+    with pytest.raises(DeclarationError, match=r"1 order\(s\) in flight.*sell 100"):
+        plan_declared(db_session, _book(record))  # type: ignore[arg-type]
+
+
+def test_a_record_that_holds_orders_needs_no_blanket_caveat(
+    db_session: Session, loud: int, tmp_path: Path
+) -> None:
+    """Every order finished, so "nothing in flight" is now a fact, not a hope."""
+    record = tmp_path / "book.sqlite"
+    pid = _record(record, loud)
+    _order(record, pid, loud, status="filled")
+
+    result = plan_declared(db_session, _book(record))  # type: ignore[arg-type]
+
+    assert IN_FLIGHT_CAVEAT not in result.plan.caveats

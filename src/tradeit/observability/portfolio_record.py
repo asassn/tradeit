@@ -53,7 +53,16 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from tradeit.core.enums import PositionStatus, Side, TradingMode
+from tradeit.core.enums import (
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    PositionStatus,
+    Side,
+    TimeInForce,
+    TradingMode,
+)
+from tradeit.execution.base import OrderRequest
 
 # **Downhill, and deliberately this way round.** `observability` already
 # imports `execution` (`base.py` takes `Fill`, `record.py` takes the journal)
@@ -62,15 +71,20 @@ from tradeit.core.enums import PositionStatus, Side, TradingMode
 # imported rather than re-declared so the thing written and the thing resumed
 # cannot drift apart.
 from tradeit.execution.live_shape import LadderState
+from tradeit.execution.paper import PaperOrderStatus
+from tradeit.observability.record import record_order
 from tradeit.portfolio.base import PortfolioState, PositionState
 from tradeit.risk.base import RiskSnapshot as RiskSnapshotValue
-from tradeit.storage.tables import Portfolio, PortfolioSnapshot, Position, RiskSnapshot
+from tradeit.storage.tables import Order, Portfolio, PortfolioSnapshot, Position, RiskSnapshot
 
 __all__ = [
+    "OrderSync",
     "PositionSync",
+    "RecordedOrder",
     "SnapshotExists",
     "last_recorded_session",
     "load_ladder_state",
+    "load_open_orders",
     "load_portfolio_state",
     "portfolio_named",
     "record_portfolio",
@@ -78,6 +92,7 @@ __all__ = [
     "record_position",
     "record_risk_snapshot",
     "recorded_peak_equity",
+    "sync_orders",
     "sync_positions",
 ]
 
@@ -534,3 +549,153 @@ def load_ladder_state(session: Session, portfolio_id: int) -> dict[int, LadderSt
         for instrument_id, highest, held, taken in rows
         if highest is not None and held is not None and taken is not None
     }
+
+
+# -- orders in flight, which a restart must not drop -------------------------
+
+#: The statuses an order can still fill from.
+_RESTING = (str(OrderStatus.NEW), str(OrderStatus.PARTIALLY_FILLED))
+_TERMINAL = (OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.EXPIRED, OrderStatus.REJECTED)
+
+
+@dataclass(frozen=True, slots=True)
+class OrderSync:
+    """What one session's write did to the order record."""
+
+    inserted: int
+    updated: int
+
+
+@dataclass(frozen=True, slots=True)
+class RecordedOrder:
+    """An order the record says is still resting at the venue."""
+
+    request: OrderRequest
+    broker_order_id: str
+    #: The session the order was decided on, whose bar set its fill price.
+    decided_on: dt.date
+    #: The protective stop for an entry; None for an exit.
+    intended_stop: Decimal | None
+
+
+def sync_orders(
+    session: Session,
+    portfolio_id: int,
+    history: Sequence[tuple[OrderRequest, PaperOrderStatus]],
+    intended_stops: Mapping[int, Decimal],
+    *,
+    decided_at: dt.datetime,
+) -> OrderSync:
+    """Write the venue's orders down, so the ones still resting survive a restart.
+
+    **Found 2026-11-26** (`docs/PLAN_FROM_BOOK_2026-11-26.md`): with positions
+    recorded and orders not, a book run one process per session placed 379
+    orders over 144 sessions and filled none. Every order decided at a close
+    fills at the next session's bars, so every one was in flight when its
+    process ended, and dropped.
+
+    Keyed on ``client_order_id``, the column's unique key: an order not yet
+    written was placed this session and is inserted with ``decided_at``; one
+    already written has its status brought up to date. An order restored
+    after a restart comes back with the same client id, so it updates its row
+    rather than duplicating it.
+
+    ``intended_stops`` is read **only on insert, and only for a buy** -- the
+    stop an entry was decided with, which the venue never sees and the driver
+    pops when the entry fills. An entry with none recorded is refused, for the
+    same reason a position without its ladder is: resumed, it would fill with
+    a stop decided for no trade.
+    """
+    rows = {
+        row.client_order_id: row
+        for row in session.execute(select(Order).where(Order.portfolio_id == portfolio_id))
+        .scalars()
+        .all()
+    }
+    inserted = updated = 0
+    for request, status in history:
+        row = rows.get(request.client_order_id)
+        completed = status.updated_at if status.status in _TERMINAL else None
+        if row is None:
+            intended = None
+            if request.side is OrderSide.BUY:
+                intended = intended_stops.get(request.instrument_id)
+                if intended is None:
+                    raise ValueError(
+                        f"refusing to write entry {request.client_order_id} with no "
+                        "intended stop: resumed, it would fill with a stop decided for "
+                        "no trade, and the initial stop defines R"
+                    )
+            # Through `record_order`, the one writer `orders` has: a second
+            # constructor here would be a second definition of what a row is.
+            row = record_order(
+                session,
+                request,
+                submitted_at=decided_at,
+                status=status.status,
+                broker_order_id=status.broker_order_id,
+                intended_stop_price=intended,
+            )
+            row.filled_quantity = status.filled_quantity
+            row.completed_at = completed
+            inserted += 1
+            continue
+        if row.status != str(status.status) or row.filled_quantity != status.filled_quantity:
+            row.status = str(status.status)
+            row.filled_quantity = status.filled_quantity
+            row.completed_at = completed
+            updated += 1
+    session.flush()
+    return OrderSync(inserted=inserted, updated=updated)
+
+
+def load_open_orders(session: Session, portfolio_id: int) -> tuple[RecordedOrder, ...]:
+    """The orders the record says are still resting, oldest first.
+
+    **A partly filled order is refused, not restored.** The paper venue
+    cancels a day order's remainder in the same ``advance`` that part-filled
+    it, so none should ever be written resting; one that was is a record this
+    reader cannot honestly continue, because the part that filled is already
+    in the position and restoring the full quantity would buy it twice.
+    """
+    rows = (
+        session.execute(
+            select(Order)
+            .where(Order.portfolio_id == portfolio_id, Order.status.in_(_RESTING))
+            .order_by(Order.broker_order_id)
+        )
+        .scalars()
+        .all()
+    )
+    out: list[RecordedOrder] = []
+    for row in rows:
+        if row.filled_quantity:
+            raise ValueError(
+                f"order {row.client_order_id} is recorded resting with {row.filled_quantity} "
+                "already filled; restoring it would buy the filled part twice"
+            )
+        if row.broker_order_id is None or row.submitted_at is None:
+            raise ValueError(
+                f"order {row.client_order_id} is resting with no broker id or decision "
+                "time, so it cannot be put back at the venue it came from"
+            )
+        out.append(
+            RecordedOrder(
+                request=OrderRequest(
+                    client_order_id=row.client_order_id,
+                    portfolio_id=int(row.portfolio_id),
+                    instrument_id=int(row.instrument_id),
+                    side=OrderSide(row.side),
+                    order_type=OrderType(row.order_type),
+                    quantity=row.quantity,
+                    limit_price=row.limit_price,
+                    stop_price=row.stop_price,
+                    time_in_force=TimeInForce(row.time_in_force),
+                    intent=row.intent or "",
+                ),
+                broker_order_id=str(row.broker_order_id),
+                decided_on=row.submitted_at.date(),
+                intended_stop=row.intended_stop_price,
+            )
+        )
+    return tuple(out)

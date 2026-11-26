@@ -23,10 +23,16 @@ D+3 would skip two sessions in which no stop was checked. Both are refused
 rather than reported, because each produces a plausible plan about a book that
 does not exist.
 
-**Not in the record, and stated rather than assumed:** orders decided at the
-last recorded close and not yet filled. The record holds positions, not the
-broker's open orders, so an entry in flight at that close is invisible here —
-and invisible to ``--resume`` too, which restores the venue from the same rows.
+**Orders in flight at the last close refuse the plan.** Since 2026-11-26 the
+paper session writes its orders, so the record says which are still resting.
+Each one fills at the planned session's bars *before* the driver decides, and
+this plan does not simulate a fill — so planning over one would propose, for
+example, selling a position the venue has already sold that morning. The
+refusal names the orders and says to run the paper session instead.
+
+A record written before then holds no orders at all, and for it the plan
+cannot tell "nothing in flight" from "nothing recorded". Such a plan carries
+:data:`IN_FLIGHT_CAVEAT` rather than a confidence it has no basis for.
 """
 
 from __future__ import annotations
@@ -35,27 +41,30 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradeit.decide.declaration import BookRef, DeclarationError
 from tradeit.execution.live_shape import LadderState
 from tradeit.observability.portfolio_record import (
+    RecordedOrder,
     last_recorded_session,
     load_ladder_state,
+    load_open_orders,
     load_portfolio_state,
     portfolio_named,
     recorded_peak_equity,
 )
 from tradeit.portfolio.base import PortfolioState
+from tradeit.storage.tables import Order
 
 __all__ = ["IN_FLIGHT_CAVEAT", "RecordedBook", "open_record", "read_book"]
 
-#: Carried with every plan read from a book. See the module docstring.
+#: Carried by a plan whose record holds no orders. See the module docstring.
 IN_FLIGHT_CAVEAT = (
-    "Orders decided at the last recorded close and not yet filled are not in the "
-    "record, which holds positions rather than the broker's open orders. An entry in "
-    "flight at that close is invisible to this plan."
+    "This record holds no orders, so whether any was in flight at the last recorded "
+    "close is unknown. One that was would fill before this session decides, and this "
+    "plan does not see it."
 )
 
 
@@ -73,6 +82,11 @@ class RecordedBook:
     state: PortfolioState
     ladder: dict[int, LadderState]
     peak_equity: Decimal | None
+    #: Orders the record says are still resting at the venue.
+    in_flight: tuple[RecordedOrder, ...]
+    #: False for a record written before orders were recorded, which cannot
+    #: say whether anything was in flight.
+    orders_recorded: bool
 
 
 def open_record(ref: BookRef) -> Session:
@@ -136,6 +150,13 @@ def read_book(record: Session, name: str) -> RecordedBook:
                 "high since entry recorded. A trailing stop planned from a reset high is "
                 "looser than the one in force, so it is refused rather than defaulted"
             )
+    try:
+        in_flight = load_open_orders(record, portfolio_id)
+    except ValueError as exc:
+        raise DeclarationError(f"portfolio {name!r}: {exc}") from exc
+    order_rows = record.execute(
+        select(func.count()).select_from(Order).where(Order.portfolio_id == portfolio_id)
+    ).scalar_one()
     return RecordedBook(
         portfolio_id=portfolio_id,
         name=name,
@@ -144,4 +165,6 @@ def read_book(record: Session, name: str) -> RecordedBook:
         state=state,
         ladder=ladder,
         peak_equity=recorded_peak_equity(record, portfolio_id),
+        in_flight=in_flight,
+        orders_recorded=bool(order_rows),
     )

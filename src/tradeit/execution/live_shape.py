@@ -177,12 +177,25 @@ class LiveShapedSession:
     #: both consume and it must not grow execution-only fields. A position in
     #: ``resume_from`` with no entry here is refused, not defaulted.
     ladder_state: dict[int, LadderState] = field(default_factory=dict)
+    #: The stop each entry still in flight at the restart was decided with.
+    #:
+    #: The counterpart of :meth:`intended_stops`. Without it a restored entry
+    #: that fills after the restart is given the fallback stop -- a fixed
+    #: fraction of the fill price, decided for no trade -- and R is wrong for
+    #: the life of the position.
+    pending_stops: dict[int, Decimal] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._cash = self.initial_capital
         self._as_of = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
+        if self.pending_stops and self.resume_from is None:
+            raise ValueError(
+                "pending stops belong to orders in flight at a restart, and there is no "
+                "restart without a book to resume"
+            )
         if self.resume_from is not None:
             self._adopt(self.resume_from)
+            self._pending_stops.update(self.pending_stops)
         # The service reconciles OUR state, which it reads through this
         # callable. Wired here rather than by the caller so the two cannot be
         # pointed at different books by accident.
@@ -252,6 +265,10 @@ class LiveShapedSession:
             )
             for lot in self._lots.values()
         }
+
+    def intended_stops(self) -> dict[int, Decimal]:
+        """The stop each unfilled entry was decided with, for writing down."""
+        return dict(self._pending_stops)
 
     @property
     def equity(self) -> Decimal:

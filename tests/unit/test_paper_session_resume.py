@@ -113,6 +113,7 @@ def _driver(
     portfolio_id: int = 1,
     resume_from: object = None,
     ladder: dict[int, LadderState] | None = None,
+    pending_stops: dict[int, Decimal] | None = None,
 ) -> LiveShapedSession:
     """A fresh process's driver, against a venue the caller supplies.
 
@@ -149,6 +150,7 @@ def _driver(
         initial_capital=CAPITAL,
         resume_from=resume_from,  # type: ignore[arg-type]
         ladder_state=ladder or {},
+        pending_stops=pending_stops or {},
     )
 
 

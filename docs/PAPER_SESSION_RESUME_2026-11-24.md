@@ -171,3 +171,8 @@ orders, and `PaperBroker.restore` restores cash and holdings only — so every
 order in flight at a restart is dropped. The measurement above is correct for
 its cut, which had no order in flight; it does not establish that a run
 stopped at an arbitrary close resumes as one run.
+
+**Fixed the same day.** Orders are now recorded and restored. The same 144
+sessions run as 144 processes reproduce the single run exactly: 20 of 20
+orders, 10 of 10 positions, 754 snapshots within 4.8e-7, final equity
+100,944.67 ([`PLAN_FROM_BOOK_2026-11-26.md`](PLAN_FROM_BOOK_2026-11-26.md)).

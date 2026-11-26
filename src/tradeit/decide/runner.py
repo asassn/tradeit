@@ -489,6 +489,17 @@ def _require_next_session(
             f"last recorded session {last}, so the sessions between cannot be checked. "
             "Start the warmup on or before it"
         )
+    if book.in_flight:
+        orders = ", ".join(
+            f"{o.request.side} {o.request.quantity} of instrument {o.request.instrument_id}"
+            for o in book.in_flight
+        )
+        raise DeclarationError(
+            f"{declared.mandate}: book {book.name!r} has {len(book.in_flight)} order(s) in "
+            f"flight from {last} ({orders}). They fill at {declared.as_of}'s bars before "
+            "that session decides, and this plan does not simulate a fill; run the paper "
+            "session for it instead"
+        )
     skipped = [day for day in sessions if last < day < declared.as_of]
     if skipped:
         raise DeclarationError(
@@ -575,7 +586,8 @@ def _plan(
     )
     summary = None
     if book is not None:
-        plan = dataclasses.replace(plan, caveats=(*plan.caveats, IN_FLIGHT_CAVEAT))
+        if not book.orders_recorded:
+            plan = dataclasses.replace(plan, caveats=(*plan.caveats, IN_FLIGHT_CAVEAT))
         summary = BookSummary(
             name=book.name,
             portfolio_id=book.portfolio_id,

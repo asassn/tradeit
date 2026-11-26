@@ -47,7 +47,7 @@ construction rather than by coincidence.
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
@@ -57,6 +57,7 @@ from tradeit.core.models import OhlcvBar
 from tradeit.execution.base import CostModel, Fill, FillModel, OrderRequest
 
 __all__ = [
+    "OrderInFlight",
     "PaperAccount",
     "PaperBroker",
     "PaperOrderStatus",
@@ -102,6 +103,21 @@ class PaperOrderStatus:
     filled_quantity: Decimal
     average_fill_price: Decimal | None
     updated_at: dt.datetime
+
+
+@dataclass(frozen=True, slots=True)
+class OrderInFlight:
+    """An order a previous process left resting at the venue, to be put back.
+
+    ``reference_bar`` is the bar the order was decided on. It is carried
+    because it **sets the fill price** -- see ``_Resting.reference_bar`` -- so
+    an order restored without it would fill at a different price from the one
+    the uninterrupted run would have paid.
+    """
+
+    request: OrderRequest
+    broker_order_id: str
+    reference_bar: OhlcvBar | None
 
 
 @dataclass
@@ -211,7 +227,13 @@ class PaperBroker:
         self._cash = self.starting_cash
         self._as_of = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
 
-    def restore(self, *, cash: Decimal, holdings: Mapping[int, tuple[Decimal, Decimal]]) -> None:
+    def restore(
+        self,
+        *,
+        cash: Decimal,
+        holdings: Mapping[int, tuple[Decimal, Decimal]],
+        orders: Sequence[OrderInFlight] = (),
+    ) -> None:
         """Put the venue back where a previous process left it.
 
         A real broker needs nothing of the sort: its book is its own and
@@ -233,6 +255,13 @@ class PaperBroker:
         Refuses a venue that has already traded. Restoring over a live book
         would discard fills it has reported to us, which is the one thing a
         venue must never do.
+
+        **Orders still resting are restored too** (added 2026-11-26). Without
+        them every order in flight at a restart was dropped: a book run one
+        process per session placed 379 orders over 144 sessions and filled
+        none (`docs/PLAN_FROM_BOOK_2026-11-26.md`). They keep their broker ids,
+        because ``advance`` works through resting orders in id order and the
+        order of fills decides which one a short cash balance can afford.
         """
         if self._holdings or self._fills or self._sequence:
             raise ValueError(
@@ -259,6 +288,30 @@ class PaperBroker:
                 # the commission, every restart.
                 cost_basis=quantity * average_price,
             )
+        prefix = f"{self.account_id}-"
+        for flight in sorted(orders, key=lambda item: item.broker_order_id):
+            if not flight.broker_order_id.startswith(prefix):
+                raise ValueError(
+                    f"order {flight.broker_order_id!r} was not issued by account "
+                    f"{self.account_id!r}; restoring another venue's order would invent one"
+                )
+            if flight.broker_order_id in self._orders:
+                raise ValueError(f"order {flight.broker_order_id!r} restored twice")
+            sequence = int(flight.broker_order_id.removeprefix(prefix))
+            if flight.reference_bar is None:
+                self.orders_without_reference += 1
+            self._orders[flight.broker_order_id] = _Resting(
+                order_id=sequence,
+                broker_order_id=flight.broker_order_id,
+                request=flight.request,
+                status=OrderStatus.NEW,
+                updated_at=self._as_of,
+                reference_bar=flight.reference_bar,
+            )
+            self._by_client_id[flight.request.client_order_id] = flight.broker_order_id
+            # New orders continue the numbering, so a restored order and a new
+            # one can never share an id or swap places in `advance`.
+            self._sequence = max(self._sequence, sequence)
 
     # -- BrokerProvider ------------------------------------------------------
 
@@ -359,6 +412,18 @@ class PaperBroker:
         self._orders[broker_order_id] = resting
         self._by_client_id[client_order_id] = broker_order_id
         return resting.as_status()
+
+    def order_history(self) -> tuple[tuple[OrderRequest, PaperOrderStatus], ...]:
+        """Every order this venue has accepted, in id order, with its status.
+
+        What a recorder needs to write the venue's orders down: the request as
+        sent, and what has happened to it. Returned as values so a caller
+        cannot move an order by assignment.
+        """
+        return tuple(
+            (resting.request, resting.as_status())
+            for resting in sorted(self._orders.values(), key=lambda r: r.broker_order_id)
+        )
 
     def cancel_order(self, broker_order_id: str) -> PaperOrderStatus:
         resting = self._orders.get(broker_order_id)

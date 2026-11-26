@@ -42,6 +42,12 @@ design:
   needs every bar of the holding period replayed, and a trailing stop resumed
   from a reset high is looser than the one that was in force. A position whose
   high was never recorded is **refused**, not defaulted.
+* **Orders in flight are stored and restored** (2026-11-26). Every order is
+  decided at a close and fills at the next session's bars, so each one is in
+  flight when its process ends. Before they were recorded, a book run one
+  process per session placed 379 orders over 144 sessions and filled none.
+  Each order's protective stop is stored with it; its reference bar, which sets
+  the fill price, is re-derived from the corpus.
 * **The signal's own state is re-derivable**, so it is not stored. The moving
   averages are a function of prices alone, and a resumed run walks the sessions
   it has already recorded through the candidate source without deciding on
@@ -67,18 +73,20 @@ from sqlalchemy.orm import Session, sessionmaker
 from tradeit.backtesting.corpus import CorpusSessionData
 from tradeit.config import Settings, TradingMode
 from tradeit.execution.live_shape import LadderState, LiveShapedSession
-from tradeit.execution.paper import PaperBroker
+from tradeit.execution.paper import OrderInFlight, PaperBroker
 from tradeit.execution.service import BrokerExecutionService
 from tradeit.execution.simulation import BarFillModel, ParticipationCostModel
 from tradeit.observability.portfolio_record import (
     last_recorded_session,
     load_ladder_state,
+    load_open_orders,
     load_portfolio_state,
     portfolio_named,
     record_portfolio,
     record_portfolio_snapshot,
     record_risk_snapshot,
     recorded_peak_equity,
+    sync_orders,
     sync_positions,
 )
 from tradeit.portfolio.allocation import DiversityAwareRanker
@@ -164,6 +172,8 @@ def main() -> int:
     resume_from: PortfolioState | None = None
     ladder: dict[int, LadderState] = {}
     resume_after: dt.date | None = None
+    in_flight: tuple[OrderInFlight, ...] = ()
+    pending_stops: dict[int, Decimal] = {}
     if args.record:
         # `create_all` rather than a migration, matching `record_decisions.py`:
         # this is a scratch record an operator names, not the project database.
@@ -224,10 +234,46 @@ def main() -> int:
                 last_prices=prices,
             )
             ladder = load_ladder_state(record, portfolio_id)
+            # **Orders in flight are restored, not dropped.** Every order is
+            # decided at a close and fills at the next session's bars, so each
+            # one is in flight when its process ends. Dropping them made a book
+            # run one process per session place 379 orders over 144 sessions
+            # and fill none (docs/PLAN_FROM_BOOK_2026-11-26.md).
+            #
+            # The reference bar is re-derived from the corpus rather than
+            # stored: it is the decision session's bar, a price fact, and the
+            # corpus is its authority. It must exist, because the driver only
+            # submits for an instrument that printed that session.
+            flights: list[OrderInFlight] = []
+            for order in load_open_orders(record, portfolio_id):
+                reference = data.bars(order.decided_on).get(order.request.instrument_id)
+                if reference is None:
+                    ap.error(
+                        f"order {order.request.client_order_id} was decided on "
+                        f"{order.decided_on}, and instrument {order.request.instrument_id} "
+                        "has no bar that session. Its fill price would be estimated "
+                        "against a different bar, so it is not restored on a guess"
+                    )
+                if order.request.side.value == "buy":
+                    if order.intended_stop is None:
+                        ap.error(
+                            f"entry {order.request.client_order_id} is in flight with no "
+                            "intended stop recorded; it would fill with a stop decided "
+                            "for no trade"
+                        )
+                    pending_stops[order.request.instrument_id] = order.intended_stop
+                flights.append(
+                    OrderInFlight(
+                        request=order.request,
+                        broker_order_id=order.broker_order_id,
+                        reference_bar=reference,
+                    )
+                )
+            in_flight = tuple(flights)
             held = 0 if resume_from is None else len(resume_from.open_positions)
             print(
                 f"  resuming after {resume_after}: {held} position(s), "
-                f"{len(ladder)} with a recorded ladder"
+                f"{len(ladder)} with a recorded ladder, {len(in_flight)} order(s) in flight"
             )
 
     costs = ParticipationCostModel(config=config.costs)
@@ -253,6 +299,7 @@ def main() -> int:
                 position.instrument_id: (position.quantity, position.average_entry_price)
                 for position in resume_from.open_positions
             },
+            orders=in_flight,
         )
     service = BrokerExecutionService(
         broker=broker,
@@ -293,6 +340,7 @@ def main() -> int:
         initial_capital=args.capital,
         resume_from=resume_from,
         ladder_state=ladder,
+        pending_stops=pending_stops,
     )
 
     sessions = list(data.sessions(start, end))
@@ -347,6 +395,13 @@ def main() -> int:
             opened += change.opened
             updated += change.updated
             closed += change.closed
+            sync_orders(
+                record,
+                portfolio_id,
+                broker.order_history(),
+                driver.intended_stops(),
+                decided_at=dt.datetime.combine(session_date, dt.time(20), tzinfo=dt.UTC),
+            )
             record_portfolio_snapshot(record, state, session_date=session_date, peak_equity=peak)
             record_risk_snapshot(
                 record,
